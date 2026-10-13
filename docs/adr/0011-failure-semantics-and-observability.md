@@ -1,6 +1,6 @@
 # ADR-0011: Control-plane outage semantics and the observability stack
 
-- Status: Proposed (the outage semantics were decided by the owner)
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

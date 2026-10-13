@@ -1,6 +1,6 @@
 # ADR-0004: Proxy HA through tunnel registry and proxy peering
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

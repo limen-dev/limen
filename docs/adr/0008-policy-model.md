@@ -1,6 +1,6 @@
 # ADR-0008: YAML label-based policy, push-applied, signed snapshots
 
-- Status: Proposed (the delivery mechanism was decided by the owner: push via `limen admin apply`)
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Decision

@@ -1,6 +1,6 @@
 # ADR-0009: Disk spool, at-least-once delivery, S3 hash chain, Datadog
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Decision

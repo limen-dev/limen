@@ -1,6 +1,6 @@
 # Limen design
 
-Status: **Proposed (Phase 0)**. Last updated 2026-10-13.
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-13.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 

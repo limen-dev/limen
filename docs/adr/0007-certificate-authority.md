@@ -1,6 +1,6 @@
 # ADR-0007: Three CA keys behind a Signer trait, with KMS in production
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Decision

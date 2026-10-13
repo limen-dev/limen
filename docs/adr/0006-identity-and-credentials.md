@@ -1,6 +1,6 @@
 # ADR-0006: OIDC login with a key-bound nonce, and 10-minute X.509 and SSH certificates
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

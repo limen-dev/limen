@@ -1,6 +1,6 @@
 # ADR-0001: Rust for all components
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR-0015: One IAM-authenticated DB role per policy role
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

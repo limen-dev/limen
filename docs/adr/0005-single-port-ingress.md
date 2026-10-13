@@ -1,6 +1,6 @@
 # ADR-0005: Single public port with ALPN and path routing behind an NLB
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

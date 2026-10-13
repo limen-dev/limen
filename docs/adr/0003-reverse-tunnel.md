@@ -1,6 +1,6 @@
 # ADR-0003: Reverse tunnel with gRPC served by the worker over an outbound connection
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

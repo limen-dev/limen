@@ -1,6 +1,6 @@
 # ADR-0002: Workers terminate protocols; the proxy authorizes and routes
 
-- Status: Proposed. **This deviates from the brief, which says "Proxy ... records sessions."**
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Context

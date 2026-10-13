@@ -1,6 +1,6 @@
 # ADR-0010: Aurora PostgreSQL through sqlx, with advisory-lock leader election
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
 
 ## Decision

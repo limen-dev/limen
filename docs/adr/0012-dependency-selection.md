@@ -1,6 +1,6 @@
 # ADR-0012: Dependency selection and maintenance criteria
 
-- Status: Proposed
+- Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13 (data gathered that day from the crates.io API, GitHub, and the RustSec advisory DB)
 
 ## Criteria
