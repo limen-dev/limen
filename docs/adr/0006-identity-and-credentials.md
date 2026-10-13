@@ -1,0 +1,28 @@
+# ADR-0006: OIDC login with a key-bound nonce, and 10-minute X.509 and SSH certificates
+
+- Status: Proposed
+- Date: 2026-10-13
+
+## Context
+Engineers log in with Okta (Dex or Keycloak locally). Every downstream credential must be short-lived, and no long-lived user secret may exist. SAML and SCIM are out of scope but must stay possible to add.
+
+## Decision
+- **Flows:** Authorization Code with PKCE through a loopback redirect (RFC 8252) by default, and Device Authorization Grant (RFC 8628) with `--device`. The CLI is a public client that talks to the IdP directly, using the `openidconnect` crate.
+- **Key binding:**
+  - The CLI generates its keys first.
+  - It sets `nonce = b64url(SHA-256(x509_pub ‖ ssh_pub ‖ 32 random bytes))`.
+  - The control plane accepts the ID token only if its `nonce` matches the presented keys.
+
+  A relaying proxy therefore can't get certs issued for its own keys.
+- **Issued credentials:**
+  - an X.509 client cert and an OpenSSH user cert
+  - both with a 10-minute TTL by default, configurable per role, capped by a cluster `max_cert_ttl`
+  - roles and the login session ID carried in the X.509 cert's custom extension and in the SSH cert's key ID and extensions
+- **Groups → roles** come from `role_mapping` documents (ADR-0008). Groups are read from a configurable claim (default `groups`). For Okta, the custom authorization server needs a groups claim configured; this goes in the Okta setup guide.
+- **No refresh token is stored by default.** Users run `limen login` again, which is silent if the IdP session is alive.
+- The `IdentityProvider` enum is `#[non_exhaustive]`, and identity verification sits behind a trait. That's the SAML seam.
+
+## Consequences
+- \+ Stolen certs are worthless after their TTL. Private keys never leave the machine.
+- − Each user who connects after the TTL expires has to log in again (a browser round trip, usually silent).
+- *Unverified against real service:* Okta's group claim limits (Okta caps the number of groups in a token; large memberships need a filter regex). This is documented in the Okta guide.

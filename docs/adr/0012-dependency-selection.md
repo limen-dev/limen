@@ -1,0 +1,50 @@
+# ADR-0012: Dependency selection and maintenance criteria
+
+- Status: Proposed
+- Date: 2026-10-13 (data gathered that day from the crates.io API, GitHub, and the RustSec advisory DB)
+
+## Criteria
+A dependency is adopted only if all of these hold:
+1. It had a release within the last 12 months, or it is "done" with a tiny surface and active issue triage.
+2. It has no open RustSec advisory against the version we use.
+3. Its license is permissive (see `deny.toml`).
+4. It is pure Rust, or at least doesn't need OpenSSL. TLS is rustls only.
+
+`cargo deny check` and `cargo audit` enforce criteria 2–4 in CI.
+
+## Assessment
+
+| Area | Crate | Latest | Last release | Verdict |
+|---|---|---|---|---|
+| Runtime | tokio | 1.53.3 | 2026-10-13 | Adopt |
+| HTTP | hyper 1.12 / axum 0.8.9 / tower 0.5.3 | | 2026-10 / 2026-04 / 2026-01 | Adopt |
+| gRPC | tonic, tonic-prost(-build) 0.14.6, prost 0.14.4 | | 2026-05 / 2026-06 | Adopt. Needs `protoc` at build time (pinned through mise) |
+| TLS | rustls 0.23.45, tokio-rustls 0.26.6 | | 2026-09 | Adopt |
+| X.509 | rcgen 0.14.10, x509-parser 0.18.1 | | 2026-08 / 2026-02 | Adopt. Remote-signing spike in Phase 1 (ADR-0007) |
+| PEM | rustls-pemfile | 2.2.0 | 2024-09 | **Reject**: RUSTSEC-2025-0134 (unmaintained). Use `rustls-pki-types` PEM support. Banned in deny.toml |
+| AWS | aws-config 1.12, aws-sdk-{kms,s3,secretsmanager,rds} | | 2026-10 | Adopt |
+| Kubernetes | kube 4.2.0, k8s-openapi 0.28.0 | | 2026-07 / 2026-06 | Adopt |
+| OIDC | openidconnect | 4.0.1 | 2025-07 (repo active 2025-11) | Adopt. Stable and widely used. Watch maintenance; a fallback is `openidconnect` minus discovery plus `jsonwebtoken` |
+| SQL state | sqlx | 0.9.0 | 2026-05 | Adopt |
+| CLI | clap | 4.6.7 | 2026-09 | Adopt |
+| Telemetry | tracing 0.1.44, tracing-subscriber 0.3.23, opentelemetry(-otlp) 0.33.1, tracing-opentelemetry 0.34 | | 2025-12 → 2026-10 | Adopt |
+| Metrics | metrics 0.24.6 + metrics-exporter-prometheus 0.18.3, cadence 1.8.0 | | 2026-04/05 | Adopt |
+| SSH | russh 0.64.1 | | 2026-10-05 | Adopt, at ≥ 0.60.3 (RUSTSEC-2026-0154 fixed). Fuzz our usage |
+| SSH certs | ssh-key 0.6.7 (RustCrypto) | | 2026-06 | Adopt |
+| PG wire | pgwire 0.41.1 | | 2026-09-29 | Adopt. Very active (805★) |
+| MySQL wire | opensrv-mysql 0.7.0 | | **2024-02** | **Reject**: no release in 2.5 years, low use |
+| MySQL wire | mysql_common 0.38.2 | | 2026-07 | **Adopt for packet and type definitions.** We write our own server-side handshake and command loop on top (the protocol subset is small: HandshakeV10, AuthSwitch, COM_QUERY, COM_STMT_*, COM_QUIT, result passthrough) |
+| Redis wire | redis-protocol 6.0.0 | | **2024-11** (repo pushed 2025-02) | **Reject as a core dependency.** RESP2/3 is small. We write our own codec, fuzzed and tested against redis-protocol and the `redis` crate (1.7.1, active) in dev-dependencies |
+| SQL parsing | sqlparser 0.63.0 | | 2026-09 | Adopt, for statement type classification and literal normalization only. Never for allow/deny decisions |
+| YAML | serde_yaml | 0.9.34+deprecated | 2024-03 | **Reject**: deprecated |
+| YAML | serde_yml | 0.0.13 | | **Reject**: RUSTSEC-2025-0068 (unsound, unmaintained) |
+| YAML | serde-saphyr | 2.0.0 | 2026-10-13 | **Adopt** (pure Rust, active) |
+| Rate limiting | governor 0.10.4 | | 2025-12 | Adopt |
+| Spool storage | redb 4.4.0 | | 2026-10-13 | Fallback only (ADR-0009) |
+| Recording | asciicast 0.2.2 | | **2018** | **Reject**. Write our own asciicast v3 writer (newline-delimited JSON, ~100 lines) |
+| Crypto | sha2 0.11, p256 0.14, ed25519-dalek 3.0 | | 2026 | Adopt |
+| IDs and time | uuid 1.28 (v7), time 0.3.55 | | 2026 | Adopt |
+
+## Consequences
+- We own two small protocol codecs: MySQL server-side and RESP. Both are fuzzed with `cargo-fuzz` in their phases.
+- To add a dependency, a PR adds a row here.
