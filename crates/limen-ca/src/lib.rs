@@ -1,55 +1,61 @@
 //! Certificate authority.
 //!
-//! Every CA key sits behind [`Signer`], so the same issuance code runs
+//! Every CA private key sits behind [`Signer`], so the same issuance code runs
 //! against a local file key in development and AWS KMS in production
-//! (see ADR-0007). Issuance itself arrives in Phase 1.
+//! (ADR-0007). Identities are encoded as URI SANs (see
+//! [`limen_core::identity`]) and can be verified offline with [`verify`].
 
-use std::future::Future;
+pub mod authority;
+#[cfg(feature = "kms")]
+pub mod kms;
+pub mod signer;
+pub mod verify;
+
+pub use authority::{CertificateAuthority, ComponentCertRequest, IssuedCert, UserCertRequest};
+pub use signer::{FileSigner, SignError, Signer};
+pub use verify::{ComponentIdentity, UserIdentity, VerifyError};
 
 /// Each purpose has its own key, so compromising one doesn't compromise the others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CaPurpose {
-    /// Issues mTLS certificates to control plane, proxy, and workers.
+    /// Issues mTLS certificates to the control plane, proxies, and workers.
     Internal,
     /// Issues short-lived X.509 client certificates to users.
     UserX509,
-    /// Issues short-lived OpenSSH user certificates.
+    /// Issues short-lived OpenSSH user certificates (Phase 2).
     UserSsh,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignatureAlgorithm {
-    /// ECDSA over NIST P-256 with SHA-256. KMS key spec `ECC_NIST_P256`.
-    EcdsaP256Sha256,
+impl CaPurpose {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CaPurpose::Internal => "internal",
+            CaPurpose::UserX509 => "user_x509",
+            CaPurpose::UserSsh => "user_ssh",
+        }
+    }
+
+    #[must_use]
+    pub fn common_name(self) -> &'static str {
+        match self {
+            CaPurpose::Internal => "Limen Internal CA",
+            CaPurpose::UserX509 => "Limen User CA",
+            CaPurpose::UserSsh => "Limen SSH User CA",
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SignError {
-    #[error("signing backend unavailable: {0}")]
-    Unavailable(String),
-    #[error("signing backend rejected the request: {0}")]
-    Rejected(String),
-}
-
-/// A CA private key that can sign but never reveals itself.
-pub trait Signer: Send + Sync {
-    fn algorithm(&self) -> SignatureAlgorithm;
-
-    /// DER-encoded SubjectPublicKeyInfo of the signing key.
-    fn public_key_der(&self) -> &[u8];
-
-    /// Sign `message`. The signer hashes it, so callers must not pre-hash.
-    /// Returns a DER-encoded ECDSA signature, which is what KMS returns.
-    fn sign(&self, message: &[u8]) -> impl Future<Output = Result<Vec<u8>, SignError>> + Send;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn purposes_are_distinct() {
-        assert_ne!(CaPurpose::Internal, CaPurpose::UserX509);
-        assert_ne!(CaPurpose::UserX509, CaPurpose::UserSsh);
-    }
+pub enum CaError {
+    #[error("signing failed: {0}")]
+    Sign(#[from] SignError),
+    #[error("certificate generation failed: {0}")]
+    Generate(#[from] rcgen::Error),
+    #[error("invalid certificate signing request: {0}")]
+    InvalidCsr(String),
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
