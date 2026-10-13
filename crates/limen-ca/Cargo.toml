@@ -1,0 +1,14 @@
+[package]
+name = "limen-ca"
+description = "Limen certificate authority: X.509 and SSH certificate issuance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

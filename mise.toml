@@ -1,0 +1,6 @@
+[tools]
+rust = "1.99.0"
+protoc = "36.2"
+cargo-deny = "0.20.2"
+"cargo:cargo-audit" = "0.22.2"
+actionlint = "1.7.12"

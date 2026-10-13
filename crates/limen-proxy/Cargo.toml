@@ -1,0 +1,20 @@
+[package]
+name = "limen-proxy"
+description = "Limen proxy binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "limen-proxy"
+path = "src/main.rs"
+
+[dependencies]
+limen-core.workspace = true
+clap.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

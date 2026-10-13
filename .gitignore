@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+.DS_Store
+# Local dev state
+/.limen/
+*.pem
+*.key
+!deploy/compose/**/*.pub
+.env
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl.bak

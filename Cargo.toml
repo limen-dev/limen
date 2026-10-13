@@ -1,0 +1,66 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+publish = false
+
+# Versions verified against crates.io and the RustSec advisory DB on 2026-10-13.
+# See docs/adr/0012-dependency-selection.md before adding or replacing an entry.
+[workspace.dependencies]
+# Internal crates
+limen-proto = { path = "crates/limen-proto" }
+limen-core = { path = "crates/limen-core" }
+limen-policy = { path = "crates/limen-policy" }
+limen-auth = { path = "crates/limen-auth" }
+limen-ca = { path = "crates/limen-ca" }
+limen-audit = { path = "crates/limen-audit" }
+limen-tunnel = { path = "crates/limen-tunnel" }
+limen-testkit = { path = "crates/limen-testkit" }
+
+# Runtime and errors
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time", "sync", "fs"] }
+anyhow = "1.0.104"
+thiserror = "2.0.21"
+
+# Serialization
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde-saphyr = "2.0"
+uuid = { version = "1.28", features = ["v7", "serde"] }
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macros"] }
+
+# RPC and networking
+prost = "0.14.4"
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+
+# CLI and observability
+clap = { version = "4.6", features = ["derive", "env"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+# Testing
+tempfile = "3.27"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

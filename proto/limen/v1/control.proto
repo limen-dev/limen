@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package limen.v1;
+
+// Control plane API. Proxies reach it directly. Workers and the CLI reach it
+// by way of the proxy. See docs/design.md for details.
+service ControlPlane {
+  // Exchanges a single-use join token and a CSR for a worker certificate.
+  rpc EnrollWorker(EnrollWorkerRequest) returns (EnrollWorkerResponse);
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse);
+}
+
+message EnrollWorkerRequest {
+  string join_token = 1;
+  // PEM-encoded PKCS#10 CSR. The private key never leaves the worker.
+  string csr_pem = 2;
+}
+
+message EnrollWorkerResponse {
+  string worker_id = 1;
+  string certificate_pem = 2;
+  repeated string ca_bundle_pem = 3;
+}
+
+message GetVersionRequest {}
+
+message GetVersionResponse {
+  string version = 1;
+}

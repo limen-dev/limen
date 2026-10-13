@@ -1,0 +1,21 @@
+[package]
+name = "limen-cli"
+description = "Limen command-line client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "limen"
+path = "src/main.rs"
+
+[dependencies]
+limen-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
