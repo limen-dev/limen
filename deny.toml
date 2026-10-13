@@ -1,0 +1,49 @@
+# cargo-deny configuration. Run with `cargo deny check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# Unmaintained and unsound crates are errors, not warnings. To accept one, add
+# an `ignore` entry with a reason and a link to the ADR that justifies it.
+version = 2
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Licenses we expect from planned dependencies (rustls, aws-sdk, etc.).
+unused-allowed-license = "allow"
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # OpenSSL is excluded in favor of rustls (ADR-0012).
+    { crate = "openssl-sys", reason = "use rustls" },
+    { crate = "native-tls", reason = "use rustls" },
+    # Deprecated, unsound, or unmaintained YAML crates (RUSTSEC-2025-0068).
+    { crate = "serde_yml", reason = "unsound and unmaintained" },
+    { crate = "serde_yaml", reason = "deprecated upstream" },
+    { crate = "rustls-pemfile", reason = "unmaintained (RUSTSEC-2025-0134); use rustls-pki-types PEM parsing" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
