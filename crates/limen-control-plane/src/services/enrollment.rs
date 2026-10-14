@@ -70,13 +70,15 @@ impl Enrollment for EnrollmentService {
             .static_join_tokens
             .iter()
             .find(|t| t.kind == req.kind && same_secret(t.token.expose(), &req.join_token));
-        let (labels, allowed_dns, token_type) = if static_match.is_some() {
+        let (labels, allowed_dns, token_type) = if let Some(token) = static_match {
             let allowed = if kind == ComponentKind::Proxy {
                 self.0.config.proxy_dns_names.clone()
             } else {
                 Vec::new()
             };
-            (serde_json::json!({}), allowed, "static")
+            let labels = serde_json::to_value(&token.labels)
+                .map_err(|e| internal("static token labels", e))?;
+            (labels, allowed, "static")
         } else {
             match db::consume_join_token(
                 &mut tx,

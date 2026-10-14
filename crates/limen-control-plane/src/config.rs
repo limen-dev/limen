@@ -157,6 +157,8 @@ pub enum UsernameClaim {
 pub struct StaticJoinToken {
     pub kind: String,
     pub token: Secret<String>,
+    /// Labels for components enrolled with this token.
+    pub labels: limen_core::labels::Labels,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -164,17 +166,33 @@ fn parse_secret(s: &str) -> Result<Secret<String>, String> {
     Ok(Secret::new(s.to_owned()))
 }
 
+/// `kind:token` or `kind:token:key=value;key=value`.
 fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
-    let (kind, token) = s.split_once(':').ok_or("expected kind:token")?;
+    let mut parts = s.splitn(3, ':');
+    let kind = parts.next().unwrap_or_default();
+    let token = parts.next().ok_or("expected kind:token[:key=value;...]")?;
     if !matches!(kind, "proxy" | "worker") {
         return Err(format!("unknown component kind {kind:?}"));
     }
     if token.len() < 32 {
         return Err("static join tokens must be at least 32 characters".into());
     }
+    let mut labels = limen_core::labels::Labels::default();
+    for pair in parts
+        .next()
+        .unwrap_or_default()
+        .split(';')
+        .filter(|p| !p.is_empty())
+    {
+        let (k, v) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("label {pair:?} must be key=value"))?;
+        labels.insert(k, v).map_err(|e| e.to_string())?;
+    }
     Ok(StaticJoinToken {
         kind: kind.to_owned(),
         token: Secret::new(token.to_owned()),
+        labels,
     })
 }
 
@@ -195,6 +213,25 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_tokens_with_labels() {
+        let t = parse_static_token("worker:0123456789abcdef0123456789abcdef:pool=dev;az=a")
+            .expect("valid");
+        assert_eq!(t.kind, "worker");
+        assert_eq!(t.labels.get("pool"), Some("dev"));
+        assert_eq!(t.labels.get("az"), Some("a"));
+        assert!(
+            parse_static_token("worker:0123456789abcdef0123456789abcdef")
+                .expect("no labels")
+                .labels
+                .get("pool")
+                .is_none()
+        );
+        assert!(parse_static_token("worker:short").is_err());
+        assert!(parse_static_token("admin:0123456789abcdef0123456789abcdef").is_err());
+        assert!(parse_static_token("worker:0123456789abcdef0123456789abcdef:BAD=x").is_err());
+    }
 
     #[test]
     fn durations() {
