@@ -19,7 +19,13 @@ pub enum LogFormat {
 ///
 /// Calling it more than once is harmless: later calls are ignored.
 pub fn init(format: LogFormat) {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    init_with_default(format, "info");
+}
+
+/// Like [`init`], with a different default filter when `RUST_LOG` is unset.
+pub fn init_with_default(format: LogFormat, default_filter: &str) {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
     let builder = fmt().with_env_filter(filter).with_writer(std::io::stderr);
     let _ = match format {
         LogFormat::Text => builder.try_init(),

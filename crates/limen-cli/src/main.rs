@@ -1,13 +1,23 @@
 //! `limen`: log in through your identity provider and get short-lived access
 //! to SSH hosts, databases, Redis, and Kubernetes.
 
+// A CLI's job is printing to stdout.
+#![allow(clippy::print_stdout)]
+
+mod api;
+mod commands;
+mod oidc;
+mod profile;
+
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use limen_core::telemetry::{self, LogFormat};
 
 #[derive(Debug, Parser)]
 #[command(name = "limen", version = limen_core::VERSION, about)]
 struct Cli {
-    /// Proxy address, for example `limen.example.com:443`.
+    /// Proxy address, for example `limen.example.com:443`. Defaults to the last one used.
     #[arg(long, global = true, env = "LIMEN_PROXY")]
     proxy: Option<String>,
 
@@ -22,13 +32,23 @@ enum Command {
         /// Use the device code flow, for machines without a browser.
         #[arg(long)]
         device: bool,
+        /// Print the login URL instead of opening a browser.
+        #[arg(long)]
+        no_browser: bool,
+        /// CA certificate to trust for the proxy. Pinned for later commands.
+        #[arg(long)]
+        ca_file: Option<PathBuf>,
     },
     /// Delete local credentials.
     Logout,
     /// Show the current identity, roles, and when the credentials expire.
     Status,
     /// List resources you are allowed to access.
-    Ls,
+    Ls {
+        /// Output JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open an SSH session: `limen ssh user@host`.
     Ssh {
         target: String,
@@ -50,10 +70,10 @@ enum Command {
         #[command(subcommand)]
         command: KubeCommand,
     },
-    /// Administrative commands. These require an admin role.
+    /// Administrative commands. These require the limen:admin role.
     Admin {
         #[command(subcommand)]
-        command: AdminCommand,
+        command: commands::admin::AdminCommand,
     },
 }
 
@@ -81,30 +101,37 @@ enum KubeCommand {
     Login { cluster: String },
 }
 
-#[derive(Debug, Subcommand)]
-enum AdminCommand {
-    /// Validate and apply role and resource YAML to the control plane.
-    Apply {
-        paths: Vec<std::path::PathBuf>,
-        #[arg(long)]
-        dry_run: bool,
-    },
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    // Logs go to stderr and default to warnings, so command output stays clean.
+    telemetry::init_with_default(LogFormat::Text, "warn");
+    if let Err(e) = run(cli).await {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
 }
 
-fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    telemetry::init(LogFormat::Text);
-    let phase = match &cli.command {
-        Command::Login { .. }
-        | Command::Logout
-        | Command::Status
-        | Command::Ls
-        | Command::Admin { .. } => 1,
-        Command::Ssh { .. } => 2,
-        Command::Db { .. } => 4,
-        Command::Redis { .. } => 5,
-        Command::Kube { .. } => 6,
-    };
+async fn run(cli: Cli) -> anyhow::Result<()> {
+    let proxy = cli.proxy.as_deref();
+    match cli.command {
+        Command::Login {
+            device,
+            no_browser,
+            ca_file,
+        } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
+        Command::Logout => commands::logout(proxy),
+        Command::Status => commands::status(proxy),
+        Command::Ls { json } => commands::ls(proxy, json).await,
+        Command::Admin { command } => commands::admin::run(proxy, command).await,
+        Command::Ssh { .. } => not_yet(2),
+        Command::Db { .. } => not_yet(4),
+        Command::Redis { .. } => not_yet(5),
+        Command::Kube { .. } => not_yet(6),
+    }
+}
+
+fn not_yet(phase: u8) -> anyhow::Result<()> {
     anyhow::bail!("not implemented yet: this command lands in Phase {phase}")
 }
 

@@ -13,9 +13,29 @@ path = "src/main.rs"
 
 [dependencies]
 limen-core.workspace = true
+limen-proto.workspace = true
+limen-tunnel.workspace = true
 anyhow.workspace = true
+axum.workspace = true
 clap.workspace = true
+http.workspace = true
+openidconnect.workspace = true
+rand.workspace = true
+rcgen.workspace = true
+reqwest.workspace = true
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
+webbrowser.workspace = true
+x509-parser.workspace = true
+
+[dev-dependencies]
+limen-testkit.workspace = true
 
 [lints]
 workspace = true

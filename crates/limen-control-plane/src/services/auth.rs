@@ -12,26 +12,18 @@ use limen_proto::v1::{
 use rcgen::CertificateSigningRequestParams;
 use rustls_pki_types::CertificateSigningRequestDer;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::{b64url, sha256};
+use super::sha256;
 use crate::caller;
 use crate::state::{AppState, internal, unix};
 
 #[derive(Debug, Clone)]
 pub struct AuthService(pub AppState);
 
-/// `base64url(SHA-256(spki_der || salt))`, the nonce the CLI puts in its
-/// authorization request. It binds the ID token to the CSR's key.
-#[must_use]
-pub fn expected_nonce(spki_der: &[u8], salt: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(spki_der);
-    hasher.update(salt);
-    b64url(&hasher.finalize())
-}
+/// Re-exported for tests and tools. See [`limen_core::login::nonce`].
+pub use limen_core::login::nonce as expected_nonce;
 
 /// Audit a denied login and build the error to return.
 async fn deny(

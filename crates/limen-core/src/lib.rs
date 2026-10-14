@@ -3,6 +3,7 @@
 pub mod backoff;
 pub mod identity;
 pub mod labels;
+pub mod login;
 pub mod resource;
 pub mod secret;
 pub mod shutdown;
