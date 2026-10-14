@@ -336,6 +336,7 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 | 1 ✅ | Control plane (API, Aurora state, CA, policy engine), OIDC login against Dex, CLI login, worker enrollment and reverse tunnel, audit emission to a stub sink | `docker compose up`. `limen login` with Dex. `limen ls` shows only the allowed resources. A worker enrolls with a join token, and a second use of the token is rejected. The tunnel survives a proxy restart. Events land in the stub sink |
 | 2 ✅ | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
 | 3 | Audit to S3 (MinIO) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally we check the SQL against Trino*) |
+| 3.5 | Web console: users, sessions, workers, resources, policy browsing and dry run, tokens, lock and session kill, recording playback (ADR-0017) | An admin sees users, workers, and live sessions in a browser, plays a recording, locks a user, and the user's open SSH session ends. A normal user sees only their resources. CSRF, CSP, and cookie tests |
 | 4 | PostgreSQL, then MySQL and Aurora | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent |
 | 5 | Redis | `redis-cli` through `limen redis connect`. Values are redacted |
 | 6 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |

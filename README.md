@@ -29,6 +29,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 | <img src="https://cdn.simpleicons.org/openid" alt="OpenID" height="22"> | **Any OIDC provider** | Dex and Keycloak work for local development | ✅ Working with Dex |
 | <img src="https://cdn.simpleicons.org/datadog" alt="Datadog" height="22"> | **Datadog** | Logs, metrics, and traces, plus monitors as Terraform | ⏳ Phase 3 |
 | <img src="https://cdn.simpleicons.org/grafana" alt="Grafana" height="22"> | **Grafana** | Audit dashboards over S3 with Athena | ⏳ Phase 3 |
+| <img src="assets/logo-mark.svg" alt="Limen" height="22"> | **Limen web console** | Admins see users, sessions, workers and resources, create join tokens, and lock a user or end a session. Everyone else sees their own resources. Policy stays YAML ([ADR-0017](docs/adr/0017-web-console.md)) | ⏳ Phase 3.5 |
 
 ✅ working and tested, ⏳ planned (see the [roadmap](docs/design.md#13-phases-and-exit-criteria)). Everything is tested against local stand-ins. Nothing has been verified against real AWS, Okta, or Datadog yet.
 
