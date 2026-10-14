@@ -20,8 +20,15 @@ Limen ships several kinds of artifact: the `limen` CLI, three server programs (c
 - **Compatibility and upgrades** (stated now, enforced once Phase 5 lands): upgrade the control plane first, then proxies, then workers. A control plane at N serves proxies and workers at N and N-1 so rolling upgrades work. Protobuf changes are additive (field numbers are never reused); the audit schema and policy snapshot already carry versions. A newer or older CLI within one minor works. Database migrations are forward-only and run when the control plane starts, so a rollback is a restore, which the upgrade guide says.
 - **1.0 means** verified against real AWS, Okta, and Datadog; the chaos and scale-out suites passing; an upgrade path tested from the previous minor; the docs site; and a security review.
 
+## Automation
+Releases are automated; a person decides *when*, never *how*.
+- **release-please** (conventional commits are already required) keeps a standing **release pull request** on `main`: it proposes the next version from the commits since the last tag (pre-1.0, features bump the minor), updates the workspace version and `CHANGELOG.md`, and lists what changed. **Merging that PR is the act of releasing**, and we merge it when a milestone closes.
+- Merging it tags `vX.Y.Z` and creates the GitHub release (marked *pre-release* before 1.0). **The same workflow** then builds the binaries, builds and pushes the signed images, generates the SBOM and attestation, uploads everything to that release, and runs the smoke test. (One workflow, not a tag-triggered second one: a tag pushed with the default `GITHUB_TOKEN` doesn't start other workflows.)
+- The release PR also runs the full CI, so a release can't be cut from a red `main`.
+- No manual tagging, no hand-written notes, no copying files around. The release stays a *draft* until the pipeline has run cleanly a few times; after that it publishes itself.
+
 ## Stages
-1. **Prove the pipeline (now):** add image publishing, the SBOM, and the attestation to `release.yml`, then cut `v0.1.0-rc.1` as a *pre-release* from the Phase 3.5 state. This costs one tag and shows whether the pipeline works end to end.
+1. **Prove the pipeline (now):** adopt release-please, add image publishing, the SBOM, and the attestation, then merge the first release PR as `v0.1.0-rc.1` (a *pre-release*) from the Phase 3.5 state. It shows whether the pipeline works end to end.
 2. **`v0.1.0`** once the rc passes a smoke test (install the CLI from the release, start the published images with the compose file, run `demo-phase35.sh`).
 3. **Each milestone** closes with a tag and release notes.
 4. **When the repository goes public:** Homebrew tap, public image visibility, and the Terraform Registry decision.
@@ -29,4 +36,4 @@ Limen ships several kinds of artifact: the `limen` CLI, three server programs (c
 ## Consequences
 - The repository is private today, so releases and GHCR images are visible to collaborators only until it is public.
 - `Cargo.toml`'s workspace version is the single source of the number; the release workflow must check that the tag matches it.
-- Nothing is published automatically from a tag: the release is created as a draft and a person publishes it, until the pipeline has run cleanly a few times.
+- The existing `release.yml` (tag triggers a draft with binaries) is replaced by the release-please workflow above; its build matrix and packaging steps carry over.
