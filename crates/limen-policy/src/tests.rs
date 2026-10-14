@@ -270,3 +270,19 @@ fn requires_approval_is_not_allowed() {
         .is_allowed()
     );
 }
+
+#[test]
+fn worker_selector_matching() {
+    let p = example();
+    let dev: BTreeMap<String, String> = [
+        ("pool".to_owned(), "dev".to_owned()),
+        ("az".to_owned(), "a".to_owned()),
+    ]
+    .into();
+    let prod: BTreeMap<String, String> = [("pool".to_owned(), "prod".to_owned())].into();
+    assert!(p.worker_may_serve("web-staging-1", &dev));
+    assert!(!p.worker_may_serve("web-staging-1", &prod));
+    assert!(!p.worker_may_serve("web-staging-1", &BTreeMap::new()));
+    assert!(p.worker_may_serve("orders-prod", &prod));
+    assert!(!p.worker_may_serve("no-such-resource", &dev));
+}

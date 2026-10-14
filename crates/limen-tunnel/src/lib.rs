@@ -3,6 +3,7 @@
 //! tunnel (ADR-0003, ADR-0005).
 
 pub mod connect;
+pub mod framing;
 pub mod serve;
 pub mod tls;
 pub mod tunnel;

@@ -304,9 +304,37 @@ impl Policy {
             .min(max)
     }
 
+    /// How long a session may last: the shortest `max_session_ttl` across
+    /// the roles, otherwise [`DEFAULT_MAX_SESSION_TTL`].
+    #[must_use]
+    pub fn max_session_ttl(&self, roles: &[String]) -> Duration {
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r)?.spec.max_session_ttl.map(|d| d.0))
+            .min()
+            .unwrap_or(DEFAULT_MAX_SESSION_TTL)
+    }
+
     #[must_use]
     pub fn resource(&self, name: &str) -> Option<&ResourceDoc> {
         self.resources.get(name)
+    }
+
+    /// Whether a worker with `worker_labels` (from its certificate) may serve
+    /// `resource`: every `worker_selector` label must match exactly. An empty
+    /// selector matches any worker.
+    #[must_use]
+    pub fn worker_may_serve(
+        &self,
+        resource: &str,
+        worker_labels: &BTreeMap<String, String>,
+    ) -> bool {
+        self.resources.get(resource).is_some_and(|r| {
+            r.spec
+                .worker_selector
+                .iter()
+                .all(|(k, v)| worker_labels.get(k).is_some_and(|actual| actual == v))
+        })
     }
 
     #[must_use]

@@ -15,6 +15,7 @@ http-body.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+prost.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
 thiserror.workspace = true

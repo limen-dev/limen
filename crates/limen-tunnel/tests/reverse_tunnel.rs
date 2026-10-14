@@ -71,6 +71,7 @@ async fn identity(
             kind,
             id: id.into(),
             dns_names: dns.iter().map(|s| (*s).to_owned()).collect(),
+            labels: std::collections::BTreeMap::new(),
             ttl: Duration::from_secs(600),
         })
         .await
