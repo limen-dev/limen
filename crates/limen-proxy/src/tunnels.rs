@@ -11,6 +11,8 @@ use tokio::sync::Notify;
 #[derive(Debug, Clone)]
 pub struct Tunnel {
     pub worker_id: String,
+    /// From the worker's certificate, so they can't be self-reported.
+    pub labels: std::collections::BTreeMap<String, String>,
     pub tunnel_id: String,
     pub connected_at: OffsetDateTime,
     pub channel: TunnelChannel,
@@ -62,6 +64,25 @@ impl Tunnels {
             .values()
             .find(|t| t.worker_id == worker_id && !t.channel.is_closed())
             .map(|t| t.channel.clone())
+    }
+
+    /// A live tunnel to some worker whose labels satisfy `accept`, picked at
+    /// random to spread load. Returns the worker ID and the channel.
+    pub fn pick(
+        &self,
+        accept: impl Fn(&std::collections::BTreeMap<String, String>) -> bool,
+    ) -> Option<(String, TunnelChannel)> {
+        let candidates: Vec<(String, TunnelChannel)> = self
+            .lock()
+            .values()
+            .filter(|t| !t.channel.is_closed() && accept(&t.labels))
+            .map(|t| (t.worker_id.clone(), t.channel.clone()))
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let i = rand::random_range(0..candidates.len());
+        candidates.into_iter().nth(i)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Tunnel>> {

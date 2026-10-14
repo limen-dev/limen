@@ -15,7 +15,10 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
+limen-audit.workspace = true
 limen-ca.workspace = true
+limen-policy.workspace = true
+limen-session.workspace = true
 limen-component.workspace = true
 limen-core.workspace = true
 limen-proto.workspace = true
@@ -28,6 +31,9 @@ futures.workspace = true
 governor.workspace = true
 http.workspace = true
 hyper.workspace = true
+prost.workspace = true
+rand.workspace = true
+tokio-stream.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
 serde.workspace = true

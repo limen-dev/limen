@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod relay;
+mod ssh;
 pub mod tunnels;
 
 use std::net::{IpAddr, SocketAddr};
@@ -53,6 +54,9 @@ pub struct Proxy {
     accept_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
     active: Arc<AtomicUsize>,
     last_report_ok: Arc<AtomicI64>,
+    pub(crate) policy: limen_session::snapshot::PolicyCache,
+    signer: Arc<RwLock<Arc<limen_session::envelope::EnvelopeSigner>>>,
+    pub(crate) audit: limen_audit::Emitter,
 }
 
 impl Proxy {
@@ -87,6 +91,22 @@ impl Proxy {
         .await?;
         let tls = Arc::new(RwLock::new(Arc::new(build_server_config(&creds)?)));
         let cp = Arc::new(RwLock::new(build_cp_channel(&config, &creds)?));
+        let signer = Arc::new(RwLock::new(Arc::new(build_signer(&creds)?)));
+        let policy = limen_session::snapshot::PolicyCache::new(
+            Duration::from_secs(config.policy_grace_secs),
+            Some(config.data_dir.join("policy.snapshot")),
+        );
+        policy.load(&creds.internal_ca()?);
+        let audit_file = config
+            .audit_file
+            .clone()
+            .unwrap_or_else(|| config.data_dir.join("audit/proxy.jsonl"));
+        let sink = Arc::new(
+            limen_audit::JsonlFileSink::open(&audit_file)
+                .await
+                .with_context(|| format!("opening {}", audit_file.display()))?,
+        );
+        let audit = limen_audit::Emitter::new("proxy", &creds.id, sink, config.audit_failure_mode);
         let (tx, rx) = watch::channel(Arc::new(creds));
         let quota = Quota::per_second(NonZeroU32::new(50).unwrap_or(NonZeroU32::MIN))
             .allow_burst(NonZeroU32::new(200).unwrap_or(NonZeroU32::MIN));
@@ -100,9 +120,27 @@ impl Proxy {
                 accept_limiter: Arc::new(RateLimiter::keyed(quota)),
                 active: Arc::new(AtomicUsize::new(0)),
                 last_report_ok: Arc::new(AtomicI64::new(0)),
+                policy,
+                signer,
+                audit,
             },
             tx,
         ))
+    }
+
+    pub(crate) fn signer(&self) -> Arc<limen_session::envelope::EnvelopeSigner> {
+        Arc::clone(
+            &self
+                .signer
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    /// Version of the policy snapshot this proxy decides from, if any.
+    #[must_use]
+    pub fn policy_version(&self) -> Option<i64> {
+        self.policy.latest().map(|s| s.version)
     }
 
     #[must_use]
@@ -143,7 +181,20 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
         identity,
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
-        &[alpn::TUNNEL, alpn::H2],
+        &[alpn::TUNNEL, alpn::SSH, alpn::H2],
+    )?)
+}
+
+fn build_signer(
+    creds: &ComponentCredentials,
+) -> anyhow::Result<limen_session::envelope::EnvelopeSigner> {
+    let cert = limen_tunnel::tls::certs_from_pem(&creds.cert_pem)?
+        .into_iter()
+        .next()
+        .context("no certificate")?;
+    Ok(limen_session::envelope::EnvelopeSigner::new(
+        creds.key_pem.expose(),
+        cert.to_vec(),
     )?)
 }
 
@@ -176,9 +227,11 @@ pub async fn run(
         move |creds| build_cp_channel(&renew_proxy.config, creds),
     ));
     tokio::spawn(report_tunnels(proxy.clone(), shutdown.clone()));
+    tokio::spawn(policy_refresh(proxy.clone(), shutdown.clone()));
     let admin = tokio::spawn(serve_admin(proxy.clone(), shutdown.clone()));
 
     tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), "proxy listening");
+    let mut connections = tokio::task::JoinSet::new();
     loop {
         let (tcp, remote) = tokio::select! {
             accepted = listener.accept() => match accepted {
@@ -199,7 +252,9 @@ pub async fn run(
         let proxy = proxy.clone();
         let conn_shutdown = shutdown.clone();
         proxy.active.fetch_add(1, Ordering::SeqCst);
-        tokio::spawn(async move {
+        // Reap finished connections so the set doesn't grow forever.
+        while connections.try_join_next().is_some() {}
+        connections.spawn(async move {
             handle_connection(&proxy, tcp, remote, conn_shutdown).await;
             proxy.active.fetch_sub(1, Ordering::SeqCst);
         });
@@ -213,6 +268,9 @@ pub async fn run(
     while proxy.active.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    // Whatever is still open after the drain period is cut off.
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
     admin.abort();
     Ok(())
 }
@@ -238,6 +296,7 @@ async fn handle_connection(
     let protocol = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
     match protocol.as_deref() {
         Some(p) if p == alpn::TUNNEL => accept_tunnel(proxy, tls, peer, shutdown).await,
+        Some(p) if p == alpn::SSH => ssh::handle(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {
             let mut shutdown = shutdown;
             let drain = Duration::from_secs(proxy.config.drain_timeout_secs);
@@ -305,6 +364,7 @@ async fn accept_tunnel(
     }
     proxy.tunnels.insert(Tunnel {
         worker_id: worker.id.clone(),
+        labels: worker.labels.clone(),
         tunnel_id: tunnel_id.clone(),
         connected_at: time::OffsetDateTime::now_utc(),
         channel,
@@ -342,8 +402,9 @@ async fn apply_renewals(proxy: Proxy) {
         match (
             build_server_config(&creds),
             build_cp_channel(&proxy.config, &creds),
+            build_signer(&creds),
         ) {
-            (Ok(tls), Ok(cp)) => {
+            (Ok(tls), Ok(cp), Ok(signer)) => {
                 *proxy
                     .tls
                     .write()
@@ -352,11 +413,47 @@ async fn apply_renewals(proxy: Proxy) {
                     .cp
                     .write()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = cp;
+                *proxy
+                    .signer
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(signer);
                 tracing::info!("applied renewed certificate");
             }
-            (Err(e), _) | (_, Err(e)) => {
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
                 tracing::error!(error = %e, "failed to apply renewed certificate");
             }
+        }
+    }
+}
+
+/// Fetch a fresh signed policy snapshot every 10 seconds (ADR-0011).
+async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
+    let mut tick =
+        tokio::time::interval(Duration::from_secs(proxy.config.policy_refresh_secs.max(1)));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        let result = async {
+            let mut client =
+                limen_proto::v1::policy_sync_client::PolicySyncClient::new(proxy.cp_channel());
+            let signed = client
+                .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+                .await?
+                .into_inner();
+            proxy
+                .policy
+                .update(&signed, &proxy.credentials().internal_ca()?)?;
+            anyhow::Ok(())
+        }
+        .await;
+        if let Err(e) = result {
+            let age = proxy
+                .policy
+                .latest()
+                .map(|s| (time::OffsetDateTime::now_utc() - s.issued_at).whole_seconds());
+            tracing::warn!(error = %e, snapshot_age_secs = ?age, "policy refresh failed; using the cached snapshot within the grace period");
         }
     }
 }

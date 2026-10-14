@@ -53,6 +53,22 @@ pub struct Config {
     /// tunnels are closed right away so workers move to another proxy.
     #[arg(long, env = "LIMEN_DRAIN_TIMEOUT_SECS", default_value_t = 20)]
     pub drain_timeout_secs: u64,
+
+    /// How old the policy snapshot may get while the control plane is
+    /// unreachable before new sessions fail closed (ADR-0011).
+    #[arg(long, env = "LIMEN_POLICY_GRACE_SECS", default_value_t = 300)]
+    pub policy_grace_secs: u64,
+
+    /// How often to fetch a fresh policy snapshot.
+    #[arg(long, env = "LIMEN_POLICY_REFRESH_SECS", default_value_t = 10)]
+    pub policy_refresh_secs: u64,
+
+    /// Stub audit sink (until Phase 3). Defaults to `<data-dir>/audit/proxy.jsonl`.
+    #[arg(long, env = "LIMEN_AUDIT_FILE")]
+    pub audit_file: Option<PathBuf>,
+
+    #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
+    pub audit_failure_mode: limen_audit::FailureMode,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
