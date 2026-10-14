@@ -28,22 +28,58 @@ jobs:
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-  test:
+  # Integration tests need PostgreSQL and a KMS emulator, which run as
+  # service containers on Linux runners.
+  test-linux:
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: limen
+          POSTGRES_PASSWORD: limen-ci
+          POSTGRES_DB: limen
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U limen -d limen"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+      kms:
+        image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
+        ports: ["8099:8080"]
+    env:
+      LIMEN_TEST_DATABASE_URL: postgres://limen:limen-ci@localhost:5432/limen
+      LIMEN_TEST_KMS_ENDPOINT: http://localhost:8099
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo test --workspace --locked
+      - name: Test (and fail if any integration test skipped)
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-features --locked -- --nocapture 2>&1 | tee test.log
+          if grep -q '^SKIPPED:' test.log; then grep '^SKIPPED:' test.log; exit 1; fi
+
+  # macOS runners have no service containers, so integration tests skip
+  # there (they print SKIPPED). Unit tests still run.
+  test-macos:
+    name: test (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo test --workspace --all-features --locked
 
   supply-chain:
     name: cargo-deny + cargo-audit
@@ -56,6 +92,22 @@ jobs:
       - run: cargo deny --locked check
       - run: cargo audit
 
+  images:
+    name: image (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [control-plane, proxy, worker]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build -f deploy/docker/Dockerfile --target "${{ matrix.target }}" -t "limen-${{ matrix.target }}:ci" .
+      - name: Smoke test
+        run: docker run --rm "limen-${{ matrix.target }}:ci" --version
+
   actionlint:
     runs-on: ubuntu-24.04
     steps:
@@ -64,6 +116,3 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - run: actionlint
-
-  # Docker image builds (control plane, proxy, worker) are added in Phase 1,
-  # together with the Dockerfiles in deploy/docker.
