@@ -1,0 +1,18 @@
+name: Feature or work item
+description: A piece of work that belongs to a roadmap phase
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+      description: The user-visible outcome, and who needs it.
+    validations: { required: true }
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Tests, docs, and a demo that show it works. Say which part is unverified against a real service, if any.
+  - type: markdown
+    attributes:
+      value: Add the **milestone** (the phase) and an `area:` label. Link the epic with "Part of #N".

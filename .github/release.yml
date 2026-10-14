@@ -1,0 +1,15 @@
+# Groups the notes GitHub generates for a release (ADR-0023).
+changelog:
+  exclude:
+    labels: [chore, ignore-for-release]
+  categories:
+    - title: Security
+      labels: [security]
+    - title: Features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Other changes
+      labels: ["*"]

@@ -41,3 +41,9 @@ The brief's "dashboard" meant Grafana over the audit data (ADR-0014). The owner 
 - **Admin actions** (lock, unlock, kill, revoke, create token) run through the same code as the CLI (`services::ops`), so the API and the console write identical audit events, distinguished by `data.via` (`api` or `console`). The console refuses to lock your own account.
 - **Worker revoke** is new: `limen admin revoke` / the Workers page sets `components.revoked_at`; the signed snapshot carries `revoked_components`; proxies refuse and drop that worker's tunnels (within about 10 s) and end sessions routed through it.
 - **Not built**: policy editing (by decision), per-user lock expiry, a console for Kubernetes or database sessions (the protocols don't exist yet), and a "force sign-out everywhere" button (locking does it).
+
+## Amendment: look and feel
+- **Light and dark** follow the system by default and can be overridden with the toggle in the sidebar (saved in `localStorage`; applied by an external script in `<head>` before first paint, so there is no flash and no inline script). Both themes are tuned for contrast; the brand teal is the accent.
+- **Inter** and **JetBrains Mono** (variable, latin subset, OFL) and a **Lucide** icon sprite (ISC) are embedded in the binary, so the CSP stays `font-src 'self'`. Vendored files and licenses are listed in `crates/limen-control-plane/assets/vendor/README.md`.
+- **Static assets are fingerprinted** (`?v=<hash of all embedded files>`) and cached as immutable, so an upgrade can never pair new HTML with an old stylesheet.
+- Pages declare `darkreader-lock` because they handle theming themselves; extensions that force dark mode otherwise re-darken the explicit light theme and rewrite its CSS.

@@ -42,6 +42,7 @@ A dependency is adopted only if all of these hold:
 | Rate limiting | governor 0.10.4 | | 2025-12 | Adopt |
 | HTML templates | askama 0.16.1 | | 2026-09 | **Adopt** (compile-time templates, escapes by default). maud 0.27.0 (last release 2025-02) passed over for that reason |
 | Constant-time compare | subtle 2.6.1 | | 2025 | Adopt (already in the tree through rustls and RustCrypto). Used for CSRF and login-state comparisons |
+| Fonts and icons (vendored) | Inter 5.3.0 and JetBrains Mono 5.3.0 (`@fontsource-variable`, OFL-1.1), Lucide 1.57.0 (ISC) | | 2026 | **Adopt, vendored** with licenses under `crates/limen-control-plane/assets/vendor/` |
 | Recording player (JS, vendored) | asciinema-player 3.17.0 | | 2026-06-30 | **Adopt, vendored** into `crates/limen-control-plane/assets/vendor/` with hash and license. Apache-2.0, no advisories on 2026-10-14, plays asciicast v3. Needs `'wasm-unsafe-eval'` (WebAssembly terminal), see ADR-0017 |
 | Spool storage | redb 4.4.0 | | 2026-10-13 | Fallback only (ADR-0009) |
 | Recording | asciicast 0.2.2 | | **2018** | **Reject**. Write our own asciicast v3 writer (newline-delimited JSON, ~100 lines) |

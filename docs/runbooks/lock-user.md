@@ -27,6 +27,6 @@ If the control plane is down you can't lock or unlock. Proxies and workers keep 
 `user.lock`, `user.unlock`, and `session.kill` events record who did it, whom it applied to, and why. If audit is unavailable the command reports it: the lock is applied but wasn't recorded, so retry the audit path (see [spool full](audit-spool-full.md)).
 
 ## Limits
-- Only SSH sessions exist today. Database, Redis, and Kubernetes sessions (Phase 4 onward) will use the same mechanism.
+- Only SSH sessions exist today. Database, Redis, and Kubernetes sessions (Phase 6 onward) will use the same mechanism.
 - Locking doesn't revoke credentials the user already holds on a target, such as a long-running process they started. Per-session certificates last about a minute.
 - Locking is by username. If the identity provider renames a user, lock the new name too.

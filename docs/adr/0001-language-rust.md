@@ -15,4 +15,4 @@ Use Rust (edition 2024, toolchain pinned to 1.99.0) for the control plane, proxy
 
 ## Consequences
 - One toolchain, one dependency audit (cargo-deny, cargo-audit), and one set of shared types.
-- Risk: parsing the SPDY exec protocol in Rust has less prior art than Go. If the Phase 6 exec recording runs into trouble, we revisit this ADR **for the exec-recording sub-component only**.
+- Risk: parsing the SPDY exec protocol in Rust has less prior art than Go. If the Phase 8 exec recording runs into trouble, we revisit this ADR **for the exec-recording sub-component only**.

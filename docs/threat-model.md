@@ -55,17 +55,17 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 ### TB1: Laptop ↔ proxy (public)
 | Threat | Mitigation |
 |---|---|
-| S: stolen user cert and key | 10-minute TTL. Keys stored with 0600. Optional OS keychain (Phase 7) |
+| S: stolen user cert and key | 10-minute TTL. Keys stored with 0600. Optional OS keychain (Phase 13) |
 | S: another local process or user connects to the CLI's loopback DB or Redis listener and rides the session | **Known risk.** Mitigations: bind to 127.0.0.1 only. `--socket` puts a unix socket in a 0700 directory. Each listener serves one target and closes after idle, by default 1 hour, configurable. Sessions are audited under the user. Documented in the user guide |
 | T/I: downgrade or MITM | TLS 1.3 only (rustls). Public cert pinned through system roots plus an optional pin of the Limen CA |
 | D: connection floods, handshake CPU exhaustion | NLB plus a per-IP pre-auth rate limit and a concurrent handshake cap. Max sessions per user |
-| E: malformed `SessionRequest` | Strict schema, size limits, `deny_unknown_fields`. Fuzzed in Phase 7 |
+| E: malformed `SessionRequest` | Strict schema, size limits, `deny_unknown_fields`. Fuzzed in Phase 13 |
 
 ### TB2/TB2′: Proxy ↔ worker (tunnel) and worker/proxy ↔ control plane
 | Threat | Mitigation |
 |---|---|
 | S: rogue worker enrolls | Single-use join tokens with a 15-minute TTL, stored hashed and consumed atomically. Bound to allowed kinds and labels. `worker.enroll` audit plus an alert on enrollment |
-| S: leaked static join token (ADR-0016) | Kind-scoped. Proxies enrolled with one may only request allow-listed DNS names, and workers get no DNS names, so a leaked worker token can't mint a server certificate. Audited with `token_type=static`. Stored in Secrets Manager and rotated. Replaced by IAM join in Phase 7 |
+| S: leaked static join token (ADR-0016) | Kind-scoped. Proxies enrolled with one may only request allow-listed DNS names, and workers get no DNS names, so a leaked worker token can't mint a server certificate. Audited with `token_type=static`. Stored in Secrets Manager and rotated. Replaced by IAM join in Phase 13 |
 | S: client spoofs `x-limen-*` relay headers | The proxy strips every client-supplied `x-limen-*` header before relaying. The control plane accepts forwarding only from callers presenting a **proxy** certificate, and re-verifies the forwarded certificate against the user CA, or the internal CA for workers only. Integration-tested |
 | E: worker forwards a user cert to act as that user | Only proxies may forward. A worker's direct calls resolve to the worker's identity, and user APIs reject it. Integration-tested |
 | S: a worker forges or replays a grant | Grants are signed by a proxy key (verified against the internal CA, proxy kind only, domain-separated from other signatures), expire 60 seconds after issue, name the worker, carry the user certificate (its identity and roles must match), and have a nonce the worker remembers. The control plane allows one SSH certificate issuance per grant across replicas |
@@ -83,7 +83,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | Threat | Mitigation |
 |---|---|
 | S: a target impersonated (DNS hijack in the VPC) | RDS: TLS `verify-full` against the RDS CA bundle. ElastiCache: TLS required. SSH: host CA or pinned host key, unknown fails closed. Kube: cluster CA from in-cluster config |
-| E: a worker compromise exposes DB admin secrets (A4) | The secret is read only during reconcile and held in memory only. The IAM policy is scoped to that one secret ARN. The admin role should be a dedicated `limen_admin`, not the RDS master user (documented). Alternative: run bootstrap as a separate one-shot task with its own role (Phase 4 option) |
+| E: a worker compromise exposes DB admin secrets (A4) | The secret is read only during reconcile and held in memory only. The IAM policy is scoped to that one secret ARN. The admin role should be a dedicated `limen_admin`, not the RDS master user (documented). Alternative: run bootstrap as a separate one-shot task with its own role (Phase 6 option) |
 | E: a worker compromise lets it act as any `limen_*` DB role | `rds-db:connect` is limited to `dbuser:<id>/limen_*` per resource. Workers are deployed per VPC or account to limit blast radius |
 | E: privilege escalation through kube impersonation (A6) | The worker strips client-supplied `Impersonate-*` headers and sets its own from the grant. The ClusterRole limits `groups` impersonation to `resourceNames` = the `limen:*` groups when the operator lists them, and must never include `system:masters`. Constrained impersonation (K8s ≥ 1.36) is planned hardening |
 | E: SSH target cert too broad | Per-session cert: TTL 1 min to authenticate, one principal, key ID `limen:<session>:<user>`, only `permit-pty`. Issued once per proxy grant, after the control plane re-checks the grant, its own current policy, and the worker's labels. Port, agent, and X11 forwarding and environment variables are refused by the worker |
@@ -98,7 +98,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 |---|---|
 | E: CA key theft (A1) | Keys live in KMS. `kms:Sign` is granted only to the control plane task role, with a key-policy condition on the signing algorithm. CloudTrail on `Sign`. Separate keys per purpose |
 | T: policy tampering in Aurora (A9) | Policy versions are immutable rows. Snapshots are signed. `policy.change` is audited. The DB user has no `DELETE` on the policy tables |
-| I: Aurora data exposure | Encryption at rest (KMS), TLS, IAM auth for the control plane DB user (Phase 7), no secrets stored (join tokens are hashed) |
+| I: Aurora data exposure | Encryption at rest (KMS), TLS, IAM auth for the control plane DB user (Phase 13), no secrets stored (join tokens are hashed) |
 
 ### TB7: Browser ↔ proxy ↔ web console (ADR-0017)
 | Threat | Mitigation |
@@ -131,7 +131,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | Secrets in logs | `Secret<T>` (no `Serialize`, redacted `Debug`). Log scanner test. Tokens never in URLs |
 | Input validation | Strict serde (`deny_unknown_fields`), size caps on every frame and request, label and name validation (`limen-core::labels`) |
 | Rate limiting | `governor`: per IP before auth, per user after, stricter for login and enrollment |
-| Supply chain | `cargo-deny` (advisories, licenses, sources, bans), `cargo-audit`, pinned toolchain and tools (mise), GitHub Actions pinned to commit SHAs, minimal `permissions:` in workflows, distroless images, SBOM in release (Phase 7) |
+| Supply chain | `cargo-deny` (advisories, licenses, sources, bans), `cargo-audit`, pinned toolchain and tools (mise), GitHub Actions pinned to commit SHAs, minimal `permissions:` in workflows, distroless images, SBOM in release (Phase 13) |
 | Memory safety | `unsafe_code = "forbid"` workspace-wide. Hand-written protocol codecs (MySQL, RESP) are fuzzed |
 | Clock skew | Certs are back-dated 1 minute. TTL checks allow ±2 minutes |
 
@@ -142,7 +142,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 4. Duplicates in Datadog under failure (at-least-once).
 5. Revocation is TTL-based (no immediate lock in v1. `lock` is an extension point).
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
-7. Until IAM join exists (Phase 7), autoscaled proxies and workers enroll with a static, kind-scoped token.
+7. Until IAM join exists (Phase 13), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
 
 ## 7. Review log
