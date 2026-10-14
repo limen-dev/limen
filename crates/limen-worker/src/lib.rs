@@ -2,6 +2,10 @@
 //! serves sessions over reverse tunnels (ADR-0003). Protocol handlers
 //! (SSH, PostgreSQL, MySQL, Redis, Kubernetes) arrive in Phases 2 to 6.
 
+pub mod recording;
+mod session;
+pub mod ssh;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -57,6 +61,22 @@ pub struct Config {
 
     #[arg(long, env = "LIMEN_DATA_DIR", default_value = "/var/lib/limen/worker")]
     pub data_dir: PathBuf,
+
+    /// How old the policy snapshot may get while the control plane is
+    /// unreachable before new sessions fail closed (ADR-0011).
+    #[arg(long, env = "LIMEN_POLICY_GRACE", value_parser = parse_duration, default_value = "5m")]
+    pub policy_grace: Duration,
+
+    /// How often to fetch a fresh policy snapshot.
+    #[arg(long, env = "LIMEN_POLICY_REFRESH", value_parser = parse_duration, default_value = "10s")]
+    pub policy_refresh: Duration,
+
+    /// Stub audit sink (until Phase 3): a local JSONL file. Defaults to `<data-dir>/audit/worker.jsonl`.
+    #[arg(long, env = "LIMEN_AUDIT_FILE")]
+    pub audit_file: Option<PathBuf>,
+
+    #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
+    pub audit_failure_mode: limen_audit::FailureMode,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -86,6 +106,9 @@ pub struct Worker {
     draining: Arc<AtomicBool>,
     tunnels_up: Arc<AtomicUsize>,
     sessions: Arc<AtomicUsize>,
+    pub(crate) policy: limen_session::snapshot::PolicyCache,
+    pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
+    pub(crate) audit: limen_audit::Emitter,
 }
 
 impl Worker {
@@ -117,6 +140,21 @@ impl Worker {
             },
         )
         .await?;
+        let policy = limen_session::snapshot::PolicyCache::new(
+            config.policy_grace,
+            Some(config.data_dir.join("policy.snapshot")),
+        );
+        policy.load(&creds.internal_ca()?);
+        let audit_file = config
+            .audit_file
+            .clone()
+            .unwrap_or_else(|| config.data_dir.join("audit/worker.jsonl"));
+        let sink = Arc::new(
+            limen_audit::JsonlFileSink::open(&audit_file)
+                .await
+                .with_context(|| format!("opening {}", audit_file.display()))?,
+        );
+        let audit = limen_audit::Emitter::new("worker", &creds.id, sink, config.audit_failure_mode);
         let (tx, rx) = watch::channel(Arc::new(creds));
         Ok((
             Self {
@@ -125,9 +163,51 @@ impl Worker {
                 draining: Arc::new(AtomicBool::new(false)),
                 tunnels_up: Arc::new(AtomicUsize::new(0)),
                 sessions: Arc::new(AtomicUsize::new(0)),
+                policy,
+                nonces: Arc::default(),
+                audit,
             },
             tx,
         ))
+    }
+
+    pub(crate) fn credentials(&self) -> Arc<ComponentCredentials> {
+        Arc::clone(&self.creds.borrow())
+    }
+
+    /// A channel to the control plane through the proxy, presenting this
+    /// worker's certificate (which the proxy forwards).
+    pub(crate) fn control_plane(&self) -> anyhow::Result<tonic::transport::Channel> {
+        let creds = self.credentials();
+        let tls = client_config(
+            &[creds.internal_ca()?],
+            Some(creds.tls_identity()?),
+            &[alpn::H2],
+        )?;
+        Ok(channel(
+            &self.config.proxy_addr,
+            &self.config.proxy_name,
+            SharedClientConfig::new(tls),
+        ))
+    }
+
+    pub(crate) fn recordings_dir(&self) -> PathBuf {
+        self.config.data_dir.join("recordings")
+    }
+
+    pub(crate) fn session_started(&self) -> SessionGuard {
+        self.sessions.fetch_add(1, Ordering::SeqCst);
+        SessionGuard(Arc::clone(&self.sessions))
+    }
+
+    #[must_use]
+    pub fn active_sessions(&self) -> usize {
+        self.sessions.load(Ordering::SeqCst)
+    }
+
+    #[must_use]
+    pub fn policy_version(&self) -> Option<i64> {
+        self.policy.latest().map(|s| s.version)
     }
 
     #[must_use]
@@ -141,6 +221,46 @@ impl Worker {
     }
 }
 
+/// Decrements the session count when dropped.
+pub(crate) struct SessionGuard(Arc<AtomicUsize>);
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Fetch a fresh policy snapshot every 10 seconds (ADR-0011).
+async fn policy_refresh(worker: Worker, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(worker.config.policy_refresh.max(Duration::from_secs(1)));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        let result = async {
+            let mut client =
+                limen_proto::v1::policy_sync_client::PolicySyncClient::new(worker.control_plane()?);
+            let signed = client
+                .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+                .await?
+                .into_inner();
+            let snapshot = worker
+                .policy
+                .update(&signed, &worker.credentials().internal_ca()?)?;
+            anyhow::Ok(snapshot.version)
+        }
+        .await;
+        if let Err(e) = result {
+            let age = worker
+                .policy
+                .latest()
+                .map(|s| (time::OffsetDateTime::now_utc() - s.issued_at).whole_seconds());
+            tracing::warn!(error = %e, snapshot_age_secs = ?age, "policy refresh failed; using the cached snapshot within the grace period");
+        }
+    }
+}
+
 /// The gRPC service the proxy calls over a tunnel.
 #[derive(Debug, Clone)]
 struct TunnelService(Worker);
@@ -151,14 +271,12 @@ impl WorkerTunnel for TunnelService {
 
     async fn open_session(
         &self,
-        _request: Request<Streaming<TunnelFrame>>,
+        request: Request<Streaming<TunnelFrame>>,
     ) -> Result<Response<Self::OpenSessionStream>, Status> {
         if self.0.draining.load(Ordering::SeqCst) {
             return Err(Status::unavailable("worker is draining"));
         }
-        Err(Status::unimplemented(
-            "no protocol handlers yet: sessions arrive in Phase 2",
-        ))
+        session::open(self.0.clone(), request.into_inner()).await
     }
 
     async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
@@ -266,6 +384,7 @@ pub async fn run(
     for index in 0..worker.config.tunnels.max(1) {
         tokio::spawn(tunnel_loop(worker.clone(), index, tunnels_rx.clone()));
     }
+    tokio::spawn(policy_refresh(worker.clone(), tunnels_rx.clone()));
     let admin = tokio::spawn(serve_admin(worker.clone()));
     tracing::info!(id = %worker.id(), tunnels = worker.config.tunnels, "worker running");
 
