@@ -3,32 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="darkreader-lock">
 <title>{% block title %}Limen{% endblock %} · Limen</title>
 <link rel="icon" href="/console/static/logo-mark.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/console/static/console.css">
+<link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/console/static/console.css?v={{ chrome.assets }}">
+<script src="/console/static/console.js?v={{ chrome.assets }}"></script>
 {% block head %}{% endblock %}
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/console/"><img src="/console/static/logo-mark.svg" alt="" width="28" height="28"><span>Limen</span></a>
-  <nav>
-    <a href="/console/"{% if chrome.active == "home" %} aria-current="page"{% endif %}>Overview</a>
-    <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</a>
-    {% if chrome.is_admin %}
-    <a href="/console/users"{% if chrome.active == "users" %} aria-current="page"{% endif %}>Users</a>
-    <a href="/console/workers"{% if chrome.active == "workers" %} aria-current="page"{% endif %}>Workers</a>
-    <a href="/console/policy"{% if chrome.active == "policy" %} aria-current="page"{% endif %}>Policy</a>
-    {% endif %}
-  </nav>
-  <form method="post" action="/console/logout" class="who">
-    <span>{{ chrome.username }}{% if chrome.is_admin %} <span class="tag">admin</span>{% endif %}</span>
-    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-    <button type="submit" class="link">Sign out</button>
-  </form>
-</header>
-<main>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/console/">
+      <img class="logo-light" src="/console/static/logo-mark.svg" alt="" width="26" height="26">
+      <img class="logo-dark" src="/console/static/logo-mark-dark.svg" alt="" width="26" height="26">
+      <span>Limen</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="/console/"{% if chrome.active == "home" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg#terminal"/></svg><span>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</span></a>
+      {% if chrome.is_admin %}
+      <div class="nav-label">Administration</div>
+      <a href="/console/users"{% if chrome.active == "users" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg#users"/></svg><span>Users</span></a>
+      <a href="/console/workers"{% if chrome.active == "workers" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg#server"/></svg><span>Workers</span></a>
+      <a href="/console/policy"{% if chrome.active == "policy" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg#scroll-text"/></svg><span>Policy</span></a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-foot">
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg#moon"/></svg></button>
+      </div>
+      <form method="post" action="/console/logout" class="me">
+        <span class="avatar" aria-hidden="true">{{ chrome.initial }}</span>
+        <span class="me-text"><span class="me-name" title="{{ chrome.username }}">{{ chrome.username }}</span><br><span class="me-role">{% if chrome.is_admin %}Administrator{% else %}Member{% endif %}</span></span>
+        <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg#log-out"/></svg></button>
+      </form>
+    </div>
+  </aside>
+  <div class="main">
+    <main>
 {% block content %}{% endblock %}
-</main>
-<footer>Limen {{ chrome.version }} · policy v{{ chrome.policy_version }}</footer>
+    </main>
+    <div class="foot">Limen {{ chrome.version }} · policy v{{ chrome.policy_version }}</div>
+  </div>
+</div>
 </body>
 </html>

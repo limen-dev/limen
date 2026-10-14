@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Join token{% endblock %}
 {% block content %}
-<h1>Join token created</h1>
-<p>This token is single use and is shown only once. It expires {{ expires }}.</p>
-<pre class="secret">{{ token }}</pre>
-<p>Give it to the {{ kind }} as <code>LIMEN_JOIN_TOKEN</code>.</p>
-<p><a href="/console/workers">Back to workers</a></p>
+<div class="page-head"><div><h1>Join token created</h1><p class="sub">Single use. Shown only once. Expires {{ expires }}.</p></div></div>
+<div class="card card-pad">
+  <pre class="secret">{{ token }}</pre>
+  <p class="hint">Give it to the {{ kind }} as <code>LIMEN_JOIN_TOKEN</code>.</p>
+  <a class="button secondary" href="/console/workers"><svg class="i"><use href="/console/static/icons.svg#arrow-left"/></svg>Back to workers</a>
+</div>
 {% endblock %}

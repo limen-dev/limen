@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    Chrome, ComponentView, DryRun, Home, PolicyDoc, PolicyGroup, PolicyPage, ResourceView,
+    self, Chrome, ComponentView, DryRun, Home, PolicyDoc, PolicyGroup, PolicyPage, ResourceView,
     SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage, UserView, UsersPage,
     Workers, error_page, list_text, path_segment, time_text,
 };
@@ -81,16 +81,16 @@ pub struct DoneQuery {
     done: Option<String>,
 }
 
-fn labels_text(labels: &BTreeMap<String, String>) -> String {
-    if labels.is_empty() {
-        "—".into()
-    } else {
-        labels
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
+/// The branded page unauthenticated visitors land on. It does nothing but
+/// offer the way in, so it needs no session.
+pub async fn signin() -> Response {
+    html(
+        views::SigninPage {
+            assets: super::assets::version(),
+            version: limen_core::VERSION,
+        }
+        .render(),
+    )
 }
 
 // ---- overview ------------------------------------------------------------------------
@@ -108,8 +108,12 @@ pub async fn home(
         .map(|r| ResourceView {
             name: r.name,
             kind: r.kind.as_str().to_owned(),
-            labels: labels_text(&r.labels.into_iter().collect()),
-            principals: list_text(&r.principals),
+            labels: r
+                .labels
+                .into_iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect(),
+            principals: r.principals,
         })
         .collect();
     let filter = SessionFilter {
@@ -395,8 +399,8 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
     UserView {
         name: name.to_owned(),
         path: path_segment(name),
-        roles: "—".into(),
-        groups: "—".into(),
+        role_list: Vec::new(),
+        group_list: Vec::new(),
         first_login: "never".into(),
         last_login: "never".into(),
         logins: 0,
@@ -558,7 +562,7 @@ pub async fn workers(
                 last_seen: time_text(Some(c.last_seen_at)),
                 cert_expires: time_text(c.cert_expires_at),
                 revoked: c.revoked_at.is_some(),
-                labels: labels_text(&labels),
+                label_list: labels.iter().map(|(k, v)| format!("{k}={v}")).collect(),
                 kind: c.kind,
                 id: c.id,
             }

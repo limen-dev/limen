@@ -1,13 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Session{% endblock %}
-{% block head %}{% if s.has_recording %}<link rel="stylesheet" href="/console/static/asciinema-player.css">{% endif %}{% endblock %}
+{% block head %}{% if s.has_recording %}<link rel="stylesheet" href="/console/static/asciinema-player.css?v={{ chrome.assets }}">{% endif %}{% endblock %}
 {% block content %}
-<h1>Session <span class="mono small">{{ s.id }}</span></h1>
-<table class="facts">
+<div class="page-head">
+  <div>
+    <h1>{{ s.resource }} <span class="pill {{ s.status_class }} v-mid">{{ s.status }}</span></h1>
+    <p class="sub">{{ s.user }} as <span class="mono">{{ s.login }}</span> · <span class="mono">{{ s.id }}</span></p>
+  </div>
+  <a class="button secondary" href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg#arrow-left"/></svg>All sessions</a>
+</div>
+
+
+
+{% if chrome.is_admin && s.active %}
+<form method="post" action="/console/sessions/{{ s.id }}/kill" class="danger-zone">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360">
+  <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg#circle-stop"/></svg>End this session</button>
+  <span class="hint">The user is disconnected within about 11 seconds. The recording is kept.</span>
+</form>
+{% endif %}
+
+<h2>Recording</h2>
+{% if s.has_recording %}
+<div class="card player-card"><div id="player" data-src="/console/sessions/{{ s.id }}/recording"></div></div>
+<p class="hint">SHA-256 <span class="mono">{{ s.recording_sha256 }}</span>. The control plane checks this hash before it serves the recording.</p>
+<script src="/console/static/asciinema-player.min.js?v={{ chrome.assets }}"></script>
+<script src="/console/static/player-init.js?v={{ chrome.assets }}"></script>
+{% else %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#play"/></svg><div>{{ s.recording_note }}</div></div>
+{% endif %}
+
+<h2>Details</h2>
+<div class="card facts-card"><table class="facts">
   <tr><th>User</th><td>{% if chrome.is_admin %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>
   <tr><th>Resource</th><td>{{ s.resource }} <span class="muted">({{ s.kind }})</span></td></tr>
   <tr><th>Login</th><td class="mono">{{ s.login }}</td></tr>
-  <tr><th>Status</th><td><span class="status {{ s.status_class }}">{{ s.status }}</span> {{ s.reason }}</td></tr>
+  <tr><th>Outcome</th><td>{% if s.reason.is_empty() %}<span class="muted">—</span>{% else %}{{ s.reason }}{% endif %}</td></tr>
   <tr><th>Started</th><td>{{ s.started }}</td></tr>
   <tr><th>Ended</th><td>{{ s.ended }}</td></tr>
   <tr><th>Duration</th><td>{{ s.duration }}</td></tr>
@@ -16,23 +45,5 @@
   <tr><th>Client address</th><td class="mono">{{ s.client_addr }}</td></tr>
   <tr><th>Proxy / worker</th><td class="mono">{{ s.proxy }} / {{ s.worker }}</td></tr>
   {% endif %}
-</table>
-
-{% if chrome.is_admin && s.active %}
-<form method="post" action="/console/sessions/{{ s.id }}/kill" class="inline danger-form">
-  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-  <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" size="40">
-  <button type="submit" class="danger">End this session</button>
-</form>
-{% endif %}
-
-<h2>Recording</h2>
-{% if s.has_recording %}
-<div id="player" data-src="/console/sessions/{{ s.id }}/recording"></div>
-<p class="muted">SHA-256 {{ s.recording_sha256 }}. The control plane checks this hash before it serves the recording.</p>
-<script src="/console/static/asciinema-player.min.js"></script>
-<script src="/console/static/player-init.js"></script>
-{% else %}
-<p class="muted">{{ s.recording_note }}</p>
-{% endif %}
+</table></div>
 {% endblock %}

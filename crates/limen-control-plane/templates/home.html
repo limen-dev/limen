@@ -1,38 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<h1>Overview</h1>
-{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p class="sub">Signed in as {{ chrome.username }} with {{ roles_text }}. This console session ends {{ expires }}.</p>
+  </div>
+</div>
+{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg#info"/></svg>{{ done }}</div>{% endif %}
+
 {% if chrome.is_admin %}
-<section class="cards">
-  <a class="card" href="/console/sessions?filter=active"><b>{{ stats.active_sessions }}</b><span>active sessions</span></a>
-  <a class="card" href="/console/users"><b>{{ stats.users }}</b><span>users seen</span></a>
-  <a class="card" href="/console/users"><b>{{ stats.locked }}</b><span>locked</span></a>
-  <a class="card" href="/console/workers"><b>{{ stats.workers_up }}</b><span>workers connected</span></a>
-  <a class="card" href="/console/policy"><b>v{{ chrome.policy_version }}</b><span>policy</span></a>
+<section class="stats">
+  <a class="card stat" href="/console/sessions?filter=active"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg#activity"/></svg></span><div><b>{{ stats.active_sessions }}</b><span>Active sessions</span></div></a>
+  <a class="card stat" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg#users"/></svg></span><div><b>{{ stats.users }}</b><span>Users seen</span></div></a>
+  <a class="card stat{% if stats.locked > 0 %} bad{% endif %}" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg#lock"/></svg></span><div><b>{{ stats.locked }}</b><span>Locked</span></div></a>
+  <a class="card stat" href="/console/workers"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg#plug"/></svg></span><div><b>{{ stats.workers_up }}</b><span>Workers connected</span></div></a>
+  <a class="card stat" href="/console/policy"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg#scroll-text"/></svg></span><div><b>v{{ chrome.policy_version }}</b><span>Policy version</span></div></a>
 </section>
 {% endif %}
 
-<h2>Resources you can access</h2>
+<h2>Resources you can access <span class="count">{{ resources.len() }}</span></h2>
 {% if resources.is_empty() %}
-<p class="muted">Your roles don't grant access to any resource.</p>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#ban"/></svg><div>Your roles don't grant access to any resource.</div></div>
 {% else %}
-<table>
-  <thead><tr><th>Resource</th><th>Kind</th><th>Labels</th><th>Logins / roles</th><th>Connect</th></tr></thead>
+<div class="table-wrap"><table>
+  <thead><tr><th>Resource</th><th>Access as</th><th>Labels</th><th>Connect</th></tr></thead>
   <tbody>
   {% for r in resources %}
     <tr>
-      <td>{{ r.name }}</td><td>{{ r.kind }}</td><td class="mono">{{ r.labels }}</td><td class="mono">{{ r.principals }}</td>
-      <td>{% if r.kind == "ssh" %}<code>limen ssh {{ r.name }}</code>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><div class="cell-main">{{ r.name }}</div><div class="cell-sub">{{ r.kind }}</div></td>
+      <td><div class="chips">{% for p in r.principals %}<span class="chip">{{ p }}</span>{% endfor %}</div></td>
+      <td><div class="chips">{% for l in r.labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
+      <td>{% if r.kind == "ssh" %}<span class="cmd"><code>limen ssh {{ r.name }}</code><button type="button" class="secondary" data-copy="limen ssh {{ r.name }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg#copy"/></svg></button></span>{% else %}<span class="muted">Coming soon</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% endif %}
 
-<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %}</h2>
+<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %} <a class="muted ml-auto" href="/console/sessions">View all</a></h2>
 {% include "sessions_table.html" %}
-<p><a href="/console/sessions">All sessions →</a></p>
-
-<p class="muted">You're signed in as {{ chrome.username }} with {{ roles_text }}. This console session ends {{ expires }}.</p>
 {% endblock %}

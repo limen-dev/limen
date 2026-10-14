@@ -251,7 +251,11 @@ async fn console_end_to_end() {
     let mut anon = Browser::new(&d, true);
     let page = anon.get_once(&format!("{}/console/", anon.base)).await;
     assert_eq!(page.status, 303);
-    assert_eq!(page.headers["location"], "/console/login");
+    assert_eq!(page.headers["location"], "/console/signin");
+    let signin = anon.get("/console/signin").await;
+    assert_eq!(signin.status, 200, "the sign-in page is public");
+    assert!(signin.body.contains("href=\"/console/login\""));
+    assert!(!signin.body.contains("csrf"), "and carries no session data");
     let page = anon
         .get_once(&format!(
             "{}/console/sessions/anything/recording",
@@ -340,7 +344,7 @@ async fn console_end_to_end() {
     drop(conn);
     wait_until("the session and its recording", 20, async || {
         let page = alice.get("/console/sessions").await;
-        page.body.contains("bob@example.com") && page.body.contains('▶')
+        page.body.contains("bob@example.com") && page.body.contains("recmark")
     })
     .await;
     let page = alice.get("/console/sessions").await;
@@ -525,7 +529,7 @@ async fn console_end_to_end() {
             page.status,
             page.headers["location"].to_str().unwrap_or_default()
         ),
-        (303, "/console/login"),
+        (303, "/console/signin"),
         "locking deletes the user's browser sessions"
     );
     let err = ssh_client::connect(
@@ -587,7 +591,7 @@ async fn console_end_to_end() {
     assert_eq!(page.status, 400);
     let worker_id = workers
         .body
-        .split("<td class=\"mono\">")
+        .split("<div class=\"mono\">")
         .map(|s| s.split('<').next().unwrap_or_default())
         .find(|s| s.starts_with("worker-"))
         .expect("a worker id")
@@ -625,11 +629,11 @@ async fn console_end_to_end() {
         page.body.contains("Dry run: nothing was applied."),
         "{}",
         page.body
-            .split("<h3>Result</h3>")
+            .split("<h2>Result</h2>")
             .nth(1)
             .unwrap_or(&page.body)
     );
-    let result = page.body.split("<h3>Result</h3>").nth(1).expect("a result");
+    let result = page.body.split("<h2>Result</h2>").nth(1).expect("a result");
     assert!(
         result.contains("web-1"),
         "the removed resource is listed: {result}"

@@ -8,6 +8,13 @@ storage:
 web:
   http: 0.0.0.0:5556
 
+# Branded sign-in page (theme mounted by docker-compose.yml).
+frontend:
+  dir: /srv/dex/web
+  issuer: Limen
+  theme: limen
+  logoURL: theme/logo.svg
+
 oauth2:
   skipApprovalScreen: true
   responseTypes: [code]

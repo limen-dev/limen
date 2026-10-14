@@ -1,32 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Users{% endblock %}
 {% block content %}
-<h1>Users</h1>
-{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
-<p class="muted">People who have signed in with the CLI or the console. Locked users can't sign in or open sessions, and their open sessions end.</p>
-<table>
-  <thead><tr><th>User</th><th>Roles</th><th>Last sign-in</th><th>Sign-ins</th><th>Status</th></tr></thead>
+<div class="page-head">
+  <div>
+    <h1>Users</h1>
+    <p class="sub">People who have signed in with the CLI or the console. Locked users can't sign in or open sessions, and their open sessions end.</p>
+  </div>
+</div>
+{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg#info"/></svg>{{ done }}</div>{% endif %}
+{% if users.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#users"/></svg><div>Nobody has signed in yet.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>User</th><th>Roles</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>Status</th></tr></thead>
   <tbody>
   {% for u in users %}
     <tr>
-      <td><a href="/console/users/{{ u.path }}">{{ u.name }}</a></td>
-      <td class="mono">{{ u.roles }}</td>
-      <td>{{ u.last_login }}</td>
-      <td>{{ u.logins }}</td>
-      <td>{% if u.locked %}<span class="status bad">locked</span> <span class="muted">{{ u.lock_reason }}</span>{% else %}<span class="status ok">active</span>{% endif %}</td>
+      <td><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a></td>
+      <td><div class="chips">{% for r in u.role_list %}<span class="chip">{{ r }}</span>{% endfor %}</div></td>
+      <td class="nowrap">{{ u.last_login }}</td>
+      <td class="num">{{ u.logins }}</td>
+      <td>{% if u.locked %}<span class="pill bad">locked</span> <span class="cell-sub">{{ u.lock_reason }}</span>{% else %}<span class="pill ok">active</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
+{% endif %}
 {% if !orphan_locks.is_empty() %}
 <h2>Locked, never signed in</h2>
-<table>
-  <thead><tr><th>User</th><th>Reason</th><th></th></tr></thead>
+<div class="table-wrap"><table>
+  <thead><tr><th>User</th><th>Reason</th></tr></thead>
   <tbody>
   {% for l in orphan_locks %}
-    <tr><td><a href="/console/users/{{ l.path }}">{{ l.name }}</a></td><td>{{ l.lock_reason }}</td><td></td></tr>
+    <tr><td><a class="cell-main" href="/console/users/{{ l.path }}">{{ l.name }}</a></td><td>{{ l.lock_reason }}</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% endif %}
 {% endblock %}

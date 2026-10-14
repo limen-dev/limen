@@ -1,20 +1,19 @@
 {% if sessions.is_empty() %}
-<p class="muted">No sessions yet.</p>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#terminal"/></svg><div>No sessions yet.</div></div>
 {% else %}
-<table>
-  <thead><tr><th>Started</th><th>User</th><th>Resource</th><th>Login</th><th>Status</th><th>Duration</th><th></th></tr></thead>
+<div class="table-wrap"><table>
+  <thead><tr><th>Resource</th><th>User</th><th>Started</th><th>Duration</th><th>Status</th><th></th></tr></thead>
   <tbody>
   {% for s in sessions %}
     <tr>
-      <td>{{ s.started }}</td>
+      <td><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}</div></td>
       <td>{{ s.user }}</td>
-      <td>{{ s.resource }}</td>
-      <td class="mono">{{ s.login }}</td>
-      <td><span class="status {{ s.status_class }}">{{ s.status }}</span>{% if !s.reason.is_empty() %} <span class="muted">{{ s.reason }}</span>{% endif %}</td>
+      <td class="nowrap">{{ s.started }}</td>
       <td>{{ s.duration }}</td>
-      <td><a href="/console/sessions/{{ s.id }}">Details{% if s.has_recording %} ▶{% endif %}</a></td>
+      <td><span class="pill {{ s.status_class }}">{{ s.status }}</span>{% if !s.reason.is_empty() %} <span class="cell-sub">{{ s.reason }}</span>{% endif %}</td>
+      <td class="actions"><a href="/console/sessions/{{ s.id }}">{% if s.has_recording %}<span class="recmark"><svg class="i"><use href="/console/static/icons.svg#play"/></svg>Replay</span>{% else %}Details{% endif %}</a></td>
     </tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% endif %}

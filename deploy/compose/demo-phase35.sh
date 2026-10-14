@@ -50,32 +50,8 @@ sleep 11 # proxy and worker refresh policy every 10s
 pass "stack up, policy applied"
 
 # ---- a scripted browser -----------------------------------------------------------
-# browser <jar> <email> signs in through Dex and leaves the console session in <jar>.
-browser_login() {
-  local jar="$1" email="$2" work
-  work="$(mktemp -d)"
-  : > "$jar"
-  # Start: the console redirects to Dex.
-  local dex_url
-  dex_url="$(curl -s --cacert "$ca" -c "$jar" -b "$jar" -o /dev/null -w '%{redirect_url}' "$base/console/login")"
-  [ -n "$dex_url" ] || { echo "no redirect to the IdP" >&2; return 1; }
-  # Dex shows its password form; fill it in.
-  curl -sf -c "$work/dex" -b "$work/dex" -L -o "$work/form.html" "$dex_url"
-  local action
-  action="$(grep -o 'action="[^"]*"' "$work/form.html" | head -1 | sed 's/^action="//; s/"$//; s/&amp;/\&/g')"
-  local back
-  back="$(curl -s -c "$work/dex" -b "$work/dex" -o /dev/null -w '%{redirect_url}' \
-    --data-urlencode "login=$email" --data-urlencode "password=password" "http://localhost:5556$action")"
-  # Dex may bounce through an approval step; follow its redirects until we leave it.
-  while [[ "$back" == http://localhost:5556/* ]]; do
-    back="$(curl -s -c "$work/dex" -b "$work/dex" -o /dev/null -w '%{redirect_url}' "$back")"
-  done
-  # Back at the console's callback, with the code.
-  curl -s --cacert "$ca" -c "$jar" -b "$jar" -o "$work/landing.html" -w '%{http_code}' "$back" > "$work/code"
-  local code; code="$(cat "$work/code")"
-  rm -rf "$work"
-  echo "$code"
-}
+# console-login.sh signs in through Dex and leaves the console session in a cookie jar.
+browser_login() { "$here/console-login.sh" "$2" "$1"; }
 page() { # page <jar> <path> -> body
   curl -s --cacert "$ca" -b "$1" -c "$1" "$base$2"
 }

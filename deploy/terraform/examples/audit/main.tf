@@ -1,5 +1,5 @@
 # The Phase 3 audit store and its monitors on their own. The full deployment
-# (examples/complete, Phase 7) uses the same modules.
+# (examples/complete, Phase 13) uses the same modules.
 #
 #   terraform init && terraform apply -var environment=prod
 #

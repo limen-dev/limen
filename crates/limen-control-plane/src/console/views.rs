@@ -13,10 +13,12 @@ use super::{Auth, html};
 /// Page chrome: who is signed in, and the navigation state.
 pub struct Chrome {
     pub username: String,
+    pub initial: String,
     pub is_admin: bool,
     pub csrf: String,
     pub active: &'static str,
     pub version: &'static str,
+    pub assets: &'static str,
     pub policy_version: i64,
 }
 
@@ -24,11 +26,17 @@ impl Chrome {
     #[must_use]
     pub fn new(auth: &Auth, active: &'static str, policy_version: i64) -> Self {
         Self {
+            initial: auth
+                .username
+                .chars()
+                .next()
+                .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
             username: auth.username.clone(),
             is_admin: auth.is_admin,
             csrf: auth.csrf.clone(),
             active,
             version: limen_core::VERSION,
+            assets: super::assets::version(),
             policy_version,
         }
     }
@@ -132,7 +140,7 @@ pub struct SessionView {
 impl From<&SessionRow> for SessionView {
     fn from(s: &SessionRow) -> Self {
         let (status, status_class) = if s.active {
-            ("active", "ok")
+            ("active", "live")
         } else if s.ended_at.is_some() {
             ("ended", "")
         } else {
@@ -186,8 +194,8 @@ impl From<&SessionRow> for SessionView {
 pub struct UserView {
     pub name: String,
     pub path: String,
-    pub roles: String,
-    pub groups: String,
+    pub role_list: Vec<String>,
+    pub group_list: Vec<String>,
     pub first_login: String,
     pub last_login: String,
     pub logins: i64,
@@ -202,8 +210,8 @@ impl From<&UserRow> for UserView {
         Self {
             name: u.username.clone(),
             path: path_segment(&u.username),
-            roles: list_text(&u.roles),
-            groups: list_text(&u.groups),
+            role_list: u.roles.clone(),
+            group_list: u.groups.clone(),
             first_login: time_text(Some(u.first_login_at)),
             last_login: time_text(Some(u.last_login_at)),
             logins: u.login_count,
@@ -227,8 +235,8 @@ pub struct Stats {
 pub struct ResourceView {
     pub name: String,
     pub kind: String,
-    pub labels: String,
-    pub principals: String,
+    pub labels: Vec<String>,
+    pub principals: Vec<String>,
 }
 
 #[derive(Template)]
@@ -284,7 +292,7 @@ pub struct ComponentView {
     pub id: String,
     pub path: String,
     pub kind: String,
-    pub labels: String,
+    pub label_list: Vec<String>,
     pub last_seen: String,
     pub tunnels: usize,
     pub cert_expires: String,
@@ -341,17 +349,32 @@ pub struct PolicyPage {
 }
 
 #[derive(Template)]
+#[template(path = "signin.html")]
+pub struct SigninPage {
+    pub assets: &'static str,
+    pub version: &'static str,
+}
+
+#[derive(Template)]
 #[template(path = "message.html")]
-struct Message<'a> {
+struct MessagePage<'a> {
     title: &'a str,
     message: &'a str,
+    assets: &'static str,
 }
 
 /// A plain page with a status code, for errors and confirmations. It has no
 /// navigation, so it is safe to show without a session.
 #[must_use]
 pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
-    let mut response = html(Message { title, message }.render());
+    let mut response = html(
+        MessagePage {
+            title,
+            message,
+            assets: super::assets::version(),
+        }
+        .render(),
+    );
     if response.status() == StatusCode::OK {
         *response.status_mut() = status;
     }

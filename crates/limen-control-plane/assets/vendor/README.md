@@ -14,3 +14,13 @@ Plays session recordings (asciicast v3) in the web console (ADR-0017).
 The bundle is self-contained: no network access, no eval of recording content as markup. Its terminal emulator is WebAssembly, so it needs `'wasm-unsafe-eval'` in `script-src` (this permits compiling WebAssembly, not JS `eval`), plus `worker-src blob:` and `style-src-attr 'unsafe-inline'`. Nothing else is relaxed.
 
 To update: download the new tarball from the npm registry, replace both files, update this table, and play a recording (`deploy/compose/demo-phase3.sh` then open any session in the console).
+
+# Vendored: fonts and icons (console look)
+
+| | |
+|---|---|
+| Inter (variable, latin) | `@fontsource-variable/inter` 5.3.0, SIL OFL 1.1 (`fonts/Inter.OFL.txt`) |
+| JetBrains Mono (variable, latin) | `@fontsource-variable/jetbrains-mono` 5.3.0, SIL OFL 1.1 (`fonts/JetBrainsMono.OFL.txt`) |
+| Lucide icons | `lucide-static` 1.57.0, ISC (`lucide.LICENSE`). `../icons.svg` is a sprite of the icons the console uses |
+
+Fonts and icons are served from the binary, so the console loads nothing from other origins (CSP `font-src 'self'`).

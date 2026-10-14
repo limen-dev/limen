@@ -71,6 +71,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/console", get(|| async { Redirect::to("/console/") }))
         .route("/console/", get(pages::home))
+        .route("/console/signin", get(pages::signin))
         .route("/console/login", get(auth::login_start))
         .route("/console/callback", get(auth::callback))
         .route("/console/logout", post(auth::logout))
@@ -264,7 +265,7 @@ impl FromRequestParts<AppState> for Auth {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
-        let to_login = || Redirect::to("/console/login").into_response();
+        let to_login = || Redirect::to("/console/signin").into_response();
         let Some(token) = read_cookie(&parts.headers, SESSION_COOKIE) else {
             return Err(to_login());
         };

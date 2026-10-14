@@ -33,7 +33,9 @@ services:
   dex:
     image: ghcr.io/dexidp/dex:v2.46.0
     command: ["dex", "serve", "/etc/dex/config.yaml"]
-    volumes: ["./dex/config.yaml:/etc/dex/config.yaml:ro"]
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./dex/theme:/srv/dex/web/themes/limen:ro
     ports: ["127.0.0.1:5556:5556"]
 
   # KMS emulator for testing the KMS-backed CA path. LocalStack now needs an

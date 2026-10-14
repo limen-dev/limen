@@ -1,17 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Policy{% endblock %}
 {% block content %}
-<h1>Policy</h1>
-<table class="facts">
+<div class="page-head">
+  <div>
+    <h1>Policy <span class="pill ok v-mid" >v{{ version }}</span></h1>
+    <p class="sub">Policy is YAML in your repository. The console shows what's active and checks changes. Apply with <code>limen admin apply</code>.</p>
+  </div>
+</div>
+<div class="card facts-card"><table class="facts">
   <tr><th>Version</th><td>{{ version }}</td></tr>
   <tr><th>Digest</th><td class="mono">{{ digest }}</td></tr>
   <tr><th>Applied by</th><td>{{ author }}</td></tr>
   <tr><th>Applied at</th><td>{{ created }}</td></tr>
-</table>
-<p class="muted">Policy is YAML in your repository. The console shows what's active and checks changes, but doesn't edit it. Apply with <code>limen admin apply</code>.</p>
+</table></div>
 
 {% for group in groups %}
-<h2>{{ group.title }} ({{ group.docs.len() }})</h2>
+<h2>{{ group.title }} <span class="count">{{ group.docs.len() }}</span></h2>
 {% for d in group.docs %}
 <details>
   <summary><b>{{ d.name }}</b> <span class="muted">{{ d.summary }}</span></summary>
@@ -21,26 +25,28 @@
 {% endfor %}
 
 <h2>Check a change</h2>
-<p class="muted">Paste the complete policy YAML, as <code>limen admin apply</code> would read it. This shows the difference from the active policy and applies nothing.</p>
-<form method="post" action="/console/policy/dry-run" class="stack">
+<p class="hint">Paste the complete policy YAML, as <code>limen admin apply</code> would read it. This shows the difference from the active policy and applies nothing.</p>
+<div class="card">
+<form method="post" action="/console/policy/dry-run" class="stack wide">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <textarea name="yaml" rows="14" spellcheck="false" class="mono" required>{{ pasted }}</textarea>
-  <button type="submit">Show the difference</button>
+  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg#file-diff"/></svg>Show the difference</button></div>
 </form>
+</div>
 {% if let Some(r) = result %}
-<h3>Result</h3>
+<h2>Result</h2>
 {% if let Some(err) = r.error %}
 <pre class="error">{{ err }}</pre>
 {% else %}
   {% if r.no_changes %}
-  <p>No changes: this is the active policy.</p>
+  <div class="notice"><svg class="i"><use href="/console/static/icons.svg#check"/></svg>No changes: this is the active policy.</div>
   {% else %}
   <ul class="diff">
     {% for n in r.added %}<li class="add">+ {{ n }}</li>{% endfor %}
     {% for n in r.changed %}<li class="chg">~ {{ n }}</li>{% endfor %}
     {% for n in r.removed %}<li class="del">- {{ n }}</li>{% endfor %}
   </ul>
-  <p class="muted">Dry run: nothing was applied.</p>
+  <p class="hint">Dry run: nothing was applied.</p>
   {% endif %}
 {% endif %}
 {% endif %}

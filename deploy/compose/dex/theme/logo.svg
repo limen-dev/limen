@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 200" role="img" aria-label="Limen">
+  <title>Limen</title>
+  <g transform="translate(10 10) scale(0.7)">
+    <path d="M64 192 V112 a64 64 0 0 1 128 0 V192" fill="none" stroke="#1F2A44" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="36" y1="220" x2="220" y2="220" stroke="#14B8A6" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="128" cy="140" r="15" fill="#14B8A6"/>
+  </g>
+  <g transform="translate(232 50)" fill="none" stroke="#1F2A44" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 0 V100"/>
+    <path d="M42 40 V100"/>
+    <circle cx="42" cy="12" r="7" fill="#14B8A6" stroke="none"/>
+    <path d="M74 40 V100 M74 62 a22 22 0 0 1 44 0 V100 M118 62 a22 22 0 0 1 44 0 V100"/>
+    <path d="M182 70 H242 A30 30 0 1 0 233 91"/>
+    <path d="M262 40 V100 M262 62 a22 22 0 0 1 44 0 V100"/>
+  </g>
+</svg>
