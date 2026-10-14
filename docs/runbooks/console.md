@@ -34,3 +34,6 @@ Without the public URL the console is off and `/console/*` answers 404.
 | Blank player | Browser console shows a CSP error: something between the proxy and the browser rewrote the `Content-Security-Policy` header |
 
 Browser sessions end when the user's certificate lifetime ends, when they sign out, or when an admin locks them.
+
+## Resources
+The Resources page is the quickest way to see what Limen can reach and whether it is reachable: a red "none" in the Workers column means no enrolled worker has the labels the resource asks for (`worker_selector`), so sessions to it fail. Check the worker's labels on the Workers page and the selector on the resource's page.

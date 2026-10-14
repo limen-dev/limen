@@ -5,6 +5,7 @@ pub mod fake_datadog;
 pub mod idp;
 pub mod ssh_target;
 pub mod toggle_proxy;
+pub mod users;
 
 /// A temporary directory that is removed on drop, for spool and state tests.
 pub fn temp_dir() -> std::io::Result<tempfile::TempDir> {

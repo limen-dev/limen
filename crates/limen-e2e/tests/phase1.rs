@@ -12,6 +12,7 @@ use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, ListComponentsRequest,
     ListResourcesRequest, PolicySource,
 };
+use limen_testkit::users::{ALICE, BOB, CAROL};
 use tonic::Code;
 
 const POLICY: [(&str, &str); 3] = [
@@ -38,10 +39,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     };
 
     // Admin logs in through the proxy and applies policy.
-    let alice = d
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("admin login");
+    let alice = d.login(ALICE, &["admins"]).await.expect("admin login");
     let admin_ch = d.proxy_channel(Some(alice));
     let sources = POLICY
         .iter()
@@ -62,10 +60,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     assert!(applied.applied);
 
     // A developer sees only what policy allows.
-    let bob = d
-        .login("bob@example.com", &["developers"])
-        .await
-        .expect("bob login");
+    let bob = d.login(BOB, &["developers"]).await.expect("bob login");
     let listed = ResourcesClient::new(d.proxy_channel(Some(bob)))
         .list_resources(ListResourcesRequest {})
         .await
@@ -76,7 +71,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
 
     // A user with no mapped roles can't log in.
     let err = d
-        .login("carol@example.com", &["marketing"])
+        .login(CAROL, &["marketing"])
         .await
         .expect_err("carol denied");
     assert_eq!(err.code(), Code::PermissionDenied);
@@ -167,18 +162,13 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     assert_eq!(worker.worker.tunnels_up(), 2);
 
     // The restarted proxy reused its identity rather than enrolling again.
-    let components = AdminClient::new(
-        d.proxy_channel(Some(
-            d.login("alice@example.com", &["admins"])
-                .await
-                .expect("login"),
-        )),
-    )
-    .list_components(ListComponentsRequest {})
-    .await
-    .expect("list")
-    .into_inner()
-    .components;
+    let components =
+        AdminClient::new(d.proxy_channel(Some(d.login(ALICE, &["admins"]).await.expect("login"))))
+            .list_components(ListComponentsRequest {})
+            .await
+            .expect("list")
+            .into_inner()
+            .components;
     assert_eq!(components.iter().filter(|c| c.kind == "proxy").count(), 1);
 
     worker.stop().await;

@@ -10,6 +10,8 @@ keep=false
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/deploy/compose"
+# shellcheck source=dev-users.sh
+source "$here/dev-users.sh"
 compose=(docker compose --progress=quiet -f "$here/docker-compose.yml")
 export LIMEN_HOME="$here/.state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
@@ -46,19 +48,19 @@ tunnels | python3 -m json.tool
 pass "worker holds 2 reverse tunnels"
 
 step "Admin logs in through Dex (PKCE) and applies policy"
-"$here/dev-login.sh" alice@example.com
+"$here/dev-login.sh" "$ALICE"
 limen admin apply "$root/examples/policy" --source-ref demo | tee "$here/.state/apply.out"
 $keep || grep -q "Applied policy version 1" "$here/.state/apply.out" || fail "policy should be applied as version 1"
 pass "policy applied"
 
 step "Roles come from IdP groups at login: alice logs in again to pick up 'sre'"
-"$here/dev-login.sh" alice@example.com
+"$here/dev-login.sh" "$ALICE"
 limen ls
 [ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = 5 ] || fail "alice should see 5 resources"
 pass "sre sees every resource"
 
 step "A developer sees only what policy allows"
-"$here/dev-login.sh" bob@example.com
+"$here/dev-login.sh" "$BOB"
 limen ls
 names="$(limen ls --json | python3 -c 'import json,sys; print(",".join(r["name"] for r in json.load(sys.stdin)))')"
 [ "$names" = "orders-staging,web-staging-1" ] || fail "bob saw: $names"
@@ -66,12 +68,12 @@ if limen admin apply "$root/examples/policy" --dry-run 2>/dev/null; then fail "b
 pass "deny by default; bob can't administer"
 
 step "A user with no mapped groups is denied"
-if out="$("$here/dev-login.sh" carol@example.com 2>&1)"; then fail "carol must be denied"; fi
+if out="$("$here/dev-login.sh" $CAROL 2>&1)"; then fail "carol must be denied"; fi
 echo "$out" | grep -q "no roles are mapped" || fail "unexpected error for carol: $out"
 pass "carol denied: $(echo "$out" | grep -o 'login denied.*')"
 
 step "Single-use join token enrolls a second worker; reuse is rejected"
-"$here/dev-login.sh" alice@example.com >/dev/null
+"$here/dev-login.sh" "$ALICE" >/dev/null
 token="$(limen admin token create --kind worker --label pool=demo --ttl 10m 2>/dev/null)"
 "${compose[@]}" rm -sf worker-2 worker-3 >/dev/null 2>&1 || true
 docker rm -f limen-worker-2 limen-worker-3 >/dev/null 2>&1 || true

@@ -10,6 +10,8 @@ keep=false
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/deploy/compose"
+# shellcheck source=dev-users.sh
+source "$here/dev-users.sh"
 state="$here/.state"
 compose=(docker compose --progress=quiet -f "$here/docker-compose.yml")
 export LIMEN_HOME="$state/home"
@@ -37,7 +39,7 @@ wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 mkdir -p "$state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
-"$here/dev-login.sh" alice@example.com >/dev/null
+"$here/dev-login.sh" "$ALICE" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase2 >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:3444/tunnels | grep -q worker_id"
 # Proxy and worker pick up the new policy within their 10s refresh.
@@ -45,7 +47,7 @@ sleep 11
 pass "stack up, policy applied"
 
 step "bob runs a command on web-staging-1 with plain OpenSSH, through Limen"
-"$here/dev-login.sh" bob@example.com >/dev/null
+"$here/dev-login.sh" "$BOB" >/dev/null
 out="$(limen ssh web-staging-1 -- 'echo "I am $(whoami) on $(hostname)"')"
 echo "$out"
 echo "$out" | grep -q "I am ubuntu on" || fail "unexpected output: $out"
@@ -53,7 +55,7 @@ pass "login inferred from policy (ubuntu), command ran on the target"
 
 step "The target only accepted a Limen certificate naming the session and user"
 "${compose[@]}" logs sshd-target 2>/dev/null | grep -o 'Accepted certificate ID "limen:[^"]*"' | tail -1 | tee "$state/sshd-accept.log"
-grep -q 'bob@example.com' "$state/sshd-accept.log" || fail "sshd log doesn't show the Limen certificate"
+grep -q ''"$BOB"'' "$state/sshd-accept.log" || fail "sshd log doesn't show the Limen certificate"
 pass "sshd logged the per-session certificate"
 
 step "Denials"

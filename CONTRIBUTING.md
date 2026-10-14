@@ -16,6 +16,9 @@ cargo audit
 actionlint
 ```
 
+## The CLI's look
+All terminal output goes through `crates/limen-cli/src/ui.rs` (colour, glyphs, tables, spinner, errors). It prints plain text when piped or when `NO_COLOR` is set, and `--color always|never` overrides. Add new output there rather than with bare `println!`, and cover layout with a test that strips the colour.
+
 ## Rules
 - A new dependency needs a row in [ADR-0012](docs/adr/0012-dependency-selection.md).
 - A new entry point, credential type, or data store needs an update to the [threat model](docs/threat-model.md).

@@ -42,6 +42,9 @@ The brief's "dashboard" meant Grafana over the audit data (ADR-0014). The owner 
 - **Worker revoke** is new: `limen admin revoke` / the Workers page sets `components.revoked_at`; the signed snapshot carries `revoked_components`; proxies refuse and drop that worker's tunnels (within about 10 s) and end sessions routed through it.
 - **Not built**: policy editing (by decision), per-user lock expiry, a console for Kubernetes or database sessions (the protocols don't exist yet), and a "force sign-out everywhere" button (locking does it).
 
+## Amendment: resources page
+`/console/resources` lists every resource in the active policy (admins) or only those the signed-in user's roles allow (everyone else), with a kind filter and a search over names and labels. Filters run after access control, so a search can't reveal a hidden resource. Admins also see each resource's target, the roles that grant access, the live workers whose labels satisfy its selector (a resource with none is flagged, because its sessions will fail), and session counts; non-admins never see internal addresses. `/console/resources/<name>` answers 404 for resources a user can't reach, the same as for ones that don't exist.
+
 ## Amendment: look and feel
 - **Light and dark** follow the system by default and can be overridden with the toggle in the sidebar (saved in `localStorage`; applied by an external script in `<head>` before first paint, so there is no flash and no inline script). Both themes are tuned for contrast; the brand teal is the accent.
 - **Inter** and **JetBrains Mono** (variable, latin subset, OFL) and a **Lucide** icon sprite (ISC) are embedded in the binary, so the CSP stays `font-src 'self'`. Vendored files and licenses are listed in `crates/limen-control-plane/assets/vendor/README.md`.

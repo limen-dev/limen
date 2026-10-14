@@ -44,11 +44,13 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 ### Dev users
 
+<!-- BEGIN dev-users (generated from dev-users.toml) -->
 | User | Groups | Roles with `examples/policy` |
 |---|---|---|
 | `alice@example.com` | `limen-admins`, `sre` | `limen:admin`, `sre` |
 | `bob@example.com` | `developers` | `dev-readonly` |
 | `carol@example.com` | `marketing` | none, so login is denied |
+<!-- END dev-users -->
 
 ### Logging in without a browser
 

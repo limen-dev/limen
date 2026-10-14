@@ -160,3 +160,5 @@ jobs:
         run: |
           python3 dashboards/grafana/generate.py
           git diff --exit-code -- dashboards/grafana
+      - name: Dev users file and what is generated from it agree
+        run: python3 deploy/compose/gen-dev-users.py --check

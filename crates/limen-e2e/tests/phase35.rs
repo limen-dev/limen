@@ -13,6 +13,7 @@ use limen_proto::v1::{
     LockUserRequest, PolicySource, UnlockUserRequest,
 };
 use limen_testkit::ssh_target::SshTarget;
+use limen_testkit::users::{ALICE, BOB, CAROL};
 use russh::ChannelMsg;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -90,10 +91,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
     let proxy_addr = d.proxy_addr.to_string();
 
-    let alice = d
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("admin");
+    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
@@ -126,8 +124,8 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     })
     .await;
 
-    let bob = d.login("bob@example.com", &["ops"]).await.expect("bob");
-    let carol = d.login("carol@example.com", &["ops"]).await.expect("carol");
+    let bob = d.login(BOB, &["ops"]).await.expect("bob");
+    let carol = d.login(CAROL, &["ops"]).await.expect("carol");
     let open_shell = |identity: limen_tunnel::tls::Identity| {
         let (proxy_addr, ca_pem, host_ca) = (proxy_addr.clone(), ca_pem.clone(), host_ca.clone());
         async move {
@@ -154,7 +152,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     let (_carol_conn, mut carol_shell) = open_shell(carol.clone()).await;
     let carol_session = read_jsonl(&d)
         .iter()
-        .find(|e| e["kind"] == "session.start" && e["user"] == "carol@example.com")
+        .find(|e| e["kind"] == "session.start" && e["user"] == CAROL)
         .map(|e| e["session_id"].as_str().expect("id").to_owned());
     let carol_session = match carol_session {
         Some(s) => s,
@@ -162,12 +160,12 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
             eventually(Duration::from_secs(15), "carol's session.start", || async {
                 read_jsonl(&d)
                     .iter()
-                    .any(|e| e["kind"] == "session.start" && e["user"] == "carol@example.com")
+                    .any(|e| e["kind"] == "session.start" && e["user"] == CAROL)
             })
             .await;
             read_jsonl(&d)
                 .iter()
-                .find(|e| e["kind"] == "session.start" && e["user"] == "carol@example.com")
+                .find(|e| e["kind"] == "session.start" && e["user"] == CAROL)
                 .map(|e| e["session_id"].as_str().expect("id").to_owned())
                 .expect("session id")
         }
@@ -201,7 +199,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(
         admin
             .lock_user(LockUserRequest {
-                username: "bob@example.com".into(),
+                username: BOB.into(),
                 reason: "laptop stolen".into(),
             })
             .await
@@ -212,7 +210,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(
         !admin
             .lock_user(LockUserRequest {
-                username: "bob@example.com".into(),
+                username: BOB.into(),
                 reason: "again".into(),
             })
             .await
@@ -229,7 +227,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         .locks;
     assert_eq!(locks.len(), 1);
     assert_eq!(locks[0].reason, "laptop stolen");
-    assert_eq!(locks[0].locked_by, "alice@example.com");
+    assert_eq!(locks[0].locked_by, ALICE);
     assert_eq!(
         read_until_closed(&mut bob_shell, "never appears", Duration::from_secs(20)).await,
         Some(false),
@@ -249,7 +247,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(err.contains("user locked"), "{err}");
     // Login is refused too.
     let err = d
-        .login("bob@example.com", &["ops"])
+        .login(BOB, &["ops"])
         .await
         .expect_err("locked user can't log in");
     assert!(err.message().contains("user locked"), "{}", err.message());
@@ -258,7 +256,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(
         admin
             .unlock_user(UnlockUserRequest {
-                username: "bob@example.com".into(),
+                username: BOB.into(),
             })
             .await
             .expect("unlock")
@@ -283,7 +281,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     let mut as_bob = AdminClient::new(d.proxy_channel(Some(bob.clone())));
     let denied = as_bob
         .lock_user(LockUserRequest {
-            username: "carol@example.com".into(),
+            username: CAROL.into(),
             reason: "no".into(),
         })
         .await
@@ -310,8 +308,8 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         .iter()
         .find(|e| e["kind"] == "user.lock")
         .expect("user.lock");
-    assert_eq!(lock["user"], "alice@example.com");
-    assert_eq!(lock["data"]["target_user"], "bob@example.com");
+    assert_eq!(lock["user"], ALICE);
+    assert_eq!(lock["data"]["target_user"], BOB);
     assert_eq!(lock["data"]["reason"], "laptop stolen");
     let kill = events
         .iter()

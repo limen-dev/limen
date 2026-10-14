@@ -11,6 +11,8 @@ keep=false
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/deploy/compose"
+# shellcheck source=dev-users.sh
+source "$here/dev-users.sh"
 state="$here/.state"
 compose=(docker compose --progress=quiet -f "$here/docker-compose.yml")
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
@@ -19,7 +21,11 @@ base=https://localhost:3443
 # Each person has their own CLI profile directory.
 alice() { LIMEN_HOME="$state/home-alice" "$LIMEN_BIN" "$@"; }
 bob()   { LIMEN_HOME="$state/home-bob" "$LIMEN_BIN" "$@"; }
-login() { LIMEN_HOME="$state/home-$1" "$here/dev-login.sh" "$1@example.com" >/dev/null; }
+# login <alice|bob|carol>: sign in with the CLI; the email comes from dev-users.sh.
+login() {
+  local var; var="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+  LIMEN_HOME="$state/home-$1" "$here/dev-login.sh" "${!var}" >/dev/null
+}
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
@@ -44,7 +50,7 @@ ca="$state/internal-ca.pem"
 rm -rf "$state/home-alice" "$state/home-bob"
 login alice
 alice admin apply "$root/examples/policy" --source-ref demo-phase35 >/dev/null
-alice admin unlock bob@example.com >/dev/null # a previous run with --keep may have left him locked
+alice admin unlock "$BOB" >/dev/null # a previous run with --keep may have left him locked
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:3444/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
 pass "stack up, policy applied"
@@ -62,10 +68,10 @@ csrf_of() { grep -o 'name="csrf" value="[^"]*"' | head -1 | sed 's/.*value="//; 
 
 step "alice (admin) signs in to the console through Dex"
 alice_jar="$state/alice.jar"
-code="$(browser_login "$alice_jar" alice@example.com)"
+code="$(browser_login "$alice_jar" $ALICE)"
 echo "  callback answered $code (a redirect to the console)"
 home="$(page "$alice_jar" /console/)"
-echo "$home" | grep -q 'alice@example.com' || fail "alice isn't signed in"
+echo "$home" | grep -q ''"$ALICE"'' || fail "alice isn't signed in"
 echo "$home" | grep -q 'Users' || fail "admin navigation is missing"
 curl -sI --cacert "$ca" "$base/console/login" | grep -qi 'content-security-policy' || true
 curl -sI --cacert "$ca" -b "$alice_jar" "$base/console/" | tr -d '\r' | grep -i '^content-security-policy' | sed 's/^/  /'
@@ -75,7 +81,7 @@ step "bob has a live SSH session"
 login bob
 bob ssh web-staging-1 -- 'echo started; for i in $(seq 1 120); do echo tick $i; sleep 1; done' > "$state/bob-session.log" 2>&1 &
 ssh_pid=$!
-wait_for "bob's session to appear in the console" sh -c "curl -s --cacert '$ca' -b '$alice_jar' '$base/console/sessions?filter=active' | grep -q 'bob@example.com'"
+wait_for "bob's session to appear in the console" sh -c "curl -s --cacert '$ca' -b '$alice_jar' '$base/console/sessions?filter=active' | grep -q '$BOB'"
 active="$(page "$alice_jar" '/console/sessions?filter=active')"
 session_id="$(echo "$active" | grep -o '/console/sessions/[0-9a-f-]\{36\}' | head -1 | sed 's|.*/||')"
 [ -n "$session_id" ] || fail "no session id in the console"
@@ -95,18 +101,18 @@ tail -2 "$state/bob-session.log" | sed 's/^/  /'
 pass "bob's session ended within seconds"
 
 step "alice locks bob from the CLI; bob can't log in or open sessions"
-alice admin lock bob@example.com --reason "demo: laptop reported stolen"
+alice admin lock "$BOB" --reason "demo: laptop reported stolen"
 alice admin locks
 if bob ssh web-staging-1 -- id >/dev/null 2>"$state/locked.err"; then fail "a locked user opened a session"; fi
 grep -o 'user locked' "$state/locked.err" | head -1
-if LIMEN_HOME="$state/home-bob" "$here/dev-login.sh" bob@example.com >"$state/locked-login.err" 2>&1; then fail "a locked user logged in"; fi
+if LIMEN_HOME="$state/home-bob" "$here/dev-login.sh" "$BOB" >"$state/locked-login.err" 2>&1; then fail "a locked user logged in"; fi
 grep -o 'user locked' "$state/locked-login.err" | head -1 || { cat "$state/locked-login.err"; fail "login should say the user is locked"; }
 pass "locked: SSH and login refused"
 
 step "alice unlocks bob from the console"
-csrf="$(page "$alice_jar" '/console/users/bob%40example.com' | csrf_of)"
+csrf="$(page "$alice_jar" '/console/users/'"$BOB_ENC"'' | csrf_of)"
 code="$(curl -s --cacert "$ca" -b "$alice_jar" -o /dev/null -w '%{http_code}' -H "Origin: $base" \
-  --data-urlencode "csrf=$csrf" "$base/console/users/bob%40example.com/unlock")"
+  --data-urlencode "csrf=$csrf" "$base/console/users/$BOB_ENC/unlock")"
 [ "$code" = 303 ] || fail "unlock returned $code"
 login bob
 bob ssh web-staging-1 -- 'echo "bob is back on $(hostname)"'
@@ -114,7 +120,7 @@ pass "unlocked: bob can work again"
 
 step "bob signs in to the console: he sees only himself"
 bob_jar="$state/bob.jar"
-code="$(browser_login "$bob_jar" bob@example.com)"
+code="$(browser_login "$bob_jar" $BOB)"
 bob_home="$(page "$bob_jar" /console/)"
 echo "$bob_home" | grep -q 'web-staging-1' || fail "bob doesn't see his resource"
 if echo "$bob_home" | grep -q '>Users<'; then fail "bob sees the admin navigation"; fi

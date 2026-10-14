@@ -23,7 +23,7 @@ deploy/compose/demo-phase35.sh --keep                   # full-stack check (also
 Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbStack.
 
 ## Layout
-`crates/limen-{control-plane,proxy,worker,cli}` binaries; `limen-{core,ca,policy,session,audit,tunnel,proto,component}` libraries; `limen-testkit` and `limen-e2e` for tests. Console: `crates/limen-control-plane/src/console/` (+ `templates/`, `assets/`). Terraform in `deploy/terraform`. Dashboards are generated: `python3 dashboards/grafana/generate.py`.
+`crates/limen-{control-plane,proxy,worker,cli}` binaries; `limen-{core,ca,policy,session,audit,tunnel,proto,component}` libraries; `limen-testkit` and `limen-e2e` for tests. Console: `crates/limen-control-plane/src/console/` (+ `templates/`, `assets/`). Terraform in `deploy/terraform`. Dashboards are generated: `python3 dashboards/grafana/generate.py`. Dev users live only in `deploy/compose/dev-users.toml` (run `python3 deploy/compose/gen-dev-users.py` after editing); tests use `limen_testkit::users`.
 
 ## Gotchas
 - sqlx wants literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.

@@ -39,6 +39,7 @@ staticClients:
 
 enablePasswordDB: true
 staticPasswords:
+  # BEGIN dev-users (generated from ../dev-users.toml)
   - email: alice@example.com
     hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
     username: alice
@@ -54,3 +55,4 @@ staticPasswords:
     username: carol
     userID: 5f0e8c2a-9a47-4a0b-8a51-6a0e0f8d2c11
     groups: [marketing]
+  # END dev-users

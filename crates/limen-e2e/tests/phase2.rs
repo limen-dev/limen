@@ -9,6 +9,7 @@ use limen_e2e::{Deployment, eventually, ssh_client};
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
 use limen_testkit::ssh_target::SshTarget;
+use limen_testkit::users::{ALICE, BOB};
 use russh::ChannelMsg;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -72,10 +73,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let proxy_addr = d.proxy_addr.to_string();
 
     // Policy, and a worker labelled pool=dev.
-    let alice = d
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("admin");
+    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
@@ -113,7 +111,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     .await;
 
     // bob runs a command as ubuntu on web-1.
-    let bob = || async { d.login("bob@example.com", &["ops"]).await.expect("bob") };
+    let bob = || async { d.login(BOB, &["ops"]).await.expect("bob") };
     let conn = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
@@ -137,7 +135,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
         .expect("target login");
     assert_eq!(login, "ubuntu");
     assert!(
-        key_id.starts_with("limen:") && key_id.ends_with(":bob@example.com"),
+        key_id.starts_with("limen:") && key_id.ends_with(&format!(":{BOB}")),
         "key id {key_id}"
     );
     drop(conn);
@@ -187,7 +185,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     assert!(
         proxy_events
             .iter()
-            .any(|e| e["kind"] == "session.start" && e["user"] == "bob@example.com")
+            .any(|e| e["kind"] == "session.start" && e["user"] == BOB)
     );
     let worker_events = read_jsonl(&d, AUDIT);
     let exec = worker_events
@@ -351,10 +349,7 @@ async fn ssh_through_a_peer_proxy() {
     let host_ca = d.public_ca("ssh-host-ca.pub");
     let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
 
-    let alice = d
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("admin");
+    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
     admin
         .apply_policy(ApplyPolicyRequest {
@@ -397,7 +392,7 @@ async fn ssh_through_a_peer_proxy() {
     )
     .await;
 
-    let bob = d.login("bob@example.com", &["ops"]).await.expect("bob");
+    let bob = d.login(BOB, &["ops"]).await.expect("bob");
     let mut last_err = String::new();
     // Proxy A reports its tunnels within a moment; B caches the registry for 5s.
     for _ in 0..40 {
