@@ -1,8 +1,10 @@
 pub mod admin;
 pub mod auth;
 pub mod enrollment;
+pub mod policy_sync;
 pub mod registry;
 pub mod resources;
+pub mod ssh_certs;
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};

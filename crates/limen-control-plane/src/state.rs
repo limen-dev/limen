@@ -25,6 +25,9 @@ pub struct AppState {
     pub policy: PolicyStore,
     pub audit: Emitter,
     pub limits: Arc<Limits>,
+    /// Signs policy snapshots with this replica's own (rotating) key. Set
+    /// once the server certificate is issued.
+    pub snapshot_signer: Arc<RwLock<Option<Arc<limen_session::envelope::EnvelopeSigner>>>>,
 }
 
 /// The currently active policy, cached in memory.

@@ -51,6 +51,14 @@ pub struct Config {
     #[arg(long, env = "LIMEN_KMS_USER_CA_KEY")]
     pub kms_user_ca_key: Option<String>,
 
+    /// KMS key ID or ARN for the SSH user CA, which targets trust (kms backend).
+    #[arg(long, env = "LIMEN_KMS_SSH_USER_CA_KEY")]
+    pub kms_ssh_user_ca_key: Option<String>,
+
+    /// KMS key ID or ARN for the SSH host CA, which the CLI trusts (kms backend).
+    #[arg(long, env = "LIMEN_KMS_SSH_HOST_CA_KEY")]
+    pub kms_ssh_host_ca_key: Option<String>,
+
     /// Write the CA certificates (public) to this directory on startup, so
     /// components and the CLI can pin them. Used by the dev stack.
     #[arg(long, env = "LIMEN_CA_EXPORT_DIR")]
@@ -126,6 +134,10 @@ pub struct Config {
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: FailureMode,
+
+    /// On shutdown, how long in-flight connections may finish before they're cut.
+    #[arg(long, env = "LIMEN_DRAIN_TIMEOUT", value_parser = parse_duration_or_zero, default_value = "20s")]
+    pub drain_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -166,7 +178,30 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
     })
 }
 
+/// Like [`parse_duration`], but `0s` is allowed.
+pub fn parse_duration_or_zero(s: &str) -> Result<Duration, String> {
+    let digits = s.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    if !digits.is_empty() && digits.bytes().all(|b| b == b'0') {
+        return Ok(Duration::ZERO);
+    }
+    parse_duration(s)
+}
+
 /// Parse `90s`, `10m`, `8h`, or `1d`.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
     limen_policy::duration::DurationStr::parse(s).map(|d| d.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durations() {
+        assert_eq!(parse_duration_or_zero("0s"), Ok(Duration::ZERO));
+        assert_eq!(parse_duration_or_zero("00m"), Ok(Duration::ZERO));
+        assert_eq!(parse_duration_or_zero("20s"), Ok(Duration::from_secs(20)));
+        assert!(parse_duration_or_zero("s").is_err());
+        assert!(parse_duration("0s").is_err(), "TTLs must stay positive");
+    }
 }

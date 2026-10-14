@@ -1,12 +1,14 @@
 //! Loading the CA keys and their certificates.
 //!
-//! Keys come from files (development) or KMS (production). Each CA
+//! Keys come from files (development) or KMS (production). Each X.509 CA
 //! certificate is created once, under an advisory lock so concurrent replicas
-//! agree, and stored in the database keyed by purpose and key reference.
+//! agree, and stored in the database keyed by purpose and key reference. SSH
+//! CAs have no certificate: their public key is all anyone needs.
 
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use limen_ca::ssh::SshCa;
 use limen_ca::{CaPurpose, CertificateAuthority, FileSigner, Signer};
 
 use crate::config::{CaBackend, Config};
@@ -16,6 +18,8 @@ use crate::db::{self, Db};
 pub struct Cas {
     pub internal: CertificateAuthority,
     pub user: CertificateAuthority,
+    pub ssh_user: SshCa,
+    pub ssh_host: SshCa,
 }
 
 pub async fn load(config: &Config, db: &Db) -> anyhow::Result<Cas> {
@@ -23,40 +27,50 @@ pub async fn load(config: &Config, db: &Db) -> anyhow::Result<Cas> {
         CaBackend::Kms => Some(aws_sdk_kms::Client::new(&aws_config::load_from_env().await)),
         CaBackend::File => None,
     };
-    let mut cas = Vec::new();
-    for (purpose, kms_key) in [
-        (CaPurpose::Internal, &config.kms_internal_ca_key),
-        (CaPurpose::UserX509, &config.kms_user_ca_key),
-    ] {
-        let (signer, key_ref): (Arc<dyn Signer>, String) = match &kms {
-            Some(client) => {
-                let key = kms_key.as_ref().with_context(|| {
-                    format!(
-                        "--kms-{}-ca-key is required with the kms backend",
-                        purpose.as_str()
-                    )
-                })?;
-                (
-                    Arc::new(limen_ca::kms::KmsSigner::new(client.clone(), key).await?),
-                    format!("kms:{key}"),
-                )
-            }
-            None => {
-                let path = config.ca_dir.join(format!("{}-ca.key", purpose.as_str()));
-                (
-                    Arc::new(FileSigner::load_or_create(&path)?),
-                    format!("file:{}", path.display()),
-                )
-            }
-        };
-        cas.push(load_one(db, purpose, signer, &key_ref).await?);
-    }
-    let user = cas.pop().context("user CA")?;
-    let internal = cas.pop().context("internal CA")?;
-    Ok(Cas { internal, user })
+    let signer = |purpose: CaPurpose, kms_key: Option<String>| {
+        let kms = kms.clone();
+        let dir = config.ca_dir.clone();
+        async move {
+            let result: anyhow::Result<(Arc<dyn Signer>, String)> = match kms {
+                Some(client) => {
+                    let key = kms_key.with_context(|| {
+                        format!(
+                            "a KMS key for the {} CA is required with the kms backend",
+                            purpose.as_str()
+                        )
+                    })?;
+                    let signer = limen_ca::kms::KmsSigner::new(client, &key).await?;
+                    Ok((Arc::new(signer), format!("kms:{key}")))
+                }
+                None => {
+                    let path = dir.join(format!("{}-ca.key", purpose.as_str()));
+                    Ok((
+                        Arc::new(FileSigner::load_or_create(&path)?),
+                        format!("file:{}", path.display()),
+                    ))
+                }
+            };
+            result
+        }
+    };
+
+    let (s, key_ref) = signer(CaPurpose::Internal, config.kms_internal_ca_key.clone()).await?;
+    let internal = load_x509(db, CaPurpose::Internal, s, &key_ref).await?;
+    let (s, key_ref) = signer(CaPurpose::UserX509, config.kms_user_ca_key.clone()).await?;
+    let user = load_x509(db, CaPurpose::UserX509, s, &key_ref).await?;
+    let (s, _) = signer(CaPurpose::UserSsh, config.kms_ssh_user_ca_key.clone()).await?;
+    let ssh_user = SshCa::new(CaPurpose::UserSsh, s)?;
+    let (s, _) = signer(CaPurpose::HostSsh, config.kms_ssh_host_ca_key.clone()).await?;
+    let ssh_host = SshCa::new(CaPurpose::HostSsh, s)?;
+    Ok(Cas {
+        internal,
+        user,
+        ssh_user,
+        ssh_host,
+    })
 }
 
-async fn load_one(
+async fn load_x509(
     db: &Db,
     purpose: CaPurpose,
     signer: Arc<dyn Signer>,

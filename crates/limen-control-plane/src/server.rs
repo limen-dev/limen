@@ -13,8 +13,10 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::admin_server::AdminServer;
 use limen_proto::v1::auth_server::AuthServer;
 use limen_proto::v1::enrollment_server::EnrollmentServer;
+use limen_proto::v1::policy_sync_server::PolicySyncServer;
 use limen_proto::v1::registry_server::RegistryServer;
 use limen_proto::v1::resources_server::ResourcesServer;
+use limen_proto::v1::ssh_certificates_server::SshCertificatesServer;
 use limen_tunnel::PeerInfo;
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::tls::{ClientAuth, Identity, server_config};
@@ -27,13 +29,14 @@ use tokio_rustls::TlsAcceptor;
 use crate::services::admin::AdminService;
 use crate::services::auth::AuthService;
 use crate::services::enrollment::EnrollmentService;
+use crate::services::policy_sync::PolicySyncService;
 use crate::services::registry::RegistryService;
 use crate::services::resources::ResourcesService;
+use crate::services::ssh_certs::SshCertificatesService;
 use crate::state::AppState;
 
 const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Issue this replica's own server certificate from the internal CA.
 pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfig> {
@@ -47,11 +50,19 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
             kind: ComponentKind::ControlPlane,
             id: state.config.id.clone(),
             dns_names: state.config.dns_names.clone(),
+            labels: std::collections::BTreeMap::new(),
             ttl: state.config.component_cert_ttl,
         })
         .await?;
     let chain = format!("{}{}", issued.pem, state.cas.internal.cert_pem());
     let identity = Identity::from_pem(&chain, &key.serialize_pem())?;
+    // The same key signs policy snapshots, so they rotate together.
+    let signer =
+        limen_session::envelope::EnvelopeSigner::new(&key.serialize_pem(), issued.der.to_vec())?;
+    *state
+        .snapshot_signer
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(signer));
     // Only components connect directly. A cert is optional because proxies
     // enroll before they have one.
     Ok(server_config(
@@ -89,9 +100,18 @@ pub async fn serve_api(
         RegistryServer::new(RegistryService(state.clone()))
             .max_decoding_message_size(MAX_MESSAGE_BYTES),
     )
+    .add_service(
+        PolicySyncServer::new(PolicySyncService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        SshCertificatesServer::new(SshCertificatesService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
     .prepare();
 
     let active = Arc::new(AtomicUsize::new(0));
+    let mut connections = tokio::task::JoinSet::new();
     tracing::info!(addr = %listener.local_addr()?, "control plane API listening");
     loop {
         let (tcp, remote) = tokio::select! {
@@ -111,7 +131,9 @@ pub async fn serve_api(
         let routes = routes.clone();
         let active = Arc::clone(&active);
         active.fetch_add(1, Ordering::SeqCst);
-        tokio::spawn(async move {
+        // Reap finished connections so the set doesn't grow forever.
+        while connections.try_join_next().is_some() {}
+        connections.spawn(async move {
             let _ = tcp.set_nodelay(true);
             match tokio::time::timeout(HANDSHAKE_TIMEOUT, TlsAcceptor::from(config).accept(tcp))
                 .await
@@ -132,10 +154,13 @@ pub async fn serve_api(
         connections = active.load(Ordering::SeqCst),
         "shutting down: no longer accepting, draining"
     );
-    let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + state.config.drain_timeout;
     while active.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    // Whatever is still open after the drain period is cut off.
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
     Ok(())
 }
 

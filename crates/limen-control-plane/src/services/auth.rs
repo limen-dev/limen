@@ -232,5 +232,10 @@ async fn login(
         user_ca_pem: state.cas.user.cert_pem().to_owned(),
         internal_ca_pem: state.cas.internal.cert_pem().to_owned(),
         expires_at_unix: unix(issued.not_after),
+        ssh_host_ca_public_key: state
+            .cas
+            .ssh_host
+            .public_key_openssh()
+            .map_err(|e| internal("SSH host CA", e))?,
     })
 }

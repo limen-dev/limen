@@ -118,6 +118,8 @@ impl Enrollment for EnrollmentService {
                 kind,
                 id: id.clone(),
                 dns_names: req.dns_names.clone(),
+                labels: serde_json::from_value(labels.clone())
+                    .map_err(|e| internal("join token labels", e))?,
                 ttl: self.0.config.component_cert_ttl,
             })
             .await
@@ -177,6 +179,8 @@ impl Enrollment for EnrollmentService {
                 kind: identity.kind,
                 id: identity.id.clone(),
                 dns_names: row.dns_names,
+                labels: serde_json::from_value(row.labels)
+                    .map_err(|e| internal("component labels", e))?,
                 ttl: self.0.config.component_cert_ttl,
             })
             .await

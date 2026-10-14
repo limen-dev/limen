@@ -35,6 +35,17 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         tokio::fs::create_dir_all(dir).await?;
         tokio::fs::write(dir.join("internal-ca.pem"), cas.internal.cert_pem()).await?;
         tokio::fs::write(dir.join("user-ca.pem"), cas.user.cert_pem()).await?;
+        // SSH targets trust this one (TrustedUserCAKeys); the CLI trusts the host CA.
+        tokio::fs::write(
+            dir.join("ssh-user-ca.pub"),
+            format!("{}\n", cas.ssh_user.public_key_openssh()?),
+        )
+        .await?;
+        tokio::fs::write(
+            dir.join("ssh-host-ca.pub"),
+            format!("{}\n", cas.ssh_host.public_key_openssh()?),
+        )
+        .await?;
         tracing::info!(dir = %dir.display(), "exported CA certificates");
     }
     let http = http_client::HttpClient::new()?;
@@ -61,6 +72,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         policy,
         audit,
         limits: Arc::new(Limits::default()),
+        snapshot_signer: Arc::default(),
     })
 }
 
