@@ -1,7 +1,13 @@
-//! Reverse tunnel transport and proxy ingress routing identifiers.
-//!
-//! The worker dials the proxy, then serves gRPC over that outbound connection
-//! (see ADR-0003 and ADR-0005). The transport arrives in Phase 1.
+//! Transport for Limen components: TLS configuration, HTTP/2 serving with
+//! per-connection peer information, connectors, and the worker reverse
+//! tunnel (ADR-0003, ADR-0005).
+
+pub mod connect;
+pub mod serve;
+pub mod tls;
+pub mod tunnel;
+
+pub use serve::PeerInfo;
 
 /// ALPN protocol IDs the proxy's single TLS listener routes on.
 pub mod alpn {
@@ -15,11 +21,21 @@ pub mod alpn {
     pub const REDIS: &[u8] = b"limen-redis/1";
     /// CLI → proxy, for SSH sessions.
     pub const SSH: &[u8] = b"limen-ssh/1";
-    /// CLI API and the Kubernetes API, routed by path.
+    /// CLI API (relayed to the control plane) and the Kubernetes API, routed by path.
     pub const H2: &[u8] = b"h2";
     pub const HTTP11: &[u8] = b"http/1.1";
 
     pub const ALL: [&[u8]; 7] = [TUNNEL, PEER, DB, REDIS, SSH, H2, HTTP11];
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TransportError {
+    #[error("TLS configuration: {0}")]
+    Tls(String),
+    #[error("I/O: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("HTTP/2: {0}")]
+    Http(#[from] hyper::Error),
 }
 
 #[cfg(test)]
