@@ -20,13 +20,17 @@ pub mod relay {
 mod tests {
     use prost::Message;
 
-    use super::v1::{SessionOpen, TunnelFrame, tunnel_frame::Frame};
+    use super::v1::{SessionOpen, Signed, TunnelFrame, tunnel_frame::Frame};
 
     #[test]
     fn tunnel_frame_round_trips() {
         let frame = TunnelFrame {
             frame: Some(Frame::Open(SessionOpen {
-                signed_grant: vec![1, 2, 3],
+                grant: Some(Signed {
+                    payload: vec![1, 2, 3],
+                    signature: vec![4],
+                    signer_cert_der: vec![5],
+                }),
             })),
         };
         let bytes = frame.encode_to_vec();

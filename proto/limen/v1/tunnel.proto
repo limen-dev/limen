@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package limen.v1;
 
+import "limen/v1/session.proto";
+
 // Served by the WORKER over the connection the worker dialed to a proxy.
 // The proxy is the gRPC client. See docs/adr/0003-reverse-tunnel.md.
 service WorkerTunnel {
@@ -13,19 +15,27 @@ service WorkerTunnel {
 
 message TunnelFrame {
   oneof frame {
+    // Proxy → worker, first frame.
     SessionOpen open = 1;
     bytes data = 2;
     SessionClose close = 3;
+    // Worker → proxy, first frame: the worker accepted the grant.
+    SessionOpened opened = 4;
   }
 }
 
 message SessionOpen {
   // Session grant signed by the proxy. The worker verifies it before serving.
-  bytes signed_grant = 1;
+  Signed grant = 1;
 }
+
+message SessionOpened {}
 
 message SessionClose {
   string reason = 1;
+  // Where the worker stored the session recording, if any, and its SHA-256.
+  string recording_uri = 2;
+  string recording_sha256 = 3;
 }
 
 message PingRequest {}

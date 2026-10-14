@@ -76,6 +76,8 @@ message LoginResponse {
   string user_ca_pem = 5;
   string internal_ca_pem = 6;
   int64 expires_at_unix = 7;
+  // OpenSSH public key of the SSH host CA, for the CLI's known_hosts.
+  string ssh_host_ca_public_key = 8;
 }
 
 message WhoAmIRequest {}

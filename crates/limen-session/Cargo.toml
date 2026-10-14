@@ -1,0 +1,31 @@
+[package]
+name = "limen-session"
+description = "Signed session grants and policy snapshots shared by the control plane, proxies, and workers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+limen-ca.workspace = true
+limen-core.workspace = true
+limen-policy.workspace = true
+limen-proto.workspace = true
+aws-lc-rs.workspace = true
+prost.workspace = true
+rand.workspace = true
+rcgen.workspace = true
+rustls-pki-types.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+x509-parser.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
