@@ -1,0 +1,20 @@
+# A target host configured the way Limen expects (docs/runbooks/ssh-target-onboarding.md).
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Only Limen per-session certificates: trust the Limen SSH user CA, and
+# nothing else. With no AuthorizedPrincipalsFile, a certificate must list
+# the login itself as a principal.
+TrustedUserCAKeys /etc/ssh/limen/ssh-user-ca.pub
+AuthorizedKeysFile none
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+
+AllowAgentForwarding no
+AllowTcpForwarding no
+X11Forwarding no
+
+# VERBOSE logs the certificate key ID, which names the Limen session and user.
+LogLevel VERBOSE
