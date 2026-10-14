@@ -202,7 +202,10 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
         () = download => {}
         () = async { upload.await; std::future::pending::<()>().await } => {}
     }
-    Ok(())
+    // Exit now. Returning would make the runtime wait for the blocking stdin
+    // read, so OpenSSH would never see our stdout close and would sit there
+    // until its keepalive gave up: minutes after an admin ended the session.
+    std::process::exit(0);
 }
 
 /// `limen config ssh`: an `ssh_config` block so plain `ssh <resource>.limen` works.
