@@ -1,6 +1,10 @@
 //! A whole Limen deployment in one process, for end-to-end tests.
 
-#![allow(clippy::missing_panics_doc, clippy::must_use_candidate, clippy::similar_names)]
+#![allow(
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    clippy::similar_names
+)]
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

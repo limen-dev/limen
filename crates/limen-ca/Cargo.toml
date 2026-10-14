@@ -29,7 +29,12 @@ aws-sdk-kms = { workspace = true, optional = true }
 
 [dev-dependencies]
 limen-testkit.workspace = true
+rcgen.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[[test]]
+name = "kms"
+required-features = ["kms"]
 
 [lints]
 workspace = true
