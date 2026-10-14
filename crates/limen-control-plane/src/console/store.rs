@@ -146,6 +146,7 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
 #[derive(Debug, Clone, Default)]
 pub struct SessionFilter {
     pub username: Option<String>,
+    pub resource: Option<String>,
     pub active_only: bool,
     pub limit: i64,
     pub offset: i64,
@@ -158,6 +159,7 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
         session_select!(),
         "
          WHERE ($2::text IS NULL OR username = $2)
+           AND ($6::text IS NULL OR resource = $6)
            AND (NOT $3 OR (ended_at IS NULL AND started_at > now() - make_interval(hours => $1)))
          ORDER BY COALESCE(started_at, ended_at) DESC, session_id DESC
          LIMIT $4 OFFSET $5"
@@ -167,6 +169,7 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
     .bind(f.active_only)
     .bind(f.limit + 1)
     .bind(f.offset)
+    .bind(&f.resource)
     .fetch_all(db)
     .await?
     .iter()
@@ -183,6 +186,31 @@ pub async fn session(db: &Db, id: Uuid) -> Result<Option<SessionRow>, sqlx::Erro
         .as_ref()
         .map(session_from_row)
         .transpose()
+}
+
+/// Sessions per resource: (all time, active now).
+pub async fn session_counts_by_resource(
+    db: &Db,
+) -> Result<std::collections::HashMap<String, (i64, i64)>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT resource, count(*) AS total,
+                count(*) FILTER (WHERE ended_at IS NULL AND started_at > now() - make_interval(hours => $1)) AS active
+         FROM sessions WHERE resource IS NOT NULL GROUP BY resource",
+    )
+    .bind(ACTIVE_WINDOW_HOURS)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                r.try_get::<String, _>("resource")?,
+                (
+                    r.try_get::<i64, _>("total")?,
+                    r.try_get::<i64, _>("active")?,
+                ),
+            ))
+        })
+        .collect()
 }
 
 pub async fn active_session_count(db: &Db) -> Result<i64, sqlx::Error> {

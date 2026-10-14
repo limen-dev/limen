@@ -421,6 +421,68 @@ pub struct PolicyPage {
     pub result: Option<DryRun>,
 }
 
+pub struct RoleAccess {
+    pub chip: Chip,
+    pub principals: Vec<String>,
+}
+
+pub struct WorkerMatch {
+    pub id: String,
+    pub tunnels: usize,
+    pub last_seen: String,
+}
+
+pub struct KindTab {
+    pub name: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub current: bool,
+}
+
+pub struct ResourceRow {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub labels: Vec<String>,
+    pub principals: Vec<String>,
+    pub roles: Vec<RoleAccess>,
+    pub target: String,
+    pub workers: usize,
+    pub sessions: i64,
+    pub active: i64,
+}
+
+#[derive(Template)]
+#[template(path = "resources.html")]
+pub struct ResourcesPage {
+    pub chrome: Chrome,
+    pub kinds: Vec<KindTab>,
+    pub all_selected: bool,
+    pub query: String,
+    pub rows: Vec<ResourceRow>,
+}
+
+#[derive(Template)]
+#[template(path = "resource.html")]
+pub struct ResourcePage {
+    pub chrome: Chrome,
+    pub name: String,
+    pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub labels: Vec<String>,
+    pub selector: Vec<String>,
+    pub target: String,
+    pub pinned: bool,
+    pub description: String,
+    pub principals: Vec<String>,
+    pub workers: Vec<WorkerMatch>,
+    pub roles: Vec<RoleAccess>,
+    pub sessions: Vec<SessionView>,
+}
+
 #[derive(Template)]
 #[template(path = "signout.html")]
 pub struct SignoutPage {

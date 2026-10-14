@@ -22,6 +22,7 @@
     </a>
     <nav class="nav" aria-label="Main">
       <a href="/console/"{% if chrome.active == "home" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"{% if chrome.active == "resources" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#database"/></svg><span>Resources</span></a>
       <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#terminal"/></svg><span>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</span></a>
       {% if chrome.is_admin %}
       <div class="nav-label">Administration</div>

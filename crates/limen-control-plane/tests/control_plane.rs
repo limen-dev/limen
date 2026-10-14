@@ -18,6 +18,7 @@ use limen_proto::v1::{
     TunnelReport, WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
+use limen_testkit::users::{ALICE, BOB, CAROL};
 use limen_tunnel::tls::Identity;
 use tonic::Code;
 
@@ -44,15 +45,12 @@ async fn pkce_login_issues_verified_short_lived_cert() {
     let Some(h) = Harness::start().await else {
         return;
     };
-    let (resp, der) = h
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("login");
-    assert_eq!(resp.username, "alice@example.com");
+    let (resp, der) = h.login(ALICE, &["admins"]).await.expect("login");
+    assert_eq!(resp.username, ALICE);
     assert_eq!(resp.roles, ["limen:admin"]);
     let id =
         verify_user(&der, h.state.cas.user.cert_der()).expect("cert verifies against the user CA");
-    assert_eq!(id.username, "alice@example.com");
+    assert_eq!(id.username, ALICE);
     let ttl = resp.expires_at_unix - time::OffsetDateTime::now_utc().unix_timestamp();
     assert!(
         (540..=600).contains(&ttl),
@@ -64,7 +62,7 @@ async fn pkce_login_issues_verified_short_lived_cert() {
         .into_iter()
         .find(|e| e.kind == EventKind::AuthLogin)
         .expect("auth.login event");
-    assert_eq!(login.user.as_deref(), Some("alice@example.com"));
+    assert_eq!(login.user.as_deref(), Some(ALICE));
 }
 
 #[tokio::test]
@@ -80,7 +78,7 @@ async fn login_rejects_replay_wrong_nonce_and_bad_tokens() {
     );
     let token = h
         .idp
-        .id_token(&Claims::user("alice@example.com", &["admins"]).with_nonce(&nonce));
+        .id_token(&Claims::user(ALICE, &["admins"]).with_nonce(&nonce));
 
     h.login_raw(token.clone(), csr(&key), salt.clone(), LoginFlow::Pkce)
         .await
@@ -95,7 +93,7 @@ async fn login_rejects_replay_wrong_nonce_and_bad_tokens() {
     let other_key = new_key();
     let token = h
         .idp
-        .id_token(&Claims::user("alice@example.com", &["admins"]).with_nonce(&nonce));
+        .id_token(&Claims::user(ALICE, &["admins"]).with_nonce(&nonce));
     let swapped = h
         .login_raw(token, csr(&other_key), salt.clone(), LoginFlow::Pkce)
         .await
@@ -162,10 +160,7 @@ async fn login_without_roles_is_denied_and_audited() {
     let Some(h) = Harness::start().await else {
         return;
     };
-    let err = h
-        .login("carol@example.com", &["marketing"])
-        .await
-        .expect_err("no roles");
+    let err = h.login(CAROL, &["marketing"]).await.expect_err("no roles");
     assert_eq!(err.code(), Code::PermissionDenied);
     let denied = h
         .audit_events()
@@ -173,7 +168,7 @@ async fn login_without_roles_is_denied_and_audited() {
         .into_iter()
         .find(|e| e.kind == EventKind::AuthDenied)
         .expect("auth.denied event");
-    assert_eq!(denied.user.as_deref(), Some("carol@example.com"));
+    assert_eq!(denied.user.as_deref(), Some(CAROL));
 }
 
 #[tokio::test]
@@ -182,9 +177,7 @@ async fn device_flow_login_works_without_nonce_and_is_single_use() {
         return;
     };
     let key = new_key();
-    let token = h
-        .idp
-        .id_token(&Claims::user("alice@example.com", &["admins"]));
+    let token = h.idp.id_token(&Claims::user(ALICE, &["admins"]));
     h.login_raw(token.clone(), csr(&key), vec![2u8; 32], LoginFlow::Device)
         .await
         .expect("device login");
@@ -194,9 +187,7 @@ async fn device_flow_login_works_without_nonce_and_is_single_use() {
         .expect_err("replay");
     assert_eq!(replay.code(), Code::PermissionDenied);
     // PKCE without a nonce in the token is refused.
-    let token = h
-        .idp
-        .id_token(&Claims::user("alice@example.com", &["admins"]));
+    let token = h.idp.id_token(&Claims::user(ALICE, &["admins"]));
     let err = h
         .login_raw(token, csr(&key), vec![3u8; 32], LoginFlow::Pkce)
         .await
@@ -211,10 +202,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     };
     let (proxy_id, proxy) = h.enroll_proxy().await;
     assert!(proxy_id.starts_with("proxy-"));
-    let (_, alice) = h
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("alice");
+    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
     let ch = h.channel(Some(proxy));
 
     // Dry run changes nothing.
@@ -273,10 +261,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     assert!(!again.applied);
 
     // Bob (developers → dev-readonly) sees the staging DB and host.
-    let (bob_resp, bob) = h
-        .login("bob@example.com", &["developers"])
-        .await
-        .expect("bob");
+    let (bob_resp, bob) = h.login(BOB, &["developers"]).await.expect("bob");
     assert_eq!(bob_resp.roles, ["dev-readonly"]);
     let mut resources = ResourcesClient::new(ch.clone());
     let listed = resources
@@ -306,7 +291,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .await
         .expect("whoami")
         .into_inner();
-    assert_eq!(who.username, "bob@example.com");
+    assert_eq!(who.username, BOB);
 }
 
 #[tokio::test]
@@ -315,10 +300,7 @@ async fn invalid_policy_is_rejected() {
         return;
     };
     let (_, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("alice");
+    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
     let bad = vec![PolicySource {
         name: "bad.yaml".into(),
         content: "kind: role\nversion: v1\nmetadata: {name: x}\nspec: {bogus: true}".into(),
@@ -344,10 +326,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         return;
     };
     let (proxy_id, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("alice");
+    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
     let ch = h.channel(Some(proxy.clone()));
 
     let token = AdminClient::new(ch.clone())
@@ -461,10 +440,7 @@ async fn only_proxies_may_forward_or_report() {
         return;
     };
     let (_, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h
-        .login("alice@example.com", &["admins"])
-        .await
-        .expect("alice");
+    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
 
     // Anonymous caller claiming to forward a user's cert.
     let err = ResourcesClient::new(h.channel(None))

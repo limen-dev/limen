@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="title-row">
+    <span class="kind lg {{ kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ icon }}"/></svg></span>
+    <div><h1>{{ name }}</h1><p class="sub">{{ kind }}{% if !description.is_empty() %} · {{ description }}{% endif %}</p></div>
+  </div>
+  <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All resources</a>
+</div>
+<div class="card facts-card"><table class="facts">
+  <tr><th>Labels</th><td><div class="chips">{% for l in labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td></tr>
+  {% if chrome.is_admin %}
+  <tr><th>Target</th><td class="mono">{{ target }}{% if pinned %} <span class="pill ok">host key pinned</span>{% endif %}</td></tr>
+  <tr><th>Worker selector</th><td><div class="chips">{% for l in selector %}<span class="chip">{{ l }}</span>{% endfor %}{% if selector.is_empty() %}<span class="muted">any worker</span>{% endif %}</div></td></tr>
+  {% endif %}
+  <tr><th>You can access as</th><td><div class="chips">{% for p in principals %}<span class="chip">{{ p }}</span>{% endfor %}{% if principals.is_empty() %}<span class="muted">not with your own roles</span>{% endif %}</div></td></tr>
+  {% if kind == "ssh" && !principals.is_empty() %}<tr><th>Connect</th><td><span class="cmd"><code>limen ssh {{ name }}</code><button type="button" class="secondary" data-copy="limen ssh {{ name }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span></td></tr>{% endif %}
+</table></div>
+
+{% if chrome.is_admin %}
+<h2>Who can access it</h2>
+{% if roles.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>No role grants access to this resource.</div></div>{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Role</th><th>Principals</th></tr></thead>
+  <tbody>{% for a in roles %}<tr><td><span class="chip c{{ a.chip.c }}">{{ a.chip.text }}</span></td><td><div class="chips">{% for p in a.principals %}<span class="chip">{{ p }}</span>{% endfor %}</div></td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+
+<h2>Workers that can serve it <span class="count">{{ workers.len() }}</span></h2>
+{% if workers.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plug"/></svg><div>No enrolled worker matches the selector, so sessions to this resource will fail.</div></div>{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Worker</th><th>Last seen</th><th class="num">Tunnels</th></tr></thead>
+  <tbody>{% for w in workers %}<tr><td class="mono">{{ w.id }}</td><td class="nowrap">{{ w.last_seen }}</td><td class="num">{{ w.tunnels }}</td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+{% endif %}
+
+<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %}</h2>
+{% include "sessions_table.html" %}
+{% endblock %}

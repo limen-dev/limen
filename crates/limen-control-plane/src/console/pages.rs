@@ -16,9 +16,10 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, Chrome, ComponentView, DryRun, Home, PolicyDoc, PolicyGroup, PolicyPage, ResourceView,
-    SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage, UserView, UsersPage,
-    Workers, error_page, list_text, path_segment, time_text,
+    self, Chrome, ComponentView, DryRun, Home, KindTab, PolicyDoc, PolicyGroup, PolicyPage,
+    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView,
+    SessionsPage, Stats, TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers,
+    error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -184,6 +185,265 @@ pub async fn home(
     )
 }
 
+// ---- resources ---------------------------------------------------------------------
+
+/// Where a resource points, for admins. Never shown to non-admins.
+fn target_text(spec: &limen_policy::model::ResourceSpec) -> String {
+    if let Some(t) = &spec.ssh {
+        return t.address.clone();
+    }
+    if let Some(t) = spec.postgres.as_ref().or(spec.mysql.as_ref()) {
+        return t.endpoint.clone();
+    }
+    if let Some(t) = &spec.redis {
+        return t.endpoint.clone();
+    }
+    if let Some(t) = &spec.kubernetes {
+        return t.cluster_name.clone();
+    }
+    "—".into()
+}
+
+fn spec_kind(spec: &limen_policy::model::ResourceSpec) -> &'static str {
+    spec.kinds().first().map_or("other", |k| k.as_str())
+}
+
+/// Roles that grant access to `resource`, with the principals each allows.
+fn access_roles(policy: &limen_policy::Policy, resource: &str) -> Vec<RoleAccess> {
+    let mut out = Vec::new();
+    for doc in policy.documents() {
+        if let Document::Role(role) = doc {
+            let name = role.metadata.name.clone();
+            if let Some(r) = policy
+                .accessible(std::slice::from_ref(&name))
+                .into_iter()
+                .find(|r| r.name == resource)
+            {
+                out.push(RoleAccess {
+                    chip: views::Chip {
+                        c: views::chip_color(&name),
+                        text: name,
+                    },
+                    principals: r.principals,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Live, enrolled workers whose certificate labels satisfy `selector`.
+fn matching_workers(
+    components: &[db::ComponentRow],
+    tunnels: &[db::TunnelRow],
+    selector: &limen_core::labels::Labels,
+) -> Vec<WorkerMatch> {
+    components
+        .iter()
+        .filter(|c| c.kind == "worker" && c.revoked_at.is_none())
+        .filter(|c| {
+            let labels: BTreeMap<String, String> =
+                serde_json::from_value(c.labels.clone()).unwrap_or_default();
+            selector
+                .iter()
+                .all(|(k, v)| labels.get(k).is_some_and(|actual| actual == v))
+        })
+        .map(|c| WorkerMatch {
+            id: c.id.clone(),
+            tunnels: tunnels.iter().filter(|t| t.worker_id == c.id).count(),
+            last_seen: time_text(Some(c.last_seen_at)),
+        })
+        .collect()
+}
+
+#[derive(Deserialize)]
+pub struct ResourcesQuery {
+    kind: Option<String>,
+    q: Option<String>,
+}
+
+pub async fn resources(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<ResourcesQuery>,
+) -> Response {
+    let loaded = state.policy.current();
+    let (components, tunnels) = if auth.is_admin {
+        match db::list_components(&state.db).await {
+            Ok(pair) => pair,
+            Err(e) => return db_error("listing components", &e),
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let counts = if auth.is_admin {
+        store::session_counts_by_resource(&state.db)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    // Admins see every resource; everyone else only what their roles allow.
+    let accessible = loaded.policy.accessible(&auth.roles);
+    let mut rows: Vec<ResourceRow> = Vec::new();
+    for doc in loaded.policy.documents() {
+        let Document::Resource(r) = doc else { continue };
+        let name = r.metadata.name.clone();
+        let mine = accessible.iter().find(|a| a.name == name);
+        if !auth.is_admin && mine.is_none() {
+            continue;
+        }
+        let kind = spec_kind(&r.spec);
+        let (icon, kclass) = views::kind_icon(kind);
+        let (total, active) = counts.get(&name).copied().unwrap_or((0, 0));
+        rows.push(ResourceRow {
+            roles: if auth.is_admin {
+                access_roles(&loaded.policy, &name)
+            } else {
+                Vec::new()
+            },
+            workers: matching_workers(&components, &tunnels, &r.spec.worker_selector).len(),
+            labels: r
+                .metadata
+                .labels
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect(),
+            principals: mine.map(|m| m.principals.clone()).unwrap_or_default(),
+            target: if auth.is_admin {
+                target_text(&r.spec)
+            } else {
+                String::new()
+            },
+            path: path_segment(&name),
+            name,
+            kind: kind.to_owned(),
+            icon,
+            kclass,
+            sessions: total,
+            active,
+        });
+    }
+    // Filters apply after access control, so a filter can't reveal anything.
+    let needle =
+        q.q.as_deref()
+            .map(str::to_lowercase)
+            .filter(|s| !s.is_empty());
+    let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
+    let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
+    kinds.sort();
+    kinds.dedup();
+    rows.retain(|r| {
+        kind_filter.as_deref().is_none_or(|k| k == r.kind)
+            && needle.as_deref().is_none_or(|n| {
+                r.name.to_lowercase().contains(n)
+                    || r.labels.iter().any(|l| l.to_lowercase().contains(n))
+            })
+    });
+    html(
+        ResourcesPage {
+            chrome: chrome(&state, &auth, "resources"),
+            kinds: kinds
+                .into_iter()
+                .map(|k| {
+                    let (icon, kclass) = views::kind_icon(&k);
+                    KindTab {
+                        current: kind_filter.as_deref() == Some(k.as_str()),
+                        icon,
+                        kclass,
+                        name: k,
+                    }
+                })
+                .collect(),
+            all_selected: kind_filter.is_none(),
+            query: q.q.unwrap_or_default(),
+            rows,
+        }
+        .render(),
+    )
+}
+
+pub async fn resource_detail(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(name): Path<String>,
+) -> Response {
+    let not_found = || {
+        error_page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "There is no such resource.",
+        )
+    };
+    let loaded = state.policy.current();
+    let Some(r) = loaded.policy.resource(&name) else {
+        return not_found();
+    };
+    let accessible = loaded.policy.accessible(&auth.roles);
+    let mine = accessible.iter().find(|a| a.name == name);
+    if !auth.is_admin && mine.is_none() {
+        return not_found();
+    }
+    let kind = spec_kind(&r.spec);
+    let (icon, kclass) = views::kind_icon(kind);
+    let filter = SessionFilter {
+        username: (!auth.is_admin).then(|| auth.username.clone()),
+        resource: Some(name.clone()),
+        limit: 10,
+        ..SessionFilter::default()
+    };
+    let sessions = match store::list_sessions(&state.db, &filter).await {
+        Ok(rows) => rows.iter().take(10).map(SessionView::from).collect(),
+        Err(e) => return db_error("listing a resource's sessions", &e),
+    };
+    let (workers, roles) = if auth.is_admin {
+        let (components, tunnels) = match db::list_components(&state.db).await {
+            Ok(pair) => pair,
+            Err(e) => return db_error("listing components", &e),
+        };
+        (
+            matching_workers(&components, &tunnels, &r.spec.worker_selector),
+            access_roles(&loaded.policy, &name),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    html(
+        ResourcePage {
+            chrome: chrome(&state, &auth, "resources"),
+            name: name.clone(),
+            kind: kind.to_owned(),
+            icon,
+            kclass,
+            labels: r
+                .metadata
+                .labels
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect(),
+            selector: r
+                .spec
+                .worker_selector
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect(),
+            // Internal addresses are for admins only.
+            target: if auth.is_admin {
+                target_text(&r.spec)
+            } else {
+                String::new()
+            },
+            pinned: r.spec.ssh.as_ref().is_some_and(|s| s.host_key.is_some()),
+            description: r.metadata.description.clone().unwrap_or_default(),
+            principals: mine.map(|m| m.principals.clone()).unwrap_or_default(),
+            workers,
+            roles,
+            sessions,
+        }
+        .render(),
+    )
+}
+
 // ---- sessions --------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -212,6 +472,7 @@ pub async fn sessions(
         active_only,
         limit: PAGE_SIZE,
         offset,
+        ..SessionFilter::default()
     };
     let mut rows = match store::list_sessions(&state.db, &filter).await {
         Ok(rows) => rows,
