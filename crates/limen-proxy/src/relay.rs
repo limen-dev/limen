@@ -21,7 +21,8 @@ use crate::Proxy;
 /// API services the proxy relays. `Registry` is deliberately absent: only
 /// proxies call it, directly. `PolicySync` and `SshCertificates` are for
 /// workers; the control plane rejects other callers.
-const RELAYED_PREFIXES: [&str; 6] = [
+const RELAYED_PREFIXES: [&str; 7] = [
+    "/limen.v1.AuditIngest/",
     "/limen.v1.Auth/",
     "/limen.v1.Resources/",
     "/limen.v1.Admin/",

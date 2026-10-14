@@ -85,22 +85,27 @@ pass "running session finished all 12 ticks during the outage"
 wait_for "control plane back" curl -sf http://localhost:3081/readyz
 
 step "Recordings and audit trail"
+# Events from the proxy and worker reach the control plane through their
+# spools; recordings are uploaded by the worker after each session.
+sleep 8
 rm -rf "$state/recordings"
-"${compose[@]}" cp worker:/var/lib/limen/worker/recordings "$state/recordings" >/dev/null
-ls -1 "$state/recordings" | head
-cast="$(grep -l "tick 12" "$state/recordings"/*.cast | head -1)"
+"${compose[@]}" cp control-plane:/var/lib/limen/recordings "$state/recordings" >/dev/null
+find "$state/recordings" -name '*.cast' | head
+cast="$(grep -rl "tick 12" "$state/recordings" | head -1)"
 [ -n "$cast" ] || fail "no recording of the ticking session"
 head -1 "$cast"; grep -m2 '"o"' "$cast"
-"${compose[@]}" cp proxy:/var/lib/limen/proxy/audit/proxy.jsonl "$state/proxy-audit.jsonl" >/dev/null
-"${compose[@]}" cp worker:/var/lib/limen/worker/audit/worker.jsonl "$state/worker-audit.jsonl" >/dev/null
-python3 - "$state/proxy-audit.jsonl" "$state/worker-audit.jsonl" <<'PY'
+"${compose[@]}" cp control-plane:/var/lib/limen/audit/control-plane.jsonl "$state/audit.jsonl" >/dev/null
+python3 - "$state/audit.jsonl" <<'PY'
 import collections, json, sys
-events = [json.loads(l) for f in sys.argv[1:] for l in open(f)]
+events = [json.loads(l) for l in open(sys.argv[1])]
 print("  " + ", ".join(f"{k}={v}" for k, v in sorted(collections.Counter(e["kind"] for e in events).items())))
-ends = [e for e in events if e["kind"] == "session.end" and e["data"].get("recording_uri")]
-assert ends, "session.end with a recording reference"
+ends = {e["session_id"]: e for e in events if e["kind"] == "session.end"}
+stored = {e["session_id"]: e for e in events if e["kind"] == "session.recording"}
+assert stored, "session.recording events"
+for sid, rec in stored.items():
+    assert sid in ends and ends[sid]["data"]["recording_sha256"] == rec["data"]["sha256"], "recording matches its session"
 execs = [e for e in events if e["kind"] == "ssh.exec"]
-assert any(e["session_id"] in {x["session_id"] for x in ends} for e in execs), "ssh.exec links to its session"
+assert any(e["session_id"] in ends for e in execs), "ssh.exec links to its session"
 for e in execs[:3]:
     print(f"  ssh.exec {e['user']} {e['data']['login']}@{e['data']['resource']}: {e['data']['command']}")
 PY

@@ -2670,6 +2670,7 @@ name = "limen-component"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "limen-audit",
  "limen-core",
  "limen-proto",
  "limen-testkit",
@@ -2724,6 +2725,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
+ "tokio-stream",
  "tonic",
  "tower",
  "tracing",
@@ -2909,6 +2911,7 @@ dependencies = [
  "limen-proto",
  "limen-session",
  "limen-tunnel",
+ "metrics",
  "prost",
  "rand 0.10.3",
  "russh",

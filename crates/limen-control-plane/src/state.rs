@@ -24,6 +24,7 @@ pub struct AppState {
     pub oidc: OidcVerifier,
     pub policy: PolicyStore,
     pub audit: Emitter,
+    pub pipeline: crate::pipeline::Pipeline,
     pub limits: Arc<Limits>,
     /// Signs policy snapshots with this replica's own (rotating) key. Set
     /// once the server certificate is issued.

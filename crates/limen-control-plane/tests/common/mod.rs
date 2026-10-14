@@ -73,6 +73,11 @@ impl Harness {
             format!("--static-join-token=proxy:{STATIC_PROXY_TOKEN}"),
             "--proxy-dns-name=localhost".into(),
             format!("--audit-file={}", audit_file.display()),
+            format!("--audit-spool-dir={}", dir.path().join("spool").display()),
+            format!(
+                "--recordings-dir={}",
+                dir.path().join("recordings").display()
+            ),
             "--admin-listen=127.0.0.1:0".into(),
             "--dns-name=localhost".into(),
         ];
@@ -110,7 +115,20 @@ impl Harness {
     }
 
     /// Audit events written so far.
-    pub fn audit_events(&self) -> Vec<limen_audit::Event> {
+    /// Audit events written so far, once the JSONL sink has caught up.
+    pub async fn audit_events(&self) -> Vec<limen_audit::Event> {
+        for _ in 0..200 {
+            if self
+                .state
+                .pipeline
+                .spool
+                .pending(limen_control_plane::pipeline::JSONL)
+                == 0
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         std::fs::read_to_string(&self.audit_file)
             .unwrap_or_default()
             .lines()
@@ -118,8 +136,12 @@ impl Harness {
             .collect()
     }
 
-    pub fn audit_kinds(&self) -> Vec<limen_audit::EventKind> {
-        self.audit_events().into_iter().map(|e| e.kind).collect()
+    pub async fn audit_kinds(&self) -> Vec<limen_audit::EventKind> {
+        self.audit_events()
+            .await
+            .into_iter()
+            .map(|e| e.kind)
+            .collect()
     }
 
     /// Enroll a proxy with the static token. Returns its identity.

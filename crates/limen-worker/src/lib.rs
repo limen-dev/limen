@@ -3,6 +3,7 @@
 //! (SSH, PostgreSQL, MySQL, Redis, Kubernetes) arrive in Phases 2 to 6.
 
 pub mod recording;
+mod recordings;
 mod session;
 pub mod ssh;
 
@@ -71,9 +72,11 @@ pub struct Config {
     #[arg(long, env = "LIMEN_POLICY_REFRESH", value_parser = parse_duration, default_value = "10s")]
     pub policy_refresh: Duration,
 
-    /// Stub audit sink (until Phase 3): a local JSONL file. Defaults to `<data-dir>/audit/worker.jsonl`.
-    #[arg(long, env = "LIMEN_AUDIT_FILE")]
-    pub audit_file: Option<PathBuf>,
+    /// Refuse new audit events (and, by default, the actions they audit)
+    /// once the local spool holds this many bytes, e.g. during a long
+    /// control plane outage.
+    #[arg(long, env = "LIMEN_AUDIT_SPOOL_MAX_BYTES", default_value_t = 512 * 1024 * 1024)]
+    pub audit_spool_max_bytes: u64,
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,
@@ -109,6 +112,7 @@ pub struct Worker {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
+    audit_spool: limen_audit::spool::Spool,
 }
 
 impl Worker {
@@ -145,16 +149,13 @@ impl Worker {
             Some(config.data_dir.join("policy.snapshot")),
         );
         policy.load(&creds.internal_ca()?);
-        let audit_file = config
-            .audit_file
-            .clone()
-            .unwrap_or_else(|| config.data_dir.join("audit/worker.jsonl"));
-        let sink = Arc::new(
-            limen_audit::JsonlFileSink::open(&audit_file)
-                .await
-                .with_context(|| format!("opening {}", audit_file.display()))?,
-        );
-        let audit = limen_audit::Emitter::new("worker", &creds.id, sink, config.audit_failure_mode);
+        let (audit, audit_spool) = limen_component::audit::open(
+            &config.data_dir.join("spool"),
+            config.audit_spool_max_bytes,
+            "worker",
+            &creds.id,
+            config.audit_failure_mode,
+        )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
         Ok((
             Self {
@@ -166,6 +167,7 @@ impl Worker {
                 policy,
                 nonces: Arc::default(),
                 audit,
+                audit_spool,
             },
             tx,
         ))
@@ -385,6 +387,13 @@ pub async fn run(
         tokio::spawn(tunnel_loop(worker.clone(), index, tunnels_rx.clone()));
     }
     tokio::spawn(policy_refresh(worker.clone(), tunnels_rx.clone()));
+    let shipper = worker.clone();
+    tokio::spawn(limen_component::audit::ship(
+        worker.audit_spool.clone(),
+        move || shipper.control_plane(),
+        tunnels_rx.clone(),
+    ));
+    tokio::spawn(recordings::upload_loop(worker.clone(), tunnels_rx.clone()));
     let admin = tokio::spawn(serve_admin(worker.clone()));
     tracing::info!(id = %worker.id(), tunnels = worker.config.tunnels, "worker running");
 

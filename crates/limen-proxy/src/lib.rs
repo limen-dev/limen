@@ -58,6 +58,7 @@ pub struct Proxy {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     signer: Arc<RwLock<Arc<limen_session::envelope::EnvelopeSigner>>>,
     pub(crate) audit: limen_audit::Emitter,
+    audit_spool: limen_audit::spool::Spool,
     pub(crate) peers: Arc<peer::PeerState>,
 }
 
@@ -99,16 +100,13 @@ impl Proxy {
             Some(config.data_dir.join("policy.snapshot")),
         );
         policy.load(&creds.internal_ca()?);
-        let audit_file = config
-            .audit_file
-            .clone()
-            .unwrap_or_else(|| config.data_dir.join("audit/proxy.jsonl"));
-        let sink = Arc::new(
-            limen_audit::JsonlFileSink::open(&audit_file)
-                .await
-                .with_context(|| format!("opening {}", audit_file.display()))?,
-        );
-        let audit = limen_audit::Emitter::new("proxy", &creds.id, sink, config.audit_failure_mode);
+        let (audit, audit_spool) = limen_component::audit::open(
+            &config.data_dir.join("spool"),
+            config.audit_spool_max_bytes,
+            "proxy",
+            &creds.id,
+            config.audit_failure_mode,
+        )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
         let quota = Quota::per_second(NonZeroU32::new(50).unwrap_or(NonZeroU32::MIN))
             .allow_burst(NonZeroU32::new(200).unwrap_or(NonZeroU32::MIN));
@@ -125,6 +123,7 @@ impl Proxy {
                 policy,
                 signer,
                 audit,
+                audit_spool,
                 peers: Arc::default(),
             },
             tx,
@@ -231,6 +230,12 @@ pub async fn run(
     ));
     tokio::spawn(report_tunnels(proxy.clone(), shutdown.clone()));
     tokio::spawn(policy_refresh(proxy.clone(), shutdown.clone()));
+    let shipper = proxy.clone();
+    tokio::spawn(limen_component::audit::ship(
+        proxy.audit_spool.clone(),
+        move || Ok(shipper.cp_channel()),
+        shutdown.clone(),
+    ));
     let admin = tokio::spawn(serve_admin(proxy.clone(), shutdown.clone()));
 
     tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), "proxy listening");

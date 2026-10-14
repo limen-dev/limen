@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package limen.v1;
+
+// Served by the control plane. Proxies call it directly, workers through a
+// proxy (ADR-0009). The control plane acks only once the events are durable
+// in its own spool; senders retry until acked, so delivery is at-least-once.
+service AuditIngest {
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+  // A finished session recording. The first chunk names the session; the
+  // last carries the SHA-256 of the whole file.
+  rpc UploadRecording(stream RecordingChunk) returns (UploadRecordingResponse);
+}
+
+message IngestRequest {
+  // JSON-encoded audit events (limen_audit::Event), as written to the
+  // sender's spool. Their producer must be the calling component.
+  repeated bytes events = 1;
+}
+
+message IngestResponse {
+  uint32 accepted = 1;
+}
+
+message RecordingChunk {
+  string session_id = 1;
+  bytes data = 2;
+  string sha256 = 3;
+}
+
+message UploadRecordingResponse {
+  string uri = 1;
+}

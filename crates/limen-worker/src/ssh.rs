@@ -90,9 +90,12 @@ where
         .take();
     let mut outcome = SessionOutcome::default();
     if let Some(rec) = taken {
-        let (path, bytes, sha) = rec.finish()?;
+        let (_path, bytes, sha) = rec.finish()?;
+        // The uploader sends it to the control plane, which stores it and
+        // emits session.recording with its final location. Until then it's
+        // identified by its session.
         outcome = SessionOutcome {
-            recording_uri: format!("file://{}", path.display()),
+            recording_uri: format!("recording:{}", config.session_id),
             recording_sha256: sha,
             output_bytes: bytes,
         };

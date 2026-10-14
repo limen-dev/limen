@@ -100,6 +100,14 @@ impl Deployment {
                 "--audit-file={}",
                 dir.path().join("audit/control-plane.jsonl").display()
             ),
+            format!(
+                "--audit-spool-dir={}",
+                dir.path().join("cp-spool").display()
+            ),
+            format!(
+                "--recordings-dir={}",
+                dir.path().join("recordings").display()
+            ),
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout=0s".into(),
         ]);

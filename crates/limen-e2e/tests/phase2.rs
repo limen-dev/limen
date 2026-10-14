@@ -49,6 +49,9 @@ spec:
     }]
 }
 
+/// The control plane's JSONL audit sink in the test deployment.
+const AUDIT: &str = "audit/control-plane.jsonl";
+
 fn read_jsonl(d: &Deployment, file: &str) -> Vec<serde_json::Value> {
     std::fs::read_to_string(d.dir.path().join(file))
         .unwrap_or_default()
@@ -139,23 +142,33 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     );
     drop(conn);
 
-    // Recording and audit trail.
+    // Recording and audit trail. Every component's events reach the control
+    // plane through the spools; the recording is uploaded by the worker.
     eventually(
-        Duration::from_secs(10),
-        "session.end in the proxy audit",
+        Duration::from_secs(20),
+        "session.end and session.recording in the control plane's audit trail",
         || async {
-            read_jsonl(&d, "proxy/audit/proxy.jsonl")
-                .iter()
-                .any(|e| e["kind"] == "session.end")
+            let events = read_jsonl(&d, AUDIT);
+            events.iter().any(|e| e["kind"] == "session.end")
+                && events.iter().any(|e| e["kind"] == "session.recording")
         },
     )
     .await;
-    let proxy_events = read_jsonl(&d, "proxy/audit/proxy.jsonl");
+    let proxy_events = read_jsonl(&d, AUDIT);
     let end = proxy_events
         .iter()
         .find(|e| e["kind"] == "session.end")
         .expect("session.end");
-    let uri = end["data"]["recording_uri"]
+    assert_eq!(end["producer"]["component"], "proxy");
+    let stored = proxy_events
+        .iter()
+        .find(|e| e["kind"] == "session.recording" && e["session_id"] == end["session_id"])
+        .expect("session.recording for this session");
+    assert_eq!(
+        stored["data"]["sha256"], end["data"]["recording_sha256"],
+        "the stored recording is the one the session produced"
+    );
+    let uri = stored["data"]["recording_uri"]
         .as_str()
         .expect("recording uri");
     let path = uri.strip_prefix("file://").expect("file uri");
@@ -176,7 +189,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
             .iter()
             .any(|e| e["kind"] == "session.start" && e["user"] == "bob@example.com")
     );
-    let worker_events = read_jsonl(&d, "worker/audit/worker.jsonl");
+    let worker_events = read_jsonl(&d, AUDIT);
     let exec = worker_events
         .iter()
         .find(|e| e["kind"] == "ssh.exec")
@@ -217,11 +230,12 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     .err()
     .expect("unpinned host");
     assert!(err.contains("host_key"), "{err}");
-    assert!(
-        read_jsonl(&d, "proxy/audit/proxy.jsonl")
+    eventually(Duration::from_secs(10), "auth.denied for root", || async {
+        read_jsonl(&d, AUDIT)
             .iter()
             .any(|e| e["kind"] == "auth.denied" && e["data"]["login"] == "root")
-    );
+    })
+    .await;
 
     // A client that doesn't trust the Limen host CA refuses the worker: no MITM.
     let rogue_ca =
@@ -401,7 +415,21 @@ async fn ssh_through_a_peer_proxy() {
                 let (out, status) = ssh_client::exec(&conn, "hostname").await.expect("exec");
                 assert_eq!(out, "target: login=ubuntu command=hostname\n");
                 assert_eq!(status, Some(0));
-                let events = read_jsonl(&d, "proxy-b/audit/proxy.jsonl");
+                let proxy_b_id = proxy_b.proxy.id();
+                eventually(
+                    Duration::from_secs(10),
+                    "proxy B's session.start",
+                    || async {
+                        read_jsonl(&d, AUDIT).iter().any(|e| {
+                            e["kind"] == "session.start"
+                                && e["producer"]["instance_id"]
+                                    .as_str()
+                                    .is_some_and(|i| i.starts_with(&format!("{proxy_b_id}/")))
+                        })
+                    },
+                )
+                .await;
+                let events = read_jsonl(&d, AUDIT);
                 assert!(
                     events.iter().any(|e| e["kind"] == "session.start"),
                     "proxy B audits the session it authorized"

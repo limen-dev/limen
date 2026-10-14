@@ -63,9 +63,11 @@ pub struct Config {
     #[arg(long, env = "LIMEN_POLICY_REFRESH_SECS", default_value_t = 10)]
     pub policy_refresh_secs: u64,
 
-    /// Stub audit sink (until Phase 3). Defaults to `<data-dir>/audit/proxy.jsonl`.
-    #[arg(long, env = "LIMEN_AUDIT_FILE")]
-    pub audit_file: Option<PathBuf>,
+    /// Refuse new audit events (and, by default, the actions they audit)
+    /// once the local spool holds this many bytes, e.g. during a long
+    /// control plane outage.
+    #[arg(long, env = "LIMEN_AUDIT_SPOOL_MAX_BYTES", default_value_t = 512 * 1024 * 1024)]
+    pub audit_spool_max_bytes: u64,
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,

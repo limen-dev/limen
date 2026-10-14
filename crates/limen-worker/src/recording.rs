@@ -33,7 +33,15 @@ impl Recorder {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut file = std::io::BufWriter::new(options.open(path)?);
+        // Written as `.part`; `finish` renames it, so the uploader only ever
+        // sees complete recordings.
+        if path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "recording exists",
+            ));
+        }
+        let mut file = std::io::BufWriter::new(options.open(path.with_extension("cast.part"))?);
         let header = json!({
             "version": 3,
             "term": { "cols": cols, "rows": rows },
@@ -94,12 +102,13 @@ impl Recorder {
         }
         self.file.flush()?;
         self.file.get_ref().sync_all()?;
+        std::fs::rename(self.path.with_extension("cast.part"), &self.path)?;
         let digest = sha256_file(&self.path)?;
         Ok((self.path, self.bytes, digest))
     }
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<String> {
+pub(crate) fn sha256_file(path: &Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     let mut file = std::fs::File::open(path)?;

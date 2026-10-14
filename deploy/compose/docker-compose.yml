@@ -63,12 +63,15 @@ services:
       LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
       LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
       LIMEN_PROXY_DNS_NAMES: localhost,proxy
+      # Every component's audit events end up here (and in S3 and Datadog below).
       LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
     ports: ["127.0.0.1:3081:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca
       - ca-public:/var/lib/limen/ca-public
       - audit:/var/lib/limen/audit
+      - cp-spool:/var/lib/limen/spool
+      - recordings:/var/lib/limen/recordings
 
   proxy:
     build: { <<: *limen-build, target: proxy }
@@ -122,3 +125,5 @@ volumes:
   audit: {}
   proxy-data: {}
   worker-data: {}
+  cp-spool: {}
+  recordings: {}

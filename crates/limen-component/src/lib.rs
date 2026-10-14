@@ -1,6 +1,8 @@
 //! Shared runtime for proxies and workers: on-disk identity, enrollment
 //! with a join token, and certificate renewal at half-life.
 
+pub mod audit;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;

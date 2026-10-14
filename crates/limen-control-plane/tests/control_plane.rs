@@ -60,6 +60,7 @@ async fn pkce_login_issues_verified_short_lived_cert() {
     );
     let login = h
         .audit_events()
+        .await
         .into_iter()
         .find(|e| e.kind == EventKind::AuthLogin)
         .expect("auth.login event");
@@ -168,6 +169,7 @@ async fn login_without_roles_is_denied_and_audited() {
     assert_eq!(err.code(), Code::PermissionDenied);
     let denied = h
         .audit_events()
+        .await
         .into_iter()
         .find(|e| e.kind == EventKind::AuthDenied)
         .expect("auth.denied event");
@@ -249,6 +251,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     assert!(applied.version > 0);
     let change = h
         .audit_events()
+        .await
         .into_iter()
         .find(|e| e.kind == EventKind::PolicyChange)
         .expect("policy.change event");
@@ -332,7 +335,7 @@ async fn invalid_policy_is_rejected() {
         .await
         .expect_err("invalid");
     assert_eq!(err.code(), Code::InvalidArgument);
-    assert!(!h.audit_kinds().contains(&EventKind::PolicyChange));
+    assert!(!h.audit_kinds().await.contains(&EventKind::PolicyChange));
 }
 
 #[tokio::test]
@@ -401,7 +404,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         .await
         .expect_err("kind");
     assert_eq!(wrong_kind.code(), Code::PermissionDenied);
-    let kinds = h.audit_kinds();
+    let kinds = h.audit_kinds().await;
     assert!(kinds.contains(&EventKind::WorkerEnroll));
     assert!(kinds.contains(&EventKind::JoinTokenCreate));
     assert!(kinds.contains(&EventKind::AuthDenied));
@@ -537,5 +540,79 @@ async fn proxy_cannot_request_unapproved_dns_names() {
         })
         .await
         .expect_err("unapproved DNS name");
+    assert_eq!(err.code(), Code::PermissionDenied);
+}
+
+#[tokio::test]
+async fn ingest_accepts_own_events_and_rejects_forgery_and_bad_recordings() {
+    use limen_proto::v1::audit_ingest_client::AuditIngestClient;
+    use limen_proto::v1::{IngestRequest, RecordingChunk};
+    let Some(h) = Harness::start().await else {
+        return;
+    };
+    let (proxy_id, proxy) = h.enroll_proxy().await;
+    let mut ingest = AuditIngestClient::new(h.channel(Some(proxy)));
+    let event = |component: &str, instance: &str| {
+        let producer = limen_audit::Producer {
+            component: component.into(),
+            instance_id: instance.into(),
+            seq: 0,
+        };
+        serde_json::to_vec(&limen_audit::Event::new(
+            EventKind::SessionStart,
+            producer,
+            serde_json::json!({"resource": "web-1"}),
+        ))
+        .expect("json")
+    };
+
+    // A proxy may submit its own events; they reach the sinks.
+    let own = event("proxy", &format!("{proxy_id}/boot1"));
+    let accepted = ingest
+        .ingest(IngestRequest { events: vec![own] })
+        .await
+        .expect("own events")
+        .into_inner()
+        .accepted;
+    assert_eq!(accepted, 1);
+    assert!(
+        h.audit_events()
+            .await
+            .iter()
+            .any(|e| e.kind == EventKind::SessionStart)
+    );
+
+    // ...but not events claiming to come from another component or instance.
+    for (component, instance) in [
+        ("worker", format!("{proxy_id}/boot1")),
+        ("proxy", "proxy-someone-else/boot1".to_owned()),
+        ("control-plane", "cp/1".to_owned()),
+    ] {
+        let err = ingest
+            .ingest(IngestRequest {
+                events: vec![event(component, &instance)],
+            })
+            .await
+            .expect_err("forged");
+        assert_eq!(err.code(), Code::PermissionDenied, "{component} {instance}");
+    }
+    let err = ingest
+        .ingest(IngestRequest {
+            events: vec![b"not json".to_vec()],
+        })
+        .await
+        .expect_err("garbage");
+    assert_eq!(err.code(), Code::InvalidArgument);
+
+    // Only workers upload recordings.
+    let chunk = RecordingChunk {
+        session_id: uuid::Uuid::now_v7().to_string(),
+        data: b"{}".to_vec(),
+        sha256: "00".into(),
+    };
+    let err = ingest
+        .upload_recording(tokio_stream::iter(vec![chunk]))
+        .await
+        .expect_err("proxy upload");
     assert_eq!(err.code(), Code::PermissionDenied);
 }

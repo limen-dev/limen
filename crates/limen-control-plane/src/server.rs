@@ -11,6 +11,7 @@ use axum::routing::get;
 use limen_ca::ComponentCertRequest;
 use limen_core::identity::ComponentKind;
 use limen_proto::v1::admin_server::AdminServer;
+use limen_proto::v1::audit_ingest_server::AuditIngestServer;
 use limen_proto::v1::auth_server::AuthServer;
 use limen_proto::v1::enrollment_server::EnrollmentServer;
 use limen_proto::v1::policy_sync_server::PolicySyncServer;
@@ -29,6 +30,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::services::admin::AdminService;
 use crate::services::auth::AuthService;
 use crate::services::enrollment::EnrollmentService;
+use crate::services::ingest::IngestService;
 use crate::services::policy_sync::PolicySyncService;
 use crate::services::registry::RegistryService;
 use crate::services::resources::ResourcesService;
@@ -99,6 +101,10 @@ pub async fn serve_api(
     .add_service(
         RegistryServer::new(RegistryService(state.clone()))
             .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AuditIngestServer::new(IngestService(state.clone()))
+            .max_decoding_message_size(8 * 1024 * 1024),
     )
     .add_service(
         PolicySyncServer::new(PolicySyncService(state.clone()))

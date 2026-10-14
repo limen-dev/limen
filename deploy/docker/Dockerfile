@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked \
       --bin limen-control-plane --bin limen-proxy --bin limen-worker --bin limen \
- && mkdir -p /out /state/ca /state/ca-public /state/audit /state/proxy /state/worker \
+ && mkdir -p /out /state/ca /state/ca-public /state/audit /state/spool /state/recordings /state/proxy /state/worker \
  && cp target/release/limen-control-plane target/release/limen-proxy target/release/limen-worker target/release/limen /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.

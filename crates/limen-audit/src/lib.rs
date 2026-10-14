@@ -46,6 +46,9 @@ pub enum EventKind {
     WorkerEnroll,
     #[serde(rename = "join_token.create")]
     JoinTokenCreate,
+    /// A session recording was stored. Links the session to the recording's location.
+    #[serde(rename = "session.recording")]
+    SessionRecording,
 }
 
 /// Component that emitted the event, plus its per-producer sequence number.

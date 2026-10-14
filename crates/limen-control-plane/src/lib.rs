@@ -8,6 +8,7 @@ pub mod db;
 pub mod http_client;
 pub mod jobs;
 pub mod oidc;
+pub mod pipeline;
 pub mod server;
 pub mod services;
 pub mod state;
@@ -15,7 +16,8 @@ pub mod state;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use limen_audit::{Emitter, JsonlFileSink};
+use limen_audit::Emitter;
+use limen_audit::ship::SpoolSink;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -58,14 +60,13 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     )?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
-    let sink = Arc::new(
-        JsonlFileSink::open(&config.audit_file)
-            .await
-            .with_context(|| format!("opening audit file {}", config.audit_file.display()))?,
-    );
+    let config = Arc::new(config);
+    let pipeline = pipeline::Pipeline::open(&config)?;
+    let sink = Arc::new(SpoolSink(pipeline.spool.clone()));
     let audit = Emitter::new("control-plane", &config.id, sink, config.audit_failure_mode);
     Ok(AppState {
-        config: Arc::new(config),
+        config,
+        pipeline,
         db,
         cas,
         oidc,
@@ -82,6 +83,7 @@ pub async fn run(
     api: TcpListener,
     shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
+    state.pipeline.start_sinks(&shutdown);
     tokio::spawn(jobs::policy_refresh(state.clone(), shutdown.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), shutdown.clone()));
     let health = tokio::spawn(server::serve_health(

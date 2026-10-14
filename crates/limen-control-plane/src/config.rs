@@ -124,13 +124,31 @@ pub struct Config {
     #[arg(long, env = "LIMEN_COMPONENT_CERT_TTL", value_parser = parse_duration, default_value = "24h")]
     pub component_cert_ttl: Duration,
 
-    /// Stub audit sink (Phase 1): a local JSONL file.
+    /// Local spool for audit events, from this replica and ingested from
+    /// proxies and workers, until every sink has shipped them (ADR-0009).
     #[arg(
         long,
-        env = "LIMEN_AUDIT_FILE",
-        default_value = "/var/lib/limen/audit/control-plane.jsonl"
+        env = "LIMEN_AUDIT_SPOOL_DIR",
+        default_value = "/var/lib/limen/spool"
     )]
-    pub audit_file: PathBuf,
+    pub audit_spool_dir: PathBuf,
+
+    /// Refuse new audit events (and so, by default, the actions they audit)
+    /// once the spool holds this many bytes.
+    #[arg(long, env = "LIMEN_AUDIT_SPOOL_MAX_BYTES", default_value_t = 2 * 1024 * 1024 * 1024)]
+    pub audit_spool_max_bytes: u64,
+
+    /// Optional sink: append every event to this local JSONL file (development).
+    #[arg(long, env = "LIMEN_AUDIT_FILE")]
+    pub audit_file: Option<PathBuf>,
+
+    /// Where session recordings go when no S3 bucket is configured (development).
+    #[arg(
+        long,
+        env = "LIMEN_RECORDINGS_DIR",
+        default_value = "/var/lib/limen/recordings"
+    )]
+    pub recordings_dir: PathBuf,
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: FailureMode,
