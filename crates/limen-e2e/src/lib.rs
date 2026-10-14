@@ -148,11 +148,31 @@ impl Deployment {
     }
 
     async fn start_proxy(&self, listener: tokio::net::TcpListener) -> RunningProxy {
+        self.start_named_proxy(listener, "proxy").await
+    }
+
+    /// Another proxy, with its own identity and data directory. Returns it
+    /// and the address it listens on.
+    pub async fn start_extra_proxy(&self, name: &str) -> (RunningProxy, SocketAddr) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        (self.start_named_proxy(listener, name).await, addr)
+    }
+
+    async fn start_named_proxy(
+        &self,
+        listener: tokio::net::TcpListener,
+        name: &str,
+    ) -> RunningProxy {
+        let addr = listener.local_addr().expect("addr");
         let config: limen_proxy::Config = parse(&[
             format!("--control-plane-addr={}", self.cp_addr),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={PROXY_TOKEN}"),
-            format!("--data-dir={}", self.dir.path().join("proxy").display()),
+            format!("--data-dir={}", self.dir.path().join(name).display()),
+            format!("--peer-address={addr}"),
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout-secs=1".into(),
             "--policy-refresh-secs=1".into(),

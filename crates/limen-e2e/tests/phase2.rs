@@ -325,3 +325,92 @@ async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, want: &str
     }
     false
 }
+
+/// ADR-0004: the worker is tunnelled to proxy A only; the session lands on
+/// proxy B, which reaches the worker through A.
+#[tokio::test(flavor = "multi_thread")]
+async fn ssh_through_a_peer_proxy() {
+    let Some(d) = Deployment::start().await else {
+        return;
+    };
+    let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
+    let host_ca = d.public_ca("ssh-host-ca.pub");
+    let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
+
+    let alice = d
+        .login("alice@example.com", &["admins"])
+        .await
+        .expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
+    admin
+        .apply_policy(ApplyPolicyRequest {
+            sources: policy(&target.addr.to_string(), &target.host_key),
+            dry_run: false,
+            source_ref: String::new(),
+        })
+        .await
+        .expect("apply");
+    let token = admin
+        .create_join_token(CreateJoinTokenRequest {
+            kind: "worker".into(),
+            ttl_seconds: 600,
+            labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
+            dns_names: vec![],
+        })
+        .await
+        .expect("token")
+        .into_inner()
+        .token;
+    let worker = d.start_worker(&token, "worker").await;
+    eventually(
+        Duration::from_secs(15),
+        "worker tunnels on proxy A",
+        || async { d.proxy().tunnels.summaries().len() == 2 },
+    )
+    .await;
+
+    let (proxy_b, addr_b) = d.start_extra_proxy("proxy-b").await;
+    assert!(
+        proxy_b.proxy.tunnels.summaries().is_empty(),
+        "proxy B holds no tunnels"
+    );
+    eventually(
+        Duration::from_secs(15),
+        "proxy B and the worker have the policy",
+        || async {
+            proxy_b.proxy.policy_version().is_some() && worker.worker.policy_version().is_some()
+        },
+    )
+    .await;
+
+    let bob = d.login("bob@example.com", &["ops"]).await.expect("bob");
+    let mut last_err = String::new();
+    // Proxy A reports its tunnels within a moment; B caches the registry for 5s.
+    for _ in 0..40 {
+        match ssh_client::connect(
+            &addr_b.to_string(),
+            &ca_pem,
+            bob.clone(),
+            &host_ca,
+            "web-1",
+            "ubuntu",
+        )
+        .await
+        {
+            Ok(conn) => {
+                let (out, status) = ssh_client::exec(&conn, "hostname").await.expect("exec");
+                assert_eq!(out, "target: login=ubuntu command=hostname\n");
+                assert_eq!(status, Some(0));
+                let events = read_jsonl(&d, "proxy-b/audit/proxy.jsonl");
+                assert!(
+                    events.iter().any(|e| e["kind"] == "session.start"),
+                    "proxy B audits the session it authorized"
+                );
+                return;
+            }
+            Err(e) => last_err = e,
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    panic!("session through the peer never succeeded: {last_err}");
+}
