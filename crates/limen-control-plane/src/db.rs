@@ -316,6 +316,39 @@ pub async fn replace_tunnels(
     Ok(skipped)
 }
 
+/// A live tunnel with what peering needs: the worker's labels and how to
+/// reach the proxy holding it.
+#[derive(Debug, Clone)]
+pub struct PeerTunnelRow {
+    pub worker_id: String,
+    pub worker_labels: serde_json::Value,
+    pub proxy_id: String,
+    pub peer_address: String,
+}
+
+pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Error> {
+    sqlx::query(
+        "SELECT DISTINCT t.worker_id, w.labels AS worker_labels, t.proxy_id, p.peer_address
+         FROM tunnels t
+         JOIN components w ON w.id = t.worker_id AND w.revoked_at IS NULL
+         JOIN components p ON p.id = t.proxy_id AND p.revoked_at IS NULL AND p.peer_address IS NOT NULL
+         WHERE t.lease_expires_at > now()
+         ORDER BY t.worker_id, t.proxy_id",
+    )
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(|r| {
+        Ok(PeerTunnelRow {
+            worker_id: r.try_get("worker_id")?,
+            worker_labels: r.try_get("worker_labels")?,
+            proxy_id: r.try_get("proxy_id")?,
+            peer_address: r.try_get("peer_address")?,
+        })
+    })
+    .collect()
+}
+
 // ---- Login nonces ----------------------------------------------------------
 
 /// Record a used nonce. Returns `false` if it was already used (a replay).

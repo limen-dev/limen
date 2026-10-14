@@ -40,6 +40,8 @@ service Enrollment {
 service Registry {
   // Full set of worker tunnels the calling proxy holds. Replaces its previous report.
   rpc ReportTunnels(ReportTunnelsRequest) returns (ReportTunnelsResponse);
+  // Live tunnels held by other proxies, for proxy peering (ADR-0004).
+  rpc ListTunnels(ListTunnelsRequest) returns (ListTunnelsResponse);
 }
 
 message GetAuthConfigRequest {}
@@ -215,4 +217,18 @@ message ReportTunnelsRequest {
 
 message ReportTunnelsResponse {
   uint32 lease_seconds = 1;
+}
+
+message ListTunnelsRequest {}
+
+message PeerTunnel {
+  string worker_id = 1;
+  map<string, string> worker_labels = 2;
+  string proxy_id = 3;
+  // Where to reach the proxy holding the tunnel (its --peer-address).
+  string peer_address = 4;
+}
+
+message ListTunnelsResponse {
+  repeated PeerTunnel tunnels = 1;
 }
