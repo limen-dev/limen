@@ -1,0 +1,195 @@
+//! Listeners: the mTLS gRPC API and the plain-HTTP health endpoints.
+
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+use axum::Router;
+use axum::http::StatusCode;
+use axum::routing::get;
+use limen_ca::ComponentCertRequest;
+use limen_core::identity::ComponentKind;
+use limen_proto::v1::admin_server::AdminServer;
+use limen_proto::v1::auth_server::AuthServer;
+use limen_proto::v1::enrollment_server::EnrollmentServer;
+use limen_proto::v1::registry_server::RegistryServer;
+use limen_proto::v1::resources_server::ResourcesServer;
+use limen_tunnel::PeerInfo;
+use limen_tunnel::serve::{H2Settings, serve_h2};
+use limen_tunnel::tls::{ClientAuth, Identity, server_config};
+use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+use rustls::ServerConfig;
+use tokio::net::TcpListener;
+use tokio::sync::watch;
+use tokio_rustls::TlsAcceptor;
+
+use crate::services::admin::AdminService;
+use crate::services::auth::AuthService;
+use crate::services::enrollment::EnrollmentService;
+use crate::services::registry::RegistryService;
+use crate::services::resources::ResourcesService;
+use crate::state::AppState;
+
+const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Issue this replica's own server certificate from the internal CA.
+pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfig> {
+    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
+    let csr = CertificateParams::default().serialize_request(&key)?;
+    let issued = state
+        .cas
+        .internal
+        .issue_component(ComponentCertRequest {
+            csr_der: csr.der().to_vec(),
+            kind: ComponentKind::ControlPlane,
+            id: state.config.id.clone(),
+            dns_names: state.config.dns_names.clone(),
+            ttl: state.config.component_cert_ttl,
+        })
+        .await?;
+    let chain = format!("{}{}", issued.pem, state.cas.internal.cert_pem());
+    let identity = Identity::from_pem(&chain, &key.serialize_pem())?;
+    // Only components connect directly. A cert is optional because proxies
+    // enroll before they have one.
+    Ok(server_config(
+        identity,
+        &[state.cas.internal.cert_der().clone()],
+        ClientAuth::Optional,
+        &[limen_tunnel::alpn::H2],
+    )?)
+}
+
+/// Serve the gRPC API until `shutdown` flips, then drain.
+pub async fn serve_api(
+    state: AppState,
+    listener: TcpListener,
+    mut shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let tls = Arc::new(RwLock::new(Arc::new(issue_server_config(&state).await?)));
+    tokio::spawn(rotate_server_cert(state.clone(), Arc::clone(&tls)));
+
+    let routes = tonic::service::Routes::new(
+        AuthServer::new(AuthService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        ResourcesServer::new(ResourcesService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AdminServer::new(AdminService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        EnrollmentServer::new(EnrollmentService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        RegistryServer::new(RegistryService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .prepare();
+
+    let active = Arc::new(AtomicUsize::new(0));
+    tracing::info!(addr = %listener.local_addr()?, "control plane API listening");
+    loop {
+        let (tcp, remote) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::warn!(error = %e, "accept failed");
+                    continue;
+                }
+            },
+            _ = shutdown.changed() => break,
+        };
+        let config = Arc::clone(
+            &tls.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let routes = routes.clone();
+        let active = Arc::clone(&active);
+        active.fetch_add(1, Ordering::SeqCst);
+        tokio::spawn(async move {
+            let _ = tcp.set_nodelay(true);
+            match tokio::time::timeout(HANDSHAKE_TIMEOUT, TlsAcceptor::from(config).accept(tcp))
+                .await
+            {
+                Ok(Ok(stream)) => {
+                    let peer = PeerInfo::from_tls(&stream, Some(remote));
+                    if let Err(e) = serve_h2(stream, peer, routes, H2Settings::default()).await {
+                        tracing::debug!(error = %e, %remote, "connection ended with error");
+                    }
+                }
+                Ok(Err(e)) => tracing::debug!(error = %e, %remote, "TLS handshake failed"),
+                Err(_) => tracing::debug!(%remote, "TLS handshake timed out"),
+            }
+            active.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
+    tracing::info!(
+        connections = active.load(Ordering::SeqCst),
+        "shutting down: no longer accepting, draining"
+    );
+    let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
+    while active.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Ok(())
+}
+
+/// Reissue the server certificate at half its lifetime.
+async fn rotate_server_cert(state: AppState, tls: Arc<RwLock<Arc<ServerConfig>>>) {
+    let period = state.config.component_cert_ttl / 2;
+    loop {
+        tokio::time::sleep(period).await;
+        match issue_server_config(&state).await {
+            Ok(config) => {
+                *tls.write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(config);
+                tracing::info!("rotated control plane server certificate");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to rotate server certificate; retrying in 1 minute");
+            }
+        }
+        if period > Duration::from_mins(1) {
+            continue;
+        }
+        tokio::time::sleep(Duration::from_mins(1)).await;
+    }
+}
+
+/// `/healthz` (process up) and `/readyz` (database reachable).
+pub async fn serve_health(
+    state: AppState,
+    addr: SocketAddr,
+    mut shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let app = Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route(
+            "/readyz",
+            get(move || {
+                let db = state.db.clone();
+                async move {
+                    match crate::db::ping(&db).await {
+                        Ok(()) => (StatusCode::OK, "ready"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "not ready: database unreachable");
+                            (StatusCode::SERVICE_UNAVAILABLE, "database unreachable")
+                        }
+                    }
+                }
+            }),
+        );
+    let listener = TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "health endpoints listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = shutdown.changed().await;
+        })
+        .await?;
+    Ok(())
+}

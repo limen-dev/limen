@@ -1,0 +1,40 @@
+# Dex for local development. Stands in for Okta: static users with groups.
+# All passwords are "password". Do not use this configuration anywhere real.
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  responseTypes: [code]
+
+expiry:
+  idTokens: 10m
+
+staticClients:
+  # Public client: PKCE, and any loopback redirect port (RFC 8252).
+  - id: limen-cli
+    name: Limen CLI
+    public: true
+
+enablePasswordDB: true
+staticPasswords:
+  - email: alice@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: alice
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+    groups: [limen-admins, sre]
+  - email: bob@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: bob
+    userID: 41331323-6f44-45e6-b3b9-2c4b60c02be5
+    groups: [developers]
+  - email: carol@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: carol
+    userID: 5f0e8c2a-9a47-4a0b-8a51-6a0e0f8d2c11
+    groups: [marketing]

@@ -1,0 +1,36 @@
+# Limen local development stack.
+#
+#   docker compose -f deploy/compose/docker-compose.yml up -d --build
+#
+# See deploy/compose/README.md for the walkthrough.
+name: limen
+
+x-limen-common: &limen-common
+  restart: unless-stopped
+  environment: &limen-env
+    RUST_LOG: info,limen=debug
+    LIMEN_LOG_JSON: "false"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: limen
+      POSTGRES_PASSWORD: limen-dev-only
+      POSTGRES_DB: limen
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U limen -d limen"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.0
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes: ["./dex/config.yaml:/etc/dex/config.yaml:ro"]
+    ports: ["127.0.0.1:5556:5556"]
+
+volumes:
+  postgres: {}
