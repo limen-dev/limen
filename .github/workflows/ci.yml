@@ -72,6 +72,12 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
     steps:
+      # The x86 runner is short on disk: free some before building and before
+      # SeaweedFS (below) tries to allocate volumes. `df` shows the result.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -80,7 +86,7 @@ jobs:
         run: >-
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/s3/s3.json:/etc/seaweedfs/s3.json:ro"
-          chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data
+          chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test (and fail if any integration test skipped)
