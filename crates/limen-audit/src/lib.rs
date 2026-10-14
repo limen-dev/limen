@@ -39,8 +39,11 @@ pub enum EventKind {
     KubeRequest,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// A proxy or worker enrolled. `data.kind` says which.
     #[serde(rename = "worker.enroll")]
     WorkerEnroll,
+    #[serde(rename = "join_token.create")]
+    JoinTokenCreate,
 }
 
 /// Component that emitted the event, plus its per-producer sequence number.

@@ -45,6 +45,12 @@ A dependency is adopted only if all of these hold:
 | Crypto | sha2 0.11, p256 0.14, ed25519-dalek 3.0 | | 2026 | Adopt |
 | IDs and time | uuid 1.28 (v7), time 0.3.55 | | 2026 | Adopt |
 
+## Accepted advisories
+
+| Advisory | Crate (path) | Why it's accepted |
+|---|---|---|
+| RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
+
 ## Consequences
 - We own two small protocol codecs: MySQL server-side and RESP. Both are fuzzed with `cargo-fuzz` in their phases.
 - To add a dependency, a PR adds a row here.

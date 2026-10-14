@@ -1,1 +1,2 @@
 doc-valid-idents = ["OIDC", "IdP", "IdPs", "PKCE", "SubjectPublicKeyInfo", "OpenSSH", "OpenTelemetry", "PostgreSQL", "MySQL", "ElastiCache", "DogStatsD", "..", ]
+too-many-lines-threshold = 150

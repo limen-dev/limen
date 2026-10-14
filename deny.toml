@@ -10,7 +10,12 @@ version = 2
 yanked = "deny"
 unmaintained = "all"
 unsound = "all"
-ignore = []
+ignore = [
+    # rsa (via openidconnect): Marvin timing attack on private-key operations.
+    # Limen only verifies IdP RS256 signatures with public keys and never holds
+    # an RSA private key. No fixed version exists. See ADR-0012.
+    { id = "RUSTSEC-2023-0071", reason = "public-key verification only; no RSA private keys" },
+]
 
 [licenses]
 version = 2

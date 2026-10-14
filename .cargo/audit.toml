@@ -1,0 +1,5 @@
+# Keep in sync with the ignore list in deny.toml (see ADR-0012).
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071", # rsa Marvin attack: we only verify RS256 with public keys
+]
