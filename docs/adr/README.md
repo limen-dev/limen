@@ -28,5 +28,6 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
+| [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Proposed |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
