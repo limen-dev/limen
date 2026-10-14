@@ -48,8 +48,19 @@ pub fn authenticated(flag: Option<&str>) -> anyhow::Result<(Profile, Channel)> {
     Ok((profile, channel))
 }
 
+/// If `message` is a TLS trust failure, explain the usual cause and the fix.
+pub fn tls_hint(message: &str) -> Option<&'static str> {
+    (message.contains("invalid peer certificate") || message.contains("UnknownIssuer")).then_some(
+        "the proxy's certificate isn't signed by the CA pinned for it. If the proxy's CA changed \
+         (for example, the dev stack was reset), log in again with `--ca-file <new ca.pem>`",
+    )
+}
+
 /// Turn a gRPC status into a readable error.
 pub fn status_error(status: &tonic::Status) -> anyhow::Error {
+    if let Some(hint) = tls_hint(status.message()) {
+        return anyhow::anyhow!("{}: {hint}", status.message());
+    }
     match status.code() {
         tonic::Code::Unauthenticated => anyhow::anyhow!(
             "not authenticated: {}. Run `limen login`.",
@@ -63,6 +74,13 @@ pub fn status_error(status: &tonic::Status) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn explains_untrusted_proxy_certificates() {
+        let status = tonic::Status::unavailable("invalid peer certificate: UnknownIssuer");
+        assert!(super::status_error(&status).to_string().contains("--ca-file"));
+        assert!(super::tls_hint("connection refused").is_none());
+    }
+
     #[test]
     fn server_name_strips_port_and_brackets() {
         assert_eq!(
