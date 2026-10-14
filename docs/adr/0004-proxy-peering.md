@@ -15,6 +15,12 @@ There are at least 2 proxies behind an NLB. A worker's tunnels land on whichever
 - A proxy that receives a session for a worker it has no tunnel to opens `limen-peer/1` (mTLS, internal CA, proxy role required) to the owning proxy's private address and relays the stream.
 - A worker opens 2 tunnels by default, which raises the chance of a local hit. The NLB spreads them.
 
+## Implementation (Phase 2)
+- `Registry.ListTunnels` returns live tunnels held by other proxies, with worker labels and each proxy's `--peer-address`. Proxies cache it for 5 seconds.
+- The peer serves `WorkerTunnel` on `limen-peer/1`. The worker ID goes in `x-limen-worker-id` metadata, and the peer forwards the stream into its tunnel. Callers must present a proxy certificate.
+- The calling proxy pins the peer by certificate identity (`proxy` kind, expected ID) through a custom rustls verifier, because peer addresses are private and often IPs.
+- Tested end to end: `crates/limen-e2e/tests/phase2.rs::ssh_through_a_peer_proxy`.
+
 ## Consequences
 - \+ Works with a single public NLB and with Fargate.
 - − One extra hop for sessions that miss locally. At the target scale that's acceptable.

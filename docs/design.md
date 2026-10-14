@@ -1,6 +1,6 @@
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-14 (Phase 1 complete).
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-14 (Phase 2 complete).
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -102,8 +102,8 @@ The proxy still owns session start and end and the authorization decision.
    - emits `auth.login`, or `auth.denied` on failure
 4. The control plane returns:
    - an **X.509 client cert** (user CA, TTL 10 min by default, configurable per role up to a cluster-wide maximum). Subject = username. The identity is carried as URI SANs: `limen://user/<name>`, one `limen://role/<role>` per role, and `limen://login/<uuid>` (ADR-0006, amended). Component certificates carry `limen://component/<kind>/<id>`.
-   - an **OpenSSH user cert** (SSH user CA, same TTL). Key ID = username plus login session ID. Principals = the union of `ssh.logins` from the matched roles.
-   - the CA bundle and proxy address
+   - the CA bundle, and the public key of the **SSH host CA**, which the CLI writes to its own known_hosts as `@cert-authority * <key>`
+   - *Amended in Phase 2:* no SSH certificate is issued at login. A login certificate trusted by targets would let its holder SSH straight to any reachable host, bypassing the proxy, recording, and audit. SSH certificates are issued per session instead (§5.1).
 5. Credentials are stored in `~/.limen/<proxy>/` with mode 0600. The **refresh token is not stored by default**: re-login is cheap with an active IdP session. Making this optional (encrypted in the OS keychain) is a Phase 7 decision.
 
 `limen logout` deletes the local credentials. Revoking credentials that are already issued relies on short TTLs. A `lock` primitive (to kill a user's sessions immediately) is an extension point noted in ADR-0008.
@@ -114,7 +114,7 @@ The proxy still owns session start and end and the authorization decision.
 - Rotation: a service cert is renewed at 50% of its lifetime, so a control plane outage of 12 hours or less doesn't break workers. During **CA rotation**, the old and new CA are trusted at the same time for at least the longest cert TTL (ADR-0007).
 
 ### 4.3 CA keys
-There are three keys, one per purpose: the internal mTLS CA, the user X.509 CA, and the SSH user CA. In production each is a KMS `ECC_NIST_P256` / `SIGN_VERIFY` key, with `kms:Sign` granted only to the control plane task role. KMS returns DER ECDSA signatures. X.509 uses DER directly. For OpenSSH, Limen converts DER to the `ecdsa-sha2-nistp256` signature blob (two mpints: r and s). In dev, a file-backed signer behind the same `Signer` trait is used.
+There are four keys, one per purpose: the internal mTLS CA, the user X.509 CA, the SSH user CA (trusted by targets), and the SSH host CA (trusted by the CLI). In production each is a KMS `ECC_NIST_P256` / `SIGN_VERIFY` key, with `kms:Sign` granted only to the control plane task role. KMS returns DER ECDSA signatures. X.509 uses DER directly. For OpenSSH, Limen converts DER to the `ecdsa-sha2-nistp256` signature blob (two mpints: r and s). In dev, a file-backed signer behind the same `Signer` trait is used.
 
 ## 5. Session flows
 
@@ -135,19 +135,22 @@ Every session follows the same skeleton:
 
 **Session lifetime vs. cert TTL.** An established session can outlive the 10-minute cert, as with Teleport. A per-role `max_session_ttl` (default 8 hours) caps it, and the session ends early if the user is locked out (an extension point).
 
-### 5.1 SSH (Phase 2)
-- `limen ssh user@host` connects to the proxy (ALPN `limen-ssh/1`), sends the session request, and then runs SSH **end to end with the worker** inside that stream. The worker runs a russh server that accepts the user's Limen SSH cert. The proxy only sees ciphertext.
-- `limen ssh` can also run as `ProxyCommand` for stock OpenSSH: `limen config ssh` writes the `~/.ssh/config` snippet.
-- The worker asks the control plane (through its proxy, over its mTLS identity) for a **per-session target certificate**:
-  - principal = the granted login
-  - TTL = 1 minute to authenticate
-  - critical options and extensions limited to what the role allows (pty, port forwarding off by default)
-  - key ID = session ID, so sshd logs can be tied to Limen sessions
+### 5.1 SSH (Phase 2, implemented)
+```
+ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel─ worker: SSH server ═ bridge ═ SSH client ─ target sshd
+```
+- `limen ssh [login@]resource [command]` runs the system OpenSSH client with `limen ssh-proxy` as its `ProxyCommand`, the profile's known_hosts, and no user keys or agent offered. `limen config ssh` prints the same settings as an `~/.ssh/config` block for `ssh <login>@<resource>.limen`. If the login is omitted and policy allows exactly one, that one is used.
+- `ssh-proxy` opens TLS to the proxy with the user's certificate and sends a `SessionRequest{resource, login}`. The proxy decides from its policy snapshot, picks a worker (or a peer proxy, §6), signs a grant, and answers `ok` once the worker accepts. From then on the stream carries SSH **end to end between OpenSSH and the worker**, so the proxy only sees ciphertext.
+- **Worker admission.** It verifies the grant (§5), checks its own snapshot and that its certified labels may serve the resource, and refuses resources without a pinned `host_key`. It then generates two Ed25519 keys for this session only and asks the control plane, through the proxy, for:
+  - a **user certificate** from the SSH user CA: the granted login as the only principal, valid for 1 minute plus 1 minute of back-dating, key ID `limen:<session>:<user>`, and only `permit-pty`
+  - a **host certificate** from the SSH host CA for `<resource>` and `<resource>.limen`, valid for 5 minutes
 
-  The worker then connects to the target with russh as a client.
-- Targets trust the SSH user CA through `TrustedUserCAKeys` and `AuthorizedPrincipalsFile` (or the default principal = login). We ship a bootstrap script, cloud-init, and SSM document.
-- **Recording.** The worker writes asciicast **v3** (`o`, `r`, `x` events; no `i` by default) to the audit pipeline in chunks. `ssh.exec` is emitted for `exec` requests: the command, its exit status, and the session ID.
-- **Host keys.** Targets present either a host cert (from an optional SSH host CA) or a pinned host key from the resource definition. Unknown host keys fail closed.
+  The control plane re-verifies the grant, re-evaluates its own current policy, checks the worker's labels, and issues **once per grant** (the grant nonce is recorded in the database).
+- **Toward the user**, the worker's SSH server presents the host certificate. OpenSSH verifies it against the host CA and fails on any other key. It accepts only the `none` method, and only for the granted login: the stream underneath is already authenticated (mTLS) and authorized (grant). Environment variables, agent forwarding, X11, and port forwarding are refused.
+- **Toward the target**, the worker's SSH client checks the pinned host key and authenticates with the user certificate. Targets trust the SSH user CA with `TrustedUserCAKeys`, and the login must be a certificate principal (runbook: `docs/runbooks/ssh-target-onboarding.md`). With `LogLevel VERBOSE`, sshd logs the key ID, which ties its log to the Limen session.
+- **Recording.** The worker writes asciicast **v3** (`o`, `r`, `x`; never `i`, since input includes typed passwords) to `<data-dir>/recordings/<session>.cast` (mode 0600), and reports its path and SHA-256 in the closing frame. The proxy puts both in `session.end`. Phase 3 ships recordings to S3.
+- **Audit.** The proxy emits `session.start`, `session.end` (duration, bytes, end reason, recording), and `auth.denied`. The worker emits `ssh.exec` for every exec and subsystem request, *before* forwarding it, and refuses the command if the event can't be written.
+- **Limits.** Sessions end at `max_session_ttl` from the role (default 8 hours). Port forwarding through Limen is not supported yet.
 
 ### 5.2 PostgreSQL, MySQL, and Aurora (Phase 4)
 - `limen db connect <resource> [--db-role R] [--database D]` opens `127.0.0.1:<port>` (or a unix socket with mode 0600, `--socket`). It prints a ready-to-run `psql` or `mysql` command with no password. Each accepted local connection becomes one Limen session.
@@ -188,8 +191,9 @@ Every session follows the same skeleton:
 ## 6. Reverse tunnel and HA routing (ADR-0003, ADR-0004)
 - The worker dials the NLB with ALPN `limen-tunnel/1` and its worker cert. After the TLS handshake **the roles flip**: the worker serves the `WorkerTunnel` gRPC service (tonic, HTTP/2) over that connection, and the proxy is the client. Each session is one bidirectional stream, so HTTP/2 multiplexes many sessions over one TCP connection, with flow control giving backpressure.
 - Each worker keeps **N ≥ 2 tunnels** (default 2) and reconnects with exponential backoff and full jitter (base 1 s, cap 60 s). Health checks use both HTTP/2 PING and `Ping` RPCs (every 15 s, with a 45 s dead-peer timeout).
-- **Tunnel registry.** Proxies report `(worker_id, proxy_id, tunnel_id)` to the control plane, which keeps it in Aurora with a lease, and proxies cache it. A session that lands on proxy A for a worker tunnelled only to proxy B is relayed **A → B over `limen-peer/1`** (proxy-to-proxy mTLS inside the VPC).
-- **Drain.** On SIGTERM a worker sends `draining=true`, stops accepting new sessions, and lets the current ones finish (up to `drain_timeout`, default 10 minutes) before it closes the tunnels. Proxies drain the same way. NLB deregistration delay is set to match.
+- **Tunnel registry.** Proxies report `(worker_id, proxy_id, tunnel_id)` to the control plane, which keeps it in Aurora with a lease, and proxies cache it. A session that lands on proxy A for a worker tunnelled only to proxy B is relayed **A → B over `limen-peer/1`** (proxy-to-proxy mTLS inside the VPC). *Implemented in Phase 2:* A asks the control plane for live tunnels (`Registry.ListTunnels`, cached for 5 s), picks a worker whose labels match, and calls `WorkerTunnel.OpenSession` on B, naming the worker in metadata. B forwards the stream into its tunnel. A pins B's identity (`proxy` kind and ID from its internal-CA certificate) instead of checking a host name. Each proxy advertises its peer address with `--peer-address`.
+- **Worker selection.** A resource's `worker_selector` must match the worker's labels exactly. Labels are signed into the worker's certificate at enrollment, so a worker can't claim labels it wasn't given.
+- **Drain.** On SIGTERM a worker sends `draining=true`, stops accepting new sessions, and lets the current ones finish (up to `drain_timeout`, default 10 minutes) before it closes the tunnels. A proxy stops accepting, closes its worker tunnels right away (so workers move to another proxy), waits up to its drain timeout for API connections, then cuts what's left. The control plane does the same. NLB deregistration delay is set to match.
 
 ## 7. Policy (ADR-0008)
 
@@ -231,7 +235,7 @@ spec:
 
 ### 7.3 Distribution
 - `limen admin apply -f policy/ [--dry-run]`. The control plane parses strictly (unknown fields are errors), validates references, and stores a new **policy version** (an immutable row with the full document, author, and SHA-256). It emits `policy.change` with a structured diff. `--dry-run` prints the diff and changes nothing.
-- The control plane publishes a **signed policy snapshot** (version, `issued_at`, roles, resources) signed by the internal CA. Proxies and workers subscribe to it with a gRPC server stream and cache it on disk.
+- The control plane publishes a **signed policy snapshot** (version, `issued_at`, documents), signed with the control plane's own internal-CA certificate key, which rotates with it. Proxies fetch it directly, and workers through a proxy, every 10 seconds (`PolicySync.GetPolicySnapshot`). They verify the signer is a control plane, refuse version rollbacks, and persist it to disk. Its age counts from `issued_at`, including across restarts.
 - **Control plane outage semantics** are in §9.
 
 ## 8. Audit pipeline (ADR-0009)
@@ -328,7 +332,7 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 |---|---|---|
 | 0 | Design, ADRs, threat model, skeleton, CI | fmt, clippy, test, deny, and audit pass locally. actionlint is clean |
 | 1 ✅ | Control plane (API, Aurora state, CA, policy engine), OIDC login against Dex, CLI login, worker enrollment and reverse tunnel, audit emission to a stub sink | `docker compose up`. `limen login` with Dex. `limen ls` shows only the allowed resources. A worker enrolls with a join token, and a second use of the token is rejected. The tunnel survives a proxy restart. Events land in the stub sink |
-| 2 | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
+| 2 ✅ | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
 | 3 | Audit to S3 (MinIO) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally we check the SQL against Trino*) |
 | 4 | PostgreSQL, then MySQL and Aurora | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent |
 | 5 | Redis | `redis-cli` through `limen redis connect`. Values are redacted |
@@ -336,6 +340,17 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 | 7 | Hardening, HA and failure tests, ECS and EC2 Terraform, docs | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
+- **Phase 2 status (2026-10-14).**
+  - Implemented and tested:
+    - SSH through proxy and worker, with per-session user and host certificates and recording
+    - signed grants and policy snapshots, with the grace period
+    - proxy peering
+    - static-token labels
+    - the outage semantics of §9: the in-process tests and the demo stop the control plane in the middle of a session
+  - *Deferred:*
+    - port forwarding through Limen
+    - recording upload to S3 (Phase 3)
+    - an IAM join method (Phase 7)
 - **Phase 1 status (2026-10-14).**
   - Implemented and tested: OIDC login (PKCE with key-bound nonce, and device flow), user and component certificates, the policy engine, versioned policy administration, single-use and static join tokens, the reverse tunnel with proxy health checks and the control plane registry, proxy relaying with forwarded-certificate verification, renewal at half-life, the KMS signer (against local-kms), and the stub audit sink.
   - Deferred to the phase that needs them:

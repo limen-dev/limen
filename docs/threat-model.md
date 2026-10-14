@@ -1,6 +1,6 @@
 # Limen threat model
 
-Status: **Living document**. Last reviewed 2026-10-14 (Phase 1). Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
+Status: **Living document**. Last reviewed 2026-10-14 (Phase 2). Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
 
 ## 1. Assets
 
@@ -68,6 +68,10 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | S: leaked static join token (ADR-0016) | Kind-scoped. Proxies enrolled with one may only request allow-listed DNS names, and workers get no DNS names, so a leaked worker token can't mint a server certificate. Audited with `token_type=static`. Stored in Secrets Manager and rotated. Replaced by IAM join in Phase 7 |
 | S: client spoofs `x-limen-*` relay headers | The proxy strips every client-supplied `x-limen-*` header before relaying. The control plane accepts forwarding only from callers presenting a **proxy** certificate, and re-verifies the forwarded certificate against the user CA, or the internal CA for workers only. Integration-tested |
 | E: worker forwards a user cert to act as that user | Only proxies may forward. A worker's direct calls resolve to the worker's identity, and user APIs reject it. Integration-tested |
+| S: a worker forges or replays a grant | Grants are signed by a proxy key (verified against the internal CA, proxy kind only, domain-separated from other signatures), expire 60 seconds after issue, name the worker, carry the user certificate (its identity and roles must match), and have a nonce the worker remembers. The control plane allows one SSH certificate issuance per grant across replicas |
+| S: a worker claims labels to receive sessions for other resources | Labels are signed into its certificate at enrollment. Proxies and the control plane only use certified labels |
+| S: something other than a proxy joins peering | `limen-peer/1` requires a proxy certificate. The calling proxy pins the expected peer ID from the registry |
+| T: rolled-back or stale policy on proxies and workers | Snapshots are signed by a control plane and versioned. Rollbacks are refused. Age counts from issue time, including across restarts. Past the grace period, decisions fail closed |
 | S: a compromised worker claims resources it doesn't serve | The worker's cert carries its pool and labels. The control plane only routes resources whose `worker_selector` matches the cert attributes |
 | S: a compromised proxy forges identities toward the control plane | The control plane re-verifies the forwarded user cert against the user CA. The proxy can't mint certs (no `kms:Sign`) |
 | T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (10 min). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
@@ -82,7 +86,12 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | E: a worker compromise exposes DB admin secrets (A4) | The secret is read only during reconcile and held in memory only. The IAM policy is scoped to that one secret ARN. The admin role should be a dedicated `limen_admin`, not the RDS master user (documented). Alternative: run bootstrap as a separate one-shot task with its own role (Phase 4 option) |
 | E: a worker compromise lets it act as any `limen_*` DB role | `rds-db:connect` is limited to `dbuser:<id>/limen_*` per resource. Workers are deployed per VPC or account to limit blast radius |
 | E: privilege escalation through kube impersonation (A6) | The worker strips client-supplied `Impersonate-*` headers and sets its own from the grant. The ClusterRole limits `groups` impersonation to `resourceNames` = the `limen:*` groups when the operator lists them, and must never include `system:masters`. Constrained impersonation (K8s ≥ 1.36) is planned hardening |
-| E: SSH target cert too broad | Per-session cert: TTL 1 min to authenticate, one principal, key ID = session ID. Port forwarding and agent forwarding are off unless the role allows them |
+| E: SSH target cert too broad | Per-session cert: TTL 1 min to authenticate, one principal, key ID `limen:<session>:<user>`, only `permit-pty`. Issued once per proxy grant, after the control plane re-checks the grant, its own current policy, and the worker's labels. Port, agent, and X11 forwarding and environment variables are refused by the worker |
+| S: a target impersonated toward the worker | Every SSH resource pins `host_key`. The worker refuses resources without one, and refuses any other key |
+| S: the proxy (or anyone in the path) impersonates the worker toward the user's SSH client | The worker presents a per-session host certificate from the SSH host CA. The CLI's known_hosts trusts only that CA (`@cert-authority`, `StrictHostKeyChecking=yes`). Tested: a client trusting another CA refuses the worker |
+| E: the user's SSH client authenticates to the worker with `none` | Only for the granted login, on a stream the worker received from a proxy with a signed grant it verified. A direct connection to a worker isn't possible (it listens nowhere) |
+| E: a login SSH certificate used to bypass Limen | None exist. Targets only trust the SSH user CA, which signs per-session certificates on a grant (ADR-0007 amendment) |
+| T: a compromised worker alters or drops recordings | **Residual until Phase 3.** The SHA-256 the worker reports is recorded by the proxy in `session.end`. Phase 3 ships recordings off the worker with signed manifests |
 
 ### TB4/TB5: Control plane ↔ Aurora, KMS, S3, Secrets Manager
 | Threat | Mitigation |
@@ -119,9 +128,11 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 5. Revocation is TTL-based (no immediate lock in v1. `lock` is an extension point).
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
 7. Until IAM join exists (Phase 7), autoscaled proxies and workers enroll with a static, kind-scoped token.
+8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
+| 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |

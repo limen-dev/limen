@@ -2,9 +2,9 @@
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider and get short-lived, audited access to SSH hosts, RDS and Aurora (PostgreSQL and MySQL), ElastiCache Redis, and EKS. There are no static SSH keys, shared database passwords, or hand-made users.
 
-> **Status: Phase 1 complete.** OIDC login, policy, the control plane, proxy, worker enrollment, and reverse tunnels work end to end. Access to resources (SSH, databases, Redis, Kubernetes) arrives in Phases 2 to 6. See the [roadmap](docs/design.md#13-phases-and-exit-criteria).
+> **Status: Phase 2 complete.** OIDC login, policy, the control plane, proxies (with peering), workers, and SSH access with session recording work end to end. Databases, Redis, and Kubernetes arrive in Phases 4 to 6, and the audit pipeline to S3, Datadog, and Grafana in Phase 3. See the [roadmap](docs/design.md#13-phases-and-exit-criteria).
 
-Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase1.sh`.
+Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh`.
 
 ## Documentation
 - [Design](docs/design.md): architecture, data paths, failure semantics
@@ -39,6 +39,8 @@ LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-featu
 ```
 
 The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS.
+
+To put the CLI on your PATH: `cargo install --locked --path crates/limen-cli` (installs `limen` into `~/.cargo/bin`).
 
 ## License
 [Apache-2.0](LICENSE)

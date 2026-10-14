@@ -24,7 +24,7 @@ version: v1
 metadata: { name: dev-readonly, description: optional }
 spec:
   cert_ttl: 10m            # credential lifetime; the shortest across a user's roles wins (default 10m)
-  max_session_ttl: 8h      # cap on a single session (enforced from Phase 2)
+  max_session_ttl: 8h      # cap on a single session; the shortest across a user's roles wins
   allow:
     - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
       db: { roles: [limen_readonly], databases: ["*"] }
@@ -62,4 +62,6 @@ spec:
   worker_selector: { pool: payments-vpc }   # which workers may serve it
 ```
 
-Exactly one of `ssh` (`address`, optional `host_key`), `postgres` / `mysql` (`endpoint`, `region`, `iam_auth`, `admin_secret_arn`), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+`worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
+
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` (`endpoint`, `region`, `iam_auth`, `admin_secret_arn`), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.

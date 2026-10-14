@@ -15,6 +15,12 @@
 - **Rotation:** a CA has states `active` and `additional_trusted`. New keys are trusted first and used for signing later. The old key stays trusted for at least `max_cert_ttl` plus clock skew (5 min). For SSH, `TrustedUserCAKeys` lists both keys during the overlap.
 - `kms:Sign` is granted only to the control plane task role, with a key-policy condition on `kms:SigningAlgorithm`.
 
+## Amendment (Phase 2, 2026-10-14): two SSH CAs, per-session certificates
+- **SSH user CA** (`user_ssh`): trusted by targets (`TrustedUserCAKeys`). It signs only per-session user certificates, at the request of a worker presenting a valid proxy grant. Each certificate has one principal (the granted login), lives for 1 minute (plus 1 minute of back-dating), carries key ID `limen:<session>:<user>`, and grants only `permit-pty`. It's issued once per grant.
+- **SSH host CA** (`host_ssh`): trusted by the CLI through `@cert-authority` in the profile's known_hosts. It signs per-session host certificates for the worker's ephemeral host key, with principals `<resource>` and `<resource>.limen`, valid for 5 minutes.
+- **No SSH certificate at login.** The original design issued one, signed by the CA that targets trust. Anyone holding it could have reached targets directly when the network allowed, skipping the proxy, the recording, and the audit trail. The user's SSH client authenticates to the worker with `none` on a stream that mTLS and the grant already authenticate.
+- Both SSH CAs use the `Signer` trait, so they can live in KMS. KMS's DER ECDSA signature is converted to the SSH `mpint(r) || mpint(s)` form (`limen_ca::ssh::der_to_ssh_ecdsa`), and this is tested against local-kms.
+
 ## Consequences
 - \+ CA private keys never exist outside KMS in production.
 - − Signing costs one KMS call per cert. At the target scale (500 users × a few certs every 10 min) that's far below the quotas. *Check the current KMS quota for asymmetric `Sign` in Phase 1.*

@@ -9,7 +9,8 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `kms` | KMS emulator ([local-kms](https://github.com/nsmithuk/local-kms)), used by tests | 8099 |
 | `control-plane` | API, CA, policy, registry. Health on 3081 | 3081 |
 | `proxy` | Public entry point (3443) and admin/debug endpoints (3444) | 3443, 3444 |
-| `worker` | Enrolls through the proxy and holds two reverse tunnels | none (outbound only) |
+| `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
+| `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
 
 ## Quick start
 
@@ -51,6 +52,28 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 - `limen login --device` uses the device flow. Open the printed URL anywhere and enter the code.
 - `deploy/compose/dev-login.sh bob@example.com` automates Dex's password form. It's for scripts and tests only.
+
+## SSH (Phase 2)
+
+```sh
+deploy/compose/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
+```
+
+By hand, after `limen admin apply examples/policy`:
+
+```sh
+limen login                                   # as bob@example.com (developers -> dev-readonly)
+limen ssh web-staging-1                       # interactive shell as ubuntu (the only login policy allows)
+limen ssh web-staging-1 -- uptime             # one command
+limen ssh root@web-staging-1                  # denied, and audited
+limen config ssh >> ~/.ssh/config && ssh ubuntu@web-staging-1.limen
+
+docker compose -f deploy/compose/docker-compose.yml logs sshd-target | grep 'Accepted certificate'
+docker compose -f deploy/compose/docker-compose.yml cp worker:/var/lib/limen/worker/recordings ./recordings
+asciinema play recordings/<session-id>.cast   # if you have asciinema 3.x
+```
+
+Audit events are in `proxy:/var/lib/limen/proxy/audit/proxy.jsonl` (`session.start`, `session.end`, `auth.denied`) and `worker:/var/lib/limen/worker/audit/worker.jsonl` (`ssh.exec`). Phase 3 ships them to S3 and Datadog.
 
 ## Things to try
 
