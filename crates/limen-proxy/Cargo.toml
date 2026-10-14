@@ -11,10 +11,37 @@ publish.workspace = true
 name = "limen-proxy"
 path = "src/main.rs"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
+limen-ca.workspace = true
+limen-component.workspace = true
 limen-core.workspace = true
+limen-proto.workspace = true
+limen-tunnel.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+base64.workspace = true
 clap.workspace = true
+futures.workspace = true
+governor.workspace = true
+http.workspace = true
+hyper.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tonic.workspace = true
+tower.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+limen-testkit.workspace = true
 
 [lints]
 workspace = true
