@@ -30,7 +30,7 @@
 <form method="post" action="/console/policy/dry-run" class="stack wide">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <textarea name="yaml" rows="14" spellcheck="false" class="mono" required>{{ pasted }}</textarea>
-  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg#file-diff"/></svg>Show the difference</button></div>
+  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Show the difference</button></div>
 </form>
 </div>
 {% if let Some(r) = result %}
@@ -39,7 +39,7 @@
 <pre class="error">{{ err }}</pre>
 {% else %}
   {% if r.no_changes %}
-  <div class="notice"><svg class="i"><use href="/console/static/icons.svg#check"/></svg>No changes: this is the active policy.</div>
+  <div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>No changes: this is the active policy.</div>
   {% else %}
   <ul class="diff">
     {% for n in r.added %}<li class="add">+ {{ n }}</li>{% endfor %}

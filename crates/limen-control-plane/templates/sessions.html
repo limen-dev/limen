@@ -11,7 +11,7 @@
     <a href="/console/sessions?filter=active"{% if active_only %} aria-current="true"{% endif %}>Active</a>
   </div>
 </div>
-{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg#info"/></svg>{{ done }}</div>{% endif %}
+{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% include "sessions_table.html" %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}

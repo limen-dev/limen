@@ -7,17 +7,17 @@
     <p class="sub">People who have signed in with the CLI or the console. Locked users can't sign in or open sessions, and their open sessions end.</p>
   </div>
 </div>
-{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg#info"/></svg>{{ done }}</div>{% endif %}
+{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% if users.is_empty() %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#users"/></svg><div>Nobody has signed in yet.</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>Nobody has signed in yet.</div></div>
 {% else %}
 <div class="table-wrap"><table>
   <thead><tr><th>User</th><th>Roles</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>Status</th></tr></thead>
   <tbody>
   {% for u in users %}
     <tr>
-      <td><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a></td>
-      <td><div class="chips">{% for r in u.role_list %}<span class="chip">{{ r }}</span>{% endfor %}</div></td>
+      <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a></div></td>
+      <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td>
       <td class="nowrap">{{ u.last_login }}</td>
       <td class="num">{{ u.logins }}</td>
       <td>{% if u.locked %}<span class="pill bad">locked</span> <span class="cell-sub">{{ u.lock_reason }}</span>{% else %}<span class="pill ok">active</span>{% endif %}</td>

@@ -74,7 +74,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/signin", get(pages::signin))
         .route("/console/login", get(auth::login_start))
         .route("/console/callback", get(auth::callback))
-        .route("/console/logout", post(auth::logout))
+        .route("/console/logout", get(pages::signout).post(auth::logout))
         .route("/console/static/{name}", get(assets::serve))
         .route("/console/sessions", get(pages::sessions))
         .route("/console/sessions/{id}", get(pages::session_detail))

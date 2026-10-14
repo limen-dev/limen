@@ -81,6 +81,17 @@ pub struct DoneQuery {
     done: Option<String>,
 }
 
+/// `GET /console/logout`: a page with the sign-out button. Signing out is a
+/// POST, so a link or an image tag can't log someone out.
+pub async fn signout(State(state): State<AppState>, auth: Auth) -> Response {
+    html(
+        views::SignoutPage {
+            chrome: chrome(&state, &auth, ""),
+        }
+        .render(),
+    )
+}
+
 /// The branded page unauthenticated visitors land on. It does nothing but
 /// offer the way in, so it needs no session.
 pub async fn signin() -> Response {
@@ -108,6 +119,8 @@ pub async fn home(
         .map(|r| ResourceView {
             name: r.name,
             kind: r.kind.as_str().to_owned(),
+            icon: views::kind_icon(r.kind.as_str()).0,
+            kclass: views::kind_icon(r.kind.as_str()).1,
             labels: r
                 .labels
                 .into_iter()
@@ -401,6 +414,11 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         path: path_segment(name),
         role_list: Vec::new(),
         group_list: Vec::new(),
+        av: views::avatar_class(name),
+        initial: name
+            .chars()
+            .next()
+            .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
         first_login: "never".into(),
         last_login: "never".into(),
         logins: 0,
@@ -562,6 +580,16 @@ pub async fn workers(
                 last_seen: time_text(Some(c.last_seen_at)),
                 cert_expires: time_text(c.cert_expires_at),
                 revoked: c.revoked_at.is_some(),
+                icon: if c.kind == "worker" {
+                    "server"
+                } else {
+                    "radio"
+                },
+                kclass: if c.kind == "worker" {
+                    "k-worker"
+                } else {
+                    "k-proxy"
+                },
                 label_list: labels.iter().map(|(k, v)| format!("{k}={v}")).collect(),
                 kind: c.kind,
                 id: c.id,

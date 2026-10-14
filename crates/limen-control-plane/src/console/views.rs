@@ -14,6 +14,7 @@ use super::{Auth, html};
 pub struct Chrome {
     pub username: String,
     pub initial: String,
+    pub avatar: String,
     pub is_admin: bool,
     pub csrf: String,
     pub active: &'static str,
@@ -31,6 +32,7 @@ impl Chrome {
                 .chars()
                 .next()
                 .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
+            avatar: avatar_class(&auth.username),
             username: auth.username.clone(),
             is_admin: auth.is_admin,
             csrf: auth.csrf.clone(),
@@ -40,6 +42,61 @@ impl Chrome {
             policy_version,
         }
     }
+}
+
+// ---- colour and icons ----------------------------------------------------------
+
+fn hash_byte(s: &str) -> u8 {
+    s.bytes()
+        .fold(0u8, |h, b| h.wrapping_mul(31).wrapping_add(b))
+}
+
+/// A stable colour slot (0 to 5) for a role or group name.
+#[must_use]
+pub fn chip_color(s: &str) -> u8 {
+    hash_byte(s) % 6
+}
+
+/// A stable avatar gradient class for a user name.
+#[must_use]
+pub fn avatar_class(s: &str) -> String {
+    format!("av-{}", hash_byte(s) % 8)
+}
+
+/// Icon symbol and colour class for a resource kind.
+#[must_use]
+pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "ssh" => ("terminal", "k-ssh"),
+        "postgres" | "postgresql" => ("k-postgres", "k-postgres"),
+        "mysql" => ("k-mysql", "k-mysql"),
+        "redis" => ("k-redis", "k-redis"),
+        "kubernetes" => ("k-kubernetes", "k-kubernetes"),
+        "mongodb" => ("k-mongodb", "k-mongodb"),
+        "opensearch" => ("k-opensearch", "k-opensearch"),
+        "elasticsearch" => ("k-elasticsearch", "k-elasticsearch"),
+        "rabbitmq" => ("k-rabbitmq", "k-rabbitmq"),
+        "kafka" => ("k-kafka", "k-kafka"),
+        "web" => ("globe", "k-web"),
+        "tcp" => ("network", "k-tcp"),
+        _ => ("database", "k-other"),
+    }
+}
+
+/// A role or group shown as a coloured chip.
+pub struct Chip {
+    pub text: String,
+    pub c: u8,
+}
+
+fn chips(items: &[String]) -> Vec<Chip> {
+    items
+        .iter()
+        .map(|t| Chip {
+            text: t.clone(),
+            c: chip_color(t),
+        })
+        .collect()
 }
 
 // ---- formatting ----------------------------------------------------------------
@@ -119,6 +176,8 @@ pub struct SessionView {
     pub user: String,
     pub user_path: String,
     pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
     pub resource: String,
     pub login: String,
     pub started: String,
@@ -152,6 +211,8 @@ impl From<&SessionRow> for SessionView {
             user: dash(s.username.as_deref()),
             user_path: path_segment(s.username.as_deref().unwrap_or_default()),
             kind: dash(s.kind.as_deref()),
+            icon: kind_icon(s.kind.as_deref().unwrap_or_default()).0,
+            kclass: kind_icon(s.kind.as_deref().unwrap_or_default()).1,
             resource: dash(s.resource.as_deref()),
             login: dash(s.login.as_deref()),
             started: time_text(s.started_at),
@@ -194,8 +255,10 @@ impl From<&SessionRow> for SessionView {
 pub struct UserView {
     pub name: String,
     pub path: String,
-    pub role_list: Vec<String>,
-    pub group_list: Vec<String>,
+    pub role_list: Vec<Chip>,
+    pub group_list: Vec<Chip>,
+    pub av: String,
+    pub initial: String,
     pub first_login: String,
     pub last_login: String,
     pub logins: i64,
@@ -210,8 +273,14 @@ impl From<&UserRow> for UserView {
         Self {
             name: u.username.clone(),
             path: path_segment(&u.username),
-            role_list: u.roles.clone(),
-            group_list: u.groups.clone(),
+            role_list: chips(&u.roles),
+            group_list: chips(&u.groups),
+            av: avatar_class(&u.username),
+            initial: u
+                .username
+                .chars()
+                .next()
+                .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
             first_login: time_text(Some(u.first_login_at)),
             last_login: time_text(Some(u.last_login_at)),
             logins: u.login_count,
@@ -235,6 +304,8 @@ pub struct Stats {
 pub struct ResourceView {
     pub name: String,
     pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
     pub labels: Vec<String>,
     pub principals: Vec<String>,
 }
@@ -293,6 +364,8 @@ pub struct ComponentView {
     pub path: String,
     pub kind: String,
     pub label_list: Vec<String>,
+    pub icon: &'static str,
+    pub kclass: &'static str,
     pub last_seen: String,
     pub tunnels: usize,
     pub cert_expires: String,
@@ -346,6 +419,12 @@ pub struct PolicyPage {
     pub groups: Vec<PolicyGroup>,
     pub pasted: String,
     pub result: Option<DryRun>,
+}
+
+#[derive(Template)]
+#[template(path = "signout.html")]
+pub struct SignoutPage {
+    pub chrome: Chrome,
 }
 
 #[derive(Template)]

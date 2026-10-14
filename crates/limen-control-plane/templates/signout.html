@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Sign out{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Sign out</h1><p class="sub">You will need to sign in again with your identity provider.</p></div></div>
+<form method="post" action="/console/logout" class="card card-pad signout">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <p>Sign out of the console as <b>{{ chrome.username }}</b>?</p>
+  <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#log-out"/></svg>Sign out</button>
+  <a class="button secondary" href="/console/">Stay signed in</a>
+</form>
+{% endblock %}

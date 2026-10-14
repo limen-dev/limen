@@ -234,3 +234,34 @@ td.actions form.inline { flex-wrap: nowrap; }
 .button.wide { width: 100%; justify-content: center; padding: 11px 16px; }
 .signin-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
 .signin-foot .theme { width: 108px; }
+
+/* ---- resource kinds: brand icon in a tinted tile ---- */
+.kind { --kc: var(--text-2); width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; color: var(--kc); background: color-mix(in srgb, var(--kc) 13%, transparent); }
+:root[data-theme="dark"] .kind { color: color-mix(in srgb, var(--kc) 50%, #fff); background: color-mix(in srgb, var(--kc) 20%, transparent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kind { color: color-mix(in srgb, var(--kc) 50%, #fff); background: color-mix(in srgb, var(--kc) 20%, transparent); } }
+.kind .i { width: 18px; height: 18px; }
+.kind.lg { width: 44px; height: 44px; border-radius: 12px; } .kind.lg .i { width: 22px; height: 22px; }
+.k-ssh { --kc: #10b981; } .k-postgres { --kc: #4169e1; } .k-mysql { --kc: #4479a1; } .k-redis { --kc: #ff4438; }
+.k-kubernetes { --kc: #326ce5; } .k-mongodb { --kc: #47a248; } .k-opensearch { --kc: #005eb8; } .k-elasticsearch { --kc: #00a79d; }
+.k-rabbitmq { --kc: #ff6600; } .k-kafka { --kc: #6b7280; } .k-web { --kc: #8b5cf6; } .k-tcp { --kc: #64748b; } .k-other { --kc: #64748b; }
+.k-worker { --kc: #3b82f6; } .k-proxy { --kc: #8b5cf6; }
+.kind-cell { display: flex; align-items: center; gap: 12px; }
+
+/* ---- colour: stat tiles, avatars, role chips ---- */
+.stat { --sc: var(--accent-text); }
+.stat .stat-icon { color: var(--sc); background: color-mix(in srgb, var(--sc) 14%, transparent); }
+.stat.c-green { --sc: #10b981; } .stat.c-blue { --sc: #3b82f6; } .stat.c-violet { --sc: #8b5cf6; } .stat.c-amber { --sc: #f59e0b; } .stat.c-teal { --sc: #14b8a6; } .stat.bad { --sc: #ef4444; }
+.stat:hover { border-color: var(--sc); }
+.stat.bad .stat-icon { background: color-mix(in srgb, var(--sc) 14%, transparent); color: var(--sc); }
+.avatar.av-0, .av-0 { background: linear-gradient(135deg, #14b8a6, #0ea5e9); } .av-1 { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.av-2 { background: linear-gradient(135deg, #f59e0b, #ef4444); } .av-3 { background: linear-gradient(135deg, #3b82f6, #6366f1); }
+.av-4 { background: linear-gradient(135deg, #10b981, #84cc16); } .av-5 { background: linear-gradient(135deg, #ec4899, #f97316); }
+.av-6 { background: linear-gradient(135deg, #06b6d4, #3b82f6); } .av-7 { background: linear-gradient(135deg, #a855f7, #6366f1); }
+.avatar.sm { width: 28px; height: 28px; font-size: 11px; }
+.user-cell { display: flex; align-items: center; gap: 10px; }
+.chip.c0 { --cc: #14b8a6; } .chip.c1 { --cc: #3b82f6; } .chip.c2 { --cc: #8b5cf6; } .chip.c3 { --cc: #f59e0b; } .chip.c4 { --cc: #ec4899; } .chip.c5 { --cc: #10b981; }
+.chip[class*=" c"] { color: color-mix(in srgb, var(--cc) 80%, var(--text)); background: color-mix(in srgb, var(--cc) 12%, transparent); border-color: color-mix(in srgb, var(--cc) 28%, transparent); }
+.page-head h1 .kind { vertical-align: middle; margin-right: 10px; }
+.title-row { display: flex; align-items: center; gap: 14px; }
+.signout { max-width: 460px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.signout p { flex-basis: 100%; margin: 0 0 4px; }

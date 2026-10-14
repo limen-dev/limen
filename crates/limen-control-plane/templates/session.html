@@ -4,10 +4,10 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>{{ s.resource }} <span class="pill {{ s.status_class }} v-mid">{{ s.status }}</span></h1>
-    <p class="sub">{{ s.user }} as <span class="mono">{{ s.login }}</span> · <span class="mono">{{ s.id }}</span></p>
+    <div class="title-row"><span class="kind lg {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><h1>{{ s.resource }} <span class="pill {{ s.status_class }} v-mid">{{ s.status }}</span></h1>
+    <p class="sub">{{ s.user }} as <span class="mono">{{ s.login }}</span> · <span class="mono">{{ s.id }}</span></p></div></div>
   </div>
-  <a class="button secondary" href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg#arrow-left"/></svg>All sessions</a>
+  <a class="button secondary" href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All sessions</a>
 </div>
 
 
@@ -16,7 +16,7 @@
 <form method="post" action="/console/sessions/{{ s.id }}/kill" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360">
-  <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg#circle-stop"/></svg>End this session</button>
+  <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-stop"/></svg>End this session</button>
   <span class="hint">The user is disconnected within about 11 seconds. The recording is kept.</span>
 </form>
 {% endif %}
@@ -28,7 +28,7 @@
 <script src="/console/static/asciinema-player.min.js?v={{ chrome.assets }}"></script>
 <script src="/console/static/player-init.js?v={{ chrome.assets }}"></script>
 {% else %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#play"/></svg><div>{{ s.recording_note }}</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg><div>{{ s.recording_note }}</div></div>
 {% endif %}
 
 <h2>Details</h2>

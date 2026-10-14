@@ -1,17 +1,17 @@
 {% if sessions.is_empty() %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg#terminal"/></svg><div>No sessions yet.</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#terminal"/></svg><div>No sessions yet.</div></div>
 {% else %}
 <div class="table-wrap"><table>
   <thead><tr><th>Resource</th><th>User</th><th>Started</th><th>Duration</th><th>Status</th><th></th></tr></thead>
   <tbody>
   {% for s in sessions %}
     <tr>
-      <td><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}</div></td>
+      <td><div class="kind-cell"><span class="kind {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}</div></div></div></td>
       <td>{{ s.user }}</td>
       <td class="nowrap">{{ s.started }}</td>
       <td>{{ s.duration }}</td>
       <td><span class="pill {{ s.status_class }}">{{ s.status }}</span>{% if !s.reason.is_empty() %} <span class="cell-sub">{{ s.reason }}</span>{% endif %}</td>
-      <td class="actions"><a href="/console/sessions/{{ s.id }}">{% if s.has_recording %}<span class="recmark"><svg class="i"><use href="/console/static/icons.svg#play"/></svg>Replay</span>{% else %}Details{% endif %}</a></td>
+      <td class="actions"><a href="/console/sessions/{{ s.id }}">{% if s.has_recording %}<span class="recmark"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg>Replay</span>{% else %}Details{% endif %}</a></td>
     </tr>
   {% endfor %}
   </tbody>

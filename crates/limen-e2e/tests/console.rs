@@ -671,7 +671,16 @@ async fn console_end_to_end() {
     );
 
     // ---- sign out ------------------------------------------------------------------------------
-    let csrf = Browser::csrf(&alice.get("/console/").await);
+    // Opening the logout URL shows a confirmation; it signs nobody out by itself.
+    let confirm = alice.get("/console/logout").await;
+    assert_eq!(confirm.status, 200);
+    assert!(confirm.body.contains("action=\"/console/logout\""));
+    assert_eq!(alice.get("/console/").await.status, 200, "still signed in");
+    let anon_logout = anon
+        .get_once(&format!("{}/console/logout", anon.base))
+        .await;
+    assert_eq!(anon_logout.status, 303, "no session: sent to sign-in");
+    let csrf = Browser::csrf(&confirm);
     let page = alice.post("/console/logout", &[("csrf", &csrf)]).await;
     assert_eq!(page.status, 200);
     assert!(alice.cookies.is_empty(), "the cookie is cleared");

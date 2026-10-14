@@ -24,3 +24,7 @@ To update: download the new tarball from the npm registry, replace both files, u
 | Lucide icons | `lucide-static` 1.57.0, ISC (`lucide.LICENSE`). `../icons.svg` is a sprite of the icons the console uses |
 
 Fonts and icons are served from the binary, so the console loads nothing from other origins (CSP `font-src 'self'`).
+
+# Vendored: brand icons for resource kinds
+
+`simple-icons` 16.35.0 (CC0-1.0, `simple-icons.LICENSE`): the PostgreSQL, MySQL, Redis, Kubernetes, MongoDB, OpenSearch, Elasticsearch, RabbitMQ, and Apache Kafka marks, inlined in `../icons.svg` as `k-*` symbols. Product names and logos belong to their owners and are used only to say what a resource is.
