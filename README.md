@@ -171,6 +171,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 
 ## Documentation
 - [Using the console](docs/guides/console.md) and [using the CLI](docs/guides/cli.md)
+- [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
 - [Threat model](docs/threat-model.md)
