@@ -1,0 +1,28 @@
+[package]
+name = "limen-e2e"
+description = "End-to-end tests: control plane, proxy, and worker running together in-process."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+limen-control-plane.workspace = true
+limen-proxy.workspace = true
+limen-worker.workspace = true
+limen-proto.workspace = true
+limen-testkit.workspace = true
+limen-tunnel.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+rcgen.workspace = true
+rustls-pki-types.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
