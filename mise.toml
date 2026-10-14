@@ -1,5 +1,5 @@
 [tools]
-rust = "1.99.0"
+rust = { version = "1.99.0", components = "rustfmt,clippy" }
 protoc = "36.2"
 cargo-deny = "0.20.2"
 "cargo:cargo-audit" = "0.22.2"
