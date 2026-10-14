@@ -44,7 +44,8 @@ pub struct Deployment {
     pub cp_addr: SocketAddr,
     pub proxy_addr: SocketAddr,
     pub proxy: Option<RunningProxy>,
-    _cp_shutdown: watch::Sender<bool>,
+    cp_shutdown: watch::Sender<bool>,
+    cp_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
 }
 
 #[derive(Debug)]
@@ -71,6 +72,9 @@ impl RunningWorker {
 impl Deployment {
     /// Start a control plane and one proxy. `None` without a test database.
     pub async fn start() -> Option<Self> {
+        if std::env::var_os("LIMEN_TEST_LOG").is_some() {
+            limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
+        }
         let base = limen_testkit::database_url()?;
         let mut conn = sqlx::PgConnection::connect(&base).await.expect("connect");
         let name = format!("limen_e2e_{}", uuid::Uuid::now_v7().simple());
@@ -97,6 +101,7 @@ impl Deployment {
                 dir.path().join("audit/control-plane.jsonl").display()
             ),
             "--admin-listen=127.0.0.1:0".into(),
+            "--drain-timeout=0s".into(),
         ]);
         let state = limen_control_plane::build_state(cp_config)
             .await
@@ -106,7 +111,7 @@ impl Deployment {
             .expect("bind");
         let cp_addr = cp_listener.local_addr().expect("addr");
         let (cp_tx, cp_rx) = watch::channel(false);
-        tokio::spawn(limen_control_plane::run(state, cp_listener, cp_rx));
+        let cp_task = tokio::spawn(limen_control_plane::run(state, cp_listener, cp_rx));
 
         let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -118,7 +123,8 @@ impl Deployment {
             cp_addr,
             proxy_addr,
             proxy: None,
-            _cp_shutdown: cp_tx,
+            cp_shutdown: cp_tx,
+            cp_task: Some(cp_task),
         };
         deployment.proxy = Some(deployment.start_proxy(proxy_listener).await);
         Some(deployment)
@@ -126,6 +132,19 @@ impl Deployment {
 
     pub fn ca_file(&self) -> PathBuf {
         self.dir.path().join("ca-public/internal-ca.pem")
+    }
+
+    /// An exported public CA file, such as `ssh-user-ca.pub` or `ssh-host-ca.pub`.
+    pub fn public_ca(&self, name: &str) -> String {
+        std::fs::read_to_string(self.dir.path().join("ca-public").join(name)).expect("exported CA")
+    }
+
+    /// Stop the control plane abruptly: no drain, open connections are cut.
+    pub async fn stop_control_plane(&mut self) {
+        let _ = self.cp_shutdown.send(true);
+        if let Some(task) = self.cp_task.take() {
+            let _ = task.await;
+        }
     }
 
     async fn start_proxy(&self, listener: tokio::net::TcpListener) -> RunningProxy {
@@ -136,6 +155,8 @@ impl Deployment {
             format!("--data-dir={}", self.dir.path().join("proxy").display()),
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout-secs=1".into(),
+            "--policy-refresh-secs=1".into(),
+            "--policy-grace-secs=3".into(),
         ]);
         let (proxy, creds_tx) = limen_proxy::Proxy::start(config)
             .await
@@ -173,6 +194,8 @@ impl Deployment {
             format!("--data-dir={}", self.dir.path().join(name).display()),
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout=1s".into(),
+            "--policy-refresh=1s".into(),
+            "--policy-grace=3s".into(),
         ]);
         let (worker, creds_tx) = limen_worker::Worker::start(config)
             .await
@@ -243,4 +266,128 @@ where
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("timed out after {timeout:?} waiting for {what}");
+}
+
+/// An SSH client doing what `limen ssh` makes OpenSSH do: mTLS to the proxy,
+/// the session handshake, then SSH to the worker, checking its host
+/// certificate against the Limen SSH host CA and authenticating with `none`.
+pub mod ssh_client {
+    use std::sync::Arc;
+
+    use limen_proto::v1::{SessionRequest, SessionResponse};
+    use limen_tunnel::connect::dial;
+    use limen_tunnel::framing::{read_message, write_message};
+    use limen_tunnel::tls::{Identity, client_config};
+    use russh::keys::{HashAlg, PublicKey, PublicKeyOrCertificate};
+    use russh::{ChannelMsg, client};
+
+    #[derive(Debug)]
+    pub struct HostCheck {
+        pub host_ca: PublicKey,
+        pub host_name: String,
+    }
+
+    impl client::Handler for HostCheck {
+        type Error = russh::Error;
+
+        #[allow(clippy::unused_async_trait_impl)] // the trait method is async
+        async fn check_server_key(
+            &mut self,
+            server: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            Ok(match server {
+                PublicKeyOrCertificate::Certificate(cert) => {
+                    cert.cert_type().is_host()
+                        && cert
+                            .validate([&self.host_ca.fingerprint(HashAlg::Sha256)])
+                            .is_ok()
+                        && cert.valid_principals().contains(&self.host_name)
+                }
+                PublicKeyOrCertificate::PublicKey { .. } => false,
+            })
+        }
+    }
+
+    /// Open an SSH connection to `resource` as `login` through the proxy.
+    /// `Err` carries the proxy's refusal message, or the SSH failure.
+    pub async fn connect(
+        proxy_addr: &str,
+        ca_pem: &str,
+        identity: Identity,
+        host_ca_openssh: &str,
+        resource: &str,
+        login: &str,
+    ) -> Result<client::Handle<HostCheck>, String> {
+        let roots = limen_tunnel::tls::certs_from_pem(ca_pem).map_err(|e| e.to_string())?;
+        let tls_config = client_config(&roots, Some(identity), &[limen_tunnel::alpn::SSH])
+            .map_err(|e| e.to_string())?;
+        let mut tls = dial(proxy_addr, "localhost", Arc::new(tls_config))
+            .await
+            .map_err(|e| e.to_string())?;
+        write_message(
+            &mut tls,
+            &SessionRequest {
+                resource: resource.into(),
+                principal: login.into(),
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let response: SessionResponse = read_message(&mut tls).await.map_err(|e| e.to_string())?;
+        if !response.ok {
+            return Err(response.error);
+        }
+        let handler = HostCheck {
+            host_ca: PublicKey::from_openssh(host_ca_openssh.trim()).map_err(|e| e.to_string())?,
+            host_name: resource.into(),
+        };
+        // Ask for the host certificate, as OpenSSH does for hosts with an
+        // @cert-authority entry in known_hosts.
+        let config = client::Config {
+            preferred: russh::Preferred {
+                host_key_certificates: std::borrow::Cow::Borrowed(&[
+                    russh::keys::Algorithm::Ed25519,
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut handle = client::connect_stream(Arc::new(config), tls, handler)
+            .await
+            .map_err(|e| format!("ssh: {e}"))?;
+        let auth = handle
+            .authenticate_none(login)
+            .await
+            .map_err(|e| format!("ssh auth: {e}"))?;
+        if !auth.success() {
+            return Err("ssh: authentication rejected".into());
+        }
+        Ok(handle)
+    }
+
+    /// Run a command and collect (stdout, exit status).
+    pub async fn exec(
+        handle: &client::Handle<HostCheck>,
+        command: &str,
+    ) -> Result<(String, Option<u32>), String> {
+        let mut channel = handle
+            .channel_open_session()
+            .await
+            .map_err(|e| e.to_string())?;
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        let mut status = None;
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => out.extend_from_slice(&data),
+                ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        Ok((String::from_utf8_lossy(&out).into_owned(), status))
+    }
 }

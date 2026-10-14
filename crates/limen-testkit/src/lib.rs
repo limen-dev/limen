@@ -2,6 +2,7 @@
 //! access to the test database.
 
 pub mod idp;
+pub mod ssh_target;
 
 /// A temporary directory that is removed on drop, for spool and state tests.
 pub fn temp_dir() -> std::io::Result<tempfile::TempDir> {
