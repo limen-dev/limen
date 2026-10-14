@@ -1,0 +1,332 @@
+{
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 0,
+          "rawSQL": "SELECT date_trunc('minute', from_iso8601_timestamp(\"time\")) AS time, kind AS metric, count(DISTINCT event_id) AS value\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind IN ('auth.login', 'auth.denied')\nGROUP BY 1, 2 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Logins and denials",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "description": "Sessions started in the range without a session.end yet.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT count(*) AS active FROM (\n  SELECT session_id FROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind IN ('session.start', 'session.end') AND session_id IS NOT NULL\n  GROUP BY session_id HAVING count_if(kind = 'session.end') = 0\n)",
+          "refId": "A"
+        }
+      ],
+      "title": "Active sessions",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start'\nGROUP BY 1 ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Access by resource type",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT \"user\", data.resource AS resource, data.login AS login, count(DISTINCT session_id) AS sessions,\n  max(from_iso8601_timestamp(\"time\")) AS last_access\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start'\nGROUP BY 1, 2, 3 ORDER BY last_access DESC LIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Who accessed what",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 5,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT max(from_iso8601_timestamp(\"time\")) AS last_seen, coalesce(\"user\", '(unknown)') AS \"user\", data.action AS action,\n  data.resource AS resource, data.login AS login, data.reason AS reason, count(DISTINCT event_id) AS attempts\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'auth.denied'\nGROUP BY 2, 3, 4, 5, 6 ORDER BY last_seen DESC LIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed and denied attempts",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 6,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT \"user\", count(DISTINCT session_id) AS sessions\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start' AND \"user\" IS NOT NULL\nGROUP BY 1 ORDER BY 2 DESC LIMIT 15",
+          "refId": "A"
+        }
+      ],
+      "title": "Top users",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "description": "Commands as root, or using sudo, su, or other privilege-changing tools.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 7,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT from_iso8601_timestamp(\"time\") AS time, \"user\", data.login AS login, data.resource AS resource, data.command AS command, session_id\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'ssh.exec'\n  AND (data.login = 'root' OR regexp_like(data.command, '(^|[;&|[:space:]])(sudo|su|doas|pkexec|chmod|chown|passwd|useradd|usermod|visudo)([[:space:]]|$)'))\nORDER BY 1 DESC LIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Privileged commands",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "description": "Seconds since each producer's newest event reached the audit store. A growing value means its events aren't arriving.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "id": 8,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT producer.component AS component, producer.instance_id AS instance,\n  to_unixtime(current_timestamp) - to_unixtime(max(from_iso8601_timestamp(\"time\"))) AS lag_seconds\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd')\nGROUP BY 1, 2 ORDER BY lag_seconds DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingestion lag by producer",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "description": "Each producer numbers its events. Gaps mean lost events and should always be zero (ADR-0009).",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "id": 9,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT producer.instance_id AS instance, min(producer.seq) AS first_seq, max(producer.seq) AS last_seq,\n  max(producer.seq) - min(producer.seq) + 1 - count(DISTINCT producer.seq) AS missing\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd')\nGROUP BY 1 ORDER BY missing DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Missing events (sequence gaps)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "limen-trino"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 10,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "limen-trino"
+          },
+          "format": 1,
+          "rawSQL": "SELECT from_iso8601_timestamp(\"time\") AS time, \"user\" AS author, data.version AS version, data.digest AS digest, data.source_ref AS source_ref\nFROM audit.limen.events_raw WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'policy.change'\nORDER BY 1 DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Policy changes",
+      "type": "table"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "limen",
+    "audit"
+  ],
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "title": "Limen audit",
+  "uid": "limen-audit"
+}

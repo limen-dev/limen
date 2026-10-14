@@ -1,0 +1,199 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "folder": "Limen",
+      "interval": "5m",
+      "name": "limen-audit",
+      "orgId": 1,
+      "rules": [
+        {
+          "annotations": {
+            "summary": "More than 20 denied logins or sessions in 10 minutes."
+          },
+          "condition": "C",
+          "data": [
+            {
+              "datasourceUid": "limen-trino",
+              "model": {
+                "datasource": {
+                  "type": "trino-datasource",
+                  "uid": "limen-trino"
+                },
+                "format": 1,
+                "rawSQL": "SELECT count(DISTINCT event_id) AS value FROM audit.limen.events_raw WHERE kind = 'auth.denied' AND from_iso8601_timestamp(\"time\") > current_timestamp - INTERVAL '10' MINUTE AND dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd')",
+                "refId": "A"
+              },
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 86400,
+                "to": 0
+              }
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B",
+                "type": "reduce"
+              },
+              "refId": "B"
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        20
+                      ],
+                      "type": "gt"
+                    }
+                  }
+                ],
+                "expression": "B",
+                "refId": "C",
+                "type": "threshold"
+              },
+              "refId": "C"
+            }
+          ],
+          "execErrState": "Error",
+          "for": "5m",
+          "labels": {
+            "service": "limen"
+          },
+          "noDataState": "OK",
+          "title": "Limen: spike in denied access",
+          "uid": "limen-denied-spike-trino"
+        },
+        {
+          "annotations": {
+            "summary": "A producer's audit sequence has gaps: events were lost."
+          },
+          "condition": "C",
+          "data": [
+            {
+              "datasourceUid": "limen-trino",
+              "model": {
+                "datasource": {
+                  "type": "trino-datasource",
+                  "uid": "limen-trino"
+                },
+                "format": 1,
+                "rawSQL": "SELECT coalesce(sum(missing), 0) AS value FROM (SELECT max(producer.seq) - min(producer.seq) + 1 - count(DISTINCT producer.seq) AS missing FROM audit.limen.events_raw WHERE dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd') GROUP BY producer.instance_id)",
+                "refId": "A"
+              },
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 86400,
+                "to": 0
+              }
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B",
+                "type": "reduce"
+              },
+              "refId": "B"
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        0
+                      ],
+                      "type": "gt"
+                    }
+                  }
+                ],
+                "expression": "B",
+                "refId": "C",
+                "type": "threshold"
+              },
+              "refId": "C"
+            }
+          ],
+          "execErrState": "Error",
+          "for": "5m",
+          "labels": {
+            "service": "limen"
+          },
+          "noDataState": "OK",
+          "title": "Limen: audit events missing",
+          "uid": "limen-sequence-gaps-trino"
+        },
+        {
+          "annotations": {
+            "summary": "No audit event has reached the audit store in over an hour."
+          },
+          "condition": "C",
+          "data": [
+            {
+              "datasourceUid": "limen-trino",
+              "model": {
+                "datasource": {
+                  "type": "trino-datasource",
+                  "uid": "limen-trino"
+                },
+                "format": 1,
+                "rawSQL": "SELECT coalesce(to_unixtime(current_timestamp) - to_unixtime(max(from_iso8601_timestamp(\"time\"))), 0) AS value FROM audit.limen.events_raw WHERE dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd')",
+                "refId": "A"
+              },
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 86400,
+                "to": 0
+              }
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "expression": "A",
+                "reducer": "last",
+                "refId": "B",
+                "type": "reduce"
+              },
+              "refId": "B"
+            },
+            {
+              "datasourceUid": "__expr__",
+              "model": {
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        3600
+                      ],
+                      "type": "gt"
+                    }
+                  }
+                ],
+                "expression": "B",
+                "refId": "C",
+                "type": "threshold"
+              },
+              "refId": "C"
+            }
+          ],
+          "execErrState": "Error",
+          "for": "5m",
+          "labels": {
+            "service": "limen"
+          },
+          "noDataState": "OK",
+          "title": "Limen: audit ingestion stalled",
+          "uid": "limen-ingestion-stalled-trino"
+        }
+      ]
+    }
+  ]
+}

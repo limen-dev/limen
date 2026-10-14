@@ -3,11 +3,13 @@
 //!
 //! Needs `LIMEN_TEST_DATABASE_URL`, `LIMEN_TEST_S3_ENDPOINT` (`SeaweedFS` from
 //! the dev stack: `http://localhost:8333`), and AWS credentials in the
-//! environment (any values work with `SeaweedFS`'s open default configuration).
+//! environment (the dev stack's `SeaweedFS` accepts `test` / `test`, see
+//! `deploy/compose/s3/s3.json`).
 
 mod common;
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use common::Harness;
@@ -305,4 +307,57 @@ async fn full_spool_fails_closed_by_default() {
     let status = refused.expect("a login is refused once the spool is full");
     assert_eq!(status.code(), tonic::Code::Unavailable, "{status}");
     assert!(status.message().contains("audit"), "{status}");
+}
+
+/// Recordings are streamed from disk (aws-chunked, signed), unlike batches.
+#[tokio::test(flavor = "multi_thread")]
+async fn recordings_stream_to_s3() {
+    let Some(endpoint) = limen_testkit::s3_endpoint() else {
+        return;
+    };
+    let client = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
+    client
+        .create_bucket()
+        .bucket(&bucket)
+        .send()
+        .await
+        .expect("create bucket");
+    let sink = limen_control_plane::sinks::S3Sink::new(
+        client.clone(),
+        bucket.clone(),
+        String::new(),
+        None,
+        "cp-test".into(),
+        std::sync::Arc::default(),
+    );
+
+    // Several MiB, so the SDK splits the upload into chunks.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("rec.cast");
+    let mut body = String::from("{\"version\":3,\"term\":{\"cols\":80,\"rows\":24}}\n");
+    for i in 0..120_000 {
+        let _ = writeln!(body, "[0.01, \"o\", \"line {i}\\r\\n\"]");
+    }
+    std::fs::write(&path, &body).expect("write");
+
+    let uri = sink.put_recording("sess-1", &path).await.expect("upload");
+    let key = uri
+        .strip_prefix(&format!("s3://{bucket}/"))
+        .expect("s3 uri");
+    assert!(key.starts_with("recordings/dt=") && key.ends_with("/sess-1.cast"));
+    let stored = client
+        .get_object()
+        .bucket(&bucket)
+        .key(key)
+        .send()
+        .await
+        .expect("get")
+        .body
+        .collect()
+        .await
+        .expect("body")
+        .into_bytes();
+    assert_eq!(stored.len(), body.len());
+    assert_eq!(stored, body.as_bytes());
 }

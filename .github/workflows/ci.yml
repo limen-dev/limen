@@ -59,17 +59,20 @@ jobs:
       LIMEN_TEST_DATABASE_URL: postgres://limen:limen-ci@localhost:5432/limen
       LIMEN_TEST_KMS_ENDPOINT: http://localhost:8099
       LIMEN_TEST_S3_ENDPOINT: http://localhost:8333
-      # SeaweedFS accepts any credentials; the AWS SDK just needs some.
-      AWS_ACCESS_KEY_ID: ci
-      AWS_SECRET_ACCESS_KEY: ci-only-secret
+      # The test identity in deploy/compose/s3/s3.json.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
     steps:
-      # Service containers can't take a command, so S3 starts here.
-      - name: Start SeaweedFS (S3)
-        run: docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.48 server -s3 -dir=/data
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Service containers can't take a command or mount repo files, so S3 starts here.
+      - name: Start SeaweedFS (S3)
+        run: >-
+          docker run -d --name s3 -p 8333:8333
+          -v "$GITHUB_WORKSPACE/deploy/compose/s3/s3.json:/etc/seaweedfs/s3.json:ro"
+          chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test (and fail if any integration test skipped)
@@ -126,3 +129,26 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - run: actionlint
+
+  terraform-and-dashboards:
+    name: terraform validate + dashboards
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          install_args: terraform
+      - name: terraform fmt
+        run: terraform fmt -check -recursive deploy/terraform
+      - name: terraform validate
+        run: |
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/examples/audit; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+      - name: Generated dashboards are up to date
+        run: |
+          python3 dashboards/grafana/generate.py
+          git diff --exit-code -- dashboards/grafana

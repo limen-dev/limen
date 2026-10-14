@@ -43,12 +43,14 @@ services:
     ports: ["127.0.0.1:8099:8080"]
 
   # S3-compatible object store for audit batches and recordings (MinIO no
-  # longer publishes images). Open access, development only.
+  # longer publishes images). Requests must be signed with the dev or test
+  # keys in s3/s3.json: anonymous SeaweedFS rejects the SDK's signed
+  # streaming uploads. Development only.
   s3:
     image: chrislusf/seaweedfs:4.48
-    command: ["server", "-s3", "-dir=/data"]
+    command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
     ports: ["127.0.0.1:8333:8333"]
-    volumes: [s3-data:/data]
+    volumes: [s3-data:/data, "./s3/s3.json:/etc/seaweedfs/s3.json:ro"]
 
   # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
   fake-datadog:
@@ -86,7 +88,7 @@ services:
       LIMEN_AUDIT_S3_PATH_STYLE: "true"
       LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
       LIMEN_AUDIT_S3_FLUSH: 10s
-      # SeaweedFS accepts any credentials; the SDK just needs some.
+      # The dev identity in s3/s3.json.
       AWS_ACCESS_KEY_ID: dev
       AWS_SECRET_ACCESS_KEY: dev-only-secret
       AWS_REGION: us-east-1
@@ -145,6 +147,37 @@ services:
     volumes:
       # ssh-user-ca.pub, exported by the control plane.
       - ca-public:/etc/ssh/limen:ro
+
+  # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
+  trino:
+    image: trinodb/trino:483
+    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
+    depends_on: [s3]
+
+  # Creates the audit table and keeps its partitions in sync.
+  trino-init:
+    image: trinodb/trino:483
+    entrypoint: ["/init/sync.sh"]
+    volumes: ["./trino:/init:ro"]
+    depends_on: [trino]
+    restart: unless-stopped
+
+  # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
+  grafana:
+    image: grafana/grafana:13.0.2
+    depends_on: [trino]
+    environment:
+      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
+      GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/limen/limen-audit.json
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../dashboards/grafana/alerting/trino:/etc/grafana/provisioning/alerting:ro
+      - ../../dashboards/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro
 
 volumes:
   postgres: {}

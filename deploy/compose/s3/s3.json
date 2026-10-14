@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "limen-dev",
+      "credentials": [{ "accessKey": "dev", "secretKey": "dev-only-secret" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    },
+    {
+      "name": "limen-test",
+      "credentials": [{ "accessKey": "test", "secretKey": "test" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}
