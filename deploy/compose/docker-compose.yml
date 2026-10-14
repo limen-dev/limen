@@ -2,14 +2,18 @@
 #
 #   docker compose -f deploy/compose/docker-compose.yml up -d --build
 #
-# See deploy/compose/README.md for the walkthrough.
+# Walkthrough: deploy/compose/README.md. Everything here is for local
+# development only: static tokens, Dex static passwords, file-backed CA keys.
 name: limen
 
-x-limen-common: &limen-common
-  restart: unless-stopped
-  environment: &limen-env
-    RUST_LOG: info,limen=debug
-    LIMEN_LOG_JSON: "false"
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+x-dev-tokens:
+  # Multi-use tokens so `docker compose up` works unattended. Dev only.
+  proxy: &proxy-token dev-only-proxy-join-token-7f3a9c1e5b2d4f60
+  worker: &worker-token dev-only-worker-join-token-2c8e6a4b0d1f3e5a
 
 services:
   postgres:
@@ -32,5 +36,72 @@ services:
     volumes: ["./dex/config.yaml:/etc/dex/config.yaml:ro"]
     ports: ["127.0.0.1:5556:5556"]
 
+  control-plane:
+    build: { <<: *limen-build, target: control-plane }
+    image: limen-control-plane:dev
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      dex: { condition: service_started }
+    environment:
+      RUST_LOG: info
+      LIMEN_ID: control-plane-1
+      LIMEN_DATABASE_URL: postgres://limen:limen-dev-only@postgres:5432/limen
+      LIMEN_DNS_NAMES: control-plane,localhost
+      LIMEN_CA_DIR: /var/lib/limen/ca
+      LIMEN_CA_EXPORT_DIR: /var/lib/limen/ca-public
+      # The CLI reaches Dex at localhost:5556, the control plane at dex:5556.
+      LIMEN_OIDC_ISSUER: http://localhost:5556/dex
+      LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
+      LIMEN_OIDC_CLIENT_ID: limen-cli
+      LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a"
+      LIMEN_PROXY_DNS_NAMES: localhost,proxy
+      LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
+    ports: ["127.0.0.1:3081:3081"]
+    volumes:
+      - cp-ca:/var/lib/limen/ca
+      - ca-public:/var/lib/limen/ca-public
+      - audit:/var/lib/limen/audit
+
+  proxy:
+    build: { <<: *limen-build, target: proxy }
+    image: limen-proxy:dev
+    restart: unless-stopped
+    depends_on: [control-plane]
+    environment:
+      RUST_LOG: info
+      LIMEN_CONTROL_PLANE_ADDR: control-plane:3080
+      LIMEN_CONTROL_PLANE_NAME: control-plane
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *proxy-token
+      LIMEN_DNS_NAMES: localhost,proxy
+      LIMEN_DATA_DIR: /var/lib/limen/proxy
+    ports: ["127.0.0.1:3443:3443", "127.0.0.1:3444:3444"]
+    volumes:
+      - proxy-data:/var/lib/limen/proxy
+      - ca-public:/var/lib/limen/ca-public:ro
+
+  worker:
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:dev
+    restart: unless-stopped
+    depends_on: [proxy]
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+    volumes:
+      - worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+
 volumes:
   postgres: {}
+  cp-ca: {}
+  ca-public: {}
+  audit: {}
+  proxy-data: {}
+  worker-data: {}

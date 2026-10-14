@@ -13,3 +13,4 @@
 *.tfstate.*
 *.tfplan
 .terraform.lock.hcl.bak
+deploy/compose/.state/
