@@ -298,7 +298,6 @@ jobs:
       - name: Smoke test the published artifacts
         run: |
           set -euo pipefail
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           while read -r ref; do
             echo "== ${ref}"
