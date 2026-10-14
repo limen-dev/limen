@@ -28,7 +28,7 @@ limen-proxy = { path = "crates/limen-proxy" }
 limen-worker = { path = "crates/limen-worker" }
 
 # Runtime and errors
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time", "sync", "fs"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "io-std", "time", "sync", "fs"] }
 anyhow = "1.0.104"
 thiserror = "2.0.21"
 

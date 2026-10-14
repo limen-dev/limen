@@ -49,11 +49,19 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Open an SSH session: `limen ssh user@host`.
+    /// Open an SSH session: `limen ssh [login@]resource [command...]`.
     Ssh {
         target: String,
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,
+    },
+    /// OpenSSH ProxyCommand used by `limen ssh` and `limen config ssh`.
+    #[command(hide = true)]
+    SshProxy { login: String, host: String },
+    /// Print configuration snippets for other tools.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
     /// Database access.
     Db {
@@ -75,6 +83,12 @@ enum Command {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// An ~/.ssh/config block so `ssh <login>@<resource>.limen` works directly.
+    Ssh,
 }
 
 #[derive(Debug, Subcommand)]
@@ -124,7 +138,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Status => commands::status(proxy),
         Command::Ls { json } => commands::ls(proxy, json).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
-        Command::Ssh { .. } => not_yet(2),
+        Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
+        Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
+        Command::Config {
+            command: ConfigCommand::Ssh,
+        } => commands::ssh::config(proxy),
         Command::Db { .. } => not_yet(4),
         Command::Redis { .. } => not_yet(5),
         Command::Kube { .. } => not_yet(6),

@@ -81,6 +81,9 @@ pub async fn run(
         &key.serialize_pem(),
         &resp.cert_pem,
     )?;
+    if !resp.ssh_host_ca_public_key.is_empty() {
+        commands::ssh::write_known_hosts(&proxy, &resp.ssh_host_ca_public_key)?;
+    }
     profile::set_current(&proxy)?;
     println!("Logged in to {proxy} as {}.", resp.username);
     commands::status(Some(&proxy))

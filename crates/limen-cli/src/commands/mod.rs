@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod login;
+pub mod ssh;
 
 use limen_proto::v1::ListResourcesRequest;
 use limen_proto::v1::resources_client::ResourcesClient;

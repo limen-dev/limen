@@ -1,2 +1,2 @@
-doc-valid-idents = ["known_hosts", "OIDC", "IdP", "IdPs", "PKCE", "SubjectPublicKeyInfo", "OpenSSH", "OpenTelemetry", "PostgreSQL", "MySQL", "ElastiCache", "DogStatsD", "..", ]
+doc-valid-idents = ["known_hosts", "ProxyCommand", "OIDC", "IdP", "IdPs", "PKCE", "SubjectPublicKeyInfo", "OpenSSH", "OpenTelemetry", "PostgreSQL", "MySQL", "ElastiCache", "DogStatsD", "..", ]
 too-many-lines-threshold = 150
