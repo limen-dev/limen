@@ -28,7 +28,9 @@
       <div class="nav-label">Administration</div>
       <a href="/console/users"{% if chrome.active == "users" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><span>Users</span></a>
       <a href="/console/workers"{% if chrome.active == "workers" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#server"/></svg><span>Workers</span></a>
+      <a href="/console/audit"{% if chrome.active == "audit" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#activity"/></svg><span>Audit trail</span></a>
       <a href="/console/policy"{% if chrome.active == "policy" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#scroll-text"/></svg><span>Policy</span></a>
+      {% if let Some(g) = chrome.grafana %}<a href="{{ g }}" target="_blank" rel="noopener noreferrer"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chart-column"/></svg><span>Dashboards</span><svg class="i ext"><use href="/console/static/icons.svg?v={{ chrome.assets }}#external-link"/></svg></a>{% endif %}
       {% endif %}
     </nav>
     <div class="sidebar-foot">

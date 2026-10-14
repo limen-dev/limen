@@ -14,13 +14,16 @@ Then give the control plane (all replicas):
 | `LIMEN_CONSOLE_PUBLIC_URL` | `https://<public host>` (HTTPS only, no path) |
 | `LIMEN_CONSOLE_OIDC_CLIENT_ID` | defaults to `limen-console` |
 | `LIMEN_CONSOLE_OIDC_CLIENT_SECRET` | from your secret store; never in an image or a log |
+| `LIMEN_CONSOLE_SESSION_TTL` | optional; how long a browser sign-in lasts (default `8h`, capped by `LIMEN_MAX_CERT_TTL`) |
+| `LIMEN_CONSOLE_GRAFANA_URL` | optional; adds a Dashboards link for admins, such as `https://grafana.example.com` |
 
 Without the public URL the console is off and `/console/*` answers 404.
 
 ## Day to day
 - **Users**: who has signed in, their roles, lock status. Lock or unlock with a reason.
 - **Sessions**: active and past. Open one to play its recording or end it.
-- **Workers**: enrollment state, tunnels, certificate expiry. Create single-use join tokens (shown once) and revoke a worker.
+- **Workers**: enrollment state, tunnels, certificate expiry. Outstanding join tokens (unused and unexpired; values are never stored). Create single-use join tokens (shown once) and revoke a worker.
+- **Audit trail**: the last 30 days, filterable. A convenience copy for answering "what just happened"; for investigations use the sinks (S3 or Datadog) and [verify the chain](audit-verify.md).
 - **Policy**: what's active, the YAML behind each document, and a dry-run check. Apply changes with `limen admin apply`.
 
 ## Troubleshooting
@@ -33,7 +36,7 @@ Without the public URL the console is off and `/console/*` answers 404.
 | A session shows as "unknown" | No `session.end` arrived for 24 h: its proxy died. The audit trail has the details |
 | Blank player | Browser console shows a CSP error: something between the proxy and the browser rewrote the `Content-Security-Policy` header |
 
-Browser sessions end when the user's certificate lifetime ends, when they sign out, or when an admin locks them.
+Browser sessions end after `LIMEN_CONSOLE_SESSION_TTL` (8 hours by default), when they sign out, or when an admin locks them.
 
 ## Resources
 The Resources page is the quickest way to see what Limen can reach and whether it is reachable: a red "none" in the Workers column means no enrolled worker has the labels the resource asks for (`worker_selector`), so sessions to it fail. Check the worker's labels on the Workers page and the selector on the resource's page.

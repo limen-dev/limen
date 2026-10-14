@@ -234,6 +234,46 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
     data.get(key).and_then(serde_json::Value::as_i64)
 }
 
+/// Data fields that may appear in the console's audit trail, in display
+/// order. Everything else (statements, claims, groups) stays in the sinks.
+const SUMMARY_KEYS: [&str; 10] = [
+    "action",
+    "target_user",
+    "component_id",
+    "kind",
+    "resource",
+    "login",
+    "reason",
+    "by",
+    "via",
+    "worker_id",
+];
+
+/// The wire name of an event kind, such as `auth.login`.
+fn kind_name(kind: limen_audit::EventKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn summarize(data: &serde_json::Value) -> String {
+    let mut out = SUMMARY_KEYS
+        .iter()
+        .filter_map(|k| text(data, k).map(|v| format!("{k}={v}")))
+        .collect::<Vec<_>>()
+        .join("  ");
+    if out.len() > 300 {
+        let mut end = 300;
+        while !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push('…');
+    }
+    out
+}
+
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
@@ -241,6 +281,18 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
     use limen_audit::EventKind;
     let mut tx = db.begin().await?;
     for e in events {
+        sqlx::query(
+            "INSERT INTO audit_events (event_id, at, kind, username, session_id, summary)
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (event_id) DO NOTHING",
+        )
+        .bind(e.event_id)
+        .bind(e.time)
+        .bind(kind_name(e.kind))
+        .bind(&e.user)
+        .bind(e.session_id)
+        .bind(summarize(&e.data))
+        .execute(&mut *tx)
+        .await?;
         let Some(session_id) = e.session_id else {
             continue;
         };
@@ -413,4 +465,90 @@ pub async fn take_login(
         return Ok(None);
     }
     Ok(Some((r.try_get("nonce")?, r.try_get("pkce_verifier")?)))
+}
+
+// ---- the audit trail ---------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct EventRow {
+    pub at: OffsetDateTime,
+    pub kind: String,
+    pub username: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub summary: String,
+}
+
+/// Newest first. `limit` rows starting at `offset`.
+pub async fn list_events(
+    db: &Db,
+    username: Option<&str>,
+    kind: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<EventRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT at, kind, username, session_id, summary FROM audit_events
+         WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR kind = $2)
+         ORDER BY at DESC, event_id DESC LIMIT $3 OFFSET $4",
+    )
+    .bind(username)
+    .bind(kind)
+    .bind(limit + 1)
+    .bind(offset)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(EventRow {
+                at: r.try_get("at")?,
+                kind: r.try_get("kind")?,
+                username: r.try_get("username")?,
+                session_id: r.try_get("session_id")?,
+                summary: r.try_get("summary")?,
+            })
+        })
+        .collect()
+}
+
+/// The kinds seen in the trail, for the filter.
+pub async fn event_kinds(db: &Db) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT DISTINCT kind FROM audit_events ORDER BY kind")
+        .fetch_all(db)
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_keeps_only_listed_fields() {
+        let data = serde_json::json!({
+            "reason": "stolen laptop",
+            "target_user": "developer@example.com",
+            "statement": "select * from secrets where token = 'abc'",
+            "groups": ["sre"],
+            "idp_subject": "subject-123",
+        });
+        let summary = summarize(&data);
+        assert_eq!(
+            summary,
+            "target_user=developer@example.com  reason=stolen laptop"
+        );
+        assert!(!summary.contains("secrets") && !summary.contains("subject"));
+    }
+
+    #[test]
+    fn summary_is_capped_on_a_character_boundary() {
+        let data = serde_json::json!({ "reason": "é".repeat(400) });
+        let summary = summarize(&data);
+        assert!(summary.chars().count() < 305);
+        assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn kind_names_match_the_wire_format() {
+        assert_eq!(kind_name(limen_audit::EventKind::AuthLogin), "auth.login");
+        assert_eq!(kind_name(limen_audit::EventKind::UserLock), "user.lock");
+    }
 }

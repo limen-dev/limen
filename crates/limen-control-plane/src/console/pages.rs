@@ -16,10 +16,10 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, Chrome, ComponentView, DryRun, Home, KindTab, PolicyDoc, PolicyGroup, PolicyPage,
-    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView,
-    SessionsPage, Stats, TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers,
-    error_page, list_text, path_segment, time_text,
+    self, AuditPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab, PendingTokenView,
+    PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage,
+    RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage, UserView,
+    UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -29,7 +29,25 @@ use crate::state::AppState;
 const PAGE_SIZE: i64 = 50;
 
 fn chrome(state: &AppState, auth: &Auth, active: &'static str) -> Chrome {
-    Chrome::new(auth, active, state.policy.current().version)
+    let mut chrome = Chrome::new(auth, active, state.policy.current().version);
+    chrome.grafana.clone_from(&state.config.console_grafana_url);
+    chrome
+}
+
+fn event_view(e: &store::EventRow) -> EventView {
+    EventView {
+        at: time_text(Some(e.at)),
+        tone: match e.kind.as_str() {
+            "auth.denied" | "user.lock" | "session.kill" | "component.revoke" => "bad",
+            "auth.login" | "user.unlock" | "worker.enroll" => "ok",
+            _ => "",
+        },
+        kind: e.kind.clone(),
+        user: e.username.clone(),
+        user_path: e.username.as_deref().map(path_segment),
+        session_path: e.session_id.map(|id| id.to_string()),
+        summary: e.summary.clone(),
+    }
 }
 
 fn actor(auth: &Auth) -> Actor<'_> {
@@ -720,6 +738,10 @@ pub async fn user_detail(
             }
         }
     };
+    let events = match store::list_events(&state.db, Some(&name), None, 15, 0).await {
+        Ok(rows) => rows.iter().take(15).map(event_view).collect(),
+        Err(e) => return db_error("reading a user's activity", &e),
+    };
     let filter = SessionFilter {
         username: Some(name),
         limit: PAGE_SIZE,
@@ -739,6 +761,7 @@ pub async fn user_detail(
             notice: notice(q.done.as_deref()),
             u: view,
             sessions,
+            events,
         }
         .render(),
     )
@@ -857,11 +880,31 @@ pub async fn workers(
             }
         })
         .collect();
+    let pending = match db::list_pending_join_tokens(&state.db).await {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|t| {
+                let labels: BTreeMap<String, String> =
+                    serde_json::from_value(t.labels).unwrap_or_default();
+                let worker = t.kind == "worker";
+                PendingTokenView {
+                    icon: if worker { "server" } else { "radio" },
+                    kclass: if worker { "k-worker" } else { "k-proxy" },
+                    label_list: labels.iter().map(|(k, v)| format!("{k}={v}")).collect(),
+                    kind: t.kind,
+                    created_by: t.created_by,
+                    expires: time_text(Some(t.expires_at)),
+                }
+            })
+            .collect(),
+        Err(e) => return db_error("listing join tokens", &e),
+    };
     html(
         Workers {
             chrome: chrome(&state, &auth, "workers"),
             notice: notice(q.done.as_deref()),
             components,
+            pending,
         }
         .render(),
     )
@@ -1085,4 +1128,63 @@ pub async fn dry_run(
         },
     };
     policy_page(&state, &auth, form.yaml, Some(result))
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    user: Option<String>,
+    kind: Option<String>,
+    offset: Option<i64>,
+}
+
+pub async fn audit(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<AuditQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let user = q.user.clone().filter(|u| !u.is_empty());
+    let kind = q.kind.clone().filter(|k| !k.is_empty());
+    let offset = q.offset.unwrap_or(0).max(0);
+    let mut rows = match store::list_events(
+        &state.db,
+        user.as_deref(),
+        kind.as_deref(),
+        PAGE_SIZE,
+        offset,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_error("listing audit events", &e),
+    };
+    let kinds = store::event_kinds(&state.db).await.unwrap_or_default();
+    let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
+    rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
+    let link = |offset: i64| {
+        let mut url = format!("/console/audit?offset={offset}");
+        if let Some(u) = &user {
+            url.push_str("&user=");
+            url.push_str(&path_segment(u));
+        }
+        if let Some(k) = &kind {
+            url.push_str("&kind=");
+            url.push_str(&path_segment(k));
+        }
+        url
+    };
+    html(
+        AuditPage {
+            chrome: chrome(&state, &auth, "audit"),
+            events: rows.iter().map(event_view).collect(),
+            kinds,
+            newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
+            older: has_more.then(|| link(offset + PAGE_SIZE)),
+            kind_filter: kind.clone(),
+            user_filter: user.clone(),
+        }
+        .render(),
+    )
 }

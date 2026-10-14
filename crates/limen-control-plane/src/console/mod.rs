@@ -89,6 +89,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/workers", get(pages::workers))
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
+        .route("/console/audit", get(pages::audit))
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))
         // Not `.fallback()`: the gRPC router this is merged with has one.

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Audit trail{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Audit trail</h1>
+    <p class="sub">The last 30 days, newest first. This is a summary: the complete, signed events are in your audit sinks.</p>
+  </div>
+</div>
+<form method="get" action="/console/audit" class="filters">
+  <label><span>Event</span>
+    <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if kind_filter.as_deref() == Some(k.as_str()) %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+  </label>
+  <label><span>User</span>
+    <input type="text" name="user" value="{% if let Some(u) = user_filter %}{{ u }}{% endif %}" placeholder="anyone" maxlength="200">
+  </label>
+  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
+</form>
+{% include "events_table.html" %}
+<p class="pager">
+  {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
+  {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}
+</p>
+{% endblock %}

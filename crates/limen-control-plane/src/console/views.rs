@@ -21,6 +21,7 @@ pub struct Chrome {
     pub version: &'static str,
     pub assets: &'static str,
     pub policy_version: i64,
+    pub grafana: Option<String>,
 }
 
 impl Chrome {
@@ -40,6 +41,7 @@ impl Chrome {
             version: limen_core::VERSION,
             assets: super::assets::version(),
             policy_version,
+            grafana: None,
         }
     }
 }
@@ -357,6 +359,7 @@ pub struct UserPage {
     pub notice: Option<&'static str>,
     pub u: UserView,
     pub sessions: Vec<SessionView>,
+    pub events: Vec<EventView>,
 }
 
 pub struct ComponentView {
@@ -372,12 +375,44 @@ pub struct ComponentView {
     pub revoked: bool,
 }
 
+pub struct PendingTokenView {
+    pub kind: String,
+    pub kclass: &'static str,
+    pub icon: &'static str,
+    pub label_list: Vec<String>,
+    pub created_by: String,
+    pub expires: String,
+}
+
 #[derive(Template)]
 #[template(path = "workers.html")]
 pub struct Workers {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub components: Vec<ComponentView>,
+    pub pending: Vec<PendingTokenView>,
+}
+
+pub struct EventView {
+    pub at: String,
+    pub kind: String,
+    pub tone: &'static str,
+    pub user: Option<String>,
+    pub user_path: Option<String>,
+    pub session_path: Option<String>,
+    pub summary: String,
+}
+
+#[derive(Template)]
+#[template(path = "audit.html")]
+pub struct AuditPage {
+    pub chrome: Chrome,
+    pub events: Vec<EventView>,
+    pub kinds: Vec<String>,
+    pub kind_filter: Option<String>,
+    pub user_filter: Option<String>,
+    pub newer: Option<String>,
+    pub older: Option<String>,
 }
 
 #[derive(Template)]

@@ -113,6 +113,8 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | E: a worker or other component calls the console directly | Only a proxy certificate with the forwarded marker is accepted |
 | D: sign-in flooding | Separate per-IP limiter for console login; login state rows expire in 10 minutes and are cleaned up |
 | R: unattributed console changes | Every change is audited as the signed-in admin with `via=console` |
+| I: sensitive data in the console's audit trail | The `audit_events` table stores only a fixed list of summary fields (never statements, claims, or payloads), is readable by admins only, and is trimmed after 30 days. The sinks remain the record |
+| S: a stolen cookie lives longer now that sign-ins last 8 hours (A-console) | Lock, kill and every-request lock checks still end it at once; the lifetime is configurable (`LIMEN_CONSOLE_SESSION_TTL`) and capped by the maximum certificate lifetime. Limit: no device binding |
 
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |

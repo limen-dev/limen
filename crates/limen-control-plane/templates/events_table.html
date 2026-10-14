@@ -1,0 +1,16 @@
+<div class="table-wrap"><table>
+  <thead><tr><th>When</th><th>Event</th><th>User</th><th>Details</th><th></th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr>
+      <td class="nowrap">{{ e.at }}</td>
+      <td class="nowrap"><span class="pill {{ e.tone }}">{{ e.kind }}</span></td>
+      <td>{% if let Some(u) = e.user %}{% if let Some(p) = e.user_path %}<a href="/console/users/{{ p }}">{{ u }}</a>{% endif %}{% else %}—{% endif %}</td>
+      <td class="mono">{{ e.summary }}</td>
+      <td class="nowrap">{% if let Some(s) = e.session_path %}<a href="/console/sessions/{{ s }}">session</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No events match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>

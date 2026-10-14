@@ -33,6 +33,24 @@
   </tbody>
 </table></div>
 
+<h2>Outstanding join tokens</h2>
+<p class="sub">Created and not yet used or expired. The token values are never stored, so they can't be shown again.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>For</th><th>Labels</th><th>Created by</th><th>Expires</th></tr></thead>
+  <tbody>
+  {% for t in pending %}
+    <tr>
+      <td class="nowrap"><div class="kind-cell"><span class="kind {{ t.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div>{{ t.kind }}</div></div></td>
+      <td><div class="chips">{% for l in t.label_list %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
+      <td>{{ t.created_by }}</td>
+      <td class="nowrap">{{ t.expires }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="empty">None. Every token that was created has been used or has expired.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
 <h2>Create a join token</h2>
 <div class="card">
 <form method="post" action="/console/workers/tokens" class="stack">

@@ -133,6 +133,36 @@ pub async fn insert_join_token(
         .map(|_| ())
 }
 
+/// A join token that can still be used. The secret itself is never stored.
+#[derive(Debug, Clone)]
+pub struct PendingToken {
+    pub kind: String,
+    pub labels: serde_json::Value,
+    pub created_by: String,
+    pub created_at: OffsetDateTime,
+    pub expires_at: OffsetDateTime,
+}
+
+pub async fn list_pending_join_tokens(db: &Db) -> Result<Vec<PendingToken>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT kind, labels, created_by, created_at, expires_at FROM join_tokens
+         WHERE used_at IS NULL AND expires_at > now() ORDER BY expires_at",
+    )
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(PendingToken {
+                kind: r.try_get("kind")?,
+                labels: r.try_get("labels")?,
+                created_by: r.try_get("created_by")?,
+                created_at: r.try_get("created_at")?,
+                expires_at: r.try_get("expires_at")?,
+            })
+        })
+        .collect()
+}
+
 /// Atomically consume a single-use token. Returns its labels and allowed DNS
 /// names, or `None` if it doesn't exist, has expired, was already used, or
 /// is for another component kind.
@@ -390,6 +420,10 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .await?
         .rows_affected();
     deleted += sqlx::query("DELETE FROM join_tokens WHERE expires_at < now() - interval '7 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM audit_events WHERE at < now() - interval '30 days'")
         .execute(&mut *tx)
         .await?
         .rows_affected();

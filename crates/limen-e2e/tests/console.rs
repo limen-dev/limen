@@ -411,7 +411,12 @@ async fn console_end_to_end() {
     assert!(page.body.contains("limen ssh web-1"));
     assert!(!page.body.contains(">Users<"), "no admin navigation");
     assert!(!page.body.contains("active sessions"), "no admin stats");
-    for path in ["/console/users", "/console/workers", "/console/policy"] {
+    for path in [
+        "/console/users",
+        "/console/workers",
+        "/console/policy",
+        "/console/audit",
+    ] {
         let page = dev_user.get(path).await;
         assert_eq!(page.status, 403, "{path}");
     }
@@ -646,6 +651,12 @@ async fn console_end_to_end() {
         .await;
     assert_eq!(page.status, 200, "{}", page.body);
     assert!(page.body.contains("lmn_join_"), "the token is shown once");
+    let after = admin_user.get("/console/workers").await;
+    assert!(
+        after.body.contains("Outstanding join tokens") && after.body.contains("team=db"),
+        "the unused token is listed (without its value)"
+    );
+    assert!(!after.body.contains("lmn_join_"));
     let page = admin_user
         .post(
             "/console/workers/tokens",
@@ -686,6 +697,34 @@ async fn console_end_to_end() {
         || async { d.proxy().tunnels.summaries().is_empty() },
     )
     .await;
+
+    // ---- the audit trail ------------------------------------------------------------------
+    let mut trail = String::new();
+    for _ in 0..40 {
+        trail = admin_user.get("/console/audit").await.body;
+        if trail.contains("auth.login") && trail.contains("join_token.create") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(trail.contains("auth.login"), "{trail}");
+    assert!(trail.contains("join_token.create") && trail.contains("component.revoke"));
+    let filtered = admin_user
+        .get(&format!("/console/audit?kind=user.lock&user={ADMIN_ENC}"))
+        .await;
+    assert_eq!(filtered.status, 200);
+    // (The kinds also appear as options in the filter, so look at the rows.)
+    assert!(
+        filtered.body.contains(">user.lock</span>"),
+        "{}",
+        filtered.body
+    );
+    assert!(filtered.body.contains(&format!("target_user={DEVELOPER}")));
+    assert!(!filtered.body.contains(">join_token.create</span>"));
+    let user_page = admin_user
+        .get(&format!("/console/users/{DEVELOPER_ENC}"))
+        .await;
+    assert!(user_page.body.contains("Recent activity"));
 
     // ---- policy browsing and dry run -------------------------------------------------------
     let policy_page = admin_user.get("/console/policy").await;

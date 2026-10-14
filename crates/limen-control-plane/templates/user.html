@@ -33,4 +33,7 @@
 {% endif %}
 <h2>Sessions</h2>
 {% include "sessions_table.html" %}
+<h2>Recent activity</h2>
+{% include "events_table.html" %}
+<p class="pager"><a href="/console/audit?user={{ u.path }}">All activity →</a></p>
 {% endblock %}
