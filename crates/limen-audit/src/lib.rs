@@ -1,9 +1,16 @@
-//! Audit event schema (v1).
+//! Audit event schema (v1) and emission.
 //!
-//! The disk spool and the S3 and Datadog sinks arrive in Phases 1 and 3
-//! (see ADR-0009). The envelope defined here is the stable contract that
-//! the Glue table and Grafana dashboards are built on, so changes must bump
-//! [`SCHEMA_VERSION`].
+//! Phase 1 ships the [`Emitter`] and a stub sink: a local, fsynced JSONL
+//! file ([`sink::JsonlFileSink`]). The disk spool and the S3 and Datadog
+//! sinks arrive in Phase 3 (ADR-0009). The envelope defined here is the
+//! stable contract that the Glue table and Grafana dashboards are built on,
+//! so changes must bump [`SCHEMA_VERSION`].
+
+pub mod emitter;
+pub mod sink;
+
+pub use emitter::{AuditError, Context, Emitter, FailureMode};
+pub use sink::{AuditSink, JsonlFileSink, MemorySink};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
