@@ -1,4 +1,4 @@
-<p align="center"><img src="../assets/logo.svg" alt="Limen" width="240"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/logo-dark.svg"><img src="../assets/logo.svg" alt="Limen" width="240"></picture></p>
 
 # Limen design
 

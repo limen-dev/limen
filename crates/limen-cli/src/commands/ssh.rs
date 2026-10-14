@@ -56,10 +56,16 @@ async fn default_login(proxy: Option<&str>, resource: &str) -> anyhow::Result<St
         .with_context(|| format!("you have no SSH access to {resource:?}; see `limen ls`"))?;
     match found.principals.as_slice() {
         [only] => Ok(only.clone()),
-        many => bail!(
-            "several logins are allowed on {resource} ({}); pick one: limen ssh <login>@{resource}",
-            many.join(", ")
-        ),
+        many => {
+            let options: Vec<String> = many
+                .iter()
+                .map(|l| format!("  limen ssh {l}@{resource}"))
+                .collect();
+            bail!(
+                "several logins are allowed on {resource}; pick one:\n{}",
+                options.join("\n")
+            )
+        }
     }
 }
 
@@ -86,6 +92,9 @@ fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<String> {
         "ForwardX11=no".into(),
         "ClearAllForwardings=yes".into(),
         "ServerAliveInterval=30".into(),
+        // Limen prints its own errors (access denied, ...). Without this,
+        // OpenSSH adds "Connection closed by UNKNOWN port 65535" after them.
+        "LogLevel=ERROR".into(),
     ]
 }
 
