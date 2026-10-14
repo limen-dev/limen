@@ -82,6 +82,8 @@ services:
       LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
       LIMEN_JOIN_TOKEN: *proxy-token
       LIMEN_DNS_NAMES: localhost,proxy
+      # How other proxies reach this one for peering (ADR-0004).
+      LIMEN_PEER_ADDRESS: proxy:3443
       LIMEN_DATA_DIR: /var/lib/limen/proxy
     ports: ["127.0.0.1:3443:3443", "127.0.0.1:3444:3444"]
     volumes:

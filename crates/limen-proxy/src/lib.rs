@@ -3,6 +3,7 @@
 //! (ADR-0002 through ADR-0005).
 
 pub mod config;
+mod peer;
 pub mod relay;
 mod ssh;
 pub mod tunnels;
@@ -57,6 +58,7 @@ pub struct Proxy {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     signer: Arc<RwLock<Arc<limen_session::envelope::EnvelopeSigner>>>,
     pub(crate) audit: limen_audit::Emitter,
+    pub(crate) peers: Arc<peer::PeerState>,
 }
 
 impl Proxy {
@@ -123,6 +125,7 @@ impl Proxy {
                 policy,
                 signer,
                 audit,
+                peers: Arc::default(),
             },
             tx,
         ))
@@ -181,7 +184,7 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
         identity,
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
-        &[alpn::TUNNEL, alpn::SSH, alpn::H2],
+        &[alpn::TUNNEL, alpn::PEER, alpn::SSH, alpn::H2],
     )?)
 }
 
@@ -297,6 +300,7 @@ async fn handle_connection(
     match protocol.as_deref() {
         Some(p) if p == alpn::TUNNEL => accept_tunnel(proxy, tls, peer, shutdown).await,
         Some(p) if p == alpn::SSH => ssh::handle(proxy, tls, peer).await,
+        Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {
             let mut shutdown = shutdown;
             let drain = Duration::from_secs(proxy.config.drain_timeout_secs);

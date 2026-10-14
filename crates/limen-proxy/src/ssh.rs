@@ -116,6 +116,23 @@ async fn respond(
     write_message(tls, &response).await
 }
 
+enum Route {
+    Local {
+        worker_id: String,
+        channel: limen_tunnel::tunnel::TunnelChannel,
+    },
+    Peer(crate::peer::Remote),
+}
+
+impl Route {
+    fn worker_id(&self) -> &str {
+        match self {
+            Route::Local { worker_id, .. } => worker_id,
+            Route::Peer(remote) => &remote.worker_id,
+        }
+    }
+}
+
 struct Denial {
     reason: String,
     /// Policy denials are audited; infrastructure failures are logged.
@@ -162,15 +179,35 @@ async fn establish(
             request.principal, request.resource
         )));
     }
-    let (worker_id, channel) = proxy
+    // A worker tunnelled to this proxy if possible, otherwise one held by a
+    // peer proxy (ADR-0004).
+    let route = match proxy
         .tunnels
         .pick(|labels| policy.worker_may_serve(&request.resource, labels))
-        .ok_or_else(|| {
-            failed(format!(
-                "no worker is connected that can reach {}",
-                request.resource
-            ))
-        })?;
+    {
+        Some((worker_id, channel)) => Route::Local { worker_id, channel },
+        None => match crate::peer::find(proxy, |labels| {
+            policy.worker_may_serve(&request.resource, labels)
+        })
+        .await
+        {
+            Ok(Some(remote)) => Route::Peer(remote),
+            Ok(None) => {
+                return Err(failed(format!(
+                    "no worker is connected that can reach {}",
+                    request.resource
+                )));
+            }
+            Err(e) => {
+                return Err(failed(format!(
+                    "no local worker for {}, and peer lookup failed: {}",
+                    request.resource,
+                    e.message()
+                )));
+            }
+        },
+    };
+    let worker_id = route.worker_id().to_owned();
 
     let session_id = Uuid::now_v7();
     let ttl = policy.max_session_ttl(&user.roles);
@@ -202,10 +239,25 @@ async fn establish(
     })
     .await
     .map_err(|_| failed("tunnel closed"))?;
-    let mut client = WorkerTunnelClient::new(channel);
-    let mut inbound = client
-        .open_session(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .await
+    let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let opened = match route {
+        Route::Local { channel, .. } => {
+            WorkerTunnelClient::new(channel)
+                .open_session(outbound)
+                .await
+        }
+        Route::Peer(remote) => {
+            tracing::info!(worker = %remote.worker_id, via = %remote.proxy_id, "opening the session through a peer proxy");
+            let mut request = tonic::Request::new(outbound);
+            if let Ok(value) = remote.worker_id.parse() {
+                request.metadata_mut().insert(crate::peer::WORKER_ID, value);
+            }
+            WorkerTunnelClient::new(remote.channel)
+                .open_session(request)
+                .await
+        }
+    };
+    let mut inbound = opened
         .map_err(|s| match s.code() {
             tonic::Code::PermissionDenied => {
                 denied(format!("worker refused the session: {}", s.message()))
