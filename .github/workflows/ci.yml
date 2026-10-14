@@ -4,12 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs the whole suite before it builds anything, and
+  # dispatches it for the release pull request (whose commits are pushed with
+  # the workflow token, which doesn't start workflows by itself).
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # (When the release workflow calls this one, github.workflow is the caller's name.)
+  group: ${{ github.workflow }}-${{ github.ref }}
   # Only supersede pull request runs. A push to main always runs to the end, so a
   # quick follow-up commit can't hide the result of the one before it.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

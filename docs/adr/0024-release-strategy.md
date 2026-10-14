@@ -1,6 +1,6 @@
 # ADR-0024: Releases and distribution
 
-- Status: Proposed (owner asked for a strategy 2026-10-14)
+- Status: Accepted (owner agreed 2026-10-14); pipeline built, first run pending
 - Date: 2026-10-14
 
 ## Context
@@ -37,3 +37,11 @@ Releases are automated; a person decides *when*, never *how*.
 - The repository is private today, so releases and GHCR images are visible to collaborators only until it is public.
 - `Cargo.toml`'s workspace version is the single source of the number; the release workflow must check that the tag matches it.
 - The existing `release.yml` (tag triggers a draft with binaries) is replaced by the release-please workflow above; its build matrix and packaging steps carry over.
+
+## Amendment: how the pipeline is built
+- `release-please-config.json` and `.release-please-manifest.json` drive it. The workspace version is read and written at `$.workspace.package.version` in `Cargo.toml`. `draft` and `prerelease` are on, so every release starts as a draft pre-release. The first release is forced to `0.1.0-rc.1` with `release-as`; remove that line after it ships.
+- **Cargo.lock.** CI builds with `--locked` and the lock file names each crate's version, so a version bump alone would turn CI red. A `lockfile` job refreshes it on the release branch (`cargo update --workspace`) and then **dispatches CI** on that branch, because commits and pull requests made with the workflow token don't start workflows by themselves.
+- **Gate.** After the release PR is merged, `verify` runs the whole CI workflow (called as a reusable workflow) on the release commit. Nothing is built until it passes.
+- **Binaries** for four targets, **images** built natively per architecture (no emulation) and combined into one multi-arch tag per component, a **CycloneDX SBOM** (syft), and a **deploy bundle** (compose, Terraform, dashboards, runbooks). `SHA256SUMS` covers all of them. A final job pulls each image and runs `--version`, runs the Linux CLI from the tarball, uploads the assets to the draft, and publishes it only if the repository variable `RELEASE_AUTO_PUBLISH` is `true`.
+- **Signatures and attestations (cosign, build provenance) run only when the repository is public.** Sigstore's transparency log is public and would otherwise record this private repository's name, and GitHub's attestations need a paid plan for private repositories. The steps are already in the workflow and switch on by themselves.
+- **Not yet covered:** the smoke test checks that the artifacts run, not that the stack works end to end from them (running `demo-phase35.sh` against the published images is the next step). Floating minor tags (`:0.1`) are only added for non-prerelease versions.
