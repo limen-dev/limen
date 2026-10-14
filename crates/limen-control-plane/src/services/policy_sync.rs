@@ -43,6 +43,11 @@ impl PolicySync for PolicySyncService {
                 .map_err(|e| internal("reading session kills", e))?
                 .into_iter()
                 .collect(),
+            revoked_components: db::revoked_components(&self.0.db)
+                .await
+                .map_err(|e| internal("reading revoked components", e))?
+                .into_iter()
+                .collect(),
         };
         let signed = limen_session::snapshot::sign(
             &key,

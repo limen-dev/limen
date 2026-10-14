@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
+{% if chrome.is_admin %}
+<section class="cards">
+  <a class="card" href="/console/sessions?filter=active"><b>{{ stats.active_sessions }}</b><span>active sessions</span></a>
+  <a class="card" href="/console/users"><b>{{ stats.users }}</b><span>users seen</span></a>
+  <a class="card" href="/console/users"><b>{{ stats.locked }}</b><span>locked</span></a>
+  <a class="card" href="/console/workers"><b>{{ stats.workers_up }}</b><span>workers connected</span></a>
+  <a class="card" href="/console/policy"><b>v{{ chrome.policy_version }}</b><span>policy</span></a>
+</section>
+{% endif %}
+
+<h2>Resources you can access</h2>
+{% if resources.is_empty() %}
+<p class="muted">Your roles don't grant access to any resource.</p>
+{% else %}
+<table>
+  <thead><tr><th>Resource</th><th>Kind</th><th>Labels</th><th>Logins / roles</th><th>Connect</th></tr></thead>
+  <tbody>
+  {% for r in resources %}
+    <tr>
+      <td>{{ r.name }}</td><td>{{ r.kind }}</td><td class="mono">{{ r.labels }}</td><td class="mono">{{ r.principals }}</td>
+      <td>{% if r.kind == "ssh" %}<code>limen ssh {{ r.name }}</code>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %}</h2>
+{% include "sessions_table.html" %}
+<p><a href="/console/sessions">All sessions →</a></p>
+
+<p class="muted">You're signed in as {{ chrome.username }} with {{ roles_text }}. This console session ends {{ expires }}.</p>
+{% endblock %}

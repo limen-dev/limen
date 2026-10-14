@@ -84,6 +84,24 @@ pub struct Config {
     )]
     pub oidc_scopes: Vec<String>,
 
+    /// Public URL users reach the proxy at, such as `https://limen.example.com`.
+    /// Setting it turns on the web console under `/console/` (ADR-0017).
+    #[arg(long, env = "LIMEN_CONSOLE_PUBLIC_URL")]
+    pub console_public_url: Option<String>,
+
+    /// The console's own OIDC client. Its redirect URI is
+    /// `<console public URL>/console/callback`.
+    #[arg(
+        long,
+        env = "LIMEN_CONSOLE_OIDC_CLIENT_ID",
+        default_value = "limen-console"
+    )]
+    pub console_oidc_client_id: String,
+
+    /// Secret of the console's OIDC client. Required with the console.
+    #[arg(long, env = "LIMEN_CONSOLE_OIDC_CLIENT_SECRET", value_parser = parse_secret)]
+    pub console_oidc_client_secret: Option<Secret<String>>,
+
     /// ID token claim used as the Limen username.
     #[arg(
         long,

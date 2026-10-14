@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ u.name }}{% endblock %}
+{% block content %}
+<h1>{{ u.name }}</h1>
+{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
+<table class="facts">
+  <tr><th>Roles</th><td class="mono">{{ u.roles }}</td></tr>
+  <tr><th>IdP groups</th><td class="mono">{{ u.groups }}</td></tr>
+  <tr><th>First sign-in</th><td>{{ u.first_login }}</td></tr>
+  <tr><th>Last sign-in</th><td>{{ u.last_login }}</td></tr>
+  <tr><th>Sign-ins</th><td>{{ u.logins }}</td></tr>
+  <tr><th>Status</th><td>{% if u.locked %}<span class="status bad">locked</span> by {{ u.locked_by }} on {{ u.locked_at }}: {{ u.lock_reason }}{% else %}<span class="status ok">active</span>{% endif %}</td></tr>
+</table>
+{% if u.locked %}
+<form method="post" action="/console/users/{{ u.path }}/unlock" class="inline">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <button type="submit">Unlock {{ u.name }}</button>
+</form>
+{% else %}
+<form method="post" action="/console/users/{{ u.path }}/lock" class="inline danger-form">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" size="40">
+  <button type="submit" class="danger">Lock {{ u.name }}</button>
+</form>
+<p class="muted">Locking refuses new sign-ins and sessions at once and ends open sessions within about 11 seconds.</p>
+{% endif %}
+<h2>Sessions</h2>
+{% include "sessions_table.html" %}
+{% endblock %}

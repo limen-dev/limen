@@ -25,6 +25,8 @@ pub struct AppState {
     pub policy: PolicyStore,
     pub audit: Emitter,
     pub pipeline: crate::pipeline::Pipeline,
+    /// Present when `--console-public-url` is set.
+    pub console: Option<crate::console::Console>,
     pub limits: Arc<Limits>,
     /// Signs policy snapshots with this replica's own (rotating) key. Set
     /// once the server certificate is issued.
@@ -97,6 +99,9 @@ impl PolicyStore {
 #[derive(Debug)]
 pub struct Limits {
     pub unauthenticated: DefaultKeyedRateLimiter<IpAddr>,
+    /// Browser sign-ins (two requests each: start and callback). Separate, so
+    /// the console and the CLI don't share one budget.
+    pub console_login: DefaultKeyedRateLimiter<IpAddr>,
 }
 
 impl Default for Limits {
@@ -104,8 +109,12 @@ impl Default for Limits {
         // 30 requests a minute per IP, with bursts of 10.
         let quota = Quota::per_minute(NonZeroU32::new(30).unwrap_or(NonZeroU32::MIN))
             .allow_burst(NonZeroU32::new(10).unwrap_or(NonZeroU32::MIN));
+        // 60 requests a minute per IP, with bursts of 20.
+        let console = Quota::per_minute(NonZeroU32::new(60).unwrap_or(NonZeroU32::MIN))
+            .allow_burst(NonZeroU32::new(20).unwrap_or(NonZeroU32::MIN));
         Self {
             unauthenticated: RateLimiter::keyed(quota),
+            console_login: RateLimiter::keyed(console),
         }
     }
 }
@@ -118,9 +127,17 @@ impl Limits {
             .map_err(|_| Status::resource_exhausted("too many requests; slow down"))
     }
 
+    pub fn check_console_login(&self, addr: Option<IpAddr>) -> Result<(), Status> {
+        let key = addr.unwrap_or(IpAddr::from([0, 0, 0, 0]));
+        self.console_login
+            .check_key(&key)
+            .map_err(|_| Status::resource_exhausted("too many sign-in attempts; slow down"))
+    }
+
     /// Drop state for idle keys. Call periodically.
     pub fn shrink(&self) {
         self.unauthenticated.retain_recent();
+        self.console_login.retain_recent();
     }
 }
 

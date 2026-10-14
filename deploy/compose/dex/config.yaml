@@ -21,6 +21,15 @@ staticClients:
     name: Limen CLI
     public: true
 
+  # The web console: a confidential client (authorization code with PKCE).
+  # Its redirect URI is the proxy's public URL. Dev-only secret: the same
+  # value is in docker-compose.yml.
+  - id: limen-console
+    name: Limen console
+    secret: dev-only-console-client-secret
+    redirectURIs:
+      - https://localhost:3443/console/callback
+
 enablePasswordDB: true
 staticPasswords:
   - email: alice@example.com

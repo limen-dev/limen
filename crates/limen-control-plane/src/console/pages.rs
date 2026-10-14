@@ -1,0 +1,795 @@
+//! Console page handlers. Admins see everything; everyone else sees their
+//! own identity, resources, and sessions (ADR-0017).
+
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use askama::Template;
+use axum::extract::{Form, Path, Query, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Redirect, Response};
+use limen_policy::Document;
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+use super::store::{self, SessionFilter};
+use super::views::{
+    Chrome, ComponentView, DryRun, Home, PolicyDoc, PolicyGroup, PolicyPage, ResourceView,
+    SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage, UserView, UsersPage,
+    Workers, error_page, list_text, path_segment, time_text,
+};
+use super::{Auth, Console, html};
+use crate::db;
+use crate::services::ops::{self, Actor};
+use crate::state::AppState;
+
+const PAGE_SIZE: i64 = 50;
+
+fn chrome(state: &AppState, auth: &Auth, active: &'static str) -> Chrome {
+    Chrome::new(auth, active, state.policy.current().version)
+}
+
+fn actor(auth: &Auth) -> Actor<'_> {
+    Actor {
+        username: &auth.username,
+        via: "console",
+    }
+}
+
+fn console(state: &AppState) -> Result<&Console, Response> {
+    state
+        .console
+        .as_ref()
+        .ok_or_else(|| StatusCode::NOT_FOUND.into_response())
+}
+
+fn db_error(what: &str, e: &sqlx::Error) -> Response {
+    tracing::error!(error = %e, "{what}");
+    error_page(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Unavailable",
+        "The console can't read its database right now. Try again shortly.",
+    )
+}
+
+/// An admin action failed: show why, using the status the API would return.
+fn action_error(status: &tonic::Status) -> Response {
+    let code = match status.code() {
+        tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+        tonic::Code::NotFound => StatusCode::NOT_FOUND,
+        tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    };
+    error_page(code, "That didn't work", status.message())
+}
+
+/// Fixed messages for `?done=` so no page reflects arbitrary text.
+fn notice(code: Option<&str>) -> Option<&'static str> {
+    Some(match code? {
+        "locked" => "User locked. Their sessions end within about 11 seconds.",
+        "unlocked" => "User unlocked.",
+        "killed" => "The session will end within about 11 seconds.",
+        "revoked" => "Revoked. Proxies drop its tunnels within about 10 seconds.",
+        _ => return None,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct DoneQuery {
+    done: Option<String>,
+}
+
+fn labels_text(labels: &BTreeMap<String, String>) -> String {
+    if labels.is_empty() {
+        "—".into()
+    } else {
+        labels
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+// ---- overview ------------------------------------------------------------------------
+
+pub async fn home(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<DoneQuery>,
+) -> Response {
+    let loaded = state.policy.current();
+    let resources = loaded
+        .policy
+        .accessible(&auth.roles)
+        .into_iter()
+        .map(|r| ResourceView {
+            name: r.name,
+            kind: r.kind.as_str().to_owned(),
+            labels: labels_text(&r.labels.into_iter().collect()),
+            principals: list_text(&r.principals),
+        })
+        .collect();
+    let filter = SessionFilter {
+        username: (!auth.is_admin).then(|| auth.username.clone()),
+        limit: 10,
+        ..SessionFilter::default()
+    };
+    let sessions = match store::list_sessions(&state.db, &filter).await {
+        Ok(rows) => rows.iter().take(10).map(SessionView::from).collect(),
+        Err(e) => return db_error("listing sessions", &e),
+    };
+    let mut overview = Stats {
+        active_sessions: 0,
+        users: 0,
+        locked: 0,
+        workers_up: 0,
+    };
+    if auth.is_admin {
+        let counted = async {
+            let active = store::active_session_count(&state.db).await?;
+            let users = store::list_users(&state.db).await?;
+            let locks = db::active_locks(&state.db).await?;
+            let (components, tunnels) = db::list_components(&state.db).await?;
+            Ok::<_, sqlx::Error>((active, users.len(), locks.len(), components, tunnels))
+        }
+        .await;
+        match counted {
+            Ok((active, users, locked, components, tunnels)) => {
+                overview.active_sessions = active;
+                overview.users = users;
+                overview.locked = locked;
+                overview.workers_up = components
+                    .iter()
+                    .filter(|c| {
+                        c.kind == "worker"
+                            && c.revoked_at.is_none()
+                            && tunnels.iter().any(|t| t.worker_id == c.id)
+                    })
+                    .count();
+            }
+            Err(e) => return db_error("counting for the overview", &e),
+        }
+    }
+    html(
+        Home {
+            chrome: chrome(&state, &auth, "home"),
+            notice: notice(q.done.as_deref()),
+            stats: overview,
+            resources,
+            sessions,
+            roles_text: format!("the roles {}", list_text(&auth.roles)),
+            expires: time_text(Some(auth.expires_at)),
+        }
+        .render(),
+    )
+}
+
+// ---- sessions --------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SessionsQuery {
+    filter: Option<String>,
+    user: Option<String>,
+    offset: Option<i64>,
+    done: Option<String>,
+}
+
+pub async fn sessions(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<SessionsQuery>,
+) -> Response {
+    let active_only = q.filter.as_deref() == Some("active");
+    // Non-admins only ever see their own, whatever the query says.
+    let user_filter = if auth.is_admin {
+        q.user.clone().filter(|u| !u.is_empty())
+    } else {
+        Some(auth.username.clone())
+    };
+    let offset = q.offset.unwrap_or(0).max(0);
+    let filter = SessionFilter {
+        username: user_filter.clone(),
+        active_only,
+        limit: PAGE_SIZE,
+        offset,
+    };
+    let mut rows = match store::list_sessions(&state.db, &filter).await {
+        Ok(rows) => rows,
+        Err(e) => return db_error("listing sessions", &e),
+    };
+    let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
+    rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
+    let link = |offset: i64| {
+        let mut url = format!("/console/sessions?offset={offset}");
+        if active_only {
+            url.push_str("&filter=active");
+        }
+        if auth.is_admin
+            && let Some(u) = &user_filter
+        {
+            url.push_str("&user=");
+            url.push_str(&path_segment(u));
+        }
+        url
+    };
+    html(
+        SessionsPage {
+            chrome: chrome(&state, &auth, "sessions"),
+            notice: notice(q.done.as_deref()),
+            sessions: rows.iter().map(SessionView::from).collect(),
+            active_only,
+            user_filter: auth.is_admin.then(|| user_filter.clone()).flatten(),
+            newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
+            older: has_more.then(|| link(offset + PAGE_SIZE)),
+        }
+        .render(),
+    )
+}
+
+/// The session, if the viewer may see it. Others get the same "not found" as
+/// a session that doesn't exist.
+async fn visible_session(
+    state: &AppState,
+    auth: &Auth,
+    id: &str,
+) -> Result<store::SessionRow, Response> {
+    let not_found = || {
+        error_page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "There is no such session.",
+        )
+    };
+    let id = Uuid::parse_str(id).map_err(|_| not_found())?;
+    let row = store::session(&state.db, id)
+        .await
+        .map_err(|e| db_error("reading a session", &e))?
+        .ok_or_else(not_found)?;
+    if auth.is_admin || row.username.as_deref() == Some(auth.username.as_str()) {
+        Ok(row)
+    } else {
+        Err(not_found())
+    }
+}
+
+pub async fn session_detail(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> Response {
+    match visible_session(&state, &auth, &id).await {
+        Ok(row) => html(
+            SessionPage {
+                chrome: chrome(&state, &auth, "sessions"),
+                s: SessionView::from(&row),
+            }
+            .render(),
+        ),
+        Err(r) => r,
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
+}
+
+/// The recording as asciicast, after checking it against the hash the worker
+/// reported when the session ended.
+pub async fn recording(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> Response {
+    let row = match visible_session(&state, &auth, &id).await {
+        Ok(row) => row,
+        Err(r) => return r,
+    };
+    let (Some(uri), Some(expected)) = (&row.recording_uri, &row.recording_sha256) else {
+        return error_page(
+            StatusCode::NOT_FOUND,
+            "No recording",
+            "This session has no recording yet.",
+        );
+    };
+    let bytes = match state.pipeline.recordings.get(uri).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!(session = %row.session_id, error = %e, "reading a recording");
+            return error_page(
+                StatusCode::BAD_GATEWAY,
+                "Recording unavailable",
+                "The recording couldn't be read from storage.",
+            );
+        }
+    };
+    if hex(&Sha256::digest(&bytes)) != *expected {
+        tracing::error!(session = %row.session_id, "recording doesn't match its recorded hash; refusing to serve it");
+        return error_page(
+            StatusCode::BAD_GATEWAY,
+            "Recording failed its integrity check",
+            "The stored recording doesn't match the hash recorded when the session ended, so it won't be played.",
+        );
+    }
+    (
+        [
+            (CONTENT_TYPE, "application/x-asciicast"),
+            (CACHE_CONTROL, "no-store"),
+            (CONTENT_DISPOSITION, "inline; filename=\"session.cast\""),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ReasonForm {
+    csrf: String,
+    reason: String,
+}
+
+pub async fn kill_session(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<ReasonForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    match ops::kill_session(&state, actor(&auth), &id, &form.reason).await {
+        Ok(_) => Redirect::to("/console/sessions?filter=active&done=killed").into_response(),
+        Err(s) => action_error(&s),
+    }
+}
+
+// ---- users -----------------------------------------------------------------------------
+
+pub async fn users(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<DoneQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let users = match store::list_users(&state.db).await {
+        Ok(u) => u,
+        Err(e) => return db_error("listing users", &e),
+    };
+    let locks = match db::active_locks(&state.db).await {
+        Ok(l) => l,
+        Err(e) => return db_error("listing locks", &e),
+    };
+    let orphan_locks = locks
+        .iter()
+        .filter(|l| !users.iter().any(|u| u.username == l.username))
+        .map(|l| lock_only_view(&l.username, l))
+        .collect();
+    html(
+        UsersPage {
+            chrome: chrome(&state, &auth, "users"),
+            notice: notice(q.done.as_deref()),
+            users: users.iter().map(UserView::from).collect(),
+            orphan_locks,
+        }
+        .render(),
+    )
+}
+
+fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
+    UserView {
+        name: name.to_owned(),
+        path: path_segment(name),
+        roles: "—".into(),
+        groups: "—".into(),
+        first_login: "never".into(),
+        last_login: "never".into(),
+        logins: 0,
+        locked: true,
+        lock_reason: l.reason.clone(),
+        locked_by: l.locked_by.clone(),
+        locked_at: time_text(Some(l.locked_at)),
+    }
+}
+
+pub async fn user_detail(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(name): Path<String>,
+    Query(q): Query<DoneQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let row = match store::user(&state.db, &name).await {
+        Ok(r) => r,
+        Err(e) => return db_error("reading a user", &e),
+    };
+    let view = match row {
+        Some(row) => UserView::from(&row),
+        None => {
+            // A lock can name someone who never signed in.
+            let locks = db::active_locks(&state.db).await.unwrap_or_default();
+            match locks.iter().find(|l| l.username == name) {
+                Some(l) => lock_only_view(&name, l),
+                None => {
+                    return error_page(
+                        StatusCode::NOT_FOUND,
+                        "Not found",
+                        "There is no such user.",
+                    );
+                }
+            }
+        }
+    };
+    let filter = SessionFilter {
+        username: Some(name),
+        limit: PAGE_SIZE,
+        ..SessionFilter::default()
+    };
+    let sessions = match store::list_sessions(&state.db, &filter).await {
+        Ok(rows) => rows
+            .iter()
+            .take(usize::try_from(PAGE_SIZE).unwrap_or(50))
+            .map(SessionView::from)
+            .collect(),
+        Err(e) => return db_error("listing a user's sessions", &e),
+    };
+    html(
+        UserPage {
+            chrome: chrome(&state, &auth, "users"),
+            notice: notice(q.done.as_deref()),
+            u: view,
+            sessions,
+        }
+        .render(),
+    )
+}
+
+pub async fn lock_user(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Form(form): Form<ReasonForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    if name == auth.username {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "That would lock you out",
+            "You can't lock your own account from the console. Ask another admin, or use the CLI if you really mean it.",
+        );
+    }
+    match ops::lock_user(&state, actor(&auth), &name, &form.reason).await {
+        Ok(_) => {
+            let _ = store::delete_console_sessions_of(&state.db, &name).await;
+            Redirect::to(&format!(
+                "/console/users/{}?done=locked",
+                path_segment(&name)
+            ))
+            .into_response()
+        }
+        Err(s) => action_error(&s),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CsrfOnly {
+    csrf: String,
+}
+
+pub async fn unlock_user(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Form(form): Form<CsrfOnly>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    match ops::unlock_user(&state, actor(&auth), &name).await {
+        Ok(_) => Redirect::to(&format!(
+            "/console/users/{}?done=unlocked",
+            path_segment(&name)
+        ))
+        .into_response(),
+        Err(s) => action_error(&s),
+    }
+}
+
+// ---- workers ---------------------------------------------------------------------------
+
+pub async fn workers(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<DoneQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let (components, tunnels) = match db::list_components(&state.db).await {
+        Ok(pair) => pair,
+        Err(e) => return db_error("listing components", &e),
+    };
+    let components = components
+        .into_iter()
+        .map(|c| {
+            let labels: BTreeMap<String, String> =
+                serde_json::from_value(c.labels).unwrap_or_default();
+            ComponentView {
+                tunnels: tunnels
+                    .iter()
+                    .filter(|t| t.worker_id == c.id || t.proxy_id == c.id)
+                    .count(),
+                path: path_segment(&c.id),
+                last_seen: time_text(Some(c.last_seen_at)),
+                cert_expires: time_text(c.cert_expires_at),
+                revoked: c.revoked_at.is_some(),
+                labels: labels_text(&labels),
+                kind: c.kind,
+                id: c.id,
+            }
+        })
+        .collect();
+    html(
+        Workers {
+            chrome: chrome(&state, &auth, "workers"),
+            notice: notice(q.done.as_deref()),
+            components,
+        }
+        .render(),
+    )
+}
+
+#[derive(Deserialize)]
+pub struct TokenForm {
+    csrf: String,
+    kind: String,
+    #[serde(default)]
+    labels: String,
+    ttl_minutes: u32,
+    #[serde(default)]
+    dns_names: String,
+}
+
+fn lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+pub async fn create_token(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Form(form): Form<TokenForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    let mut labels = BTreeMap::new();
+    for line in lines(&form.labels) {
+        let Some((k, v)) = line.split_once('=') else {
+            return error_page(
+                StatusCode::BAD_REQUEST,
+                "That didn't work",
+                "Each label must be written key=value.",
+            );
+        };
+        labels.insert(k.trim().to_owned(), v.trim().to_owned());
+    }
+    let dns_names: Vec<String> = lines(&form.dns_names)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let ttl = Duration::from_secs(u64::from(form.ttl_minutes.clamp(1, 1440)) * 60);
+    match ops::create_join_token(
+        &state,
+        actor(&auth),
+        &form.kind,
+        &labels,
+        Some(ttl),
+        &dns_names,
+    )
+    .await
+    {
+        Ok((token, expires)) => html(
+            TokenPage {
+                chrome: chrome(&state, &auth, "workers"),
+                token,
+                kind: form.kind,
+                expires: time_text(Some(expires)),
+            }
+            .render(),
+        ),
+        Err(s) => action_error(&s),
+    }
+}
+
+pub async fn revoke(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<ReasonForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    match ops::revoke_component(&state, actor(&auth), &id, &form.reason).await {
+        Ok(_) => Redirect::to("/console/workers?done=revoked").into_response(),
+        Err(s) => action_error(&s),
+    }
+}
+
+// ---- policy ----------------------------------------------------------------------------
+
+fn summarize(doc: &Document) -> String {
+    match doc {
+        Document::Role(r) => format!(
+            "{} allow, {} deny rules",
+            r.spec.allow.len(),
+            r.spec.deny.len()
+        ),
+        Document::RoleMapping(m) => format!("{} group mappings", m.spec.len()),
+        Document::Resource(r) => r
+            .spec
+            .kinds()
+            .iter()
+            .map(|k| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
+fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
+    let docs = state.policy.current().policy.documents();
+    [
+        ("Roles", "role"),
+        ("Role mappings", "role_mapping"),
+        ("Resources", "resource"),
+    ]
+    .into_iter()
+    .map(|(title, kind)| PolicyGroup {
+        title,
+        docs: docs
+            .iter()
+            .filter(|d| d.kind() == kind)
+            .map(|d| PolicyDoc {
+                name: d.name().to_owned(),
+                summary: summarize(d),
+                yaml: serde_saphyr::to_string(d)
+                    .unwrap_or_else(|e| format!("(couldn't render: {e})")),
+            })
+            .collect(),
+    })
+    .collect()
+}
+
+fn policy_page(state: &AppState, auth: &Auth, pasted: String, result: Option<DryRun>) -> Response {
+    let loaded = state.policy.current();
+    html(
+        PolicyPage {
+            chrome: chrome(state, auth, "policy"),
+            version: loaded.version,
+            digest: loaded.policy.digest(),
+            author: if loaded.author.is_empty() {
+                "—".into()
+            } else {
+                loaded.author.clone()
+            },
+            created: time_text(loaded.created_at),
+            groups: policy_groups(state),
+            pasted,
+            result,
+        }
+        .render(),
+    )
+}
+
+pub async fn policy(State(state): State<AppState>, auth: Auth) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    policy_page(&state, &auth, String::new(), None)
+}
+
+#[derive(Deserialize)]
+pub struct DryRunForm {
+    csrf: String,
+    yaml: String,
+}
+
+/// What `limen admin apply --dry-run` would show. Never applies anything.
+pub async fn dry_run(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Form(form): Form<DryRunForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    if form.yaml.len() > 1024 * 1024 {
+        return error_page(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Too large",
+            "Policy YAML is limited to 1 MiB.",
+        );
+    }
+    let result = match limen_policy::Policy::parse_yaml([("pasted", form.yaml.as_str())]) {
+        Ok(next) => {
+            let diff = state.policy.current().policy.diff(&next);
+            DryRun {
+                error: None,
+                no_changes: diff.is_empty(),
+                added: diff.added,
+                changed: diff.changed,
+                removed: diff.removed,
+            }
+        }
+        Err(e) => DryRun {
+            error: Some(e.to_string()),
+            no_changes: false,
+            added: vec![],
+            changed: vec![],
+            removed: vec![],
+        },
+    };
+    policy_page(&state, &auth, form.yaml, Some(result))
+}

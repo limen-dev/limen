@@ -4,6 +4,7 @@
 pub mod ca_store;
 pub mod caller;
 pub mod config;
+pub mod console;
 pub mod db;
 pub mod http_client;
 pub mod jobs;
@@ -58,8 +59,9 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         config.oidc_internal_url.as_deref(),
         &config.oidc_client_id,
         config.oidc_username_claim,
-        http,
+        http.clone(),
     )?;
+    let console = build_console(&config, &http)?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
     let config = Arc::new(config);
@@ -70,6 +72,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     Ok(AppState {
         config,
         pipeline,
+        console,
         db,
         cas,
         oidc,
@@ -80,13 +83,51 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     })
 }
 
+/// The web console is off unless `--console-public-url` is set.
+fn build_console(
+    config: &Config,
+    http: &http_client::HttpClient,
+) -> anyhow::Result<Option<console::Console>> {
+    let Some(public) = &config.console_public_url else {
+        return Ok(None);
+    };
+    let origin = public.trim_end_matches('/').to_owned();
+    let url = url::Url::parse(&origin).context("--console-public-url")?;
+    anyhow::ensure!(
+        url.scheme() == "https" && url.path() == "/" && url.query().is_none(),
+        "--console-public-url must be an https origin such as https://limen.example.com"
+    );
+    let secret = config
+        .console_oidc_client_secret
+        .clone()
+        .context("the console needs --console-oidc-client-secret")?;
+    let verifier = oidc::OidcVerifier::new(
+        &config.oidc_issuer,
+        config.oidc_internal_url.as_deref(),
+        &config.console_oidc_client_id,
+        config.oidc_username_claim,
+        http.clone(),
+    )?;
+    let oidc = console::BrowserOidc::new(
+        &config.oidc_issuer,
+        config.oidc_internal_url.as_deref(),
+        config.console_oidc_client_id.clone(),
+        secret,
+        format!("{origin}/console/callback"),
+        config.oidc_scopes.clone(),
+        http.clone(),
+        verifier,
+    );
+    Ok(Some(console::Console { origin, oidc }))
+}
+
 /// Run until `shutdown` flips to true.
 pub async fn run(
     state: AppState,
     api: TcpListener,
     shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    state.pipeline.start_sinks(&shutdown);
+    state.pipeline.start_sinks(&state.db, &shutdown);
     tokio::spawn(jobs::policy_refresh(state.clone(), shutdown.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), shutdown.clone()));
     let health = tokio::spawn(server::serve_health(

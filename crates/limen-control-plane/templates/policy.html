@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Policy{% endblock %}
+{% block content %}
+<h1>Policy</h1>
+<table class="facts">
+  <tr><th>Version</th><td>{{ version }}</td></tr>
+  <tr><th>Digest</th><td class="mono">{{ digest }}</td></tr>
+  <tr><th>Applied by</th><td>{{ author }}</td></tr>
+  <tr><th>Applied at</th><td>{{ created }}</td></tr>
+</table>
+<p class="muted">Policy is YAML in your repository. The console shows what's active and checks changes, but doesn't edit it. Apply with <code>limen admin apply</code>.</p>
+
+{% for group in groups %}
+<h2>{{ group.title }} ({{ group.docs.len() }})</h2>
+{% for d in group.docs %}
+<details>
+  <summary><b>{{ d.name }}</b> <span class="muted">{{ d.summary }}</span></summary>
+  <pre class="yaml">{{ d.yaml }}</pre>
+</details>
+{% endfor %}
+{% endfor %}
+
+<h2>Check a change</h2>
+<p class="muted">Paste the complete policy YAML, as <code>limen admin apply</code> would read it. This shows the difference from the active policy and applies nothing.</p>
+<form method="post" action="/console/policy/dry-run" class="stack">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <textarea name="yaml" rows="14" spellcheck="false" class="mono" required>{{ pasted }}</textarea>
+  <button type="submit">Show the difference</button>
+</form>
+{% if let Some(r) = result %}
+<h3>Result</h3>
+{% if let Some(err) = r.error %}
+<pre class="error">{{ err }}</pre>
+{% else %}
+  {% if r.no_changes %}
+  <p>No changes: this is the active policy.</p>
+  {% else %}
+  <ul class="diff">
+    {% for n in r.added %}<li class="add">+ {{ n }}</li>{% endfor %}
+    {% for n in r.changed %}<li class="chg">~ {{ n }}</li>{% endfor %}
+    {% for n in r.removed %}<li class="del">- {{ n }}</li>{% endfor %}
+  </ul>
+  <p class="muted">Dry run: nothing was applied.</p>
+  {% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}

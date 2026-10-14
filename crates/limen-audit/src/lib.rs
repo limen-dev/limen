@@ -57,6 +57,9 @@ pub enum EventKind {
     /// An admin ended a session. `session_id` says which.
     #[serde(rename = "session.kill")]
     SessionKill,
+    /// An admin revoked a proxy or worker.
+    #[serde(rename = "component.revoke")]
+    ComponentRevoke,
 }
 
 /// Component that emitted the event, plus its per-producer sequence number.

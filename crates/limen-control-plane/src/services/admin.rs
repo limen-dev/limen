@@ -12,21 +12,19 @@ use limen_proto::v1::{
     ApplyPolicyRequest, ApplyPolicyResponse, Component, CreateJoinTokenRequest,
     CreateJoinTokenResponse, GetPolicyRequest, GetPolicyResponse, KillSessionRequest,
     KillSessionResponse, ListComponentsRequest, ListComponentsResponse, ListLocksRequest,
-    ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff, TunnelInfo,
-    UnlockUserRequest, UnlockUserResponse,
+    ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff, RevokeComponentRequest,
+    RevokeComponentResponse, TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
 use serde_json::json;
 use time::OffsetDateTime;
 use tonic::{Request, Response, Status};
 
-use super::{b64url, sha256};
+use super::{b64url, ops};
 use crate::caller;
 use crate::db;
 use crate::state::{AppState, LoadedPolicy, internal, unix};
 
 const MAX_POLICY_BYTES: usize = 1024 * 1024;
-const DEFAULT_TOKEN_TTL: Duration = Duration::from_mins(15);
-const MAX_TOKEN_TTL: Duration = Duration::from_hours(24);
 
 #[derive(Debug, Clone)]
 pub struct AdminService(pub AppState);
@@ -158,53 +156,22 @@ impl Admin for AdminService {
         &self,
         request: Request<CreateJoinTokenRequest>,
     ) -> Result<Response<CreateJoinTokenResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
-        let admin = caller.admin()?.clone();
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
         let req = request.into_inner();
-        if !matches!(req.kind.as_str(), "proxy" | "worker") {
-            return Err(Status::invalid_argument("kind must be proxy or worker"));
-        }
-        if req.kind == "worker" && !req.dns_names.is_empty() {
-            return Err(Status::invalid_argument(
-                "worker certificates carry no DNS names",
-            ));
-        }
         let labels = parse_labels(&req.labels)?;
-        let ttl = if req.ttl_seconds == 0 {
-            DEFAULT_TOKEN_TTL
-        } else {
-            Duration::from_secs(u64::from(req.ttl_seconds))
-        };
-        if ttl > MAX_TOKEN_TTL {
-            return Err(Status::invalid_argument("ttl must be at most 24h"));
-        }
-        let token = new_token();
-        let expires_at = OffsetDateTime::now_utc() + ttl;
-        let labels_json = serde_json::to_value(&labels).map_err(|e| internal("labels", e))?;
-        db::insert_join_token(
-            &self.0.db,
-            &sha256(token.as_bytes()),
+        let ttl = (req.ttl_seconds != 0).then(|| Duration::from_secs(u64::from(req.ttl_seconds)));
+        let (token, expires_at) = ops::create_join_token(
+            &self.0,
+            ops::Actor {
+                username: &admin.username,
+                via: "api",
+            },
             &req.kind,
-            &labels_json,
+            &labels.into(),
+            ttl,
             &req.dns_names,
-            &admin.username,
-            expires_at,
         )
-        .await
-        .map_err(|e| internal("storing join token", e))?;
-        let data = json!({ "kind": req.kind, "labels": labels, "dns_names": req.dns_names, "expires_at": unix(expires_at) });
-        self.0
-            .audit
-            .emit(
-                EventKind::JoinTokenCreate,
-                Context {
-                    user: Some(admin.username),
-                    session_id: None,
-                },
-                data,
-            )
-            .await
-            .map_err(|_| Status::unavailable("audit unavailable"))?;
+        .await?;
         Ok(Response::new(CreateJoinTokenResponse {
             token,
             expires_at_unix: unix(expires_at),
@@ -252,24 +219,8 @@ impl Admin for AdminService {
     ) -> Result<Response<LockUserResponse>, Status> {
         let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
         let req = request.into_inner();
-        let username = req.username.trim();
-        if username.is_empty() || username.len() > 256 {
-            return Err(Status::invalid_argument("username is required"));
-        }
-        let reason = clean_reason(&req.reason)?;
-        let locked = db::lock_user(&self.0.db, username, &reason, &admin.username)
-            .await
-            .map_err(|e| internal("locking user", e))?;
-        if locked {
-            self.audit_admin(
-                EventKind::UserLock,
-                &admin.username,
-                None,
-                json!({ "target_user": username, "reason": reason }),
-            )
-            .await?;
-            tracing::warn!(user = username, by = %admin.username, %reason, "user locked");
-        }
+        let locked =
+            ops::lock_user(&self.0, actor(&admin.username), &req.username, &req.reason).await?;
         Ok(Response::new(LockUserResponse { locked }))
     }
 
@@ -278,20 +229,12 @@ impl Admin for AdminService {
         request: Request<UnlockUserRequest>,
     ) -> Result<Response<UnlockUserResponse>, Status> {
         let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
-        let username = request.into_inner().username;
-        let unlocked = db::unlock_user(&self.0.db, username.trim(), &admin.username)
-            .await
-            .map_err(|e| internal("unlocking user", e))?;
-        if unlocked {
-            self.audit_admin(
-                EventKind::UserUnlock,
-                &admin.username,
-                None,
-                json!({ "target_user": username.trim() }),
-            )
-            .await?;
-            tracing::info!(user = username.trim(), by = %admin.username, "user unlocked");
-        }
+        let unlocked = ops::unlock_user(
+            &self.0,
+            actor(&admin.username),
+            &request.into_inner().username,
+        )
+        .await?;
         Ok(Response::new(UnlockUserResponse { unlocked }))
     }
 
@@ -320,72 +263,36 @@ impl Admin for AdminService {
     ) -> Result<Response<KillSessionResponse>, Status> {
         let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
         let req = request.into_inner();
-        let session_id = uuid::Uuid::parse_str(req.session_id.trim())
-            .map_err(|_| Status::invalid_argument("session_id must be a session UUID"))?;
-        let reason = clean_reason(&req.reason)?;
-        let killed = db::kill_session(
-            &self.0.db,
-            &session_id.to_string(),
-            &reason,
-            &admin.username,
+        let killed = ops::kill_session(
+            &self.0,
+            actor(&admin.username),
+            &req.session_id,
+            &req.reason,
         )
-        .await
-        .map_err(|e| internal("killing session", e))?;
-        if killed {
-            self.audit_admin(
-                EventKind::SessionKill,
-                &admin.username,
-                Some(session_id),
-                json!({ "reason": reason }),
-            )
-            .await?;
-            tracing::warn!(session = %session_id, by = %admin.username, %reason, "session kill requested");
-        }
+        .await?;
         Ok(Response::new(KillSessionResponse { killed }))
     }
-}
 
-impl AdminService {
-    /// Audit an admin action. If the event can't be written, the caller
-    /// returns an error: a lock nobody can audit still applies, but the admin
-    /// is told it wasn't recorded.
-    async fn audit_admin(
+    async fn revoke_component(
         &self,
-        kind: EventKind,
-        admin: &str,
-        session_id: Option<uuid::Uuid>,
-        mut data: serde_json::Value,
-    ) -> Result<(), Status> {
-        data["by"] = json!(admin);
-        self.0
-            .audit
-            .emit(
-                kind,
-                Context {
-                    user: Some(admin.to_owned()),
-                    session_id,
-                },
-                data,
-            )
-            .await
-            .map(|_| ())
-            .map_err(|e| {
-                tracing::error!(error = %e, "audit unavailable for an admin action");
-                Status::unavailable("the change was applied but audit is unavailable")
-            })
+        request: Request<RevokeComponentRequest>,
+    ) -> Result<Response<RevokeComponentResponse>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let req = request.into_inner();
+        let revoked = ops::revoke_component(
+            &self.0,
+            actor(&admin.username),
+            &req.component_id,
+            &req.reason,
+        )
+        .await?;
+        Ok(Response::new(RevokeComponentResponse { revoked }))
     }
 }
 
-/// Reasons are free text shown to the user and stored in audit.
-fn clean_reason(reason: &str) -> Result<String, Status> {
-    let reason = reason.trim();
-    if reason.is_empty() {
-        return Err(Status::invalid_argument("a reason is required"));
+fn actor(username: &str) -> ops::Actor<'_> {
+    ops::Actor {
+        username,
+        via: "api",
     }
-    if reason.len() > 500 || reason.chars().any(char::is_control) {
-        return Err(Status::invalid_argument(
-            "reason must be at most 500 characters, without control characters",
-        ));
-    }
-    Ok(reason.to_owned())
 }

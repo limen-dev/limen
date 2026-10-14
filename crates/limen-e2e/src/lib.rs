@@ -21,6 +21,8 @@ use tokio::sync::watch;
 use tonic::transport::Channel;
 
 pub const CLIENT_ID: &str = "limen-cli";
+pub const CONSOLE_CLIENT_ID: &str = "limen-console";
+pub const CONSOLE_SECRET: &str = "e2e-console-client-secret";
 pub const PROXY_TOKEN: &str = "e2e-static-proxy-token-0123456789abcdef";
 
 #[derive(Parser)]
@@ -72,6 +74,17 @@ impl RunningWorker {
 impl Deployment {
     /// Start a control plane and one proxy. `None` without a test database.
     pub async fn start() -> Option<Self> {
+        Self::start_inner(false).await
+    }
+
+    /// Like [`start`](Self::start), with the web console enabled. Its public
+    /// URL is `https://localhost:<proxy port>`, and the mock IdP knows the
+    /// console's OIDC client ([`CONSOLE_CLIENT_ID`], [`CONSOLE_SECRET`]).
+    pub async fn start_with_console() -> Option<Self> {
+        Self::start_inner(true).await
+    }
+
+    async fn start_inner(console: bool) -> Option<Self> {
         if std::env::var_os("LIMEN_TEST_LOG").is_some() {
             limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
         }
@@ -86,9 +99,23 @@ impl Deployment {
 
         let dir = limen_testkit::temp_dir().expect("tempdir");
         let idp = MockIdp::start(CLIENT_ID).await;
-        let cp_config: limen_control_plane::Config = parse(&[
-            "--id=cp-e2e".into(),
-            format!("--database-url={db_url}"),
+        // The console's public URL needs the proxy's port, so bind it first.
+        let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let proxy_addr = proxy_listener.local_addr().expect("addr");
+        let mut console_args = Vec::new();
+        if console {
+            idp.set_browser_client(CONSOLE_CLIENT_ID, CONSOLE_SECRET);
+            console_args.push(format!(
+                "--console-public-url=https://localhost:{}",
+                proxy_addr.port()
+            ));
+            console_args.push(format!("--console-oidc-client-secret={CONSOLE_SECRET}"));
+        }
+        let mut cp_args = vec!["--id=cp-e2e".to_owned(), format!("--database-url={db_url}")];
+        cp_args.extend(console_args);
+        cp_args.extend([
             format!("--ca-dir={}", dir.path().join("ca").display()),
             format!("--ca-export-dir={}", dir.path().join("ca-public").display()),
             format!("--oidc-issuer={}", idp.issuer),
@@ -111,6 +138,7 @@ impl Deployment {
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout=0s".into(),
         ]);
+        let cp_config: limen_control_plane::Config = parse(&cp_args);
         let state = limen_control_plane::build_state(cp_config)
             .await
             .expect("control plane state");
@@ -121,10 +149,6 @@ impl Deployment {
         let (cp_tx, cp_rx) = watch::channel(false);
         let cp_task = tokio::spawn(limen_control_plane::run(state, cp_listener, cp_rx));
 
-        let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let proxy_addr = proxy_listener.local_addr().expect("addr");
         let mut deployment = Self {
             dir,
             idp,

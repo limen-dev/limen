@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Limen{% endblock %} · Limen</title>
+<link rel="icon" href="/console/static/logo-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/console/static/console.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/console/"><img src="/console/static/logo-mark.svg" alt="" width="28" height="28"><span>Limen</span></a>
+  <nav>
+    <a href="/console/"{% if chrome.active == "home" %} aria-current="page"{% endif %}>Overview</a>
+    <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</a>
+    {% if chrome.is_admin %}
+    <a href="/console/users"{% if chrome.active == "users" %} aria-current="page"{% endif %}>Users</a>
+    <a href="/console/workers"{% if chrome.active == "workers" %} aria-current="page"{% endif %}>Workers</a>
+    <a href="/console/policy"{% if chrome.active == "policy" %} aria-current="page"{% endif %}>Policy</a>
+    {% endif %}
+  </nav>
+  <form method="post" action="/console/logout" class="who">
+    <span>{{ chrome.username }}{% if chrome.is_admin %} <span class="tag">admin</span>{% endif %}</span>
+    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+    <button type="submit" class="link">Sign out</button>
+  </form>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>Limen {{ chrome.version }} · policy v{{ chrome.policy_version }}</footer>
+</body>
+</html>

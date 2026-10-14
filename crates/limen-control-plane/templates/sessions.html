@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Sessions{% endblock %}
+{% block content %}
+<h1>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</h1>
+{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
+<p class="filters">
+  <a href="/console/sessions"{% if !active_only %} aria-current="true"{% endif %}>All</a>
+  <a href="/console/sessions?filter=active"{% if active_only %} aria-current="true"{% endif %}>Active</a>
+  {% if let Some(u) = user_filter %}<span class="muted">for {{ u }}</span>{% endif %}
+</p>
+{% include "sessions_table.html" %}
+<p class="pager">
+  {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
+  {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}
+</p>
+{% endblock %}

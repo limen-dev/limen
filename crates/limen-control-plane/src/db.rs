@@ -393,6 +393,14 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query("DELETE FROM console_sessions WHERE expires_at < now()")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM console_logins WHERE expires_at < now()")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM session_kills WHERE killed_at < now() - interval '2 days'")
         .execute(&mut *tx)
         .await?
@@ -487,6 +495,30 @@ pub async fn kill_session(
     .execute(db)
     .await?;
     Ok(inserted.rows_affected() > 0)
+}
+
+/// Revoke a proxy or worker. `false` if it's unknown or already revoked.
+pub async fn revoke_component(db: &Db, id: &str, by: &str) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE components SET revoked_at = now(), revoked_by = $2 WHERE id = $1 AND revoked_at IS NULL",
+    )
+    .bind(id)
+    .bind(by)
+    .execute(db)
+    .await?;
+    if updated.rows_affected() > 0 {
+        sqlx::query("DELETE FROM tunnels WHERE worker_id = $1 OR proxy_id = $1")
+            .bind(id)
+            .execute(db)
+            .await?;
+    }
+    Ok(updated.rows_affected() > 0)
+}
+
+pub async fn revoked_components(db: &Db) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM components WHERE revoked_at IS NOT NULL")
+        .fetch_all(db)
+        .await
 }
 
 /// Sessions killed within the last day (no session lives longer).

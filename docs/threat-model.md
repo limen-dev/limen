@@ -100,6 +100,20 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | T: policy tampering in Aurora (A9) | Policy versions are immutable rows. Snapshots are signed. `policy.change` is audited. The DB user has no `DELETE` on the policy tables |
 | I: Aurora data exposure | Encryption at rest (KMS), TLS, IAM auth for the control plane DB user (Phase 7), no secrets stored (join tokens are hashed) |
 
+### TB7: Browser ↔ proxy ↔ web console (ADR-0017)
+| Threat | Mitigation |
+|---|---|
+| S: login CSRF / session fixation (an attacker's callback URL opened by a victim) | A login cookie must match the OIDC `state`; each state is single use; the session token is minted only after the callback, never accepted from the request |
+| S: stolen console cookie | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Lax`, random 256-bit token (only its hash is stored), expires with the user's certificate lifetime, ended by a lock or sign-out. Limit: a stolen live cookie works until then; there is no device binding |
+| T: CSRF on state-changing requests | POST only; per-session token compared in constant time; `Origin`/`Referer` must equal the public origin |
+| T: XSS, clickjacking | Server-side templates escape by default; recording text only reaches the browser as data for the player; CSP forbids inline script and third-party origins; `frame-ancestors 'none'`. `'wasm-unsafe-eval'` is the one relaxation (vendored player). Limit: the player is third-party code running in the page |
+| I: one user reads another's sessions or recordings | Non-admins are limited to their own rows in the query itself (not by hiding links); other users' sessions answer 404; recordings follow the same check |
+| I: a tampered recording is played | Its hash is compared with the one recorded at session end; mismatch is refused |
+| E: a non-admin reaches admin pages | Every admin page and action checks the role server-side; tests cover each |
+| E: a worker or other component calls the console directly | Only a proxy certificate with the forwarded marker is accepted |
+| D: sign-in flooding | Separate per-IP limiter for console login; login state rows expire in 10 minutes and are cleaned up |
+| R: unattributed console changes | Every change is audited as the signed-in admin with `via=console` |
+
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|

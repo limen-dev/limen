@@ -95,6 +95,9 @@ services:
       LIMEN_DATADOG_LOGS_URL: http://fake-datadog:8126/api/v2/logs
       DD_API_KEY: dev-only-datadog-key
       LIMEN_ENVIRONMENT: dev
+      # The web console, served by the proxy at https://localhost:3443/console/
+      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:3443
+      LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
     ports: ["127.0.0.1:3081:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca

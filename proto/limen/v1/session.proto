@@ -49,6 +49,8 @@ message PolicySnapshot {
   repeated string locked_users = 4;
   // Sessions an admin ended. Kept for a day, longer than any session lives.
   repeated string killed_sessions = 5;
+  // Proxies and workers an admin revoked. Their certificates are no longer honoured.
+  repeated string revoked_components = 6;
 }
 
 // First message on a client session stream (ALPN limen-ssh/1 and friends),

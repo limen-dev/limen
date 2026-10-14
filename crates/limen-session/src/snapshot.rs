@@ -32,6 +32,7 @@ pub struct Snapshot {
 pub struct Restrictions {
     pub locked_users: BTreeSet<String>,
     pub killed_sessions: BTreeSet<String>,
+    pub revoked_components: BTreeSet<String>,
 }
 
 impl Restrictions {
@@ -45,6 +46,12 @@ impl Restrictions {
         } else {
             None
         }
+    }
+
+    /// Whether `component_id` (a proxy or worker) was revoked.
+    #[must_use]
+    pub fn is_revoked(&self, component_id: &str) -> bool {
+        self.revoked_components.contains(component_id)
     }
 }
 
@@ -63,6 +70,7 @@ pub fn sign(
         documents_json,
         locked_users: restrictions.locked_users.iter().cloned().collect(),
         killed_sessions: restrictions.killed_sessions.iter().cloned().collect(),
+        revoked_components: restrictions.revoked_components.iter().cloned().collect(),
     };
     signer.sign(Purpose::PolicySnapshot, snapshot.encode_to_vec())
 }
@@ -88,6 +96,7 @@ pub fn verify_snapshot(
         restrictions: Arc::new(Restrictions {
             locked_users: snapshot.locked_users.into_iter().collect(),
             killed_sessions: snapshot.killed_sessions.into_iter().collect(),
+            revoked_components: snapshot.revoked_components.into_iter().collect(),
         }),
     })
 }
@@ -319,6 +328,7 @@ mod tests {
         let restrictions = Restrictions {
             locked_users: ["mallory@example.com".to_owned()].into(),
             killed_sessions: ["s-1".to_owned()].into(),
+            revoked_components: ["worker-9".to_owned()].into(),
         };
         let signed = sign(
             &cp,
@@ -334,5 +344,7 @@ mod tests {
         assert_eq!(r.blocks("mallory@example.com", "s-9"), Some("user locked"));
         assert_eq!(r.blocks("alice@example.com", "s-1"), Some("session killed"));
         assert_eq!(r.blocks("alice@example.com", "s-2"), None);
+        assert!(r.is_revoked("worker-9"));
+        assert!(!r.is_revoked("worker-1"));
     }
 }

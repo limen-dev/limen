@@ -9,7 +9,8 @@ use clap::Subcommand;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, GetPolicyRequest, KillSessionRequest,
-    ListComponentsRequest, ListLocksRequest, LockUserRequest, PolicySource, UnlockUserRequest,
+    ListComponentsRequest, ListLocksRequest, LockUserRequest, PolicySource, RevokeComponentRequest,
+    UnlockUserRequest,
 };
 
 use crate::api;
@@ -49,6 +50,14 @@ pub enum AdminCommand {
     Unlock { username: String },
     /// List locked users.
     Locks,
+    /// Stop honouring a proxy's or worker's certificate. Its tunnels drop within about 10 seconds.
+    Revoke {
+        /// The component ID, from `limen admin components`.
+        component_id: String,
+        /// Why. Recorded in the audit trail.
+        #[arg(long)]
+        reason: String,
+    },
     /// End one live session.
     KillSession {
         /// The session ID, from `session.start` in the audit trail.
@@ -197,6 +206,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }
         | AdminCommand::Locks
+        | AdminCommand::Revoke { .. }
         | AdminCommand::KillSession { .. }) => run_locks(&mut admin, lock_command).await?,
     }
     Ok(())
@@ -260,6 +270,26 @@ async fn run_locks(
                 })
                 .collect();
             print_table(["USER", "LOCKED BY", "LOCKED AT", "REASON"], &rows);
+        }
+        AdminCommand::Revoke {
+            component_id,
+            reason,
+        } => {
+            let resp = admin
+                .revoke_component(RevokeComponentRequest {
+                    component_id: component_id.clone(),
+                    reason,
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            if resp.revoked {
+                println!(
+                    "Revoked {component_id}. Renewal is refused, and proxies drop its tunnels within about 10 seconds."
+                );
+            } else {
+                println!("{component_id} was already revoked.");
+            }
         }
         AdminCommand::KillSession { session_id, reason } => {
             let resp = admin

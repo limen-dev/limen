@@ -210,6 +210,17 @@ async fn login(
             other => internal("issuing user certificate", other),
         })?;
 
+    if let Err(e) = crate::console::store::upsert_user(
+        &state.db,
+        &identity.username,
+        &identity.subject,
+        &roles,
+        &identity.groups,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, "recording the user");
+    }
     // Fail closed: no audit event, no credentials.
     let data = json!({
         "login_id": login_id,

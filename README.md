@@ -11,7 +11,7 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
 
 > **Status: Phase 2 complete.** OIDC login, policy, the control plane, proxies (with peering), workers, and SSH access with session recording work end to end. Databases, Redis, and Kubernetes arrive in Phases 4 to 6, and the audit pipeline to S3, Datadog, and Grafana in Phase 3. See the [roadmap](docs/design.md#13-phases-and-exit-criteria).
 
-Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH) or `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards).
+Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), or `deploy/compose/demo-phase35.sh` (web console, locks, session kill).
 
 ## Why "Limen"
 Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.
@@ -34,7 +34,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 | <img src="https://cdn.simpleicons.org/openid" alt="OpenID" height="22"> | **Any OIDC provider** | Dex and Keycloak work for local development | ✅ Working with Dex |
 | <img src="https://cdn.simpleicons.org/datadog" alt="Datadog" height="22"> | **Datadog** | Logs, metrics, and traces, plus monitors as Terraform | ⏳ Phase 3 |
 | <img src="https://cdn.simpleicons.org/grafana" alt="Grafana" height="22"> | **Grafana** | Audit dashboards over S3 with Athena | ⏳ Phase 3 |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-mark-dark.svg"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-mark-dark.svg"><img src="assets/logo-mark.svg" alt="Limen" height="22"></picture></picture> | **Limen web console** | Admins see users, sessions, workers and resources, create join tokens, and lock a user or end a session. Everyone else sees their own resources. Policy stays YAML ([ADR-0017](docs/adr/0017-web-console.md)) | ⏳ Phase 3.5 |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-mark-dark.svg"><img src="assets/logo-mark.svg" alt="Limen" height="22"></picture> | **Limen web console** | Admins see users, sessions, workers and resources, create join tokens, and lock a user or end a session. Everyone else sees their own resources. Policy stays YAML ([ADR-0017](docs/adr/0017-web-console.md)) | ✅ Phase 3.5 |
 
 ✅ working and tested, ⏳ planned (see the [roadmap](docs/design.md#13-phases-and-exit-criteria)). Everything is tested against local stand-ins. Nothing has been verified against real AWS, Okta, or Datadog yet.
 

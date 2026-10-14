@@ -2,6 +2,7 @@ pub mod admin;
 pub mod auth;
 pub mod enrollment;
 pub mod ingest;
+pub mod ops;
 pub mod policy_sync;
 pub mod registry;
 pub mod resources;

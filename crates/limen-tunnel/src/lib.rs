@@ -24,6 +24,8 @@ pub mod alpn {
     pub const SSH: &[u8] = b"limen-ssh/1";
     /// CLI API (relayed to the control plane) and the Kubernetes API, routed by path.
     pub const H2: &[u8] = b"h2";
+    /// Browsers that don't speak HTTP/2. Only the web console is served this way.
+    pub const HTTP1: &[u8] = b"http/1.1";
     pub const HTTP11: &[u8] = b"http/1.1";
 
     pub const ALL: [&[u8]; 7] = [TUNNEL, PEER, DB, REDIS, SSH, H2, HTTP11];

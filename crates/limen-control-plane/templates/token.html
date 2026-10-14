@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Join token{% endblock %}
+{% block content %}
+<h1>Join token created</h1>
+<p>This token is single use and is shown only once. It expires {{ expires }}.</p>
+<pre class="secret">{{ token }}</pre>
+<p>Give it to the {{ kind }} as <code>LIMEN_JOIN_TOKEN</code>.</p>
+<p><a href="/console/workers">Back to workers</a></p>
+{% endblock %}

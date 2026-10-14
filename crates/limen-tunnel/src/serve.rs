@@ -50,6 +50,36 @@ impl PeerInfo {
     }
 }
 
+/// How long a browser connection may take to send request headers.
+const HTTP1_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Serve `service` over HTTP/1.1 on one connection (browsers that did not
+/// negotiate `h2`). Every request gets `peer` in its extensions. Keep-alive
+/// is on; there are no upgrades.
+pub async fn serve_http1<IO, S, B>(io: IO, peer: PeerInfo, service: S) -> Result<(), TransportError>
+where
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    S: Service<Request<Incoming>, Response = Response<B>, Error = Infallible>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let service = service.map_request(move |mut req: Request<Incoming>| {
+        req.extensions_mut().insert(peer.clone());
+        req
+    });
+    hyper::server::conn::http1::Builder::new()
+        .timer(TokioTimer::new())
+        .header_read_timeout(HTTP1_HEADER_TIMEOUT)
+        .serve_connection(TokioIo::new(io), TowerToHyperService::new(service))
+        .await?;
+    Ok(())
+}
+
 /// HTTP/2 tuning shared by every Limen gRPC surface.
 #[derive(Debug, Clone, Copy)]
 pub struct H2Settings {

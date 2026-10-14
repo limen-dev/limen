@@ -381,12 +381,16 @@ async fn relay(
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         loop {
             tick.tick().await;
-            if let Some(snapshot) = proxy.policy.latest()
-                && let Some(why) = snapshot
+            if let Some(snapshot) = proxy.policy.latest() {
+                if let Some(why) = snapshot
                     .restrictions
                     .blocks(&user.username, &session_id.to_string())
-            {
-                return why;
+                {
+                    return why;
+                }
+                if snapshot.restrictions.is_revoked(worker_id) {
+                    return "worker revoked";
+                }
             }
         }
     };

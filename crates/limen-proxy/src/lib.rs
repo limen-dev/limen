@@ -183,7 +183,7 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
         identity,
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
-        &[alpn::TUNNEL, alpn::PEER, alpn::SSH, alpn::H2],
+        &[alpn::TUNNEL, alpn::PEER, alpn::SSH, alpn::H2, alpn::HTTP1],
     )?)
 }
 
@@ -327,6 +327,15 @@ async fn handle_connection(
                 }
             }
         }
+        Some(p) if p == alpn::HTTP1 => {
+            // Browsers on HTTP/1.1: the relay answers only `/console/`.
+            if let Err(e) =
+                limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone()))
+                    .await
+            {
+                tracing::debug!(error = %e, %remote, "browser connection ended with error");
+            }
+        }
         other => {
             tracing::debug!(%remote, alpn = ?other.map(String::from_utf8_lossy), "unsupported or missing ALPN; closing");
         }
@@ -354,6 +363,14 @@ async fn accept_tunnel(
             return;
         }
     };
+    if proxy
+        .policy
+        .latest()
+        .is_some_and(|s| s.restrictions.is_revoked(&worker.id))
+    {
+        tracing::warn!(worker = %worker.id, "rejected tunnel: the worker was revoked");
+        return;
+    }
     let (channel, connection) = match TunnelChannel::handshake(tls, H2Settings::default()).await {
         Ok(pair) => pair,
         Err(e) => return tracing::warn!(error = %e, worker = %worker.id, "tunnel handshake failed"),
@@ -382,10 +399,17 @@ async fn accept_tunnel(
 
     let mut tick = tokio::time::interval(PING_INTERVAL);
     tick.tick().await;
+    // Revocation arrives with the policy snapshot; check the cached copy.
+    let mut revocation = tokio::time::interval(Duration::from_secs(1));
     let reason = loop {
         tokio::select! {
             result = &mut connection => break format!("connection closed: {result:?}"),
             _ = shutdown.changed() => break "proxy shutting down".to_owned(),
+            _ = revocation.tick() => {
+                if proxy.policy.latest().is_some_and(|s| s.restrictions.is_revoked(&worker.id)) {
+                    break "worker revoked".to_owned();
+                }
+            }
             _ = tick.tick() => {
                 match tokio::time::timeout(PING_TIMEOUT, client.ping(PingRequest {})).await {
                     Ok(Ok(pong)) if pong.get_ref().draining => {

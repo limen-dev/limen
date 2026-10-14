@@ -33,6 +33,8 @@ service Admin {
   rpc ListLocks(ListLocksRequest) returns (ListLocksResponse);
   // End one live session.
   rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
+  // Stop honouring a proxy's or worker's certificate and refuse its renewal.
+  rpc RevokeComponent(RevokeComponentRequest) returns (RevokeComponentResponse);
 }
 
 service Enrollment {
@@ -274,6 +276,16 @@ message ListLocksResponse {
 message KillSessionRequest {
   string session_id = 1;
   string reason = 2;
+}
+
+message RevokeComponentRequest {
+  string component_id = 1;
+  string reason = 2;
+}
+
+message RevokeComponentResponse {
+  // False if it was already revoked.
+  bool revoked = 1;
 }
 
 message KillSessionResponse {

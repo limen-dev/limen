@@ -115,6 +115,13 @@ pub async fn serve_api(
             .max_decoding_message_size(MAX_MESSAGE_BYTES),
     )
     .prepare();
+    // The console shares the listener: proxies relay browser requests here.
+    let routes: axum::Router = match &state.console {
+        Some(_) => routes
+            .into_axum_router()
+            .merge(crate::console::router(state.clone())),
+        None => routes.into_axum_router(),
+    };
 
     let active = Arc::new(AtomicUsize::new(0));
     let mut connections = tokio::task::JoinSet::new();

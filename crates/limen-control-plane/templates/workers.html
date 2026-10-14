@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Workers{% endblock %}
+{% block content %}
+<h1>Workers and proxies</h1>
+{% if let Some(done) = notice %}<p class="notice">{{ done }}</p>{% endif %}
+<table>
+  <thead><tr><th>ID</th><th>Kind</th><th>Labels</th><th>Last seen</th><th>Tunnels</th><th>Certificate</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for c in components %}
+    <tr>
+      <td class="mono">{{ c.id }}</td><td>{{ c.kind }}</td><td class="mono">{{ c.labels }}</td>
+      <td>{{ c.last_seen }}</td><td>{{ c.tunnels }}</td><td>{{ c.cert_expires }}</td>
+      <td>{% if c.revoked %}<span class="status bad">revoked</span>{% else %}<span class="status ok">enrolled</span>{% endif %}</td>
+      <td>
+        {% if !c.revoked %}
+        <form method="post" action="/console/workers/{{ c.path }}/revoke" class="inline danger-form">
+          <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+          <input type="text" name="reason" placeholder="Reason" required maxlength="500" size="16">
+          <button type="submit" class="danger">Revoke</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Revoking stops renewal and makes proxies drop the component's tunnels within about 10 seconds. Its certificate still exists until it expires but nothing honours it.</p>
+
+<h2>Create a join token</h2>
+<form method="post" action="/console/workers/tokens" class="stack">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <label>Kind
+    <select name="kind"><option value="worker">worker</option><option value="proxy">proxy</option></select>
+  </label>
+  <label>Labels, one <code>key=value</code> per line
+    <textarea name="labels" rows="3" placeholder="pool=dev"></textarea>
+  </label>
+  <label>Valid for (minutes)
+    <input type="number" name="ttl_minutes" value="15" min="1" max="1440">
+  </label>
+  <label>DNS names for a proxy certificate, one per line
+    <textarea name="dns_names" rows="2"></textarea>
+  </label>
+  <button type="submit">Create token</button>
+</form>
+<p class="muted">Tokens are single use. The value is shown once.</p>
+{% endblock %}

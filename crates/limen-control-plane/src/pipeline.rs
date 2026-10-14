@@ -17,6 +17,11 @@ use crate::sinks::{DatadogSink, S3Sink, SignerSlot};
 pub const JSONL: &str = "jsonl";
 pub const S3: &str = "s3";
 pub const DATADOG: &str = "datadog";
+/// Fills the `sessions` table the web console reads.
+pub const CONSOLE: &str = "console";
+
+/// Largest recording the console will load into memory to play.
+pub const MAX_PLAYBACK_BYTES: usize = 64 * 1024 * 1024;
 
 /// Where recordings are stored.
 #[derive(Debug, Clone)]
@@ -41,6 +46,55 @@ impl RecordingStore {
             RecordingStore::S3(sink) => sink.put_recording(session_id, file).await,
         }
     }
+
+    /// Read a stored recording by the URI `put` returned. Refuses anything
+    /// outside this store.
+    pub async fn get(&self, uri: &str) -> anyhow::Result<Vec<u8>> {
+        match self {
+            RecordingStore::Local(dir) => {
+                let path = uri
+                    .strip_prefix("file://")
+                    .ok_or_else(|| anyhow::anyhow!("not a local recording: {uri}"))?;
+                let root = tokio::fs::canonicalize(dir).await?;
+                let path = tokio::fs::canonicalize(path).await?;
+                anyhow::ensure!(path.starts_with(&root), "recording is outside the store");
+                let len = tokio::fs::metadata(&path).await?.len();
+                anyhow::ensure!(
+                    usize::try_from(len).is_ok_and(|n| n <= MAX_PLAYBACK_BYTES),
+                    "recording is too large to play in the browser ({len} bytes)"
+                );
+                Ok(tokio::fs::read(path).await?)
+            }
+            RecordingStore::S3(sink) => {
+                let rest = uri
+                    .strip_prefix("s3://")
+                    .ok_or_else(|| anyhow::anyhow!("not an S3 recording: {uri}"))?;
+                let (bucket, key) = rest
+                    .split_once('/')
+                    .ok_or_else(|| anyhow::anyhow!("malformed recording URI"))?;
+                anyhow::ensure!(
+                    bucket == sink.bucket && key.contains("recordings/"),
+                    "recording is outside the store"
+                );
+                let out = sink
+                    .client
+                    .get_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("{}", aws_sdk_s3::error::DisplayErrorContext(&e))
+                    })?;
+                let len = out.content_length().unwrap_or(0);
+                anyhow::ensure!(
+                    usize::try_from(len).is_ok_and(|n| n <= MAX_PLAYBACK_BYTES),
+                    "recording is too large to play in the browser ({len} bytes)"
+                );
+                Ok(out.body.collect().await?.into_bytes().to_vec())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +108,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub async fn open(config: &Arc<Config>, signer: SignerSlot) -> anyhow::Result<Self> {
-        let mut consumers: Vec<&str> = Vec::new();
+        let mut consumers: Vec<&str> = vec![CONSOLE];
         if config.audit_file.is_some() {
             consumers.push(JSONL);
         }
@@ -105,7 +159,7 @@ impl Pipeline {
             (Some(_), None) => anyhow::bail!("--datadog-logs-url needs DD_API_KEY"),
             _ => None,
         };
-        if consumers.is_empty() {
+        if consumers.len() == 1 {
             anyhow::bail!(
                 "no audit sink is configured: set --audit-file, an S3 bucket, or Datadog"
             );
@@ -133,7 +187,18 @@ impl Pipeline {
     }
 
     /// Start every configured sink.
-    pub fn start_sinks(&self, shutdown: &watch::Receiver<bool>) {
+    pub fn start_sinks(&self, db: &crate::db::Db, shutdown: &watch::Receiver<bool>) {
+        let db = db.clone();
+        tokio::spawn(run_consumer(
+            self.spool.clone(),
+            ConsumerConfig {
+                name: CONSOLE.into(),
+                batch_max: 500,
+                linger: Duration::from_millis(200),
+            },
+            move |batch| project(db.clone(), batch),
+            shutdown.clone(),
+        ));
         if let Some(path) = self.config.audit_file.clone() {
             let consumer = ConsumerConfig {
                 name: JSONL.into(),
@@ -180,6 +245,23 @@ impl Pipeline {
             ));
         }
     }
+}
+
+/// Project session events into the database for the console. A batch that
+/// can't be read is skipped (it's still in every other sink); a database
+/// error is retried.
+async fn project(db: crate::db::Db, batch: Vec<(u64, Vec<u8>)>) -> Result<(), ShipError> {
+    let events: Vec<limen_audit::Event> = batch
+        .iter()
+        .filter_map(|(seq, line)| {
+            serde_json::from_slice(line)
+                .map_err(|e| tracing::warn!(seq, error = %e, "skipping an unreadable audit event"))
+                .ok()
+        })
+        .collect();
+    crate::console::store::project_events(&db, &events)
+        .await
+        .map_err(|e| ShipError::Retry(format!("projecting sessions: {e}")))
 }
 
 async fn write_jsonl(path: PathBuf, batch: Vec<(u64, Vec<u8>)>) -> Result<(), ShipError> {
