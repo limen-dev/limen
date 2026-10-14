@@ -1,0 +1,31 @@
+# Example roles for the local dev stack (deploy/compose).
+kind: role
+version: v1
+metadata:
+  name: dev-readonly
+  description: Read-only access to staging databases, plus SSH as ubuntu on staging hosts.
+spec:
+  cert_ttl: 10m
+  allow:
+    - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
+      db: { roles: [limen_readonly] }
+    - resources: { kind: [ssh], labels: { env: [staging] } }
+      ssh: { logins: [ubuntu] }
+  deny:
+    - resources: { kind: [ssh], labels: { tier: [bastion] } }
+---
+kind: role
+version: v1
+metadata:
+  name: sre
+spec:
+  cert_ttl: 30m
+  max_session_ttl: 12h
+  allow:
+    - resources: { kind: [ssh], labels: { "*": ["*"] } }
+      ssh: { logins: [ubuntu, ec2-user], port_forwarding: true }
+    - resources: { kind: [postgres, mysql, redis], labels: { "*": ["*"] } }
+      db: { roles: [limen_readonly, limen_rw] }
+      redis: { users: [limen-rw] }
+    - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
+      kube: { groups: ["limen:edit"] }

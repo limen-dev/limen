@@ -10,6 +10,10 @@ publish.workspace = true
 [dependencies]
 limen-core.workspace = true
 serde.workspace = true
+serde-saphyr.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
