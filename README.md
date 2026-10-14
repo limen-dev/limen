@@ -11,7 +11,7 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
 
 > **Status: Phase 2 complete.** OIDC login, policy, the control plane, proxies (with peering), workers, and SSH access with session recording work end to end. Databases, Redis, and Kubernetes arrive in Phases 4 to 6, and the audit pipeline to S3, Datadog, and Grafana in Phase 3. See the [roadmap](docs/design.md#13-phases-and-exit-criteria).
 
-Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh`.
+Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH) or `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards).
 
 ## Why "Limen"
 Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.

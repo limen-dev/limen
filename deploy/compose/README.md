@@ -59,6 +59,7 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 ```sh
 deploy/compose/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
+deploy/compose/demo-phase3.sh          # audit to S3 and Datadog, sink outage, tamper check, Grafana
 ```
 
 By hand, after `limen admin apply examples/policy`:

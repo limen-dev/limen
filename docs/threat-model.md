@@ -103,11 +103,11 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|
-| T: tampering with audit batches (A8) | Per-writer hash chain plus signed manifests. Optional S3 Object Lock in compliance mode. A separate KMS key. Bucket policy denies delete except to lifecycle. `limen admin audit verify` |
+| T: tampering with audit batches (A8) | Per-writer hash chain plus signed manifests. Optional S3 Object Lock in compliance mode. A separate KMS key. Bucket policy denies delete except to lifecycle. `limen-audit-verify` (a CLI subcommand comes later). Limit: a signed chain proves a batch was altered or removed, not that the control plane never wrote a false event; and the tail after the last manifest isn't covered until the next batch lands |
 | R: an insider evades audit through protocol tricks | PG: extended protocol, `COPY`, multi-statement, and `DO` blocks are all logged at the wire level, not through SQL parsing. MySQL: `COM_STMT_PREPARE`/`EXECUTE`, multi-statements. Redis: `MULTI`/`EXEC`, `EVAL`/`EVALSHA` (the script body is logged, args redacted), pipelining. Kube: exec recorded, port-forward audited. Unparseable input is logged raw as `statement_type=unknown` |
 | D: audit pipeline loss | Local fsynced spool, at-least-once delivery, fail-closed by default, producer `seq` gap detection |
 | I: sensitive data in audit (PII in SQL literals, Redis values) | Redis values redacted by default. SQL full text by default (owner decision), with per-resource literal normalization. Bound parameters redacted by default. Access to the bucket and Grafana is limited to auditors |
-| S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role |
+| S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
 ## 5. Cross-cutting
 

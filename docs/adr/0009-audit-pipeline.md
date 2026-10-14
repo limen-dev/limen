@@ -19,4 +19,12 @@
 ## Consequences
 - \+ No single event loss on crash after the local fsync. Sink outages are absorbed up to the spool size.
 - − Duplicates are possible. Athena views dedupe, and Datadog may show rare duplicates.
-- *Tested in Phase 3:* kill -9 the producer mid-batch, break MinIO, break the fake Datadog intake, and verify that the set of event IDs equals the set of IDs emitted.
+- *Tested in Phase 3:* kill -9 the producer mid-batch, break S3 (SeaweedFS), break the fake Datadog intake, and verify that the set of event IDs equals the set of IDs emitted.
+
+## Amendment (Phase 3, 2026-10-14)
+- **Framing uses CRC32 via `crc32fast`**, not CRC32C: the `crc32c` crate is unmaintained.
+- **Local S3 is SeaweedFS** (`chrislusf/seaweedfs`); MinIO no longer publishes images and LocalStack needs a token. It requires signed requests, which caught a real bug: streamed recording uploads failed against an anonymous server.
+- **Manifests** live at `manifests/<writer>/<seq>.json`; the verifier is the `limen-audit-verify` binary for now.
+- **Recordings** are uploaded by the worker to the control plane in chunks, not multipart straight from the worker; the proxy never gets S3 access.
+- **IAM** (`deploy/terraform/modules/audit`): the control plane can append and read manifests but not delete; Grafana reads events only; the verifier is read-only. The bucket policy denies `DeleteObjectVersion` and non-KMS puts; Object Lock is optional.
+- *Unverified against real S3, KMS, Athena, or Datadog.*

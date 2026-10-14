@@ -88,9 +88,15 @@ step "Recordings and audit trail"
 # Events from the proxy and worker reach the control plane through their
 # spools; recordings are uploaded by the worker after each session.
 sleep 8
-rm -rf "$state/recordings"
-"${compose[@]}" cp control-plane:/var/lib/limen/recordings "$state/recordings" >/dev/null
-find "$state/recordings" -name '*.cast' | head
+# The control plane stores them in the audit bucket (SeaweedFS in this
+# stack, signed with the dev identity in s3/s3.json).
+s3curl() { curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user dev:dev-only-secret "$@"; }
+rm -rf "$state/recordings"; mkdir -p "$state/recordings"
+for key in $(s3curl "http://localhost:8333/limen-audit?list-type=2&prefix=recordings/" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g'); do
+  echo "  s3://limen-audit/$key"
+  # curl's SigV4 signs "=" in the path only when it's percent-encoded.
+  s3curl "http://localhost:8333/limen-audit/${key//=/%3D}" -o "$state/recordings/$(basename "$key")"
+done
 cast="$(grep -rl "tick 12" "$state/recordings" | head -1)"
 [ -n "$cast" ] || fail "no recording of the ticking session"
 head -1 "$cast"; grep -m2 '"o"' "$cast"

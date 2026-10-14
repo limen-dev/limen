@@ -13,4 +13,7 @@ S3 is the long-term, tamper-evident audit store. Datadog log retention is short 
 
 ## Consequences
 - − One more stateful service. Its SQLite state lives on EFS, or it uses Aurora as Grafana's DB; this gets decided in Phase 3.
-- *Unverified locally:* Athena isn't available in compose. Dashboard SQL is checked against Trino over MinIO in Phase 3, and against real Athena once an AWS account exists.
+- *Unverified locally:* Athena isn't available in compose. Dashboard SQL is checked against Trino over SeaweedFS in Phase 3, and against real Athena once an AWS account exists.
+
+## Amendment (Phase 3)
+Panels and alert rules are generated from one Python definition (`dashboards/grafana/generate.py`) for both Athena and Trino, and CI fails if the generated files are stale. Locally, `trino-init` creates the table and re-syncs partitions each minute; in AWS, partition projection replaces that. Custom login branding needs Grafana Enterprise, so stock Grafana is used.

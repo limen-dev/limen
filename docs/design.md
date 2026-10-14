@@ -247,24 +247,24 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
  (proxy, worker, CP)                                                                └─► Datadog logs intake
 ```
 - **Envelope v1** (`limen-audit::Event`): `schema_version`, `event_id` (UUIDv7, the idempotency key), `kind`, `time`, `producer{component, instance_id, seq}`, `user`, `session_id`, and `data` (fields specific to the kind, with their own JSON Schema in `docs/audit-schema/`). A gap in `seq` for a producer is detectable, and gaps are surfaced on a dashboard.
-- **Spool.** An append-only, segmented log on local disk, with length+CRC32C framing, group-commit fsync (default every 50 ms or 256 events), and a durable consumer offset. **At-least-once.** A sender advances only after the downstream ack. Duplicates are removed by `event_id` in Athena views. Datadog may see rare duplicates.
+- **Spool.** An append-only, segmented log on local disk, with length+CRC32 framing (`crc32fast`; the `crc32c` crate is unmaintained), group-commit fsync (default every 50 ms or 256 events), and a durable consumer offset. **At-least-once.** A sender advances only after the downstream ack. Duplicates are removed by `event_id` in Athena views. Datadog may see rare duplicates.
 - **Full spool or unavailable sink.** `audit.failure_mode: fail_closed` (the default) means:
   - no new sessions
   - in-flight sessions block on emission. Backpressure pauses the client stream, and if that lasts longer than `audit.block_timeout` (default 30 s), the session ends with reason `audit_unavailable`
   - logins are refused
 
   `degrade` keeps going, drops nothing it can still spool, and raises `limen_audit_degraded=1` plus an error log every 10 s. Either way, nothing is dropped silently.
-- **Session recordings** are uploaded in 1 MiB chunks through the same ingest path. The control plane writes them as S3 multipart objects at `recordings/dt=YYYY-MM-DD/<session_id>.cast` and links them from `session.end` (`recording_uri`, `sha256`).
+- **Session recordings** are written by the worker to `<data-dir>/recordings/<session>.cast.part`, renamed when the session ends, and uploaded to the control plane (`AuditIngest.UploadRecording`), which stores them at `recordings/dt=YYYY-MM-DD/<session_id>.cast` and emits `session.recording` with the final URI and SHA-256. `session.end` carries `recording:<session_id>` and the hash. Until the control plane acks, the worker keeps the file and retries.
 - **S3 layout:**
   - `events/dt=YYYY-MM-DD/hour=HH/<cp_instance>-<batch_seq>.jsonl.gz`
   - SSE-KMS with a dedicated key
   - optional Object Lock in compliance mode
   - batches close at 5 MiB or 60 s
-  - each batch has a manifest `…​.manifest.json` with `{batch_sha256, prev_manifest_sha256, first/last event_id, count}`, signed by the control plane's internal-CA key. This makes a per-writer **hash chain**, checked by `limen admin audit verify`.
+  - each batch has a manifest at `manifests/<writer>/<seq>.json`, signed by the control plane's certificate key (`Purpose::AuditManifest`) and chained by the previous manifest's SHA-256. The chain head is recovered from S3 on restart. `limen-audit-verify` (shipped in the control plane image) checks signatures, numbering, chain, and batch hashes. The planned `limen admin audit verify` is not built yet.
 
   Parquet is deferred. JSONL with the Glue JSON SerDe and partition projection is enough at the target scale.
 - **Datadog:**
-  - audit events go to the Logs HTTP intake (`service:limen`, `source:limen-audit`, plus `env`, `version`, `kind`)
+  - audit events go to the Logs HTTP intake (`service:limen`, `source:limen`, tags `env`, `version`, `event_kind`, `component`)
   - service metrics go over DogStatsD to the agent sidecar
   - traces go over OTLP to the agent
   - monitors are in `deploy/terraform/modules/datadog`
@@ -301,7 +301,7 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
   - `modules/ec2`: ASG and systemd
   - `modules/datadog`: monitors
   - `examples/complete`: a single `terraform apply`
-- **Local:** `deploy/compose` runs Postgres (state), MinIO (S3), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
+- **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
 
@@ -335,7 +335,7 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 | 0 | Design, ADRs, threat model, skeleton, CI | fmt, clippy, test, deny, and audit pass locally. actionlint is clean |
 | 1 ✅ | Control plane (API, Aurora state, CA, policy engine), OIDC login against Dex, CLI login, worker enrollment and reverse tunnel, audit emission to a stub sink | `docker compose up`. `limen login` with Dex. `limen ls` shows only the allowed resources. A worker enrolls with a join token, and a second use of the token is rejected. The tunnel survives a proxy restart. Events land in the stub sink |
 | 2 ✅ | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
-| 3 | Audit to S3 (MinIO) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally we check the SQL against Trino*) |
+| 3 | Audit to S3 (SeaweedFS) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally Trino reads the same S3 files and Grafana runs the same SQL*) |
 | 3.5 | Web console: users, sessions, workers, resources, policy browsing and dry run, tokens, lock and session kill, recording playback (ADR-0017) | An admin sees users, workers, and live sessions in a browser, plays a recording, locks a user, and the user's open SSH session ends. A normal user sees only their resources. CSRF, CSP, and cookie tests |
 | 4 | PostgreSQL, then MySQL and Aurora | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent |
 | 5 | Redis | `redis-cli` through `limen redis connect`. Values are redacted |
