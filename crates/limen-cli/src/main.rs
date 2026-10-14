@@ -8,21 +8,60 @@ mod api;
 mod commands;
 mod oidc;
 mod profile;
+mod ui;
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use limen_core::telemetry::{self, LogFormat};
 
+/// Help colours: the Limen teal for headings, plain text elsewhere.
+const STYLES: clap::builder::Styles = clap::builder::Styles::styled()
+    .header(
+        anstyle::Style::new()
+            .fg_color(Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 184, 166))))
+            .effects(anstyle::Effects::BOLD),
+    )
+    .usage(
+        anstyle::Style::new()
+            .fg_color(Some(anstyle::Color::Rgb(anstyle::RgbColor(20, 184, 166))))
+            .effects(anstyle::Effects::BOLD),
+    )
+    .literal(anstyle::Style::new().effects(anstyle::Effects::BOLD))
+    .placeholder(anstyle::Style::new().effects(anstyle::Effects::DIMMED));
+
 #[derive(Debug, Parser)]
-#[command(name = "limen", version = limen_core::VERSION, about)]
+#[command(
+    name = "limen",
+    version = limen_core::VERSION,
+    about,
+    styles = STYLES,
+    after_help = "Start with `limen login`, then `limen ls`. Output is plain when piped or when NO_COLOR is set."
+)]
 struct Cli {
+    /// When to use colour: auto, always, or never.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "auto",
+        value_name = "WHEN"
+    )]
+    color: ColorWhen,
+
     /// Proxy address, for example `limen.example.com:443`. Defaults to the last one used.
     #[arg(long, global = true, env = "LIMEN_PROXY")]
     proxy: Option<String>,
 
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum ColorWhen {
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Debug, Subcommand)]
@@ -118,10 +157,15 @@ enum KubeCommand {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    anstream::ColorChoice::write_global(match cli.color {
+        ColorWhen::Auto => anstream::ColorChoice::Auto,
+        ColorWhen::Always => anstream::ColorChoice::Always,
+        ColorWhen::Never => anstream::ColorChoice::Never,
+    });
     // Logs go to stderr and default to warnings, so command output stays clean.
     telemetry::init_with_default(LogFormat::Text, "warn");
     if let Err(e) = run(cli).await {
-        eprintln!("error: {e:#}");
+        ui::error(&e);
         std::process::exit(1);
     }
 }
@@ -143,9 +187,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Ssh,
         } => commands::ssh::config(proxy),
-        Command::Db { .. } => not_yet(4),
-        Command::Redis { .. } => not_yet(5),
-        Command::Kube { .. } => not_yet(6),
+        Command::Db { .. } => not_yet(6),
+        Command::Redis { .. } => not_yet(7),
+        Command::Kube { .. } => not_yet(8),
     }
 }
 

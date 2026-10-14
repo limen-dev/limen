@@ -9,7 +9,7 @@ use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256, PublicKeyData};
 
 use crate::oidc::{self, IdpSettings};
 use crate::profile::{self, Profile, ProfileMeta};
-use crate::{api, commands};
+use crate::{api, commands, ui};
 
 pub async fn run(
     proxy: Option<&str>,
@@ -85,6 +85,10 @@ pub async fn run(
         commands::ssh::write_known_hosts(&proxy, &resp.ssh_host_ca_public_key)?;
     }
     profile::set_current(&proxy)?;
-    println!("Logged in to {proxy} as {}.", resp.username);
+    ui::success(&format!(
+        "Signed in to {} as {}",
+        ui::bold(&proxy),
+        ui::accent(&resp.username)
+    ));
     commands::status(Some(&proxy))
 }

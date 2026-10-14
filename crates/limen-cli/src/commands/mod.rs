@@ -7,15 +7,18 @@ pub mod ssh;
 use limen_proto::v1::ListResourcesRequest;
 use limen_proto::v1::resources_client::ResourcesClient;
 
-use crate::api;
 use crate::profile::Profile;
+use crate::{api, ui};
 
 pub fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
     let proxy = api::resolve_proxy(proxy)?;
     if Profile::delete(&proxy)? {
-        println!("Logged out of {proxy}. Local credentials deleted.");
+        ui::success(&format!(
+            "Logged out of {}. Local credentials deleted.",
+            ui::bold(&proxy)
+        ));
     } else {
-        println!("Not logged in to {proxy}.");
+        ui::info(&format!("Not logged in to {proxy}."));
     }
     Ok(())
 }
@@ -23,21 +26,25 @@ pub fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
 pub fn status(proxy: Option<&str>) -> anyhow::Result<()> {
     let proxy = api::resolve_proxy(proxy)?;
     let Some(profile) = Profile::load(&proxy)? else {
-        println!("Not logged in to {proxy}. Run `limen login`.");
+        ui::info(&format!("Not logged in to {proxy}."));
+        ui::hint("Run `limen login` to sign in.");
         return Ok(());
     };
     let remaining = profile.expires_at() - time::OffsetDateTime::now_utc();
-    println!("Proxy:    {}", profile.meta.proxy);
-    println!("User:     {}", profile.meta.username);
-    println!("Roles:    {}", profile.meta.roles.join(", "));
+    let roles: Vec<String> = profile.meta.roles.iter().map(|r| ui::role(r)).collect();
+    anstream::println!(
+        "{}",
+        ui::key_values(&[
+            ("Proxy", profile.meta.proxy.clone()),
+            ("User", ui::bold(&profile.meta.username)),
+            ("Roles", roles.join(", ")),
+            ("Expires", ui::expiry(remaining)),
+        ])
+    );
     if remaining.is_positive() {
-        println!(
-            "Expires:  in {}m {}s",
-            remaining.whole_minutes(),
-            remaining.whole_seconds() % 60
-        );
+        ui::hint("Next: `limen ls` to see what you can reach.");
     } else {
-        println!("Expires:  EXPIRED. Run `limen login`.");
+        ui::hint("Your credentials expired. Run `limen login`.");
     }
     Ok(())
 }
@@ -59,7 +66,8 @@ pub async fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     if resp.resources.is_empty() {
-        println!("No resources available to you.");
+        ui::info("No resources are available to you.");
+        ui::hint("Your roles don't grant access to anything yet. Ask an admin.");
         return Ok(());
     }
     let rows: Vec<[String; 4]> = resp
@@ -69,35 +77,18 @@ pub async fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
             let mut labels: Vec<_> = r.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
             labels.sort();
             [
-                r.name.clone(),
-                r.kind.clone(),
-                r.principals.join(","),
-                labels.join(","),
+                ui::bold(&r.name),
+                ui::kind_label(&r.kind),
+                r.principals.join(", "),
+                ui::dim(&labels.join(" ")),
             ]
         })
         .collect();
-    print_table(["NAME", "KIND", "PRINCIPALS", "LABELS"], &rows);
+    ui::print_table(["name", "kind", "access as", "labels"], &rows);
+    let n = resp.resources.len();
+    ui::hint(&format!(
+        "{n} resource{} · connect with `limen ssh <name>`",
+        if n == 1 { "" } else { "s" }
+    ));
     Ok(())
-}
-
-/// Print rows as an aligned table.
-pub fn print_table<const N: usize>(header: [&str; N], rows: &[[String; N]]) {
-    let mut widths = header.map(str::len);
-    for row in rows {
-        for (w, cell) in widths.iter_mut().zip(row) {
-            *w = (*w).max(cell.len());
-        }
-    }
-    let line = |cells: Vec<&str>| {
-        let parts: Vec<String> = cells
-            .iter()
-            .zip(widths)
-            .map(|(c, w)| format!("{c:<w$}"))
-            .collect();
-        println!("{}", parts.join("  ").trim_end());
-    };
-    line(header.to_vec());
-    for row in rows {
-        line(row.iter().map(String::as_str).collect());
-    }
 }

@@ -181,15 +181,21 @@ pub async fn pkce_login(
     );
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
 
-    eprintln!("Opening your browser to log in. If it doesn't open, visit:\n\n  {url}\n");
+    anstream::eprintln!(
+        "{} Opening your browser to sign in. If it doesn't open, visit:\n\n  {}\n",
+        crate::ui::accent("›"),
+        crate::ui::bold(url.as_str())
+    );
     if open_browser && webbrowser::open(url.as_str()).is_err() {
-        eprintln!("(could not open a browser automatically)");
+        crate::ui::warn("could not open a browser automatically");
     }
+    let waiting = crate::ui::spinner("Waiting for you to finish signing in");
     let callback = tokio::time::timeout(LOGIN_TIMEOUT, rx)
         .await
         .context("timed out waiting for the browser login")?
         .context("callback listener stopped")?;
     server.abort();
+    waiting.finish();
 
     if let Some(error) = callback.error {
         bail!(
@@ -240,9 +246,11 @@ pub async fn device_login(settings: &IdpSettings) -> anyhow::Result<String> {
         || details.verification_uri().to_string(),
         |u| u.secret().clone(),
     );
-    eprintln!(
-        "To log in, visit:\n\n  {uri}\n\nand enter the code: {}\n",
-        details.user_code().secret()
+    anstream::eprintln!(
+        "{} To sign in, visit:\n\n  {}\n\nand enter the code: {}\n",
+        crate::ui::accent("›"),
+        crate::ui::bold(&uri),
+        crate::ui::accent(details.user_code().secret())
     );
     let token = client
         .exchange_device_access_token(&details)?

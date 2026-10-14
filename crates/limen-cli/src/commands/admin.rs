@@ -14,7 +14,7 @@ use limen_proto::v1::{
 };
 
 use crate::api;
-use crate::commands::print_table;
+use crate::ui;
 
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
@@ -108,24 +108,27 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 .into_inner();
             let diff = resp.diff.unwrap_or_default();
             for name in &diff.added {
-                println!("+ {name}");
+                anstream::println!("{}", ui::green(&format!("+ {name}")));
             }
             for name in &diff.changed {
-                println!("~ {name}");
+                anstream::println!("{}", ui::yellow(&format!("~ {name}")));
             }
             for name in &diff.removed {
-                println!("- {name}");
+                anstream::println!("{}", ui::red(&format!("- {name}")));
             }
             if diff.added.is_empty() && diff.changed.is_empty() && diff.removed.is_empty() {
-                println!("No changes. Policy version {} is current.", resp.version);
+                ui::success(&format!(
+                    "No changes. Policy version {} is current.",
+                    resp.version
+                ));
             } else if resp.applied {
-                println!(
-                    "Applied policy version {} ({}).",
-                    resp.version,
-                    &resp.digest[..12.min(resp.digest.len())]
-                );
+                ui::success(&format!(
+                    "Applied policy version {} ({})",
+                    ui::bold(&resp.version.to_string()),
+                    ui::dim(&resp.digest[..12.min(resp.digest.len())])
+                ));
             } else {
-                println!("Dry run: nothing applied.");
+                ui::info("Dry run: nothing was applied.");
             }
         }
         AdminCommand::Policy => {
@@ -134,13 +137,22 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 .await
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
-            println!("Version:   {}", p.version);
-            println!("Digest:    {}", p.digest);
-            println!(
-                "Author:    {}",
-                if p.author.is_empty() { "-" } else { &p.author }
+            anstream::println!(
+                "{}",
+                ui::key_values(&[
+                    ("Version", ui::bold(&p.version.to_string())),
+                    ("Digest", p.digest.clone()),
+                    (
+                        "Author",
+                        if p.author.is_empty() {
+                            "-".into()
+                        } else {
+                            p.author.clone()
+                        }
+                    ),
+                    ("Resources", p.resource_count.to_string()),
+                ])
             );
-            println!("Resources: {}", p.resource_count);
         }
         AdminCommand::Token {
             command:
@@ -171,12 +183,12 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             println!("{}", resp.token);
-            eprintln!(
+            ui::warn(&format!(
                 "Single use. Expires at {}.",
                 time::OffsetDateTime::from_unix_timestamp(resp.expires_at_unix)
                     .map(|t| t.to_string())
                     .unwrap_or_default()
-            );
+            ));
         }
         AdminCommand::Components => {
             let resp = admin
@@ -193,15 +205,15 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                         c.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
                     labels.sort();
                     [
-                        c.id.clone(),
+                        ui::bold(&c.id),
                         c.kind.clone(),
-                        labels.join(","),
+                        ui::dim(&labels.join(" ")),
                         format!("{}s ago", now - c.last_seen_at_unix),
                         c.tunnels.len().to_string(),
                     ]
                 })
                 .collect();
-            print_table(["ID", "KIND", "LABELS", "LAST SEEN", "TUNNELS"], &rows);
+            ui::print_table(["id", "kind", "labels", "last seen", "tunnels"], &rows);
         }
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }
@@ -228,11 +240,12 @@ async fn run_locks(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             if resp.locked {
-                println!(
-                    "Locked {username}. New logins and sessions are refused now; open sessions end within about 10 seconds."
+                ui::success(&format!("Locked {}", ui::bold(&username)));
+                ui::hint(
+                    "New logins and sessions are refused now; open sessions end within about 10 seconds.",
                 );
             } else {
-                println!("{username} was already locked.");
+                ui::info(&format!("{username} was already locked."));
             }
         }
         AdminCommand::Unlock { username } => {
@@ -244,9 +257,9 @@ async fn run_locks(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             if resp.unlocked {
-                println!("Unlocked {username}.");
+                ui::success(&format!("Unlocked {}", ui::bold(&username)));
             } else {
-                println!("{username} wasn't locked.");
+                ui::info(&format!("{username} wasn't locked."));
             }
         }
         AdminCommand::Locks => {
@@ -269,7 +282,11 @@ async fn run_locks(
                     ]
                 })
                 .collect();
-            print_table(["USER", "LOCKED BY", "LOCKED AT", "REASON"], &rows);
+            if rows.is_empty() {
+                ui::info("Nobody is locked.");
+            } else {
+                ui::print_table(["user", "locked by", "locked at", "reason"], &rows);
+            }
         }
         AdminCommand::Revoke {
             component_id,
@@ -284,11 +301,12 @@ async fn run_locks(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             if resp.revoked {
-                println!(
-                    "Revoked {component_id}. Renewal is refused, and proxies drop its tunnels within about 10 seconds."
+                ui::success(&format!("Revoked {}", ui::bold(&component_id)));
+                ui::hint(
+                    "Renewal is refused, and proxies drop its tunnels within about 10 seconds.",
                 );
             } else {
-                println!("{component_id} was already revoked.");
+                ui::info(&format!("{component_id} was already revoked."));
             }
         }
         AdminCommand::KillSession { session_id, reason } => {
@@ -301,9 +319,12 @@ async fn run_locks(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             if resp.killed {
-                println!("Session {session_id} will end within about 10 seconds.");
+                ui::success(&format!(
+                    "Session {} will end within about 10 seconds",
+                    ui::bold(&session_id)
+                ));
             } else {
-                println!("Session {session_id} was already marked to end.");
+                ui::info(&format!("Session {session_id} was already marked to end."));
             }
         }
         _ => unreachable!("only lock commands are routed here"),
