@@ -29,9 +29,7 @@ use crate::state::AppState;
 const PAGE_SIZE: i64 = 50;
 
 fn chrome(state: &AppState, auth: &Auth, active: &'static str) -> Chrome {
-    let mut chrome = Chrome::new(auth, active, state.policy.current().version);
-    chrome.grafana.clone_from(&state.config.console_grafana_url);
-    chrome
+    Chrome::new(auth, active, state.policy.current().version)
 }
 
 fn event_view(e: &store::EventRow) -> EventView {

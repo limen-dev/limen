@@ -21,7 +21,6 @@ pub struct Chrome {
     pub version: &'static str,
     pub assets: &'static str,
     pub policy_version: i64,
-    pub grafana: Option<String>,
 }
 
 impl Chrome {
@@ -41,7 +40,6 @@ impl Chrome {
             version: limen_core::VERSION,
             assets: super::assets::version(),
             policy_version,
-            grafana: None,
         }
     }
 }

@@ -89,11 +89,6 @@ pub struct Config {
     #[arg(long, env = "LIMEN_CONSOLE_PUBLIC_URL")]
     pub console_public_url: Option<String>,
 
-    /// Where your Grafana lives, such as `https://grafana.example.com`. The
-    /// console links to it from the sidebar. Nothing else uses it.
-    #[arg(long, env = "LIMEN_CONSOLE_GRAFANA_URL", value_parser = parse_http_url)]
-    pub console_grafana_url: Option<String>,
-
     /// The console's own OIDC client. Its redirect URI is
     /// `<console public URL>/console/callback`.
     #[arg(
@@ -293,25 +288,6 @@ pub fn parse_duration_or_zero(s: &str) -> Result<Duration, String> {
     parse_duration(s)
 }
 
-/// An `http(s)://host[:port][/path]` link, without credentials. Used for the
-/// console's Grafana link, which is rendered into pages.
-pub fn parse_http_url(s: &str) -> Result<String, String> {
-    let rest = s
-        .strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))
-        .ok_or("must start with http:// or https://")?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    if host.is_empty() || host.contains('@') {
-        return Err("needs a host and no user name or password".into());
-    }
-    if s.chars()
-        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '<' | '>'))
-    {
-        return Err("contains characters that don't belong in a URL".into());
-    }
-    Ok(s.trim_end_matches('/').to_owned())
-}
-
 /// Parse `90s`, `10m`, `8h`, or `1d`.
 pub fn parse_duration(s: &str) -> Result<Duration, String> {
     limen_policy::duration::DurationStr::parse(s).map(|d| d.0)
@@ -320,18 +296,6 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn http_urls() {
-        assert_eq!(
-            parse_http_url("https://grafana.example.com/").as_deref(),
-            Ok("https://grafana.example.com")
-        );
-        assert!(parse_http_url("javascript:alert(1)").is_err());
-        assert!(parse_http_url("https://user:pw@host/").is_err());
-        assert!(parse_http_url("https://host/\"x").is_err());
-        assert!(parse_http_url("https:///path").is_err());
-    }
 
     #[test]
     fn static_tokens_with_labels() {

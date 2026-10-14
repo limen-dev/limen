@@ -416,6 +416,7 @@ async fn console_end_to_end() {
         "/console/workers",
         "/console/policy",
         "/console/audit",
+        "/console/dashboards",
     ] {
         let page = dev_user.get(path).await;
         assert_eq!(page.status, 403, "{path}");
@@ -725,6 +726,22 @@ async fn console_end_to_end() {
         .get(&format!("/console/users/{DEVELOPER_ENC}"))
         .await;
     assert!(user_page.body.contains("Recent activity"));
+
+    // ---- built-in dashboards -------------------------------------------------------------
+    for range in ["24h", "7d", "30d", "nonsense"] {
+        let page = admin_user
+            .get(&format!("/console/dashboards?range={range}"))
+            .await;
+        assert_eq!(page.status, 200, "{range}: {}", page.body);
+        assert!(page.body.contains("<svg class=\"chart\""), "{range}");
+        assert!(page.body.contains("Busiest resources"));
+    }
+    let dash = admin_user.get("/console/dashboards").await;
+    assert!(
+        dash.body.contains("web-1"),
+        "the resource that had sessions shows up as busy"
+    );
+    assert!(dash.body.contains("<title>"), "bars carry tooltips");
 
     // ---- policy browsing and dry run -------------------------------------------------------
     let policy_page = admin_user.get("/console/policy").await;

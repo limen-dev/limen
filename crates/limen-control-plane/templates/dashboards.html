@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Dashboards{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Dashboards</h1>
+    <p class="sub">What has been happening, from the console's own records (kept for 30 days). Times are UTC.</p>
+  </div>
+  <div class="tabs">
+    <a href="/console/dashboards?range=24h"{% if range == "24h" %} aria-current="true"{% endif %}>24 hours</a>
+    <a href="/console/dashboards?range=7d"{% if range == "7d" %} aria-current="true"{% endif %}>7 days</a>
+    <a href="/console/dashboards?range=30d"{% if range == "30d" %} aria-current="true"{% endif %}>30 days</a>
+  </div>
+</div>
+<section class="stats">
+{% for t in tiles %}
+  <div class="card stat {{ t.tone }}"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div><b>{{ t.value }}</b><span>{{ t.label }}</span></div></div>
+{% endfor %}
+</section>
+<section class="panels">
+{% for p in panels %}
+  <div class="card panel">
+    <div class="panel-head"><h2>{{ p.title }}</h2><span class="hint">{{ p.sub }}</span>
+      {% if !p.legend.is_empty() %}<span class="legend">{% for l in p.legend %}<span><i class="swatch {{ l.0 }}"></i>{{ l.1 }}</span>{% endfor %}</span>{% endif %}
+    </div>
+    <svg class="chart" viewBox="0 0 640 200" role="img" aria-label="{{ p.title }}">
+      {% for t in p.chart.ticks %}
+      <line class="grid" x1="{{ p.chart.left }}" x2="{{ p.chart.right }}" y1="{{ t.y }}" y2="{{ t.y }}"/>
+      <text class="axis" x="{{ p.chart.left - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>
+      {% endfor %}
+      {% for b in p.chart.bars %}{% if b.h > 0 %}<rect class="{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.tip }}</title></rect>{% endif %}{% endfor %}
+      {% for x in p.chart.xlabels %}<text class="axis" x="{{ x.x }}" y="{{ p.chart.base + 16 }}" text-anchor="middle">{{ x.text }}</text>{% endfor %}
+    </svg>
+    {% if p.chart.empty %}<p class="chart-empty">No activity in this period.</p>{% endif %}
+  </div>
+{% endfor %}
+</section>
+<section class="panels thirds">
+{% for p in ranked %}
+  <div class="card panel">
+    <div class="panel-head"><h2>{{ p.title }}</h2><span class="hint">{{ p.sub }}</span></div>
+    {% if p.rows.is_empty() %}<p class="chart-empty">Nothing in this period.</p>{% endif %}
+    <ul class="ranked">
+    {% for r in p.rows %}
+      <li>
+        <span class="rk-label">{% if let Some(l) = r.link %}<a href="{{ l }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</span>
+        <span class="rk-n">{{ r.value }}</span>
+        <svg class="rk-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect class="rk-track" width="100" height="6" rx="3"/><rect class="{{ p.class }}" width="{{ r.pct }}" height="6" rx="3"/></svg>
+      </li>
+    {% endfor %}
+    </ul>
+  </div>
+{% endfor %}
+</section>
+{% endblock %}

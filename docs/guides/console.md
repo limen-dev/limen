@@ -12,7 +12,7 @@ Open **`https://<your proxy>/console/`** (locally `https://localhost:3443/consol
 | **Users** | See who has signed in and their roles. **Lock** a user (they are signed out, can't log in, and their open sessions end within seconds) or **unlock** them, always with an audited reason | admins |
 | **Workers** | See enrolled proxies and workers and their tunnels. See which **join tokens are still outstanding** (who made them, when they expire; never their values), **create single-use join tokens** (shown once) and **revoke** a component | admins |
 | **Audit trail** | The last 30 days of events (sign-ins, denials, locks, kills, revokes, token creation, policy changes), filterable by event and user. A user's page shows their recent activity. It is a summary: the complete, signed events live in your audit sinks | admins |
-| **Dashboards** | A link to your Grafana, shown when the deployment sets `LIMEN_CONSOLE_GRAFANA_URL` | admins |
+| **Dashboards** | Built-in charts for the last 24 hours, 7 days or 30 days: sessions over time, sign-ins next to denials, busiest resources and people, session length, why access was denied, and admin actions. Drawn by the console itself, nothing to install | admins |
 | **Policy** | Browse roles, mappings, and resources as the YAML behind them, and **check a change**: paste YAML, see the diff, nothing is applied | admins |
 
 A few things worth knowing:

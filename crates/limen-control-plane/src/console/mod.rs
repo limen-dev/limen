@@ -17,6 +17,7 @@
 
 mod assets;
 mod auth;
+mod dashboards;
 pub mod oidc_flow;
 mod pages;
 pub mod store;
@@ -90,6 +91,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
         .route("/console/audit", get(pages::audit))
+        .route("/console/dashboards", get(dashboards::dashboards))
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))
         // Not `.fallback()`: the gRPC router this is merged with has one.
