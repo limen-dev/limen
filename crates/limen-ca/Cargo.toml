@@ -17,6 +17,9 @@ limen-core.workspace = true
 futures.workspace = true
 rcgen.workspace = true
 rustls-pki-types.workspace = true
+rand.workspace = true
+ssh-key.workspace = true
+signature.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["rt"] }
@@ -30,6 +33,8 @@ aws-sdk-kms = { workspace = true, optional = true }
 [dev-dependencies]
 limen-testkit.workspace = true
 rcgen.workspace = true
+rand.workspace = true
+ssh-key.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [[test]]

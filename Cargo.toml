@@ -22,6 +22,7 @@ limen-audit = { path = "crates/limen-audit" }
 limen-tunnel = { path = "crates/limen-tunnel" }
 limen-testkit = { path = "crates/limen-testkit" }
 limen-component = { path = "crates/limen-component" }
+limen-session = { path = "crates/limen-session" }
 limen-control-plane = { path = "crates/limen-control-plane" }
 limen-proxy = { path = "crates/limen-proxy" }
 limen-worker = { path = "crates/limen-worker" }
@@ -64,6 +65,7 @@ x509-parser = "0.18.1"
 webpki = { package = "rustls-webpki", version = "0.103.15", default-features = false, features = ["std", "aws-lc-rs"] }
 sha2 = "0.11.1"
 rand = "0.10.3"
+aws-lc-rs = "1.18"
 base64 = "0.23.1"
 
 # AWS
@@ -76,6 +78,13 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 # Identity
 openidconnect = { version = "4.0.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# SSH
+russh = { version = "0.64.1", default-features = false, features = ["aws-lc-rs"] }
+# Exact pin: the release candidate russh 0.64 depends on, so there is one ssh-key in the tree.
+ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["std", "ecdsa", "p256", "ed25519", "rand_core"] }
+
+signature = { version = "3", default-features = false, features = ["alloc"] }
 
 # Rate limiting
 governor = "0.10.4"

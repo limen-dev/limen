@@ -35,6 +35,7 @@ impl UserIdentity {
 pub struct ComponentIdentity {
     pub kind: ComponentKind,
     pub id: String,
+    pub labels: std::collections::BTreeMap<String, String>,
     pub not_after: OffsetDateTime,
 }
 
@@ -84,9 +85,13 @@ pub fn verify_component(
     verify_chain(cert, ca_cert, usage)?;
     let (uris, not_after) = identity_uris(cert)?;
     let mut found = None;
+    let mut labels = std::collections::BTreeMap::new();
     for uri in uris {
         match uri {
             IdentityUri::Component { kind, id } if found.is_none() => found = Some((kind, id)),
+            IdentityUri::Label { key, value } => {
+                labels.insert(key, value);
+            }
             other => {
                 return Err(VerifyError::Identity(format!(
                     "unexpected SAN in component cert: {other:?}"
@@ -98,6 +103,7 @@ pub fn verify_component(
     Ok(ComponentIdentity {
         kind,
         id,
+        labels,
         not_after,
     })
 }
@@ -242,12 +248,17 @@ mod tests {
                     "127.0.0.1".into(),
                     "limen.example.com".into(),
                 ],
+                labels: [("pool".to_owned(), "payments vpc".to_owned())].into(),
                 ttl: Duration::from_secs(3600),
             })
             .await
             .expect("issue");
         let id = verify_component(&issued.der, internal.cert_der(), true).expect("server verify");
         assert_eq!((id.kind, id.id.as_str()), (ComponentKind::Proxy, "proxy-1"));
+        assert_eq!(
+            id.labels.get("pool").map(String::as_str),
+            Some("payments vpc")
+        );
         verify_component(&issued.der, internal.cert_der(), false).expect("client verify");
     }
 
@@ -293,6 +304,7 @@ mod tests {
             kind: ComponentKind::Proxy,
             id: "p".into(),
             dns_names: vec!["evil/../x".into()],
+            labels: std::collections::BTreeMap::new(),
             ttl: Duration::from_secs(60),
         };
         assert!(internal.issue_component(bad_dns).await.is_err());

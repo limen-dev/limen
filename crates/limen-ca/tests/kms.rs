@@ -97,3 +97,33 @@ async fn kms_signer_rejects_wrong_key_types() {
         "encryption keys must be rejected"
     );
 }
+
+#[tokio::test]
+async fn kms_backed_ssh_ca_issues_valid_certificates() {
+    use limen_ca::ssh::{SshCa, SshUserCertRequest};
+    let Ok(endpoint) = std::env::var("LIMEN_TEST_KMS_ENDPOINT") else {
+        eprintln!("SKIPPED: LIMEN_TEST_KMS_ENDPOINT is not set");
+        return;
+    };
+    let client = client(&endpoint);
+    let key_id = create_key(&client, KeySpec::EccNistP256, KeyUsageType::SignVerify).await;
+    let signer: Arc<dyn Signer> =
+        Arc::new(KmsSigner::new(client, &key_id).await.expect("kms signer"));
+    let ca = SshCa::new(CaPurpose::UserSsh, signer).expect("ssh ca");
+    let user =
+        ssh_key::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).expect("key");
+    let cert = ca
+        .issue_user_cert(SshUserCertRequest {
+            public_key: user.public_key().clone(),
+            principal: "ubuntu".into(),
+            key_id: "session".into(),
+            ttl: Duration::from_secs(60),
+            permit_pty: true,
+            permit_port_forwarding: false,
+        })
+        .await
+        .expect("issue via KMS");
+    // KMS's DER signature, converted to the SSH mpint form, validates.
+    cert.validate([&ca.public_key().fingerprint(ssh_key::HashAlg::Sha256)])
+        .expect("KMS-signed SSH certificate validates");
+}

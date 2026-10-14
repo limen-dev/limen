@@ -50,6 +50,9 @@ pub struct ComponentCertRequest {
     pub id: String,
     /// DNS names for server certificates (proxies and the control plane).
     pub dns_names: Vec<String>,
+    /// Labels set at enrollment. Resources select workers by them, so they
+    /// are signed into the certificate rather than self-reported.
+    pub labels: std::collections::BTreeMap<String, String>,
     pub ttl: Duration,
 }
 
@@ -185,6 +188,15 @@ impl CertificateAuthority {
             }
             .to_uri(),
         )?];
+        for (key, value) in &req.labels {
+            sans.push(uri_san(
+                &IdentityUri::Label {
+                    key: key.clone(),
+                    value: value.clone(),
+                }
+                .to_uri(),
+            )?);
+        }
         for name in &req.dns_names {
             if let Ok(ip) = name.parse::<std::net::IpAddr>() {
                 sans.push(SanType::IpAddress(ip));

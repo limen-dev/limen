@@ -9,6 +9,7 @@ pub mod authority;
 #[cfg(feature = "kms")]
 pub mod kms;
 pub mod signer;
+pub mod ssh;
 pub mod verify;
 
 pub use authority::{CertificateAuthority, ComponentCertRequest, IssuedCert, UserCertRequest};
@@ -22,8 +23,13 @@ pub enum CaPurpose {
     Internal,
     /// Issues short-lived X.509 client certificates to users.
     UserX509,
-    /// Issues short-lived OpenSSH user certificates (Phase 2).
+    /// Signs per-session OpenSSH user certificates. Targets trust it via
+    /// `TrustedUserCAKeys`. Only the control plane can use it, and only for a
+    /// session a proxy has granted.
     UserSsh,
+    /// Signs per-session OpenSSH host certificates for workers. The CLI's
+    /// known_hosts trusts it, so the proxy can't man-in-the-middle SSH.
+    HostSsh,
 }
 
 impl CaPurpose {
@@ -33,6 +39,7 @@ impl CaPurpose {
             CaPurpose::Internal => "internal",
             CaPurpose::UserX509 => "user_x509",
             CaPurpose::UserSsh => "user_ssh",
+            CaPurpose::HostSsh => "host_ssh",
         }
     }
 
@@ -42,6 +49,7 @@ impl CaPurpose {
             CaPurpose::Internal => "Limen Internal CA",
             CaPurpose::UserX509 => "Limen User CA",
             CaPurpose::UserSsh => "Limen SSH User CA",
+            CaPurpose::HostSsh => "Limen SSH Host CA",
         }
     }
 }

@@ -7,6 +7,7 @@
 //! - `limen://role/<role>`: one per role granted at login
 //! - `limen://login/<uuid>`: the login session that produced the cert
 //! - `limen://component/<kind>/<id>`: a control plane, proxy, or worker (internal CA only)
+//! - `limen://label/<key>/<value>`: a component label, set at enrollment (internal CA only)
 //!
 //! Path segments are percent-encoded, so `alice@example.com` survives intact.
 
@@ -62,6 +63,7 @@ pub enum IdentityUri {
     Role(String),
     Login(String),
     Component { kind: ComponentKind, id: String },
+    Label { key: String, value: String },
 }
 
 impl IdentityUri {
@@ -73,6 +75,9 @@ impl IdentityUri {
             IdentityUri::Login(l) => format!("{SCHEME}://login/{}", encode(l)),
             IdentityUri::Component { kind, id } => {
                 format!("{SCHEME}://component/{kind}/{}", encode(id))
+            }
+            IdentityUri::Label { key, value } => {
+                format!("{SCHEME}://label/{}/{}", encode(key), encode(value))
             }
         }
     }
@@ -91,6 +96,10 @@ impl IdentityUri {
             ("component", Some(id), None) => Some(IdentityUri::Component {
                 kind: ComponentKind::parse(&first)?,
                 id: decode(id)?,
+            }),
+            ("label", Some(value), None) => Some(IdentityUri::Label {
+                key: first,
+                value: decode(value)?,
             }),
             _ => None,
         }
@@ -144,6 +153,10 @@ mod tests {
             IdentityUri::Component {
                 kind: ComponentKind::Worker,
                 id: "w-1".into(),
+            },
+            IdentityUri::Label {
+                key: "pool".into(),
+                value: "payments vpc/1".into(),
             },
         ];
         for case in cases {
