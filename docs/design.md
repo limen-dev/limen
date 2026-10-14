@@ -1,6 +1,6 @@
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-13.
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-14 (Phase 1 complete).
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -101,7 +101,7 @@ The proxy still owns session start and end and the authorization decision.
    - maps groups to roles
    - emits `auth.login`, or `auth.denied` on failure
 4. The control plane returns:
-   - an **X.509 client cert** (user CA, TTL 10 min by default, configurable per role up to a cluster-wide maximum). Subject = username. The roles, IdP subject, and login session ID go in a Limen-specific X.509 extension.
+   - an **X.509 client cert** (user CA, TTL 10 min by default, configurable per role up to a cluster-wide maximum). Subject = username. The identity is carried as URI SANs: `limen://user/<name>`, one `limen://role/<role>` per role, and `limen://login/<uuid>` (ADR-0006, amended). Component certificates carry `limen://component/<kind>/<id>`.
    - an **OpenSSH user cert** (SSH user CA, same TTL). Key ID = username plus login session ID. Principals = the union of `ssh.logins` from the matched roles.
    - the CA bundle and proxy address
 5. Credentials are stored in `~/.limen/<proxy>/` with mode 0600. The **refresh token is not stored by default**: re-login is cheap with an active IdP session. Making this optional (encrypted in the OS keychain) is a Phase 7 decision.
@@ -109,7 +109,7 @@ The proxy still owns session start and end and the authorization decision.
 `limen logout` deletes the local credentials. Revoking credentials that are already issued relies on short TTLs. A `lock` primitive (to kill a user's sessions immediately) is an extension point noted in ADR-0008.
 
 ### 4.2 Service identity, enrollment, and rotation
-- An admin creates a **join token** (`limen admin token create --kind worker --labels ...`). It is single use, has a TTL (default 15 min), and only its SHA-256 hash is stored in Aurora. It is bound to the allowed worker types and labels.
+- An admin creates a **join token** (`limen admin token create --kind worker --label k=v`). It is single use, has a TTL (default 15 min), and only its SHA-256 hash is stored in Aurora. It is bound to the component kind, labels, and (for proxies) DNS names. Static and AWS IAM join methods are covered in ADR-0016.
 - The worker generates its key locally and sends `EnrollWorker{join_token, CSR}` (TLS with server authentication only, relayed by the proxy). The control plane consumes the token atomically (`UPDATE ... WHERE used_at IS NULL RETURNING`) and issues a worker cert from the internal CA, valid for 24 hours. It emits `worker.enroll`.
 - Rotation: a service cert is renewed at 50% of its lifetime, so a control plane outage of 12 hours or less doesn't break workers. During **CA rotation**, the old and new CA are trusted at the same time for at least the longest cert TTL (ADR-0007).
 
@@ -295,7 +295,7 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
   - `modules/ec2`: ASG and systemd
   - `modules/datadog`: monitors
   - `examples/complete`: a single `terraform apply`
-- **Local:** `deploy/compose` runs Postgres (state), MinIO (S3), Dex (OIDC), LocalStack (KMS and Secrets Manager, *only where its emulation is accurate*), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
+- **Local:** `deploy/compose` runs Postgres (state), MinIO (S3), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
 
@@ -327,7 +327,7 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 | Phase | Scope | Exit criteria (tests + docs + runnable demo) |
 |---|---|---|
 | 0 | Design, ADRs, threat model, skeleton, CI | fmt, clippy, test, deny, and audit pass locally. actionlint is clean |
-| 1 | Control plane (API, Aurora state, CA, policy engine), OIDC login against Dex, CLI login, worker enrollment and reverse tunnel, audit emission to a stub sink | `docker compose up`. `limen login` with Dex. `limen ls` shows only the allowed resources. A worker enrolls with a join token, and a second use of the token is rejected. The tunnel survives a proxy restart. Events land in the stub sink |
+| 1 ✅ | Control plane (API, Aurora state, CA, policy engine), OIDC login against Dex, CLI login, worker enrollment and reverse tunnel, audit emission to a stub sink | `docker compose up`. `limen login` with Dex. `limen ls` shows only the allowed resources. A worker enrolls with a join token, and a second use of the token is rejected. The tunnel survives a proxy restart. Events land in the stub sink |
 | 2 | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
 | 3 | Audit to S3 (MinIO) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally we check the SQL against Trino*) |
 | 4 | PostgreSQL, then MySQL and Aurora | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent |
@@ -336,6 +336,14 @@ When a protocol module in the worker grows big enough, it moves to its own crate
 | 7 | Hardening, HA and failure tests, ECS and EC2 Terraform, docs | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
+- **Phase 1 status (2026-10-14).**
+  - Implemented and tested: OIDC login (PKCE with key-bound nonce, and device flow), user and component certificates, the policy engine, versioned policy administration, single-use and static join tokens, the reverse tunnel with proxy health checks and the control plane registry, proxy relaying with forwarded-certificate verification, renewal at half-life, the KMS signer (against local-kms), and the stub audit sink.
+  - Deferred to the phase that needs them:
+    - SSH user certificates at login (Phase 2)
+    - signed policy snapshots for proxies and workers, and the outage grace period (Phase 2, when the proxy first authorizes sessions)
+    - proxy peering (Phase 2)
+    - the disk spool and audit shipping (Phase 3)
+    - IAM join and a revocation CLI (Phase 7)
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.

@@ -5,7 +5,8 @@
 
 ## Decision
 - The control plane is stateless. State lives in Aurora PostgreSQL: policy versions, join tokens (SHA-256 hashes only), workers, tunnel leases, login sessions, CA metadata (key ARNs and state, never key material), and audit ingest bookkeeping.
-- `sqlx` 0.9 with offline-checked queries (`.sqlx/` committed) and embedded migrations, which run at startup under an advisory lock.
+- `sqlx` 0.9 with embedded migrations, which run at startup under sqlx's own advisory lock.
+- **Amended in Phase 1:** queries are checked at runtime, not with sqlx's offline macros. Every query is covered by integration tests against a real PostgreSQL in CI, which catches the same mistakes without making every build depend on a prepared `.sqlx/` cache or a live database. SQL strings are static (`&'static str`, `concat!`), so nothing is built from input.
 - Leader-only jobs use `pg_try_advisory_lock` per job key on a dedicated connection. Losing the connection releases the lock.
 - Local dev uses the compose Postgres. Integration tests use a throwaway database per test.
 

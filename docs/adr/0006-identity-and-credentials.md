@@ -17,12 +17,13 @@ Engineers log in with Okta (Dex or Keycloak locally). Every downstream credentia
 - **Issued credentials:**
   - an X.509 client cert and an OpenSSH user cert
   - both with a 10-minute TTL by default, configurable per role, capped by a cluster `max_cert_ttl`
-  - roles and the login session ID carried in the X.509 cert's custom extension and in the SSH cert's key ID and extensions
+  - roles and the login session ID carried as URI SANs in the X.509 cert (`limen://user/…`, `limen://role/…`, `limen://login/…`, with percent-encoded segments; see `limen_core::identity`), and in the SSH cert's key ID and extensions. *Amended in Phase 1:* URI SANs replace the custom extension planned here. They need no private OID arc, they're understood by every X.509 parser, and they verify offline.
 - **Groups → roles** come from `role_mapping` documents (ADR-0008). Groups are read from a configurable claim (default `groups`). For Okta, the custom authorization server needs a groups claim configured; this goes in the Okta setup guide.
 - **No refresh token is stored by default.** Users run `limen login` again, which is silent if the IdP session is alive.
 - The `IdentityProvider` enum is `#[non_exhaustive]`, and identity verification sits behind a trait. That's the SAML seam.
 
 ## Consequences
+- The SSH user certificate is issued from Phase 2 onward. Phase 1 login issues the X.509 certificate only.
 - \+ Stolen certs are worthless after their TTL. Private keys never leave the machine.
 - − Each user who connects after the TTL expires has to log in again (a browser round trip, usually silent).
 - *Unverified against real service:* Okta's group claim limits (Okta caps the number of groups in a token; large memberships need a filter regex). This is documented in the Okta guide.

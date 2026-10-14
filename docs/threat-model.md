@@ -1,6 +1,6 @@
 # Limen threat model
 
-Status: **Living document**. Last reviewed 2026-10-13 (Phase 0). Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
+Status: **Living document**. Last reviewed 2026-10-14 (Phase 1). Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
 
 ## 1. Assets
 
@@ -49,6 +49,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | S: authorization-code interception on the loopback redirect | PKCE (S256). Random port. `state` checked. Loopback only, never `0.0.0.0` |
 | S: a malicious proxy or MITM swaps the user's public key for its own during cert issuance | The nonce binds the hash of the CLI's public keys. The control plane rejects an ID token whose nonce doesn't match the presented keys (ADR-0006) |
 | T: replayed ID token | `exp` and `iat` checked. The nonce is single-use (the control plane stores a nonce hash until the token expires) |
+| S: no key binding in the device flow (RFC 8628 can't carry our nonce) | Replay is still blocked: the control plane records a hash of each device-flow ID token and accepts it once. PKCE stays the default. **Residual risk:** a compromised proxy relaying a device-flow login could swap in its own CSR (see §6) |
 | I: tokens in logs | `Secret<T>` newtypes. The log scanner test |
 
 ### TB1: Laptop ↔ proxy (public)
@@ -64,6 +65,9 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | Threat | Mitigation |
 |---|---|
 | S: rogue worker enrolls | Single-use join tokens with a 15-minute TTL, stored hashed and consumed atomically. Bound to allowed kinds and labels. `worker.enroll` audit plus an alert on enrollment |
+| S: leaked static join token (ADR-0016) | Kind-scoped. Proxies enrolled with one may only request allow-listed DNS names, and workers get no DNS names, so a leaked worker token can't mint a server certificate. Audited with `token_type=static`. Stored in Secrets Manager and rotated. Replaced by IAM join in Phase 7 |
+| S: client spoofs `x-limen-*` relay headers | The proxy strips every client-supplied `x-limen-*` header before relaying. The control plane accepts forwarding only from callers presenting a **proxy** certificate, and re-verifies the forwarded certificate against the user CA, or the internal CA for workers only. Integration-tested |
+| E: worker forwards a user cert to act as that user | Only proxies may forward. A worker's direct calls resolve to the worker's identity, and user APIs reject it. Integration-tested |
 | S: a compromised worker claims resources it doesn't serve | The worker's cert carries its pool and labels. The control plane only routes resources whose `worker_selector` matches the cert attributes |
 | S: a compromised proxy forges identities toward the control plane | The control plane re-verifies the forwarded user cert against the user CA. The proxy can't mint certs (no `kms:Sign`) |
 | T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (10 min). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
@@ -113,8 +117,11 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 3. A compromised worker sees the plaintext of the sessions it serves, and can act as the `limen_*` DB roles of its resources.
 4. Duplicates in Datadog under failure (at-least-once).
 5. Revocation is TTL-based (no immediate lock in v1. `lock` is an extension point).
+6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
+7. Until IAM join exists (Phase 7), autoscaled proxies and workers enroll with a static, kind-scoped token.
 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
 | 2026-10-13 | 0 | Initial model |
+| 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |

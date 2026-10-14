@@ -20,5 +20,6 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0013](0013-license.md) | Apache-2.0 license | Accepted |
 | [0014](0014-dashboards.md) | Self-hosted Grafana on ECS over Athena | Accepted |
 | [0015](0015-database-credentials.md) | One IAM-authenticated DB role per policy role | Accepted |
+| [0016](0016-join-methods.md) | How proxies and workers join: single-use, IAM (planned), static tokens | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification.

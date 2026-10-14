@@ -4,7 +4,7 @@ Runbooks are added as each component ships. Planned:
 
 | Runbook | Phase |
 |---|---|
-| Worker enrollment and join tokens | 1 |
+| [Worker enrollment and join tokens](worker-enrollment.md) | 1 ✅ |
 | Rotating a CA key | 1 / 7 |
 | SSH target onboarding (`TrustedUserCAKeys`) | 2 |
 | Audit pipeline backlog / spool full | 3 |
