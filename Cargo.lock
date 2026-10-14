@@ -2258,6 +2258,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "limen-component"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "limen-core",
+ "limen-proto",
+ "limen-testkit",
+ "limen-tunnel",
+ "rand 0.10.3",
+ "rcgen",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tonic",
+ "tracing",
+ "x509-parser",
+]
+
+[[package]]
 name = "limen-control-plane"
 version = "0.1.0"
 dependencies = [
@@ -2311,6 +2333,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "limen-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "limen-control-plane",
+ "limen-proto",
+ "limen-proxy",
+ "limen-testkit",
+ "limen-tunnel",
+ "limen-worker",
+ "rcgen",
+ "rustls-pki-types",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tonic",
+ "uuid",
+]
+
+[[package]]
 name = "limen-policy"
 version = "0.1.0"
 dependencies = [
@@ -2336,9 +2379,31 @@ dependencies = [
 name = "limen-proxy"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.23.1",
  "clap",
+ "futures",
+ "governor",
+ "http",
+ "hyper",
+ "limen-ca",
+ "limen-component",
  "limen-core",
+ "limen-proto",
+ "limen-testkit",
+ "limen-tunnel",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tonic",
+ "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2385,8 +2450,18 @@ dependencies = [
 name = "limen-worker"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "axum",
  "clap",
+ "futures",
+ "limen-component",
  "limen-core",
+ "limen-proto",
+ "limen-tunnel",
+ "rand 0.10.3",
+ "serde",
+ "tokio",
+ "tonic",
  "tracing",
 ]
 

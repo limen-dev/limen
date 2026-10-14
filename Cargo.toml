@@ -21,6 +21,10 @@ limen-ca = { path = "crates/limen-ca" }
 limen-audit = { path = "crates/limen-audit" }
 limen-tunnel = { path = "crates/limen-tunnel" }
 limen-testkit = { path = "crates/limen-testkit" }
+limen-component = { path = "crates/limen-component" }
+limen-control-plane = { path = "crates/limen-control-plane" }
+limen-proxy = { path = "crates/limen-proxy" }
+limen-worker = { path = "crates/limen-worker" }
 
 # Runtime and errors
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "time", "sync", "fs"] }
