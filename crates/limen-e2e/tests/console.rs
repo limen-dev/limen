@@ -9,7 +9,7 @@ use limen_e2e::{Deployment, eventually, ssh_client};
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
 use limen_testkit::ssh_target::SshTarget;
-use limen_testkit::users::{ALICE, ALICE_ENC, BOB, BOB_ENC, CAROL};
+use limen_testkit::users::{ADMIN, ADMIN_ENC, DEVELOPER, DEVELOPER_ENC, GUEST};
 
 /// Just enough browser: cookies, manual redirects, form posts.
 struct Browser {
@@ -219,8 +219,8 @@ async fn console_end_to_end() {
     let proxy_addr = d.proxy_addr.to_string();
 
     // Policy and a worker, through the API as in production.
-    let alice_cli = d.login(ALICE, &["admins"]).await.expect("admin");
-    let mut admin = AdminClient::new(d.proxy_channel(Some(alice_cli)));
+    let admin_cli = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_cli)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
             sources: policy(&target.addr.to_string(), &target.host_key),
@@ -270,11 +270,11 @@ async fn console_end_to_end() {
     assert_eq!(page.status, 303, "recordings need a session too");
 
     // ---- an admin signs in (HTTP/1.1) ------------------------------------------
-    let mut alice = Browser::new(&d, true);
-    let page = alice.login(&d, ALICE, &["admins"]).await;
+    let mut admin_user = Browser::new(&d, true);
+    let page = admin_user.login(&d, ADMIN, &["admins"]).await;
     assert_eq!(page.status, 200, "{}", page.body);
     assert!(page.url.ends_with("/console/"), "{}", page.url);
-    assert!(page.body.contains(ALICE));
+    assert!(page.body.contains(ADMIN));
     assert!(page.body.contains("admin"));
     for header in [
         "content-security-policy",
@@ -307,18 +307,18 @@ async fn console_end_to_end() {
         !page.body.contains("<script>"),
         "pages carry no inline script"
     );
-    let cookie = alice
+    let cookie = admin_user
         .cookies
         .keys()
         .next()
         .expect("a session cookie")
         .clone();
     assert_eq!(cookie, "__Host-limen_console");
-    assert_eq!(alice.cookies.len(), 1, "the login cookie is cleared");
+    assert_eq!(admin_user.cookies.len(), 1, "the login cookie is cleared");
 
     // The cookie is HttpOnly, Secure, and SameSite=Lax.
-    let page = alice
-        .get_once(&format!("{}/console/login", alice.base))
+    let page = admin_user
+        .get_once(&format!("{}/console/login", admin_user.base))
         .await;
     assert!(page.headers.contains_key("set-cookie"));
     let set = page.headers["set-cookie"]
@@ -330,14 +330,14 @@ async fn console_end_to_end() {
     }
     assert!(!set.contains("Domain"), "host-only cookie");
     // Finish that second, unfinished login so the session cookie isn't confused:
-    alice.cookies.remove("__Host-limen_login");
+    admin_user.cookies.remove("__Host-limen_login");
 
     // ---- a session happens, then shows up with its recording --------------------
-    let bob_cli = d.login(BOB, &["ops"]).await.expect("bob");
+    let developer_cli = d.login(DEVELOPER, &["ops"]).await.expect("developer");
     let conn = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob_cli.clone(),
+        developer_cli.clone(),
         &host_ca,
         "web-1",
         "ubuntu",
@@ -348,11 +348,11 @@ async fn console_end_to_end() {
     assert!(out.contains("login=ubuntu"));
     drop(conn);
     wait_until("the session and its recording", 20, async || {
-        let page = alice.get("/console/sessions").await;
-        page.body.contains(BOB) && page.body.contains("recmark")
+        let page = admin_user.get("/console/sessions").await;
+        page.body.contains(DEVELOPER) && page.body.contains("recmark")
     })
     .await;
-    let page = alice.get("/console/sessions").await;
+    let page = admin_user.get("/console/sessions").await;
     assert!(page.body.contains("web-1") && page.body.contains("ended"));
     let id = page
         .body
@@ -361,7 +361,7 @@ async fn console_end_to_end() {
         .and_then(|s| s.split('"').next())
         .expect("a session link")
         .to_owned();
-    let detail = alice.get(&format!("/console/sessions/{id}")).await;
+    let detail = admin_user.get(&format!("/console/sessions/{id}")).await;
     assert_eq!(detail.status, 200);
     assert!(detail.body.contains("asciinema-player.min.js"));
     assert!(
@@ -369,7 +369,7 @@ async fn console_end_to_end() {
             .body
             .contains(&format!("/console/sessions/{id}/recording"))
     );
-    let cast = alice
+    let cast = admin_user
         .get(&format!("/console/sessions/{id}/recording"))
         .await;
     assert_eq!(cast.status, 200);
@@ -377,10 +377,15 @@ async fn console_end_to_end() {
     assert!(cast.body.starts_with('{') && cast.body.contains("login=ubuntu command=whoami"));
 
     // Static assets are served from the binary.
-    let js = alice.get("/console/static/asciinema-player.min.js").await;
+    let js = admin_user
+        .get("/console/static/asciinema-player.min.js")
+        .await;
     assert_eq!(js.status, 200);
     assert!(js.body.contains("AsciinemaPlayer"));
-    assert_eq!(alice.get("/console/static/console.css").await.status, 200);
+    assert_eq!(
+        admin_user.get("/console/static/console.css").await.status,
+        200
+    );
     // Assets are looked up by exact name in an embedded table; there is no
     // file system path to traverse.
     for hostile in [
@@ -389,7 +394,7 @@ async fn console_end_to_end() {
         "console.css%00",
     ] {
         assert_eq!(
-            alice
+            admin_user
                 .get(&format!("/console/static/{hostile}"))
                 .await
                 .status,
@@ -398,75 +403,87 @@ async fn console_end_to_end() {
         );
     }
 
-    // ---- bob signs in over HTTP/2: he sees only his own things --------------------
-    let mut bob = Browser::new(&d, false);
-    let page = bob.login(&d, BOB, &["ops"]).await;
+    // ---- dev_user signs in over HTTP/2: he sees only his own things --------------------
+    let mut dev_user = Browser::new(&d, false);
+    let page = dev_user.login(&d, DEVELOPER, &["ops"]).await;
     assert_eq!(page.status, 200, "{}", page.body);
     assert!(page.body.contains("web-1"), "his resources");
     assert!(page.body.contains("limen ssh web-1"));
     assert!(!page.body.contains(">Users<"), "no admin navigation");
     assert!(!page.body.contains("active sessions"), "no admin stats");
     for path in ["/console/users", "/console/workers", "/console/policy"] {
-        let page = bob.get(path).await;
+        let page = dev_user.get(path).await;
         assert_eq!(page.status, 403, "{path}");
     }
     // His own session is visible; he cannot reach others' by guessing.
-    let mine = bob.get("/console/sessions").await;
+    let mine = dev_user.get("/console/sessions").await;
     assert!(mine.body.contains("web-1"));
     assert_eq!(
-        bob.get(&format!("/console/sessions/{id}")).await.status,
+        dev_user
+            .get(&format!("/console/sessions/{id}"))
+            .await
+            .status,
         200
     );
-    let alice_only = "00000000-0000-7000-8000-000000000000";
+    let admin_only = "00000000-0000-7000-8000-000000000000";
     assert_eq!(
-        bob.get(&format!("/console/sessions/{alice_only}"))
+        dev_user
+            .get(&format!("/console/sessions/{admin_only}"))
             .await
             .status,
         404
     );
 
-    // carol has a session of her own that bob must not see.
-    let carol_cli = d.login(CAROL, &["ops"]).await.expect("carol");
-    let conn = ssh_client::connect(&proxy_addr, &ca_pem, carol_cli, &host_ca, "web-1", "ubuntu")
+    // guest_user has a session of her own that dev_user must not see.
+    let guest_cli = d.login(GUEST, &["ops"]).await.expect("guest");
+    let conn = ssh_client::connect(&proxy_addr, &ca_pem, guest_cli, &host_ca, "web-1", "ubuntu")
         .await
         .expect("ssh");
     let _ = ssh_client::exec(&conn, "hostname").await.expect("exec");
     drop(conn);
-    wait_until("carol's session in the admin view", 20, async || {
-        alice.get("/console/sessions").await.body.contains(CAROL)
+    wait_until("guest's session in the admin view", 20, async || {
+        admin_user
+            .get("/console/sessions")
+            .await
+            .body
+            .contains(GUEST)
     })
     .await;
-    let all = alice.get("/console/sessions").await;
-    let carol_id = all
+    let all = admin_user.get("/console/sessions").await;
+    let guest_id = all
         .body
-        .split(CAROL)
+        .split(GUEST)
         .nth(1)
         .and_then(|rest| rest.split("/console/sessions/").nth(1))
         .and_then(|s| s.split('"').next())
-        .expect("carol's session id")
+        .expect("guest's session id")
         .to_owned();
     assert_eq!(
-        bob.get(&format!("/console/sessions/{carol_id}"))
+        dev_user
+            .get(&format!("/console/sessions/{guest_id}"))
             .await
             .status,
         404,
         "another user's session is hidden"
     );
     assert_eq!(
-        bob.get(&format!("/console/sessions/{carol_id}/recording"))
+        dev_user
+            .get(&format!("/console/sessions/{guest_id}/recording"))
             .await
             .status,
         404
     );
-    assert!(!bob.get("/console/sessions").await.body.contains(CAROL));
-    let page = bob.get(&format!("/console/sessions?user={CAROL}")).await;
+    assert!(!dev_user.get("/console/sessions").await.body.contains(GUEST));
+    let page = dev_user
+        .get(&format!("/console/sessions?user={GUEST}"))
+        .await;
     assert!(
-        !page.body.contains(CAROL),
+        !page.body.contains(GUEST),
         "the user filter is ignored for non-admins"
     );
 
     // ---- resources: admins see all, others only their own ----------------------------
-    let all = alice.get("/console/resources").await;
+    let all = admin_user.get("/console/resources").await;
     assert_eq!(all.status, 200);
     assert!(all.body.contains("web-1") && all.body.contains("secret-db"));
     assert!(
@@ -477,20 +494,20 @@ async fn console_end_to_end() {
         all.body.contains("none"),
         "a resource no worker can serve is flagged"
     );
-    let only_pg = alice.get("/console/resources?kind=postgres").await;
+    let only_pg = admin_user.get("/console/resources?kind=postgres").await;
     assert!(only_pg.body.contains("secret-db") && !only_pg.body.contains("web-1"));
-    let none = alice.get("/console/resources?q=does-not-exist").await;
+    let none = admin_user.get("/console/resources?q=does-not-exist").await;
     assert!(none.body.contains("No resources match"));
-    let detail = alice.get("/console/resources/secret-db").await;
+    let detail = admin_user.get("/console/resources/secret-db").await;
     assert_eq!(detail.status, 200);
     assert!(
         detail.body.contains("No role grants access"),
         "{}",
         detail.body
     );
-    let web = alice.get("/console/resources/web-1").await;
+    let web = admin_user.get("/console/resources/web-1").await;
     assert!(web.body.contains("ops") && web.body.contains("pool=dev"));
-    let mine = bob.get("/console/resources").await;
+    let mine = dev_user.get("/console/resources").await;
     assert!(mine.body.contains("web-1"));
     assert!(
         !mine.body.contains("secret-db"),
@@ -500,42 +517,48 @@ async fn console_end_to_end() {
         !mine.body.contains(&target.addr.to_string()),
         "no internal addresses for non-admins"
     );
-    assert_eq!(bob.get("/console/resources/secret-db").await.status, 404);
-    let searched = bob.get("/console/resources?q=secret").await;
+    assert_eq!(
+        dev_user.get("/console/resources/secret-db").await.status,
+        404
+    );
+    let searched = dev_user.get("/console/resources?q=secret").await;
     assert!(
         !searched.body.contains("secret-db"),
         "a search can't reveal it either"
     );
-    let bobs = bob.get("/console/resources/web-1").await;
+    let bobs = dev_user.get("/console/resources/web-1").await;
     assert_eq!(bobs.status, 200);
     assert!(!bobs.body.contains(&target.addr.to_string()));
     assert!(bobs.body.contains("limen ssh web-1"));
 
     // ---- CSRF and origin checks --------------------------------------------------
-    let home = alice.get("/console/users").await;
+    let home = admin_user.get("/console/users").await;
     assert_eq!(home.status, 200);
-    assert!(home.body.contains(BOB));
+    assert!(home.body.contains(DEVELOPER));
     let csrf = Browser::csrf(&home);
-    let page = alice
+    let page = admin_user
         .post(
-            &format!("/console/users/{BOB_ENC}/lock"),
+            &format!("/console/users/{DEVELOPER_ENC}/lock"),
             &[("csrf", "wrong"), ("reason", "x")],
         )
         .await;
     assert_eq!(page.status, 403, "wrong CSRF token");
-    let page = alice
+    let page = admin_user
         .post_with_origin(
-            &format!("/console/users/{BOB_ENC}/lock"),
+            &format!("/console/users/{DEVELOPER_ENC}/lock"),
             "https://evil.example",
             &[("csrf", &csrf), ("reason", "x")],
         )
         .await;
     assert_eq!(page.status, 403, "foreign origin");
-    let page = alice
+    let page = admin_user
         .send(
-            alice
+            admin_user
                 .http
-                .post(format!("{}/console/users/{BOB_ENC}/lock", alice.base))
+                .post(format!(
+                    "{}/console/users/{DEVELOPER_ENC}/lock",
+                    admin_user.base
+                ))
                 .form(&[("csrf", csrf.as_str()), ("reason", "x")]),
         )
         .await;
@@ -544,25 +567,29 @@ async fn console_end_to_end() {
         !read_jsonl(&d).iter().any(|e| e["kind"] == "user.lock"),
         "refused requests change nothing"
     );
-    let page = alice
+    let page = admin_user
         .post(
-            &format!("/console/users/{ALICE_ENC}/lock"),
+            &format!("/console/users/{ADMIN_ENC}/lock"),
             &[("csrf", &csrf), ("reason", "oops")],
         )
         .await;
     assert_eq!(page.status, 400, "admins can't lock themselves out");
 
-    // ---- lock bob from the console: his browser session and SSH end ------------------
-    let page = alice
+    // ---- lock dev_user from the console: his browser session and SSH end ------------------
+    let page = admin_user
         .post(
-            &format!("/console/users/{BOB_ENC}/lock"),
+            &format!("/console/users/{DEVELOPER_ENC}/lock"),
             &[("csrf", &csrf), ("reason", "stolen laptop")],
         )
         .await;
     assert_eq!(page.status, 303, "{}", page.body);
-    let user_page = alice.get(&format!("/console/users/{BOB_ENC}")).await;
+    let user_page = admin_user
+        .get(&format!("/console/users/{DEVELOPER_ENC}"))
+        .await;
     assert!(user_page.body.contains("locked") && user_page.body.contains("stolen laptop"));
-    let page = bob.get_once(&format!("{}/console/", bob.base)).await;
+    let page = dev_user
+        .get_once(&format!("{}/console/", dev_user.base))
+        .await;
     assert_eq!(
         (
             page.status,
@@ -574,7 +601,7 @@ async fn console_end_to_end() {
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob_cli.clone(),
+        developer_cli.clone(),
         &host_ca,
         "web-1",
         "ubuntu",
@@ -583,25 +610,29 @@ async fn console_end_to_end() {
     .err()
     .expect("locked");
     assert!(err.contains("user locked"), "{err}");
-    let page = bob.login(&d, BOB, &["ops"]).await;
+    let page = dev_user.login(&d, DEVELOPER, &["ops"]).await;
     assert_eq!(page.status, 403, "locked users can't sign in");
     // Unlock.
-    let csrf = Browser::csrf(&alice.get(&format!("/console/users/{BOB_ENC}")).await);
-    let page = alice
+    let csrf = Browser::csrf(
+        &admin_user
+            .get(&format!("/console/users/{DEVELOPER_ENC}"))
+            .await,
+    );
+    let page = admin_user
         .post(
-            &format!("/console/users/{BOB_ENC}/unlock"),
+            &format!("/console/users/{DEVELOPER_ENC}/unlock"),
             &[("csrf", &csrf)],
         )
         .await;
     assert_eq!(page.status, 303);
-    assert_eq!(bob.login(&d, BOB, &["ops"]).await.status, 200);
+    assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
 
     // ---- workers: token and revoke -----------------------------------------------------
-    let workers = alice.get("/console/workers").await;
+    let workers = admin_user.get("/console/workers").await;
     assert_eq!(workers.status, 200);
     assert!(workers.body.contains("pool=dev") && workers.body.contains("enrolled"));
     let csrf = Browser::csrf(&workers);
-    let page = alice
+    let page = admin_user
         .post(
             "/console/workers/tokens",
             &[
@@ -615,7 +646,7 @@ async fn console_end_to_end() {
         .await;
     assert_eq!(page.status, 200, "{}", page.body);
     assert!(page.body.contains("lmn_join_"), "the token is shown once");
-    let page = alice
+    let page = admin_user
         .post(
             "/console/workers/tokens",
             &[
@@ -635,14 +666,20 @@ async fn console_end_to_end() {
         .find(|s| s.starts_with("worker-"))
         .expect("a worker id")
         .to_owned();
-    let page = alice
+    let page = admin_user
         .post(
             &format!("/console/workers/{worker_id}/revoke"),
             &[("csrf", &csrf), ("reason", "decommissioned")],
         )
         .await;
     assert_eq!(page.status, 303, "{}", page.body);
-    assert!(alice.get("/console/workers").await.body.contains("revoked"));
+    assert!(
+        admin_user
+            .get("/console/workers")
+            .await
+            .body
+            .contains("revoked")
+    );
     eventually(
         Duration::from_secs(15),
         "the proxy drops the revoked worker's tunnels",
@@ -651,13 +688,13 @@ async fn console_end_to_end() {
     .await;
 
     // ---- policy browsing and dry run -------------------------------------------------------
-    let policy_page = alice.get("/console/policy").await;
+    let policy_page = admin_user.get("/console/policy").await;
     assert_eq!(policy_page.status, 200);
     assert!(policy_page.body.contains("web-1") && policy_page.body.contains("ops"));
     assert!(policy_page.body.contains("host_key"), "the YAML behind it");
     let csrf = Browser::csrf(&policy_page);
     let changed = "kind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [prod] } }\n      ssh: { logins: [ubuntu] }\n";
-    let page = alice
+    let page = admin_user
         .post(
             "/console/policy/dry-run",
             &[("csrf", &csrf), ("yaml", changed)],
@@ -681,7 +718,7 @@ async fn console_end_to_end() {
         result.contains("ops"),
         "the changed role is listed: {result}"
     );
-    let page = alice
+    let page = admin_user
         .post(
             "/console/policy/dry-run",
             &[("csrf", &csrf), ("yaml", "kind: nonsense")],
@@ -697,7 +734,7 @@ async fn console_end_to_end() {
 
     // ---- XSS: hostile text is escaped ---------------------------------------------------------
     let evil = "<script>alert(1)</script>";
-    let page = alice
+    let page = admin_user
         .post(
             "/console/policy/dry-run",
             &[("csrf", &csrf), ("yaml", evil)],
@@ -711,19 +748,25 @@ async fn console_end_to_end() {
 
     // ---- sign out ------------------------------------------------------------------------------
     // Opening the logout URL shows a confirmation; it signs nobody out by itself.
-    let confirm = alice.get("/console/logout").await;
+    let confirm = admin_user.get("/console/logout").await;
     assert_eq!(confirm.status, 200);
     assert!(confirm.body.contains("action=\"/console/logout\""));
-    assert_eq!(alice.get("/console/").await.status, 200, "still signed in");
+    assert_eq!(
+        admin_user.get("/console/").await.status,
+        200,
+        "still signed in"
+    );
     let anon_logout = anon
         .get_once(&format!("{}/console/logout", anon.base))
         .await;
     assert_eq!(anon_logout.status, 303, "no session: sent to sign-in");
     let csrf = Browser::csrf(&confirm);
-    let page = alice.post("/console/logout", &[("csrf", &csrf)]).await;
+    let page = admin_user.post("/console/logout", &[("csrf", &csrf)]).await;
     assert_eq!(page.status, 200);
-    assert!(alice.cookies.is_empty(), "the cookie is cleared");
-    let page = alice.get_once(&format!("{}/console/", alice.base)).await;
+    assert!(admin_user.cookies.is_empty(), "the cookie is cleared");
+    let page = admin_user
+        .get_once(&format!("{}/console/", admin_user.base))
+        .await;
     assert_eq!(page.status, 303);
 
     // ---- audit -----------------------------------------------------------------------------------
@@ -731,8 +774,8 @@ async fn console_end_to_end() {
     let find = |kind: &str| events.iter().find(|e| e["kind"] == kind).cloned();
     let lock = find("user.lock").expect("user.lock");
     assert_eq!(lock["data"]["via"], "console");
-    assert_eq!(lock["user"], ALICE);
-    assert_eq!(lock["data"]["target_user"], BOB);
+    assert_eq!(lock["user"], ADMIN);
+    assert_eq!(lock["data"]["target_user"], DEVELOPER);
     assert!(find("user.unlock").is_some());
     let revoke = find("component.revoke").expect("component.revoke");
     assert_eq!(revoke["data"]["via"], "console");
@@ -760,7 +803,7 @@ async fn console_login_is_bound_to_the_browser_that_started_it() {
         return;
     };
     // The attacker starts a login and gets a callback URL with a valid code.
-    d.idp.set_browser_user(ALICE, &["admins"]);
+    d.idp.set_browser_user(ADMIN, &["admins"]);
     let mut attacker = Browser::new(&d, true);
     let start = attacker
         .get_once(&format!("{}/console/login", attacker.base))

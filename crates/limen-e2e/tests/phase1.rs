@@ -12,7 +12,7 @@ use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, ListComponentsRequest,
     ListResourcesRequest, PolicySource,
 };
-use limen_testkit::users::{ALICE, BOB, CAROL};
+use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use tonic::Code;
 
 const POLICY: [(&str, &str); 3] = [
@@ -39,8 +39,8 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     };
 
     // Admin logs in through the proxy and applies policy.
-    let alice = d.login(ALICE, &["admins"]).await.expect("admin login");
-    let admin_ch = d.proxy_channel(Some(alice));
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin login");
+    let admin_ch = d.proxy_channel(Some(admin_user));
     let sources = POLICY
         .iter()
         .map(|(n, c)| PolicySource {
@@ -60,8 +60,11 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     assert!(applied.applied);
 
     // A developer sees only what policy allows.
-    let bob = d.login(BOB, &["developers"]).await.expect("bob login");
-    let listed = ResourcesClient::new(d.proxy_channel(Some(bob)))
+    let dev_user = d
+        .login(DEVELOPER, &["developers"])
+        .await
+        .expect("developer login");
+    let listed = ResourcesClient::new(d.proxy_channel(Some(dev_user)))
         .list_resources(ListResourcesRequest {})
         .await
         .expect("ls")
@@ -71,9 +74,9 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
 
     // A user with no mapped roles can't log in.
     let err = d
-        .login(CAROL, &["marketing"])
+        .login(GUEST, &["marketing"])
         .await
-        .expect_err("carol denied");
+        .expect_err("guest denied");
     assert_eq!(err.code(), Code::PermissionDenied);
 
     // A single-use join token enrolls a worker through the proxy.
@@ -163,7 +166,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
 
     // The restarted proxy reused its identity rather than enrolling again.
     let components =
-        AdminClient::new(d.proxy_channel(Some(d.login(ALICE, &["admins"]).await.expect("login"))))
+        AdminClient::new(d.proxy_channel(Some(d.login(ADMIN, &["admins"]).await.expect("login"))))
             .list_components(ListComponentsRequest {})
             .await
             .expect("list")

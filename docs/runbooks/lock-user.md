@@ -3,9 +3,9 @@
 Use this when a laptop is lost, an account is compromised, or a session looks wrong.
 
 ```sh
-limen admin lock alice@example.com --reason "laptop stolen"   # refuse logins and sessions, end open ones
+limen admin lock admin@example.com --reason "laptop stolen"   # refuse logins and sessions, end open ones
 limen admin locks                                              # who is locked, by whom, why
-limen admin unlock alice@example.com
+limen admin unlock admin@example.com
 
 limen admin kill-session 01a13b06-6a37-7590-a594-66b3d60772d9 --reason "unexpected command"
 ```

@@ -61,7 +61,7 @@ async fn kms_backed_ca_issues_certificates_that_verify() {
     let issued = ca
         .issue_user(UserCertRequest {
             csr_der: csr.der().to_vec(),
-            username: "alice@example.com".into(),
+            username: "admin@example.com".into(),
             roles: vec!["sre".into()],
             login_id: uuid::Uuid::now_v7(),
             ttl: Duration::from_secs(600),
@@ -71,7 +71,7 @@ async fn kms_backed_ca_issues_certificates_that_verify() {
     // The CA cert is self-signed by KMS, the leaf is signed by KMS: webpki
     // checks both signatures.
     let identity = verify_user(&issued.der, ca.cert_der()).expect("KMS-signed chain verifies");
-    assert_eq!(identity.username, "alice@example.com");
+    assert_eq!(identity.username, "admin@example.com");
 }
 
 #[tokio::test]

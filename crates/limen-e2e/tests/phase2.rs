@@ -9,7 +9,7 @@ use limen_e2e::{Deployment, eventually, ssh_client};
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
 use limen_testkit::ssh_target::SshTarget;
-use limen_testkit::users::{ALICE, BOB};
+use limen_testkit::users::{ADMIN, DEVELOPER};
 use russh::ChannelMsg;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -73,8 +73,8 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let proxy_addr = d.proxy_addr.to_string();
 
     // Policy, and a worker labelled pool=dev.
-    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
-    let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
             sources: policy(&target.addr.to_string(), &target.host_key),
@@ -110,12 +110,12 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     )
     .await;
 
-    // bob runs a command as ubuntu on web-1.
-    let bob = || async { d.login(BOB, &["ops"]).await.expect("bob") };
+    // dev_user runs a command as ubuntu on web-1.
+    let dev_user = || async { d.login(DEVELOPER, &["ops"]).await.expect("developer") };
     let conn = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob().await,
+        dev_user().await,
         &host_ca,
         "web-1",
         "ubuntu",
@@ -135,7 +135,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
         .expect("target login");
     assert_eq!(login, "ubuntu");
     assert!(
-        key_id.starts_with("limen:") && key_id.ends_with(&format!(":{BOB}")),
+        key_id.starts_with("limen:") && key_id.ends_with(&format!(":{DEVELOPER}")),
         "key id {key_id}"
     );
     drop(conn);
@@ -185,7 +185,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     assert!(
         proxy_events
             .iter()
-            .any(|e| e["kind"] == "session.start" && e["user"] == BOB)
+            .any(|e| e["kind"] == "session.start" && e["user"] == DEVELOPER)
     );
     let worker_events = read_jsonl(&d, AUDIT);
     let exec = worker_events
@@ -199,15 +199,22 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     );
 
     // Denials: wrong login, unknown resource, unpinned host key.
-    let err = ssh_client::connect(&proxy_addr, &ca_pem, bob().await, &host_ca, "web-1", "root")
-        .await
-        .err()
-        .expect("root denied");
+    let err = ssh_client::connect(
+        &proxy_addr,
+        &ca_pem,
+        dev_user().await,
+        &host_ca,
+        "web-1",
+        "root",
+    )
+    .await
+    .err()
+    .expect("root denied");
     assert!(err.contains("access denied"), "{err}");
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob().await,
+        dev_user().await,
         &host_ca,
         "nope",
         "ubuntu",
@@ -219,7 +226,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob().await,
+        dev_user().await,
         &host_ca,
         "web-unpinned",
         "ubuntu",
@@ -243,7 +250,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob().await,
+        dev_user().await,
         &rogue_ca,
         "web-1",
         "ubuntu",
@@ -253,13 +260,13 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     .expect("host CA mismatch");
     assert!(err.contains("ssh"), "{err}");
 
-    // Control plane outage (ADR-0011). Get bob's certificate first: logging
+    // Control plane outage (ADR-0011). Get dev_user's certificate first: logging
     // in needs the control plane too.
-    let bob_cert = bob().await;
+    let developer_cert = dev_user().await;
     let conn = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob_cert.clone(),
+        developer_cert.clone(),
         &host_ca,
         "web-1",
         "ubuntu",
@@ -291,7 +298,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob_cert.clone(),
+        developer_cert.clone(),
         &host_ca,
         "web-1",
         "ubuntu",
@@ -303,10 +310,17 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
 
     // Past the grace period (3s in tests), the proxy can't decide at all.
     tokio::time::sleep(Duration::from_secs(4)).await;
-    let err = ssh_client::connect(&proxy_addr, &ca_pem, bob_cert, &host_ca, "web-1", "ubuntu")
-        .await
-        .err()
-        .expect("stale policy");
+    let err = ssh_client::connect(
+        &proxy_addr,
+        &ca_pem,
+        developer_cert,
+        &host_ca,
+        "web-1",
+        "ubuntu",
+    )
+    .await
+    .err()
+    .expect("stale policy");
     assert!(err.contains("can't be decided"), "{err}");
 
     // And the open session still works after the grace period.
@@ -349,8 +363,8 @@ async fn ssh_through_a_peer_proxy() {
     let host_ca = d.public_ca("ssh-host-ca.pub");
     let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
 
-    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
-    let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     admin
         .apply_policy(ApplyPolicyRequest {
             sources: policy(&target.addr.to_string(), &target.host_key),
@@ -392,14 +406,14 @@ async fn ssh_through_a_peer_proxy() {
     )
     .await;
 
-    let bob = d.login(BOB, &["ops"]).await.expect("bob");
+    let dev_user = d.login(DEVELOPER, &["ops"]).await.expect("developer");
     let mut last_err = String::new();
     // Proxy A reports its tunnels within a moment; B caches the registry for 5s.
     for _ in 0..40 {
         match ssh_client::connect(
             &addr_b.to_string(),
             &ca_pem,
-            bob.clone(),
+            dev_user.clone(),
             &host_ca,
             "web-1",
             "ubuntu",

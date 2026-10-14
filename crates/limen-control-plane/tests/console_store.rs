@@ -4,7 +4,7 @@
 
 use limen_audit::{Event, EventKind, Producer};
 use limen_control_plane::console::store::{self, SessionFilter};
-use limen_testkit::users::{BOB, CAROL};
+use limen_testkit::users::{DEVELOPER, GUEST};
 use serde_json::json;
 use sqlx::Connection;
 use uuid::Uuid;
@@ -44,7 +44,7 @@ fn start(session: Uuid) -> Event {
     event(
         EventKind::SessionStart,
         session,
-        BOB,
+        DEVELOPER,
         json!({ "kind": "ssh", "resource": "web-1", "login": "ubuntu", "worker_id": "w1", "proxy_id": "p1", "client_addr": "10.0.0.9:5555" }),
     )
 }
@@ -53,7 +53,7 @@ fn end(session: Uuid) -> Event {
     event(
         EventKind::SessionEnd,
         session,
-        BOB,
+        DEVELOPER,
         json!({ "kind": "ssh", "resource": "web-1", "login": "ubuntu", "worker_id": "w1", "reason": "user locked", "duration_ms": 1500, "bytes_in": 10, "bytes_out": 20, "recording_sha256": "abc" }),
     )
 }
@@ -62,7 +62,7 @@ fn recording(session: Uuid) -> Event {
     event(
         EventKind::SessionRecording,
         session,
-        BOB,
+        DEVELOPER,
         json!({ "recording_uri": "file:///r/1.cast", "sha256": "abc" }),
     )
 }
@@ -88,7 +88,7 @@ async fn projection_is_idempotent_and_order_independent() {
 
     for id in [a, b] {
         let s = store::session(&db, id).await.expect("query").expect("row");
-        assert_eq!(s.username.as_deref(), Some(BOB));
+        assert_eq!(s.username.as_deref(), Some(DEVELOPER));
         assert_eq!(s.resource.as_deref(), Some("web-1"));
         assert_eq!(s.login.as_deref(), Some("ubuntu"));
         assert_eq!(s.worker_id.as_deref(), Some("w1"));
@@ -117,9 +117,9 @@ async fn projection_is_idempotent_and_order_independent() {
 async fn active_sessions_and_user_filter() {
     let Some(db) = fresh_db().await else { return };
     let (open, done, other) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
-    let mut carol = start(other);
-    carol.user = Some(CAROL.into());
-    store::project_events(&db, &[start(open), start(done), end(done), carol])
+    let mut guest_user = start(other);
+    guest_user.user = Some(GUEST.into());
+    store::project_events(&db, &[start(open), start(done), end(done), guest_user])
         .await
         .expect("project");
 
@@ -140,13 +140,13 @@ async fn active_sessions_and_user_filter() {
     let carols = store::list_sessions(
         &db,
         &SessionFilter {
-            username: Some(CAROL.into()),
+            username: Some(GUEST.into()),
             limit: 50,
             ..SessionFilter::default()
         },
     )
     .await
-    .expect("carol");
+    .expect("guest");
     assert_eq!(carols.len(), 1);
     assert_eq!(carols[0].session_id, other);
 

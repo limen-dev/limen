@@ -342,8 +342,8 @@ mod tests {
         assert_eq!(*snapshot.restrictions, restrictions);
         let r = &snapshot.restrictions;
         assert_eq!(r.blocks("mallory@example.com", "s-9"), Some("user locked"));
-        assert_eq!(r.blocks("alice@example.com", "s-1"), Some("session killed"));
-        assert_eq!(r.blocks("alice@example.com", "s-2"), None);
+        assert_eq!(r.blocks("admin@example.com", "s-1"), Some("session killed"));
+        assert_eq!(r.blocks("admin@example.com", "s-2"), None);
         assert!(r.is_revoked("worker-9"));
         assert!(!r.is_revoked("worker-1"));
     }

@@ -315,10 +315,10 @@ mod tests {
     #[test]
     fn key_values_align_labels() {
         let out = plain(&key_values(&[
-            ("User", "alice".into()),
+            ("User", "admin".into()),
             ("Expires", "soon".into()),
         ]));
-        assert_eq!(out, "  User     alice\n  Expires  soon");
+        assert_eq!(out, "  User     admin\n  Expires  soon");
     }
 
     #[test]

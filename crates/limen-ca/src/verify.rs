@@ -196,7 +196,7 @@ mod tests {
         let issued = user_ca
             .issue_user(UserCertRequest {
                 csr_der,
-                username: "alice@example.com".into(),
+                username: "admin@example.com".into(),
                 roles: vec!["db-readonly".into(), "limen:admin".into()],
                 login_id: login,
                 ttl: Duration::from_secs(600),
@@ -204,7 +204,7 @@ mod tests {
             .await
             .expect("issue");
         let id = verify_user(&issued.der, user_ca.cert_der()).expect("verify");
-        assert_eq!(id.username, "alice@example.com");
+        assert_eq!(id.username, "admin@example.com");
         assert_eq!(id.roles, ["db-readonly", "limen:admin"]);
         assert_eq!(id.login_id, login.to_string());
         assert!(id.has_role("limen:admin"));

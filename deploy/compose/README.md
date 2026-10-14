@@ -34,9 +34,9 @@ docker compose -f deploy/compose/docker-compose.yml cp \
   control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
 
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
-# A browser opens on Dex. Log in as alice@example.com / password.
+# A browser opens on Dex. Log in as admin@example.com / password.
 
-limen admin apply examples/policy      # alice is a bootstrap admin (group limen-admins)
+limen admin apply examples/policy      # admin is a bootstrap admin (group limen-admins)
 limen login                            # log in again: roles are fixed at login
 limen ls
 limen admin components                 # the proxy, the worker, and its tunnels
@@ -47,15 +47,15 @@ limen admin components                 # the proxy, the worker, and its tunnels
 <!-- BEGIN dev-users (generated from dev-users.toml) -->
 | User | Groups | Roles with `examples/policy` |
 |---|---|---|
-| `alice@example.com` | `limen-admins`, `sre` | `limen:admin`, `sre` |
-| `bob@example.com` | `developers` | `dev-readonly` |
-| `carol@example.com` | `marketing` | none, so login is denied |
+| `admin@example.com` | `limen-admins`, `sre` | `limen:admin`, `sre` |
+| `developer@example.com` | `developers` | `dev-readonly` |
+| `guest@example.com` | `marketing` | none, so login is denied |
 <!-- END dev-users -->
 
 ### Logging in without a browser
 
 - `limen login --device` uses the device flow. Open the printed URL anywhere and enter the code.
-- `deploy/compose/dev-login.sh bob@example.com` automates Dex's password form. It's for scripts and tests only.
+- `deploy/compose/dev-login.sh developer@example.com` automates Dex's password form. It's for scripts and tests only.
 
 ## SSH (Phase 2)
 
@@ -68,7 +68,7 @@ deploy/compose/demo-phase35.sh         # web console, locking a user, ending a s
 By hand, after `limen admin apply examples/policy`:
 
 ```sh
-limen login                                   # as bob@example.com (developers -> dev-readonly)
+limen login                                   # as developer@example.com (developers -> dev-readonly)
 limen ssh web-staging-1                       # interactive shell as ubuntu (the only login policy allows)
 limen ssh web-staging-1 -- uptime             # one command
 limen ssh root@web-staging-1                  # denied, and audited
@@ -84,7 +84,7 @@ Audit events are in `proxy:/var/lib/limen/proxy/audit/proxy.jsonl` (`session.sta
 ## Things to try
 
 ```sh
-# Enroll another worker with a single-use token (as alice):
+# Enroll another worker with a single-use token (as admin):
 TOKEN=$(limen admin token create --kind worker --label pool=demo)
 docker compose -f deploy/compose/docker-compose.yml run -d -e LIMEN_JOIN_TOKEN=$TOKEN \
   -e LIMEN_DATA_DIR=/var/lib/limen/worker-2 worker
@@ -112,6 +112,6 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 
 ## Web console (Phase 3.5)
 
-`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `alice@example.com` (admin) or `bob@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
+`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
 
 The console's OIDC client (`limen-console`) and its dev secret are in `dex/config.yaml` and `docker-compose.yml`.

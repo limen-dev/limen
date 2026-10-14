@@ -123,7 +123,7 @@ mod tests {
             producer(),
             serde_json::json!({"statement": "select 1"}),
         );
-        event.user = Some("alice@example.com".into());
+        event.user = Some("admin@example.com".into());
         let line = serde_json::to_string(&event).expect("serialize");
         assert!(line.contains(r#""kind":"db.query""#));
         let back: Event = serde_json::from_str(&line).expect("deserialize");

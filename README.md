@@ -29,6 +29,137 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
 
 Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), or `deploy/compose/demo-phase35.sh` (web console, locks, session kill).
 
+## Features
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🖥️ Web console</h3>
+      <ul>
+        <li><b>Resources:</b> everything Limen can reach, searchable, with who has access and whether a worker can serve it</li>
+        <li><b>Sessions:</b> live and past, with <b>in-browser replay</b> of SSH recordings and one-click <b>end session</b></li>
+        <li><b>Users:</b> who signed in, their roles, <b>lock and unlock</b> with a reason</li>
+        <li><b>Workers:</b> enrolled components, <b>join tokens</b>, <b>revoke</b></li>
+        <li><b>Policy:</b> the active YAML and a <b>dry-run diff</b> before you apply</li>
+        <li>Light and dark themes, SSO sign-in, CSRF and CSP hardening</li>
+        <li>People only see their own resources and sessions</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>⌨️ Command line</h3>
+      <ul>
+        <li><b><code>limen login</code></b> through your identity provider (browser or device code), credentials last minutes</li>
+        <li><b><code>limen ls</code></b> shows exactly what you can reach, as a table or JSON</li>
+        <li><b><code>limen ssh</code></b> opens recorded SSH sessions; plain <code>ssh</code> works too through <code>limen config ssh</code></li>
+        <li><b><code>limen admin</code></b> applies policy, creates join tokens, locks users, ends sessions, revokes workers</li>
+        <li>Colour, glyphs, and a spinner on a terminal; plain text when piped or with <code>NO_COLOR</code></li>
+        <li>Helpful errors that say what to do next</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+Behind both: short-lived certificates instead of keys and passwords, deny-by-default YAML policy, an audit trail that cannot silently lose events (S3 with a signed hash chain, Datadog, Grafana), and reverse tunnels so targets never need an open inbound port.
+
+## Quickstart
+
+You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Everything below runs on your machine against local stand-ins.
+
+```sh
+# 1. Start the stack: control plane, proxy, worker, Postgres, Dex (the identity provider), a test SSH host
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+
+# 2. Build the CLI and trust the dev stack's CA once
+cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
+mkdir -p deploy/compose/.state
+docker compose -f deploy/compose/docker-compose.yml cp control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
+
+# 3. Sign in as the dev admin, admin@example.com (password: "password"), then load the example policy
+limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # opens your browser on Dex
+limen admin apply examples/policy
+limen login                                       # roles are fixed at login: sign in again to pick them up
+
+# 4. Use it
+limen ls                                          # what can I reach?
+limen ssh web-staging-1                           # a recorded SSH session
+
+# 5. Open the console in your browser (sign in with the same user)
+open https://localhost:3443/console/              # macOS; elsewhere just paste the URL
+```
+
+> [!NOTE]
+> The proxy's certificate comes from the Limen dev CA, so a browser warns about it. That is expected here. Don't add the CA to your system trust store; click through the warning on localhost, or use `curl --cacert deploy/compose/.state/internal-ca.pem`. The dev users and their passwords are in [`deploy/compose/README.md`](deploy/compose/README.md). Want it scripted instead? `deploy/compose/demo-phase35.sh` does all of this, including the console, and checks the results.
+
+## Using the console
+
+Open **`https://<your proxy>/console/`** (locally `https://localhost:3443/console/`) and choose *Continue with single sign-on*. You sign in with the same identity provider as the CLI. What you see depends on your roles.
+
+| Page | What you can do | Who |
+|---|---|---|
+| **Overview** | See your identity and roles, what you can reach (with a copy-paste `limen ssh` command), and recent sessions. Admins also get live counts: active sessions, users, locks, workers, policy version | everyone |
+| **Resources** | Search and filter by kind. Open a resource to see its labels and, for admins, its target, **which roles grant access**, **which live workers can serve it** (a red *none* means sessions will fail), and its sessions | everyone sees their own; admins see all |
+| **Sessions** | Browse live and past sessions. Open one to **replay the recording** (the control plane verifies its hash first) and, as an admin, **end it** with a reason | everyone sees their own; admins see all |
+| **Users** | See who has signed in and their roles. **Lock** a user (they are signed out, can't log in, and their open sessions end within seconds) or **unlock** them, always with an audited reason | admins |
+| **Workers** | See enrolled proxies and workers and their tunnels. **Create single-use join tokens** (shown once) and **revoke** a component | admins |
+| **Policy** | Browse roles, mappings, and resources as the YAML behind them, and **check a change**: paste YAML, see the diff, nothing is applied | admins |
+
+A few things worth knowing:
+- **Policy stays in Git.** The console shows and checks policy but doesn't edit it. Apply with `limen admin apply`.
+- **Everything you change is audited** as you, marked as coming from the console.
+- **Switch theme** with the sun/moon buttons at the bottom of the sidebar (it follows your system by default).
+- **Sessions last as long as your login certificate** (10 minutes by default). Sign in again when it ends.
+- Setup for your own deployment (OIDC client, public URL): [`docs/runbooks/console.md`](docs/runbooks/console.md).
+
+## Using the CLI
+
+```sh
+limen login                  # sign in (opens a browser). On a machine without one: limen login --device
+limen status                 # who am I, which roles, when does it expire?
+limen ls                     # what can I reach?   add --json for scripts
+limen ssh web-staging-1      # connect; the login is picked from policy when there's only one
+limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
+limen logout                 # delete local credentials
+```
+
+What `limen ls` looks like:
+
+```text
+NAME             KIND        ACCESS AS                 LABELS
+bastion-staging  ● ssh       ec2-user, ubuntu          env=staging tier=bastion
+orders-staging   ● postgres  limen_readonly, limen_rw  env=staging team=payments
+web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
+  3 resources · connect with `limen ssh <name>`
+```
+
+<details>
+<summary><b>All commands</b></summary>
+
+| Command | What it does |
+|---|---|
+| `limen login [--device] [--no-browser] [--ca-file PEM]` | Sign in through the identity provider and get short-lived credentials. `--ca-file` pins the proxy's CA for later commands |
+| `limen logout` | Delete the local credentials |
+| `limen status` | Show your identity, roles, and the time left on your credentials |
+| `limen ls [--json]` | List the resources you can access |
+| `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
+| `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
+| `limen admin apply <files or dirs> [--dry-run] [--source-ref SHA]` | Validate and apply policy YAML; shows a coloured diff |
+| `limen admin policy` | Show the active policy version, digest, and author |
+| `limen admin components` | List enrolled proxies and workers and their tunnels |
+| `limen admin token create [--kind worker\|proxy] [--label k=v] [--ttl 15m]` | Create a single-use join token |
+| `limen admin lock <user> --reason …` / `unlock <user>` / `locks` | Lock or unlock a user; list locks |
+| `limen admin kill-session <id> --reason …` | End one live session |
+| `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
+| `limen db`, `limen redis`, `limen kube` | Planned ([roadmap](#roadmap)); they say so when run |
+
+Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
+</details>
+
+**Good to know**
+- **Credentials are short-lived on purpose.** They live in `~/.limen/` (override with `LIMEN_HOME`) and expire in minutes. When they do, the CLI tells you to run `limen login`.
+- **Plain `ssh` works too.** Run `limen config ssh >> ~/.ssh/config`, then `ssh <login>@<resource>.limen`.
+- **Scripting.** Output is plain text when piped; `limen ls --json` is stable for tools; `NO_COLOR=1` or `--color never` turns colour off everywhere.
+- **Admin commands need the `limen:admin` role** and are audited like everything else.
+
 ## What it connects to
 
 <table>

@@ -133,7 +133,7 @@ mod tests {
             FailureMode::FailClosed,
         );
         let ctx = Context {
-            user: Some("alice".into()),
+            user: Some("admin".into()),
             session_id: None,
         };
         emitter
@@ -153,7 +153,7 @@ mod tests {
             events.iter().map(|e| e.producer.seq).collect::<Vec<_>>(),
             [0, 1]
         );
-        assert!(events.iter().all(|e| e.user.as_deref() == Some("alice")));
+        assert!(events.iter().all(|e| e.user.as_deref() == Some("admin")));
         assert!(events[0].producer.instance_id.starts_with("cp-1/"));
     }
 

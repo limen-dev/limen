@@ -458,10 +458,10 @@ mod tests {
             hostname: "cp-1".into(),
             environment: "test".into(),
         };
-        let raw = br#"{"kind":"ssh.exec","user":"bob","event_id":"e1","producer":{"component":"worker","instance_id":"w/1","seq":3},"data":{"command":"id"}}"#;
+        let raw = br#"{"kind":"ssh.exec","user":"developer","event_id":"e1","producer":{"component":"worker","instance_id":"w/1","seq":3},"data":{"command":"id"}}"#;
         let entry = sink.log_entry(raw);
         assert_eq!(entry["data"]["command"], "id");
-        assert_eq!(entry["message"], "ssh.exec bob");
+        assert_eq!(entry["message"], "ssh.exec developer");
         assert!(entry["ddtags"].as_str().expect("tags").contains("env:test"));
         assert!(
             entry["ddtags"]

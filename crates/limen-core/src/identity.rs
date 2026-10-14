@@ -9,7 +9,7 @@
 //! - `limen://component/<kind>/<id>`: a control plane, proxy, or worker (internal CA only)
 //! - `limen://label/<key>/<value>`: a component label, set at enrollment (internal CA only)
 //!
-//! Path segments are percent-encoded, so `alice@example.com` survives intact.
+//! Path segments are percent-encoded, so `admin@example.com` survives intact.
 
 use std::fmt;
 
@@ -146,8 +146,8 @@ mod tests {
     #[test]
     fn round_trips_all_variants() {
         let cases = [
-            IdentityUri::User("alice@example.com".into()),
-            IdentityUri::User("bob smith/evil".into()),
+            IdentityUri::User("admin@example.com".into()),
+            IdentityUri::User("developer smith/evil".into()),
             IdentityUri::Role("limen:admin".into()),
             IdentityUri::Login("0192f1d2-0000-7000-8000-000000000000".into()),
             IdentityUri::Component {

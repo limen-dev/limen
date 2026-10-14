@@ -164,7 +164,7 @@ mod tests {
         let cert = ca
             .issue_user(UserCertRequest {
                 csr_der: csr.der().to_vec(),
-                username: "bob".into(),
+                username: "developer".into(),
                 roles: vec!["dev".into()],
                 login_id: login,
                 ttl: Duration::from_secs(600),
@@ -178,7 +178,7 @@ mod tests {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         SessionGrant {
             session_id: "s1".into(),
-            username: "bob".into(),
+            username: "developer".into(),
             roles: vec!["dev".into()],
             login_id,
             resource: "web-1".into(),
@@ -207,7 +207,7 @@ mod tests {
             OffsetDateTime::now_utc(),
         )
         .expect("verify");
-        assert_eq!(v.user.username, "bob");
+        assert_eq!(v.user.username, "developer");
         assert_eq!(v.proxy.id, "p1");
     }
 

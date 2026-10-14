@@ -18,7 +18,7 @@ use limen_proto::v1::{
     TunnelReport, WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
-use limen_testkit::users::{ALICE, BOB, CAROL};
+use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use limen_tunnel::tls::Identity;
 use tonic::Code;
 
@@ -45,12 +45,12 @@ async fn pkce_login_issues_verified_short_lived_cert() {
     let Some(h) = Harness::start().await else {
         return;
     };
-    let (resp, der) = h.login(ALICE, &["admins"]).await.expect("login");
-    assert_eq!(resp.username, ALICE);
+    let (resp, der) = h.login(ADMIN, &["admins"]).await.expect("login");
+    assert_eq!(resp.username, ADMIN);
     assert_eq!(resp.roles, ["limen:admin"]);
     let id =
         verify_user(&der, h.state.cas.user.cert_der()).expect("cert verifies against the user CA");
-    assert_eq!(id.username, ALICE);
+    assert_eq!(id.username, ADMIN);
     let ttl = resp.expires_at_unix - time::OffsetDateTime::now_utc().unix_timestamp();
     assert!(
         (540..=600).contains(&ttl),
@@ -62,7 +62,7 @@ async fn pkce_login_issues_verified_short_lived_cert() {
         .into_iter()
         .find(|e| e.kind == EventKind::AuthLogin)
         .expect("auth.login event");
-    assert_eq!(login.user.as_deref(), Some(ALICE));
+    assert_eq!(login.user.as_deref(), Some(ADMIN));
 }
 
 #[tokio::test]
@@ -78,7 +78,7 @@ async fn login_rejects_replay_wrong_nonce_and_bad_tokens() {
     );
     let token = h
         .idp
-        .id_token(&Claims::user(ALICE, &["admins"]).with_nonce(&nonce));
+        .id_token(&Claims::user(ADMIN, &["admins"]).with_nonce(&nonce));
 
     h.login_raw(token.clone(), csr(&key), salt.clone(), LoginFlow::Pkce)
         .await
@@ -93,7 +93,7 @@ async fn login_rejects_replay_wrong_nonce_and_bad_tokens() {
     let other_key = new_key();
     let token = h
         .idp
-        .id_token(&Claims::user(ALICE, &["admins"]).with_nonce(&nonce));
+        .id_token(&Claims::user(ADMIN, &["admins"]).with_nonce(&nonce));
     let swapped = h
         .login_raw(token, csr(&other_key), salt.clone(), LoginFlow::Pkce)
         .await
@@ -160,7 +160,7 @@ async fn login_without_roles_is_denied_and_audited() {
     let Some(h) = Harness::start().await else {
         return;
     };
-    let err = h.login(CAROL, &["marketing"]).await.expect_err("no roles");
+    let err = h.login(GUEST, &["marketing"]).await.expect_err("no roles");
     assert_eq!(err.code(), Code::PermissionDenied);
     let denied = h
         .audit_events()
@@ -168,7 +168,7 @@ async fn login_without_roles_is_denied_and_audited() {
         .into_iter()
         .find(|e| e.kind == EventKind::AuthDenied)
         .expect("auth.denied event");
-    assert_eq!(denied.user.as_deref(), Some(CAROL));
+    assert_eq!(denied.user.as_deref(), Some(GUEST));
 }
 
 #[tokio::test]
@@ -177,7 +177,7 @@ async fn device_flow_login_works_without_nonce_and_is_single_use() {
         return;
     };
     let key = new_key();
-    let token = h.idp.id_token(&Claims::user(ALICE, &["admins"]));
+    let token = h.idp.id_token(&Claims::user(ADMIN, &["admins"]));
     h.login_raw(token.clone(), csr(&key), vec![2u8; 32], LoginFlow::Device)
         .await
         .expect("device login");
@@ -187,7 +187,7 @@ async fn device_flow_login_works_without_nonce_and_is_single_use() {
         .expect_err("replay");
     assert_eq!(replay.code(), Code::PermissionDenied);
     // PKCE without a nonce in the token is refused.
-    let token = h.idp.id_token(&Claims::user(ALICE, &["admins"]));
+    let token = h.idp.id_token(&Claims::user(ADMIN, &["admins"]));
     let err = h
         .login_raw(token, csr(&key), vec![3u8; 32], LoginFlow::Pkce)
         .await
@@ -202,7 +202,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     };
     let (proxy_id, proxy) = h.enroll_proxy().await;
     assert!(proxy_id.starts_with("proxy-"));
-    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
     let ch = h.channel(Some(proxy));
 
     // Dry run changes nothing.
@@ -214,7 +214,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 dry_run: true,
                 source_ref: String::new(),
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect("dry run")
@@ -230,7 +230,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 dry_run: false,
                 source_ref: "abc123".into(),
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect("apply")
@@ -253,26 +253,29 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 dry_run: false,
                 source_ref: String::new(),
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect("reapply")
         .into_inner();
     assert!(!again.applied);
 
-    // Bob (developers → dev-readonly) sees the staging DB and host.
-    let (bob_resp, bob) = h.login(BOB, &["developers"]).await.expect("bob");
-    assert_eq!(bob_resp.roles, ["dev-readonly"]);
+    // The developer (developers → dev-readonly) sees the staging DB and host.
+    let (developer_resp, dev_user) = h
+        .login(DEVELOPER, &["developers"])
+        .await
+        .expect("developer");
+    assert_eq!(developer_resp.roles, ["dev-readonly"]);
     let mut resources = ResourcesClient::new(ch.clone());
     let listed = resources
-        .list_resources(forwarded(ListResourcesRequest {}, Some(&bob)))
+        .list_resources(forwarded(ListResourcesRequest {}, Some(&dev_user)))
         .await
         .expect("ls")
         .into_inner();
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["orders-staging", "web-staging-1"]);
 
-    // Bob is not an admin.
+    // The developer is not an admin.
     let err = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
@@ -280,18 +283,18 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 dry_run: true,
                 source_ref: String::new(),
             },
-            Some(&bob),
+            Some(&dev_user),
         ))
         .await
         .expect_err("not admin");
     assert_eq!(err.code(), Code::PermissionDenied);
 
     let who = AuthClient::new(ch)
-        .who_am_i(forwarded(WhoAmIRequest {}, Some(&bob)))
+        .who_am_i(forwarded(WhoAmIRequest {}, Some(&dev_user)))
         .await
         .expect("whoami")
         .into_inner();
-    assert_eq!(who.username, BOB);
+    assert_eq!(who.username, DEVELOPER);
 }
 
 #[tokio::test]
@@ -300,7 +303,7 @@ async fn invalid_policy_is_rejected() {
         return;
     };
     let (_, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
     let bad = vec![PolicySource {
         name: "bad.yaml".into(),
         content: "kind: role\nversion: v1\nmetadata: {name: x}\nspec: {bogus: true}".into(),
@@ -312,7 +315,7 @@ async fn invalid_policy_is_rejected() {
                 dry_run: false,
                 source_ref: String::new(),
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect_err("invalid");
@@ -326,7 +329,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         return;
     };
     let (proxy_id, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
     let ch = h.channel(Some(proxy.clone()));
 
     let token = AdminClient::new(ch.clone())
@@ -337,7 +340,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
                 labels: [("pool".to_owned(), "dev".to_owned())].into(),
                 dns_names: vec![],
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect("token")
@@ -421,7 +424,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         .await
         .expect("report");
     let components = AdminClient::new(ch)
-        .list_components(forwarded(ListComponentsRequest {}, Some(&alice)))
+        .list_components(forwarded(ListComponentsRequest {}, Some(&admin_user)))
         .await
         .expect("list")
         .into_inner()
@@ -440,11 +443,11 @@ async fn only_proxies_may_forward_or_report() {
         return;
     };
     let (_, proxy) = h.enroll_proxy().await;
-    let (_, alice) = h.login(ALICE, &["admins"]).await.expect("alice");
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
 
     // Anonymous caller claiming to forward a user's cert.
     let err = ResourcesClient::new(h.channel(None))
-        .list_resources(forwarded(ListResourcesRequest {}, Some(&alice)))
+        .list_resources(forwarded(ListResourcesRequest {}, Some(&admin_user)))
         .await
         .expect_err("anon forward");
     assert_eq!(err.code(), Code::PermissionDenied);
@@ -458,7 +461,7 @@ async fn only_proxies_may_forward_or_report() {
                 labels: std::collections::HashMap::default(),
                 dns_names: vec![],
             },
-            Some(&alice),
+            Some(&admin_user),
         ))
         .await
         .expect("token")
@@ -481,7 +484,7 @@ async fn only_proxies_may_forward_or_report() {
     let worker = Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity");
     let worker_ch = h.channel(Some(worker));
     let err = ResourcesClient::new(worker_ch.clone())
-        .list_resources(forwarded(ListResourcesRequest {}, Some(&alice)))
+        .list_resources(forwarded(ListResourcesRequest {}, Some(&admin_user)))
         .await
         .expect_err("worker forward");
     assert_eq!(err.code(), Code::PermissionDenied);

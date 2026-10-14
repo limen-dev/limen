@@ -3,8 +3,8 @@
 # Dex's password form, and leave the console session cookie in a curl cookie jar.
 # Dev only: Dex static users all have password "password".
 #
-#   deploy/compose/console-login.sh alice@example.com /tmp/alice.jar
-#   curl --cacert deploy/compose/.state/internal-ca.pem -b /tmp/alice.jar https://localhost:3443/console/
+#   deploy/compose/console-login.sh admin@example.com /tmp/admin.jar
+#   curl --cacert deploy/compose/.state/internal-ca.pem -b /tmp/admin.jar https://localhost:3443/console/
 set -euo pipefail
 email="${1:?usage: console-login.sh <email> <cookie-jar> [password]}"
 jar="${2:?usage: console-login.sh <email> <cookie-jar> [password]}"

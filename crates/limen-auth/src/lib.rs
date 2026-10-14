@@ -59,7 +59,7 @@ mod tests {
         mapping.map("okta-sre", "ssh-prod");
         let identity = Identity {
             subject: "00u1".into(),
-            username: "alice@example.com".into(),
+            username: "admin@example.com".into(),
             groups: ["okta-dba".to_owned(), "okta-marketing".to_owned()].into(),
         };
         let roles: Vec<_> = mapping.roles_for(&identity).into_iter().collect();

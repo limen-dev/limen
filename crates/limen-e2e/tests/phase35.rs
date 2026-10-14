@@ -13,7 +13,7 @@ use limen_proto::v1::{
     LockUserRequest, PolicySource, UnlockUserRequest,
 };
 use limen_testkit::ssh_target::SshTarget;
-use limen_testkit::users::{ALICE, BOB, CAROL};
+use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use russh::ChannelMsg;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -91,8 +91,8 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
     let proxy_addr = d.proxy_addr.to_string();
 
-    let alice = d.login(ALICE, &["admins"]).await.expect("admin");
-    let mut admin = AdminClient::new(d.proxy_channel(Some(alice)));
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
             sources: policy(&target.addr.to_string(), &target.host_key),
@@ -124,8 +124,8 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     })
     .await;
 
-    let bob = d.login(BOB, &["ops"]).await.expect("bob");
-    let carol = d.login(CAROL, &["ops"]).await.expect("carol");
+    let dev_user = d.login(DEVELOPER, &["ops"]).await.expect("developer");
+    let guest_user = d.login(GUEST, &["ops"]).await.expect("guest");
     let open_shell = |identity: limen_tunnel::tls::Identity| {
         let (proxy_addr, ca_pem, host_ca) = (proxy_addr.clone(), ca_pem.clone(), host_ca.clone());
         async move {
@@ -147,35 +147,35 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         }
     };
 
-    // Two live sessions: bob's and carol's.
-    let (_bob_conn, mut bob_shell) = open_shell(bob.clone()).await;
-    let (_carol_conn, mut carol_shell) = open_shell(carol.clone()).await;
-    let carol_session = read_jsonl(&d)
+    // Two live sessions: dev_user's and guest_user's.
+    let (_bob_conn, mut developer_shell) = open_shell(dev_user.clone()).await;
+    let (_carol_conn, mut guest_shell) = open_shell(guest_user.clone()).await;
+    let guest_session = read_jsonl(&d)
         .iter()
-        .find(|e| e["kind"] == "session.start" && e["user"] == CAROL)
+        .find(|e| e["kind"] == "session.start" && e["user"] == GUEST)
         .map(|e| e["session_id"].as_str().expect("id").to_owned());
-    let carol_session = match carol_session {
+    let guest_session = match guest_session {
         Some(s) => s,
         None => {
-            eventually(Duration::from_secs(15), "carol's session.start", || async {
+            eventually(Duration::from_secs(15), "guest's session.start", || async {
                 read_jsonl(&d)
                     .iter()
-                    .any(|e| e["kind"] == "session.start" && e["user"] == CAROL)
+                    .any(|e| e["kind"] == "session.start" && e["user"] == GUEST)
             })
             .await;
             read_jsonl(&d)
                 .iter()
-                .find(|e| e["kind"] == "session.start" && e["user"] == CAROL)
+                .find(|e| e["kind"] == "session.start" && e["user"] == GUEST)
                 .map(|e| e["session_id"].as_str().expect("id").to_owned())
                 .expect("session id")
         }
     };
 
-    // Killing carol's session ends it, not bob's.
+    // Killing guest_user's session ends it, not dev_user's.
     assert!(
         admin
             .kill_session(KillSessionRequest {
-                session_id: carol_session.clone(),
+                session_id: guest_session.clone(),
                 reason: "testing".into(),
             })
             .await
@@ -184,22 +184,25 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
             .killed
     );
     assert_eq!(
-        read_until_closed(&mut carol_shell, "never appears", Duration::from_secs(20)).await,
+        read_until_closed(&mut guest_shell, "never appears", Duration::from_secs(20)).await,
         Some(false),
         "the killed session ends"
     );
-    bob_shell.data(&b"still here\n"[..]).await.expect("send");
+    developer_shell
+        .data(&b"still here\n"[..])
+        .await
+        .expect("send");
     assert_eq!(
-        read_until_closed(&mut bob_shell, "still here", Duration::from_secs(10)).await,
+        read_until_closed(&mut developer_shell, "still here", Duration::from_secs(10)).await,
         Some(true),
         "another user's session is untouched"
     );
 
-    // Locking bob ends his session and refuses a new one, at once.
+    // Locking dev_user ends his session and refuses a new one, at once.
     assert!(
         admin
             .lock_user(LockUserRequest {
-                username: BOB.into(),
+                username: DEVELOPER.into(),
                 reason: "laptop stolen".into(),
             })
             .await
@@ -210,7 +213,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(
         !admin
             .lock_user(LockUserRequest {
-                username: BOB.into(),
+                username: DEVELOPER.into(),
                 reason: "again".into(),
             })
             .await
@@ -227,16 +230,21 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         .locks;
     assert_eq!(locks.len(), 1);
     assert_eq!(locks[0].reason, "laptop stolen");
-    assert_eq!(locks[0].locked_by, ALICE);
+    assert_eq!(locks[0].locked_by, ADMIN);
     assert_eq!(
-        read_until_closed(&mut bob_shell, "never appears", Duration::from_secs(20)).await,
+        read_until_closed(
+            &mut developer_shell,
+            "never appears",
+            Duration::from_secs(20)
+        )
+        .await,
         Some(false),
         "the locked user's session ends"
     );
     let err = ssh_client::connect(
         &proxy_addr,
         &ca_pem,
-        bob.clone(),
+        dev_user.clone(),
         &host_ca,
         "web-1",
         "ubuntu",
@@ -247,7 +255,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(err.contains("user locked"), "{err}");
     // Login is refused too.
     let err = d
-        .login(BOB, &["ops"])
+        .login(DEVELOPER, &["ops"])
         .await
         .expect_err("locked user can't log in");
     assert!(err.message().contains("user locked"), "{}", err.message());
@@ -256,32 +264,36 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     assert!(
         admin
             .unlock_user(UnlockUserRequest {
-                username: BOB.into(),
+                username: DEVELOPER.into(),
             })
             .await
             .expect("unlock")
             .into_inner()
             .unlocked
     );
-    eventually(Duration::from_secs(20), "bob can connect again", || async {
-        ssh_client::connect(
-            &proxy_addr,
-            &ca_pem,
-            bob.clone(),
-            &host_ca,
-            "web-1",
-            "ubuntu",
-        )
-        .await
-        .is_ok()
-    })
+    eventually(
+        Duration::from_secs(20),
+        "developer can connect again",
+        || async {
+            ssh_client::connect(
+                &proxy_addr,
+                &ca_pem,
+                dev_user.clone(),
+                &host_ca,
+                "web-1",
+                "ubuntu",
+            )
+            .await
+            .is_ok()
+        },
+    )
     .await;
 
     // Non-admins can't lock anyone.
-    let mut as_bob = AdminClient::new(d.proxy_channel(Some(bob.clone())));
+    let mut as_bob = AdminClient::new(d.proxy_channel(Some(dev_user.clone())));
     let denied = as_bob
         .lock_user(LockUserRequest {
-            username: CAROL.into(),
+            username: GUEST.into(),
             reason: "no".into(),
         })
         .await
@@ -308,14 +320,14 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         .iter()
         .find(|e| e["kind"] == "user.lock")
         .expect("user.lock");
-    assert_eq!(lock["user"], ALICE);
-    assert_eq!(lock["data"]["target_user"], BOB);
+    assert_eq!(lock["user"], ADMIN);
+    assert_eq!(lock["data"]["target_user"], DEVELOPER);
     assert_eq!(lock["data"]["reason"], "laptop stolen");
     let kill = events
         .iter()
         .find(|e| e["kind"] == "session.kill")
         .expect("session.kill");
-    assert_eq!(kill["session_id"], carol_session);
+    assert_eq!(kill["session_id"], guest_session);
     assert!(
         events
             .iter()

@@ -3,7 +3,7 @@
 # It runs `limen login --no-browser`, then plays the browser's part against
 # Dex's password form. Dev only: Dex static users all have password "password".
 #
-#   deploy/compose/dev-login.sh alice@example.com
+#   deploy/compose/dev-login.sh admin@example.com
 set -euo pipefail
 
 email="${1:?usage: dev-login.sh <email> [password]}"

@@ -52,14 +52,14 @@ wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 mkdir -p "$state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
-"$here/dev-login.sh" "$ALICE" >/dev/null
+"$here/dev-login.sh" "$ADMIN" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase3 >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:3444/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
 pass "stack up, policy applied"
 
 step "Generate activity: sessions, a privileged command, denials"
-"$here/dev-login.sh" "$BOB" >/dev/null
+"$here/dev-login.sh" "$DEVELOPER" >/dev/null
 limen ssh web-staging-1 -- 'echo hello from $(hostname)'
 limen ssh web-staging-1 -- 'sudo -n true 2>/dev/null; echo tried sudo'
 limen ssh root@web-staging-1 -- id 2>/dev/null && fail "root must be denied"
@@ -111,7 +111,7 @@ step "Tamper with a batch: verification catches it"
 # curl's SigV4 signs "=" in the path only when it's percent-encoded.
 victim="$(s3_keys events/ | head -1 | sed 's/=/%3D/g')"
 s3curl "$s3/$victim" -o "$state/original.jsonl.gz"
-gunzip -c "$state/original.jsonl.gz" | sed 's/'"$BOB"'/eve@example.com/' | gzip -c > "$state/tampered.jsonl.gz"
+gunzip -c "$state/original.jsonl.gz" | sed 's/'"$DEVELOPER"'/eve@example.com/' | gzip -c > "$state/tampered.jsonl.gz"
 s3curl -X PUT --data-binary @"$state/tampered.jsonl.gz" "$s3/$victim" >/dev/null
 if verify > "$state/verify-tampered.txt" 2>&1; then cat "$state/verify-tampered.txt"; fail "tampering must be detected"; fi
 grep -m1 'modified' "$state/verify-tampered.txt"
@@ -122,7 +122,7 @@ pass "a modified batch fails verification; restoring it passes"
 step "Dashboards: the panels' SQL over the same S3 data (Trino stands in for Athena)"
 trino "CALL audit.system.sync_partition_metadata('limen', 'events_raw', 'FULL')" >/dev/null
 echo "  Who accessed what:"; trino "$(query 'Who accessed what')" | sed 's/^/    /'
-trino "$(query 'Who accessed what')" | grep -q "$BOB,web-staging-1,ubuntu" || fail "who-accessed-what"
+trino "$(query 'Who accessed what')" | grep -q "$DEVELOPER,web-staging-1,ubuntu" || fail "who-accessed-what"
 echo "  Privileged commands:"; trino "$(query 'Privileged commands')" | cut -d, -f2-5 | sed 's/^/    /'
 trino "$(query 'Privileged commands')" | grep -q 'sudo' || fail "privileged commands panel"
 echo "  Failed and denied attempts:"; trino "$(query 'Failed and denied attempts')" | cut -d, -f2-7 | sed 's/^/    /'

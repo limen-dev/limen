@@ -73,6 +73,15 @@ for u in users:
     sh.append(f'{name}_ENC="{urllib.parse.quote(u["email"], safe="")}"')
 outputs[HERE / "dev-users.sh"] = "\n".join(sh) + "\n"
 
+# Rust constants for the integration tests
+rs = ["//! Generated from deploy/compose/dev-users.toml by gen-dev-users.py. Do not edit.", "//! The users the integration tests talk about; rename them in the TOML file.", ""]
+for u in users:
+    name = u["id"].upper()
+    rs.append(f'pub const {name}: &str = "{u["email"]}";')
+    rs.append(f'/// The same email as one URL path segment.')
+    rs.append(f'pub const {name}_ENC: &str = "{urllib.parse.quote(u["email"], safe="")}";')
+outputs[ROOT / "crates/limen-testkit/src/users.rs"] = "\n".join(rs) + "\n"
+
 stale = [str(p.relative_to(ROOT)) for p, text in outputs.items() if not p.exists() or p.read_text() != text]
 if "--check" in sys.argv:
     if stale:
