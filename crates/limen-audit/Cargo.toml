@@ -8,6 +8,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+limen-core.workspace = true
+metrics.workspace = true
+rand.workspace = true
+crc32fast.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,6 +22,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 limen-testkit.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 

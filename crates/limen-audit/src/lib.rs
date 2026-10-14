@@ -7,7 +7,9 @@
 //! so changes must bump [`SCHEMA_VERSION`].
 
 pub mod emitter;
+pub mod ship;
 pub mod sink;
+pub mod spool;
 
 pub use emitter::{AuditError, Context, Emitter, FailureMode};
 pub use sink::{AuditSink, JsonlFileSink, MemorySink};
