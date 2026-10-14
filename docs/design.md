@@ -20,7 +20,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 - Workers connect outbound only. No inbound ports into private networks.
 - High availability for the control plane and proxy, with defined behavior when the control plane is down.
 
-**Non-goals (v1):** RDP, web application access, approval and JIT workflows (only the extension points exist), multi-tenancy, SAML, SCIM, and multi-region.
+**Non-goals (v1):** RDP, multi-tenancy, SAML, SCIM, and multi-region.
 
 **Design target:** about 500 users, 5,000 resources, and 500 concurrent sessions. The larger-scale path is noted where it matters.
 
@@ -343,6 +343,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 5 | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
 | Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host |
 | 6 | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
+| 6.5 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
 | 7 | Redis and Valkey | `redis-cli` through `limen redis connect`. Values are redacted |
 | 8 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
 | 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |

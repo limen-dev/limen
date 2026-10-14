@@ -10,7 +10,7 @@
   - any matching `deny` rule wins
   - an `allow` rule matches when the resource kind matches, **all** selector keys match (values ORed within a key), and the requested principal (login, DB role, kube group, Redis user) is listed in the rule
   - only an explicit `"*"` wildcard is accepted, and `"*"` in an admin role triggers a lint warning
-- `Decision::RequiresApproval` is reserved for JIT and approvals. Every enforcement point treats it as deny, and tests assert this.
+- `Decision::RequiresApproval` is reserved for JIT and approvals (see [ADR-0025](0025-access-requests.md)). Every enforcement point treats it as deny, and tests assert this.
 - **Delivery:** `limen admin apply -f <dir> [--dry-run]` requires the `limen:admin` role. The control plane stores immutable, numbered policy versions in Aurora and emits `policy.change` with the author, version, SHA-256, and a structured diff. Git stays the source of truth, and CI runs `apply`.
 - **Snapshots:** the control plane signs `{version, issued_at, documents}` with the internal CA key and streams it to proxies and workers, which persist it to disk. Each worker gets only the resources it serves plus all roles.
 - **Extension points (not built in v1):** `lock` (deny a user or role immediately and end their sessions), and approval requests.
