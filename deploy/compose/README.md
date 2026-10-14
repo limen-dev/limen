@@ -1,3 +1,5 @@
+<p align="center"><img src="../../assets/logo.svg" alt="Limen" width="240"></p>
+
 # Local development stack
 
 Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and CA keys sit on a Docker volume.

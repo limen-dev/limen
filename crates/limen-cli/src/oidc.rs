@@ -169,9 +169,12 @@ pub async fn pkce_login(
                     let _ = tx.send(cb);
                 }
                 Html(if ok {
-                    "<html><body><h3>Limen: login complete.</h3><p>You can close this tab and return to the terminal.</p></body></html>"
+                    callback_page(
+                        "Login complete.",
+                        "You can close this tab and return to the terminal.",
+                    )
                 } else {
-                    "<html><body><h3>Limen: login failed.</h3><p>See the terminal for details.</p></body></html>"
+                    callback_page("Login failed.", "See the terminal for details.")
                 })
             }
         }),
@@ -251,4 +254,16 @@ pub async fn device_login(settings: &IdpSettings) -> anyhow::Result<String> {
         .id_token()
         .context("the identity provider returned no ID token")?
         .to_string())
+}
+
+/// The logo mark, inlined so the page needs no further requests.
+const LOGO_MARK: &str = include_str!("../../../assets/logo-mark.svg");
+
+fn callback_page(heading: &str, detail: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Limen</title></head>\
+         <body style=\"font-family:system-ui,sans-serif;text-align:center;margin-top:4rem\">\
+         <div style=\"width:96px;margin:0 auto\">{LOGO_MARK}</div>\
+         <h3>Limen: {heading}</h3><p>{detail}</p></body></html>"
+    )
 }
