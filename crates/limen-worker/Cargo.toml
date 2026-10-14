@@ -11,9 +11,22 @@ publish.workspace = true
 name = "limen-worker"
 path = "src/main.rs"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
+limen-component.workspace = true
 limen-core.workspace = true
+limen-proto.workspace = true
+limen-tunnel.workspace = true
+anyhow.workspace = true
+axum.workspace = true
 clap.workspace = true
+futures.workspace = true
+rand.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
 
 [lints]
