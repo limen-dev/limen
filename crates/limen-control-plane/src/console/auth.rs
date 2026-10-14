@@ -224,7 +224,10 @@ async fn finish_login(
         )
         .await;
     }
-    let ttl = loaded.policy.cert_ttl(&roles, state.config.max_cert_ttl);
+    let ttl = state
+        .config
+        .console_session_ttl
+        .min(state.config.max_cert_ttl);
     let login_id = Uuid::now_v7();
     let session_token = new_token();
     let session = ConsoleSession {
