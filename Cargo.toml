@@ -57,7 +57,7 @@ tokio-stream = { version = "0.1.19", features = ["net"] }
 futures = "0.3.34"
 
 # TLS and crypto (aws-lc-rs is the single crypto provider; see ADR-0012)
-rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs"] }
 rustls-pki-types = { version = "1.15", features = ["std"] }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }

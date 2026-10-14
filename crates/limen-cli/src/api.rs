@@ -77,7 +77,11 @@ mod tests {
     #[test]
     fn explains_untrusted_proxy_certificates() {
         let status = tonic::Status::unavailable("invalid peer certificate: UnknownIssuer");
-        assert!(super::status_error(&status).to_string().contains("--ca-file"));
+        assert!(
+            super::status_error(&status)
+                .to_string()
+                .contains("--ca-file")
+        );
         assert!(super::tls_hint("connection refused").is_none());
     }
 
