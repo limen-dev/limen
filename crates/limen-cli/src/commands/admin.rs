@@ -8,8 +8,8 @@ use anyhow::{Context as _, bail};
 use clap::Subcommand;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{
-    ApplyPolicyRequest, CreateJoinTokenRequest, GetPolicyRequest, ListComponentsRequest,
-    PolicySource,
+    ApplyPolicyRequest, CreateJoinTokenRequest, GetPolicyRequest, KillSessionRequest,
+    ListComponentsRequest, ListLocksRequest, LockUserRequest, PolicySource, UnlockUserRequest,
 };
 
 use crate::api;
@@ -37,6 +37,26 @@ pub enum AdminCommand {
     },
     /// List enrolled proxies and workers, with their tunnels.
     Components,
+    /// Refuse a user's logins and sessions, and end their open sessions.
+    Lock {
+        /// The user's name, as in the audit trail.
+        username: String,
+        /// Why. Recorded in the audit trail.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Lift a lock. The user can log in again.
+    Unlock { username: String },
+    /// List locked users.
+    Locks,
+    /// End one live session.
+    KillSession {
+        /// The session ID, from `session.start` in the audit trail.
+        session_id: String,
+        /// Why. Recorded in the audit trail.
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -174,6 +194,89 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 .collect();
             print_table(["ID", "KIND", "LABELS", "LAST SEEN", "TUNNELS"], &rows);
         }
+        lock_command @ (AdminCommand::Lock { .. }
+        | AdminCommand::Unlock { .. }
+        | AdminCommand::Locks
+        | AdminCommand::KillSession { .. }) => run_locks(&mut admin, lock_command).await?,
+    }
+    Ok(())
+}
+
+/// Locks and session kills (ADR-0017).
+async fn run_locks(
+    admin: &mut AdminClient<tonic::transport::Channel>,
+    command: AdminCommand,
+) -> anyhow::Result<()> {
+    match command {
+        AdminCommand::Lock { username, reason } => {
+            let resp = admin
+                .lock_user(LockUserRequest {
+                    username: username.clone(),
+                    reason,
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            if resp.locked {
+                println!(
+                    "Locked {username}. New logins and sessions are refused now; open sessions end within about 10 seconds."
+                );
+            } else {
+                println!("{username} was already locked.");
+            }
+        }
+        AdminCommand::Unlock { username } => {
+            let resp = admin
+                .unlock_user(UnlockUserRequest {
+                    username: username.clone(),
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            if resp.unlocked {
+                println!("Unlocked {username}.");
+            } else {
+                println!("{username} wasn't locked.");
+            }
+        }
+        AdminCommand::Locks => {
+            let resp = admin
+                .list_locks(ListLocksRequest {})
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            let rows: Vec<[String; 4]> = resp
+                .locks
+                .iter()
+                .map(|l| {
+                    [
+                        l.username.clone(),
+                        l.locked_by.clone(),
+                        time::OffsetDateTime::from_unix_timestamp(l.locked_at_unix)
+                            .map(|t| t.to_string())
+                            .unwrap_or_default(),
+                        l.reason.clone(),
+                    ]
+                })
+                .collect();
+            print_table(["USER", "LOCKED BY", "LOCKED AT", "REASON"], &rows);
+        }
+        AdminCommand::KillSession { session_id, reason } => {
+            let resp = admin
+                .kill_session(KillSessionRequest {
+                    session_id: session_id.clone(),
+                    reason,
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            if resp.killed {
+                println!("Session {session_id} will end within about 10 seconds.");
+            } else {
+                println!("Session {session_id} was already marked to end.");
+            }
+        }
+        _ => unreachable!("only lock commands are routed here"),
     }
     Ok(())
 }

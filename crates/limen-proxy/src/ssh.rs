@@ -168,6 +168,9 @@ async fn establish(
         .fresh(now)
         .map_err(|e| failed(format!("access can't be decided right now ({e})")))?;
     let policy = &snapshot.policy;
+    if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
+        return Err(denied(why));
+    }
     let decision = policy.evaluate(&AccessRequest {
         roles: &user.roles,
         resource: &request.resource,
@@ -372,9 +375,42 @@ async fn relay(
     };
     // Whichever side finishes first, give the other a moment: the worker's
     // closing frame carries the recording reference for session.end.
+    // Locks and kills arrive with the policy snapshot (every 10 s). Check the
+    // cached copy each second, and end the session as soon as one applies.
+    let revoked = async {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            if let Some(snapshot) = proxy.policy.latest()
+                && let Some(why) = snapshot
+                    .restrictions
+                    .blocks(&user.username, &session_id.to_string())
+            {
+                return why;
+            }
+        }
+    };
     tokio::pin!(upload);
     tokio::pin!(download);
+    tokio::pin!(revoked);
+    let mut revoked_why = None;
     let (bytes_in, bytes_out, close) = tokio::select! {
+        why = &mut revoked => {
+            revoked_why = Some(why);
+            tracing::warn!(session = %session_id, user = %user.username, reason = why, "ending the session");
+            // Closing the tunnel makes the worker stop the target connection
+            // and finish the recording; its closing frame still reaches us.
+            let _ = outbound
+                .send(TunnelFrame {
+                    frame: Some(Frame::Close(limen_proto::v1::SessionClose {
+                        reason: why.into(),
+                        ..Default::default()
+                    })),
+                })
+                .await;
+            let (out, close) = tokio::time::timeout(Duration::from_secs(15), &mut download).await.unwrap_or((0, None));
+            (0, out, close)
+        }
         (out, close) = &mut download => {
             let bytes_in = tokio::time::timeout(Duration::from_secs(5), &mut upload).await.unwrap_or(0);
             (bytes_in, out, close)
@@ -393,7 +429,11 @@ async fn relay(
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "bytes_in": bytes_in,
         "bytes_out": bytes_out,
-        "reason": if close.reason.is_empty() { "client disconnected".to_owned() } else { close.reason },
+        "reason": match revoked_why {
+            Some(why) => why.to_owned(),
+            None if close.reason.is_empty() => "client disconnected".to_owned(),
+            None => close.reason,
+        },
         "recording_uri": close.recording_uri,
         "recording_sha256": close.recording_sha256,
     });

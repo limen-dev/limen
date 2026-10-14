@@ -103,6 +103,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|
+| R: a compromised user keeps working after the admin notices | `limen admin lock` and `kill-session`: signed snapshot carries them, enforced at login, certificate issuance, proxy, and worker; open sessions end within about 11 s. Limit: credentials the user already used on a target (a background process) aren't recalled |
 | T: tampering with audit batches (A8) | Per-writer hash chain plus signed manifests. Optional S3 Object Lock in compliance mode. A separate KMS key. Bucket policy denies delete except to lifecycle. `limen-audit-verify` (a CLI subcommand comes later). Limit: a signed chain proves a batch was altered or removed, not that the control plane never wrote a false event; and the tail after the last manifest isn't covered until the next batch lands |
 | R: an insider evades audit through protocol tricks | PG: extended protocol, `COPY`, multi-statement, and `DO` blocks are all logged at the wire level, not through SQL parsing. MySQL: `COM_STMT_PREPARE`/`EXECUTE`, multi-statements. Redis: `MULTI`/`EXEC`, `EVAL`/`EVALSHA` (the script body is logged, args redacted), pipelining. Kube: exec recorded, port-forward audited. Unparseable input is logged raw as `statement_type=unknown` |
 | D: audit pipeline loss | Local fsynced spool, at-least-once delivery, fail-closed by default, producer `seq` gap detection |

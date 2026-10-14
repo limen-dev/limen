@@ -10,8 +10,10 @@ use limen_policy::Policy;
 use limen_proto::v1::admin_server::Admin;
 use limen_proto::v1::{
     ApplyPolicyRequest, ApplyPolicyResponse, Component, CreateJoinTokenRequest,
-    CreateJoinTokenResponse, GetPolicyRequest, GetPolicyResponse, ListComponentsRequest,
-    ListComponentsResponse, PolicyDiff, TunnelInfo,
+    CreateJoinTokenResponse, GetPolicyRequest, GetPolicyResponse, KillSessionRequest,
+    KillSessionResponse, ListComponentsRequest, ListComponentsResponse, ListLocksRequest,
+    ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff, TunnelInfo,
+    UnlockUserRequest, UnlockUserResponse,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -243,4 +245,147 @@ impl Admin for AdminService {
             .collect();
         Ok(Response::new(ListComponentsResponse { components }))
     }
+
+    async fn lock_user(
+        &self,
+        request: Request<LockUserRequest>,
+    ) -> Result<Response<LockUserResponse>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let req = request.into_inner();
+        let username = req.username.trim();
+        if username.is_empty() || username.len() > 256 {
+            return Err(Status::invalid_argument("username is required"));
+        }
+        let reason = clean_reason(&req.reason)?;
+        let locked = db::lock_user(&self.0.db, username, &reason, &admin.username)
+            .await
+            .map_err(|e| internal("locking user", e))?;
+        if locked {
+            self.audit_admin(
+                EventKind::UserLock,
+                &admin.username,
+                None,
+                json!({ "target_user": username, "reason": reason }),
+            )
+            .await?;
+            tracing::warn!(user = username, by = %admin.username, %reason, "user locked");
+        }
+        Ok(Response::new(LockUserResponse { locked }))
+    }
+
+    async fn unlock_user(
+        &self,
+        request: Request<UnlockUserRequest>,
+    ) -> Result<Response<UnlockUserResponse>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let username = request.into_inner().username;
+        let unlocked = db::unlock_user(&self.0.db, username.trim(), &admin.username)
+            .await
+            .map_err(|e| internal("unlocking user", e))?;
+        if unlocked {
+            self.audit_admin(
+                EventKind::UserUnlock,
+                &admin.username,
+                None,
+                json!({ "target_user": username.trim() }),
+            )
+            .await?;
+            tracing::info!(user = username.trim(), by = %admin.username, "user unlocked");
+        }
+        Ok(Response::new(UnlockUserResponse { unlocked }))
+    }
+
+    async fn list_locks(
+        &self,
+        request: Request<ListLocksRequest>,
+    ) -> Result<Response<ListLocksResponse>, Status> {
+        caller::resolve(&request, &self.0.cas)?.admin()?;
+        let locks = db::active_locks(&self.0.db)
+            .await
+            .map_err(|e| internal("listing locks", e))?
+            .into_iter()
+            .map(|l| Lock {
+                username: l.username,
+                reason: l.reason,
+                locked_by: l.locked_by,
+                locked_at_unix: unix(l.locked_at),
+            })
+            .collect();
+        Ok(Response::new(ListLocksResponse { locks }))
+    }
+
+    async fn kill_session(
+        &self,
+        request: Request<KillSessionRequest>,
+    ) -> Result<Response<KillSessionResponse>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let req = request.into_inner();
+        let session_id = uuid::Uuid::parse_str(req.session_id.trim())
+            .map_err(|_| Status::invalid_argument("session_id must be a session UUID"))?;
+        let reason = clean_reason(&req.reason)?;
+        let killed = db::kill_session(
+            &self.0.db,
+            &session_id.to_string(),
+            &reason,
+            &admin.username,
+        )
+        .await
+        .map_err(|e| internal("killing session", e))?;
+        if killed {
+            self.audit_admin(
+                EventKind::SessionKill,
+                &admin.username,
+                Some(session_id),
+                json!({ "reason": reason }),
+            )
+            .await?;
+            tracing::warn!(session = %session_id, by = %admin.username, %reason, "session kill requested");
+        }
+        Ok(Response::new(KillSessionResponse { killed }))
+    }
+}
+
+impl AdminService {
+    /// Audit an admin action. If the event can't be written, the caller
+    /// returns an error: a lock nobody can audit still applies, but the admin
+    /// is told it wasn't recorded.
+    async fn audit_admin(
+        &self,
+        kind: EventKind,
+        admin: &str,
+        session_id: Option<uuid::Uuid>,
+        mut data: serde_json::Value,
+    ) -> Result<(), Status> {
+        data["by"] = json!(admin);
+        self.0
+            .audit
+            .emit(
+                kind,
+                Context {
+                    user: Some(admin.to_owned()),
+                    session_id,
+                },
+                data,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                tracing::error!(error = %e, "audit unavailable for an admin action");
+                Status::unavailable("the change was applied but audit is unavailable")
+            })
+    }
+}
+
+/// Reasons are free text shown to the user and stored in audit.
+fn clean_reason(reason: &str) -> Result<String, Status> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(Status::invalid_argument("a reason is required"));
+    }
+    if reason.len() > 500 || reason.chars().any(char::is_control) {
+        return Err(Status::invalid_argument(
+            "reason must be at most 500 characters, without control characters",
+        ));
+    }
+    Ok(reason.to_owned())
 }

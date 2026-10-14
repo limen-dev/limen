@@ -2,6 +2,7 @@
 //! decide from. A snapshot's age is the time since the control plane last
 //! answered; past the grace period, decisions fail closed (ADR-0011).
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -23,12 +24,35 @@ pub struct Snapshot {
     pub version: i64,
     pub issued_at: OffsetDateTime,
     pub policy: Arc<Policy>,
+    pub restrictions: Arc<Restrictions>,
+}
+
+/// What admins have shut off, carried next to the policy (ADR-0017).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Restrictions {
+    pub locked_users: BTreeSet<String>,
+    pub killed_sessions: BTreeSet<String>,
+}
+
+impl Restrictions {
+    /// Why this session must not continue, if it must not.
+    #[must_use]
+    pub fn blocks(&self, username: &str, session_id: &str) -> Option<&'static str> {
+        if self.locked_users.contains(username) {
+            Some("user locked")
+        } else if self.killed_sessions.contains(session_id) {
+            Some("session killed")
+        } else {
+            None
+        }
+    }
 }
 
 pub fn sign(
     signer: &EnvelopeSigner,
     version: i64,
     policy: &Policy,
+    restrictions: &Restrictions,
     issued_at: OffsetDateTime,
 ) -> Result<Signed, SessionError> {
     let documents_json = serde_json::to_string(&policy.documents())
@@ -37,6 +61,8 @@ pub fn sign(
         version,
         issued_at_unix: issued_at.unix_timestamp(),
         documents_json,
+        locked_users: restrictions.locked_users.iter().cloned().collect(),
+        killed_sessions: restrictions.killed_sessions.iter().cloned().collect(),
     };
     signer.sign(Purpose::PolicySnapshot, snapshot.encode_to_vec())
 }
@@ -59,6 +85,10 @@ pub fn verify_snapshot(
         version: snapshot.version,
         issued_at,
         policy: Arc::new(policy),
+        restrictions: Arc::new(Restrictions {
+            locked_users: snapshot.locked_users.into_iter().collect(),
+            killed_sessions: snapshot.killed_sessions.into_iter().collect(),
+        }),
     })
 }
 
@@ -208,7 +238,7 @@ mod tests {
         assert!(matches!(cache.fresh(now), Err(SessionError::NoSnapshot)));
         cache
             .update(
-                &sign(&cp, 3, &Policy::default(), now).expect("sign"),
+                &sign(&cp, 3, &Policy::default(), &Restrictions::default(), now).expect("sign"),
                 ca.cert_der(),
             )
             .expect("update");
@@ -233,7 +263,8 @@ mod tests {
         assert!(
             cache
                 .update(
-                    &sign(&proxy, 9, &Policy::default(), now).expect("sign"),
+                    &sign(&proxy, 9, &Policy::default(), &Restrictions::default(), now)
+                        .expect("sign"),
                     ca.cert_der()
                 )
                 .is_err(),
@@ -241,14 +272,14 @@ mod tests {
         );
         cache
             .update(
-                &sign(&cp, 5, &Policy::default(), now).expect("sign"),
+                &sign(&cp, 5, &Policy::default(), &Restrictions::default(), now).expect("sign"),
                 ca.cert_der(),
             )
             .expect("v5");
         assert!(
             cache
                 .update(
-                    &sign(&cp, 4, &Policy::default(), now).expect("sign"),
+                    &sign(&cp, 4, &Policy::default(), &Restrictions::default(), now).expect("sign"),
                     ca.cert_der()
                 )
                 .is_err(),
@@ -265,7 +296,7 @@ mod tests {
         let issued = OffsetDateTime::now_utc() - time::Duration::minutes(10);
         PolicyCache::new(DEFAULT_GRACE, Some(path.clone()))
             .update(
-                &sign(&cp, 1, &Policy::default(), issued).expect("sign"),
+                &sign(&cp, 1, &Policy::default(), &Restrictions::default(), issued).expect("sign"),
                 ca.cert_der(),
             )
             .expect("update");
@@ -280,5 +311,28 @@ mod tests {
             "a restart doesn't reset the age"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn restrictions_travel_in_the_signed_snapshot() {
+        let (ca, cp, _) = setup().await;
+        let restrictions = Restrictions {
+            locked_users: ["mallory@example.com".to_owned()].into(),
+            killed_sessions: ["s-1".to_owned()].into(),
+        };
+        let signed = sign(
+            &cp,
+            1,
+            &Policy::default(),
+            &restrictions,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("sign");
+        let snapshot = verify_snapshot(&signed, ca.cert_der()).expect("verify");
+        assert_eq!(*snapshot.restrictions, restrictions);
+        let r = &snapshot.restrictions;
+        assert_eq!(r.blocks("mallory@example.com", "s-9"), Some("user locked"));
+        assert_eq!(r.blocks("alice@example.com", "s-1"), Some("session killed"));
+        assert_eq!(r.blocks("alice@example.com", "s-2"), None);
     }
 }

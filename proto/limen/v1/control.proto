@@ -27,6 +27,12 @@ service Admin {
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
   rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse);
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
+  // Refuse a user's logins and sessions and end their open sessions.
+  rpc LockUser(LockUserRequest) returns (LockUserResponse);
+  rpc UnlockUser(UnlockUserRequest) returns (UnlockUserResponse);
+  rpc ListLocks(ListLocksRequest) returns (ListLocksResponse);
+  // End one live session.
+  rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
 }
 
 service Enrollment {
@@ -231,4 +237,46 @@ message PeerTunnel {
 
 message ListTunnelsResponse {
   repeated PeerTunnel tunnels = 1;
+}
+
+message LockUserRequest {
+  string username = 1;
+  string reason = 2;
+}
+
+message LockUserResponse {
+  // False if the user was already locked.
+  bool locked = 1;
+}
+
+message UnlockUserRequest {
+  string username = 1;
+}
+
+message UnlockUserResponse {
+  // False if the user wasn't locked.
+  bool unlocked = 1;
+}
+
+message ListLocksRequest {}
+
+message Lock {
+  string username = 1;
+  string reason = 2;
+  string locked_by = 3;
+  int64 locked_at_unix = 4;
+}
+
+message ListLocksResponse {
+  repeated Lock locks = 1;
+}
+
+message KillSessionRequest {
+  string session_id = 1;
+  string reason = 2;
+}
+
+message KillSessionResponse {
+  // False if it was already marked for ending.
+  bool killed = 1;
 }

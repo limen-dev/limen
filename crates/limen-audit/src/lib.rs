@@ -49,6 +49,14 @@ pub enum EventKind {
     /// A session recording was stored. Links the session to the recording's location.
     #[serde(rename = "session.recording")]
     SessionRecording,
+    /// An admin locked a user: no new logins or sessions, and open sessions end.
+    #[serde(rename = "user.lock")]
+    UserLock,
+    #[serde(rename = "user.unlock")]
+    UserUnlock,
+    /// An admin ended a session. `session_id` says which.
+    #[serde(rename = "session.kill")]
+    SessionKill,
 }
 
 /// Component that emitted the event, plus its per-producer sequence number.

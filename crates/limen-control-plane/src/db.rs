@@ -393,10 +393,107 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query("DELETE FROM session_kills WHERE killed_at < now() - interval '2 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM tunnels WHERE lease_expires_at < now()")
         .execute(&mut *tx)
         .await?
         .rows_affected();
     tx.commit().await?;
     Ok(Some(deleted))
+}
+
+#[derive(Debug, Clone)]
+pub struct LockRow {
+    pub username: String,
+    pub reason: String,
+    pub locked_by: String,
+    pub locked_at: OffsetDateTime,
+}
+
+/// Lock a user. `false` if they already have an active lock.
+pub async fn lock_user(
+    db: &Db,
+    username: &str,
+    reason: &str,
+    by: &str,
+) -> Result<bool, sqlx::Error> {
+    let inserted = sqlx::query(
+        "INSERT INTO user_locks (id, username, reason, locked_by) VALUES ($1, $2, $3, $4) ON CONFLICT (username) WHERE released_at IS NULL DO NOTHING",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(username)
+    .bind(reason)
+    .bind(by)
+    .execute(db)
+    .await?;
+    Ok(inserted.rows_affected() > 0)
+}
+
+/// Release a user's active lock. `false` if they weren't locked.
+pub async fn unlock_user(db: &Db, username: &str, by: &str) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE user_locks SET released_at = now(), released_by = $2 WHERE username = $1 AND released_at IS NULL",
+    )
+    .bind(username)
+    .bind(by)
+    .execute(db)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+pub async fn active_locks(db: &Db) -> Result<Vec<LockRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT username, reason, locked_by, locked_at FROM user_locks WHERE released_at IS NULL ORDER BY locked_at",
+    )
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(LockRow {
+                username: r.try_get("username")?,
+                reason: r.try_get("reason")?,
+                locked_by: r.try_get("locked_by")?,
+                locked_at: r.try_get("locked_at")?,
+            })
+        })
+        .collect()
+}
+
+pub async fn is_locked(db: &Db, username: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE username = $1 AND released_at IS NULL)",
+    )
+    .bind(username)
+    .fetch_one(db)
+    .await
+}
+
+/// Mark a session to be ended. `false` if it already was.
+pub async fn kill_session(
+    db: &Db,
+    session_id: &str,
+    reason: &str,
+    by: &str,
+) -> Result<bool, sqlx::Error> {
+    let inserted = sqlx::query(
+        "INSERT INTO session_kills (session_id, reason, killed_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(session_id)
+    .bind(reason)
+    .bind(by)
+    .execute(db)
+    .await?;
+    Ok(inserted.rows_affected() > 0)
+}
+
+/// Sessions killed within the last day (no session lives longer).
+pub async fn recent_kills(db: &Db) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT session_id FROM session_kills WHERE killed_at > now() - interval '1 day'",
+    )
+    .fetch_all(db)
+    .await
 }

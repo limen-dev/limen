@@ -159,6 +159,19 @@ async fn login(
         .await);
     }
 
+    if crate::db::is_locked(&state.db, &identity.username)
+        .await
+        .map_err(|e| internal("checking locks", e))?
+    {
+        return Err(deny(
+            state.audit.clone(),
+            addr,
+            Some(identity.username),
+            "user locked",
+        )
+        .await);
+    }
+
     let loaded = state.policy.current();
     let roles: Vec<String> = loaded
         .policy

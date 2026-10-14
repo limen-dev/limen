@@ -174,6 +174,12 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Sta
         .policy
         .fresh(now)
         .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
+    if let Some(why) = snapshot
+        .restrictions
+        .blocks(&verified.user.username, &grant.session_id)
+    {
+        return Err(Status::permission_denied(why));
+    }
     let decision = snapshot.policy.evaluate(&AccessRequest {
         roles: &verified.user.roles,
         resource: &grant.resource,

@@ -22,3 +22,10 @@ The brief's "dashboard" meant Grafana over the audit data (ADR-0014). The owner 
 - Lock and session kill pull a policy-snapshot extension and a proxy and worker enforcement path into Phase 3.5. They get their own tests, including "kill a live SSH session".
 - Browser-facing surface is new: XSS, CSRF, clickjacking, and session fixation join the threat model, with CSP, frame denial, and cookie hardening as mitigations.
 - Recording playback in the browser needs an asciicast player. We'll vendor one (asciinema-player, Apache-2.0) after checking its maintenance and advisories, per ADR-0012.
+
+## Amendment: locks and session kill (built, Phase 3.5)
+- Tables `user_locks` (one active lock per user, kept after release for history) and `session_kills` (pruned after 2 days).
+- The signed policy snapshot carries `locked_users` and `killed_sessions`, read from the database on every snapshot request. Enforcement points: the control plane at login and when it issues SSH certificates (immediate); the proxy when establishing a session and, once a second, over every open session it relays (so a lock or kill bites within about 11 s); the worker when it opens a session.
+- Audit: `user.lock`, `user.unlock`, `session.kill`; `session.end` carries the reason (`user locked` / `session killed`).
+- CLI: `limen admin lock|unlock|locks|kill-session`. Runbook: `docs/runbooks/lock-user.md`.
+- A session killed on a proxy that has lost the control plane is only ended once that proxy gets a snapshot with the kill. Locks that already exist keep being enforced from the cached snapshot.

@@ -84,6 +84,13 @@ impl SshCertificates for SshCertificatesService {
                 "policy no longer allows this session: {decision:?}"
             )));
         }
+        // Locks are read from the database, so a lock takes effect here at once.
+        if db::is_locked(&self.0.db, &verified.user.username)
+            .await
+            .map_err(|e| internal("checking locks", e))?
+        {
+            return Err(Status::permission_denied("user locked"));
+        }
         if !loaded
             .policy
             .worker_may_serve(&grant.resource, &worker.labels)
