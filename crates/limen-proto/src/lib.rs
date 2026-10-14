@@ -5,6 +5,17 @@ pub mod v1 {
     tonic::include_proto!("limen.v1");
 }
 
+/// Metadata the proxy adds to requests it relays to the control plane. The
+/// proxy strips any client-supplied copies first.
+pub mod relay {
+    /// Present on every relayed request.
+    pub const FORWARDED: &str = "x-limen-forwarded";
+    /// Base64 (standard, padded) DER of the client certificate, when one was presented.
+    pub const CLIENT_CERT: &str = "x-limen-client-cert";
+    /// Client socket address as the proxy saw it.
+    pub const CLIENT_ADDR: &str = "x-limen-client-addr";
+}
+
 #[cfg(test)]
 mod tests {
     use prost::Message;

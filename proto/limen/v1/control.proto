@@ -2,28 +2,215 @@ syntax = "proto3";
 
 package limen.v1;
 
-// Control plane API. Proxies reach it directly. Workers and the CLI reach it
-// by way of the proxy. See docs/design.md for details.
-service ControlPlane {
-  // Exchanges a single-use join token and a CSR for a worker certificate.
-  rpc EnrollWorker(EnrollWorkerRequest) returns (EnrollWorkerResponse);
-  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse);
+// Control plane API. Proxies call it directly over mTLS. The CLI and workers
+// reach it through a proxy, which forwards their verified client
+// certificate. The control plane re-verifies that certificate (design §3).
+
+// Unauthenticated login, plus identity introspection.
+service Auth {
+  // OIDC settings the CLI needs to start a login. Unauthenticated.
+  rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
+  // Exchanges an IdP ID token and a CSR for short-lived credentials. Unauthenticated.
+  rpc Login(LoginRequest) returns (LoginResponse);
+  // Identity and roles of the calling user certificate.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
 }
 
-message EnrollWorkerRequest {
+service Resources {
+  // Resources the calling user can access, with the principals they may use.
+  rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
+}
+
+// Requires the limen:admin role.
+service Admin {
+  rpc ApplyPolicy(ApplyPolicyRequest) returns (ApplyPolicyResponse);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse);
+  rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
+}
+
+service Enrollment {
+  // Exchanges a join token and a CSR for a component certificate. Unauthenticated.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  // Renews the calling component's certificate.
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+// Called by proxies only.
+service Registry {
+  // Full set of worker tunnels the calling proxy holds. Replaces its previous report.
+  rpc ReportTunnels(ReportTunnelsRequest) returns (ReportTunnelsResponse);
+}
+
+message GetAuthConfigRequest {}
+
+message GetAuthConfigResponse {
+  string issuer_url = 1;
+  string client_id = 2;
+  repeated string scopes = 3;
+  string server_version = 4;
+}
+
+enum LoginFlow {
+  LOGIN_FLOW_UNSPECIFIED = 0;
+  // Authorization code with PKCE. The ID token nonce must bind the CSR key.
+  LOGIN_FLOW_PKCE = 1;
+  // Device authorization grant. No nonce binding is possible (threat model, TB0).
+  LOGIN_FLOW_DEVICE = 2;
+}
+
+message LoginRequest {
+  string id_token = 1;
+  // DER PKCS#10 CSR for the user's X.509 key.
+  bytes csr_der = 2;
+  // nonce = base64url(SHA-256(CSR SubjectPublicKeyInfo DER || nonce_salt)).
+  bytes nonce_salt = 3;
+  LoginFlow flow = 4;
+}
+
+message LoginResponse {
+  string username = 1;
+  repeated string roles = 2;
+  string login_id = 3;
+  string cert_pem = 4;
+  string user_ca_pem = 5;
+  string internal_ca_pem = 6;
+  int64 expires_at_unix = 7;
+}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  string username = 1;
+  repeated string roles = 2;
+  string login_id = 3;
+  int64 expires_at_unix = 4;
+}
+
+message ListResourcesRequest {}
+
+message Resource {
+  string name = 1;
+  string kind = 2;
+  map<string, string> labels = 3;
+  repeated string principals = 4;
+}
+
+message ListResourcesResponse {
+  repeated Resource resources = 1;
+  int64 policy_version = 2;
+}
+
+message PolicySource {
+  string name = 1;
+  string content = 2;
+}
+
+message ApplyPolicyRequest {
+  repeated PolicySource sources = 1;
+  bool dry_run = 2;
+  // Optional reference to where the policy came from, such as a Git commit SHA.
+  string source_ref = 3;
+}
+
+message PolicyDiff {
+  repeated string added = 1;
+  repeated string removed = 2;
+  repeated string changed = 3;
+}
+
+message ApplyPolicyResponse {
+  PolicyDiff diff = 1;
+  // Version now active. Unchanged when dry_run is set or nothing changed.
+  int64 version = 2;
+  string digest = 3;
+  bool applied = 4;
+}
+
+message GetPolicyRequest {}
+
+message GetPolicyResponse {
+  int64 version = 1;
+  string digest = 2;
+  string author = 3;
+  int64 created_at_unix = 4;
+  uint32 resource_count = 5;
+}
+
+message CreateJoinTokenRequest {
+  // "proxy" or "worker".
+  string kind = 1;
+  uint32 ttl_seconds = 2;
+  map<string, string> labels = 3;
+  // DNS names or IPs the enrolled component may put in its certificate.
+  repeated string dns_names = 4;
+}
+
+message CreateJoinTokenResponse {
+  string token = 1;
+  int64 expires_at_unix = 2;
+}
+
+message ListComponentsRequest {}
+
+message TunnelInfo {
+  string proxy_id = 1;
+  string tunnel_id = 2;
+  int64 lease_expires_at_unix = 3;
+}
+
+message Component {
+  string id = 1;
+  string kind = 2;
+  map<string, string> labels = 3;
+  int64 enrolled_at_unix = 4;
+  int64 last_seen_at_unix = 5;
+  int64 cert_expires_at_unix = 6;
+  repeated TunnelInfo tunnels = 7;
+}
+
+message ListComponentsResponse {
+  repeated Component components = 1;
+}
+
+message EnrollRequest {
   string join_token = 1;
-  // PEM-encoded PKCS#10 CSR. The private key never leaves the worker.
-  string csr_pem = 2;
+  bytes csr_der = 2;
+  // "proxy" or "worker". Must match the token.
+  string kind = 3;
+  // Must be a subset of the names the token allows.
+  repeated string dns_names = 4;
 }
 
-message EnrollWorkerResponse {
+message EnrollResponse {
+  string component_id = 1;
+  string cert_pem = 2;
+  string internal_ca_pem = 3;
+  string user_ca_pem = 4;
+  int64 expires_at_unix = 5;
+  map<string, string> labels = 6;
+}
+
+message RenewCertificateRequest {
+  bytes csr_der = 1;
+}
+
+message RenewCertificateResponse {
+  string cert_pem = 1;
+  int64 expires_at_unix = 2;
+}
+
+message TunnelReport {
   string worker_id = 1;
-  string certificate_pem = 2;
-  repeated string ca_bundle_pem = 3;
+  string tunnel_id = 2;
 }
 
-message GetVersionRequest {}
+message ReportTunnelsRequest {
+  repeated TunnelReport tunnels = 1;
+  // Private address other proxies use to reach this one (proxy peering, ADR-0004).
+  string peer_address = 2;
+}
 
-message GetVersionResponse {
-  string version = 1;
+message ReportTunnelsResponse {
+  uint32 lease_seconds = 1;
 }

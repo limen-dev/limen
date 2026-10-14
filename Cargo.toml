@@ -40,8 +40,9 @@ tonic = { version = "0.14.6", default-features = false, features = ["transport",
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 hyper = { version = "1.12", features = ["http1", "http2", "server", "client"] }
-hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2", "service"] }
 http = "1.5"
+http-body = "1.0"
 http-body-util = "0.1.5"
 axum = "0.8.9"
 tower = { version = "0.5.3", features = ["util"] }
