@@ -1,8 +1,10 @@
 //! Shared test fixtures: temporary directories, a mock OIDC provider, and
 //! access to the test database.
 
+pub mod fake_datadog;
 pub mod idp;
 pub mod ssh_target;
+pub mod toggle_proxy;
 
 /// A temporary directory that is removed on drop, for spool and state tests.
 pub fn temp_dir() -> std::io::Result<tempfile::TempDir> {
@@ -16,11 +18,22 @@ pub fn temp_dir() -> std::io::Result<tempfile::TempDir> {
 /// the dev database with `docker compose -f deploy/compose/docker-compose.yml up -d postgres`.
 #[must_use]
 pub fn database_url() -> Option<String> {
-    let url = std::env::var("LIMEN_TEST_DATABASE_URL").ok();
-    if url.is_none() {
-        eprintln!("SKIPPED: LIMEN_TEST_DATABASE_URL is not set");
+    env_or_skip("LIMEN_TEST_DATABASE_URL")
+}
+
+/// S3-compatible endpoint for integration tests, from `LIMEN_TEST_S3_ENDPOINT`
+/// (`SeaweedFS` in the dev stack: `http://localhost:8333`).
+#[must_use]
+pub fn s3_endpoint() -> Option<String> {
+    env_or_skip("LIMEN_TEST_S3_ENDPOINT")
+}
+
+fn env_or_skip(name: &str) -> Option<String> {
+    let value = std::env::var(name).ok();
+    if value.is_none() {
+        eprintln!("SKIPPED: {name} is not set");
     }
-    url
+    value
 }
 
 #[cfg(test)]

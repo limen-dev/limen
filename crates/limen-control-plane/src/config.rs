@@ -142,6 +142,48 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_FILE")]
     pub audit_file: Option<PathBuf>,
 
+    /// S3 bucket for audit batches and session recordings (ADR-0009).
+    #[arg(long, env = "LIMEN_AUDIT_S3_BUCKET")]
+    pub audit_s3_bucket: Option<String>,
+
+    /// Key prefix inside the bucket, for example `limen/`.
+    #[arg(long, env = "LIMEN_AUDIT_S3_PREFIX", default_value = "")]
+    pub audit_s3_prefix: String,
+
+    /// S3 endpoint override, for S3-compatible stores in development.
+    #[arg(long, env = "LIMEN_AUDIT_S3_ENDPOINT")]
+    pub audit_s3_endpoint: Option<String>,
+
+    /// Use path-style S3 addressing (S3-compatible stores).
+    #[arg(long, env = "LIMEN_AUDIT_S3_PATH_STYLE")]
+    pub audit_s3_path_style: bool,
+
+    /// Encrypt objects with this KMS key (SSE-KMS). Without it, the bucket's
+    /// default encryption applies.
+    #[arg(long, env = "LIMEN_AUDIT_S3_KMS_KEY")]
+    pub audit_s3_kms_key: Option<String>,
+
+    /// Create the bucket if it doesn't exist (development only; in AWS the
+    /// bucket comes from Terraform with encryption, versioning, and Object Lock).
+    #[arg(long, env = "LIMEN_AUDIT_S3_CREATE_BUCKET")]
+    pub audit_s3_create_bucket: bool,
+
+    /// Close an S3 batch after this long, even if it isn't full.
+    #[arg(long, env = "LIMEN_AUDIT_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
+    pub audit_s3_flush: Duration,
+
+    /// Datadog Logs intake URL, for example
+    /// `https://http-intake.logs.datadoghq.eu/api/v2/logs`. Enables the Datadog sink.
+    #[arg(long, env = "LIMEN_DATADOG_LOGS_URL")]
+    pub datadog_logs_url: Option<String>,
+
+    #[arg(long, env = "DD_API_KEY", value_parser = parse_secret)]
+    pub datadog_api_key: Option<Secret<String>>,
+
+    /// Deployment environment, used in Datadog tags (`env:`).
+    #[arg(long, env = "LIMEN_ENVIRONMENT", default_value = "dev")]
+    pub environment: String,
+
     /// Where session recordings go when no S3 bucket is configured (development).
     #[arg(
         long,

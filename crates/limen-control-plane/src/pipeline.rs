@@ -12,14 +12,18 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
 use crate::config::Config;
+use crate::sinks::{DatadogSink, S3Sink, SignerSlot};
 
 pub const JSONL: &str = "jsonl";
+pub const S3: &str = "s3";
+pub const DATADOG: &str = "datadog";
 
 /// Where recordings are stored.
 #[derive(Debug, Clone)]
 pub enum RecordingStore {
     /// A local directory (development, tests).
     Local(PathBuf),
+    S3(S3Sink),
 }
 
 impl RecordingStore {
@@ -34,6 +38,7 @@ impl RecordingStore {
                 tokio::fs::copy(file, &dest).await?;
                 Ok(format!("file://{}", dest.display()))
             }
+            RecordingStore::S3(sink) => sink.put_recording(session_id, file).await,
         }
     }
 }
@@ -42,15 +47,64 @@ impl RecordingStore {
 pub struct Pipeline {
     pub spool: Spool,
     pub recordings: RecordingStore,
+    s3: Option<S3Sink>,
+    datadog: Option<DatadogSink>,
     config: Arc<Config>,
 }
 
 impl Pipeline {
-    pub fn open(config: &Arc<Config>) -> anyhow::Result<Self> {
+    pub async fn open(config: &Arc<Config>, signer: SignerSlot) -> anyhow::Result<Self> {
         let mut consumers: Vec<&str> = Vec::new();
         if config.audit_file.is_some() {
             consumers.push(JSONL);
         }
+        let s3 = match &config.audit_s3_bucket {
+            Some(bucket) => {
+                consumers.push(S3);
+                let client = crate::sinks::s3_client(
+                    config.audit_s3_endpoint.as_deref(),
+                    config.audit_s3_path_style,
+                )
+                .await;
+                if config.audit_s3_create_bucket
+                    && client.head_bucket().bucket(bucket).send().await.is_err()
+                {
+                    match client.create_bucket().bucket(bucket).send().await {
+                        Ok(_) => tracing::info!(%bucket, "created the audit bucket"),
+                        Err(e) => {
+                            tracing::warn!(%bucket, error = %aws_sdk_s3::error::DisplayErrorContext(&e), "couldn't create the audit bucket; will retry when shipping");
+                        }
+                    }
+                }
+                Some(S3Sink::new(
+                    client,
+                    bucket.clone(),
+                    config.audit_s3_prefix.clone(),
+                    config.audit_s3_kms_key.clone(),
+                    config.id.clone(),
+                    signer,
+                ))
+            }
+            None => None,
+        };
+        let datadog = match (&config.datadog_logs_url, &config.datadog_api_key) {
+            (Some(url), Some(key)) => {
+                consumers.push(DATADOG);
+                let http = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()?;
+                Some(DatadogSink {
+                    http,
+                    url: url.clone(),
+                    api_key: key.clone(),
+                    hostname: config.id.clone(),
+                    environment: config.environment.clone(),
+                })
+            }
+            (Some(_), None) => anyhow::bail!("--datadog-logs-url needs DD_API_KEY"),
+            _ => None,
+        };
         if consumers.is_empty() {
             anyhow::bail!(
                 "no audit sink is configured: set --audit-file, an S3 bucket, or Datadog"
@@ -65,9 +119,15 @@ impl Pipeline {
             )
         })?;
         spool.start();
+        let recordings = match &s3 {
+            Some(sink) => RecordingStore::S3(sink.clone()),
+            None => RecordingStore::Local(config.recordings_dir.clone()),
+        };
         Ok(Self {
             spool,
-            recordings: RecordingStore::Local(config.recordings_dir.clone()),
+            recordings,
+            s3,
+            datadog,
             config: Arc::clone(config),
         })
     }
@@ -84,6 +144,38 @@ impl Pipeline {
                 self.spool.clone(),
                 consumer,
                 move |batch| write_jsonl(path.clone(), batch),
+                shutdown.clone(),
+            ));
+        }
+        if let Some(sink) = self.s3.clone() {
+            let consumer = ConsumerConfig {
+                name: S3.into(),
+                batch_max: 10_000,
+                linger: self.config.audit_s3_flush,
+            };
+            tokio::spawn(run_consumer(
+                self.spool.clone(),
+                consumer,
+                move |batch| {
+                    let sink = sink.clone();
+                    async move { sink.ship(batch).await }
+                },
+                shutdown.clone(),
+            ));
+        }
+        if let Some(sink) = self.datadog.clone() {
+            let consumer = ConsumerConfig {
+                name: DATADOG.into(),
+                batch_max: 1000,
+                linger: Duration::from_secs(1),
+            };
+            tokio::spawn(run_consumer(
+                self.spool.clone(),
+                consumer,
+                move |batch| {
+                    let sink = sink.clone();
+                    async move { sink.ship(batch).await }
+                },
                 shutdown.clone(),
             ));
         }

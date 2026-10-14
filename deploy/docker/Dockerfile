@@ -17,9 +17,9 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked \
-      --bin limen-control-plane --bin limen-proxy --bin limen-worker --bin limen \
+      --bin limen-control-plane --bin limen-audit-verify --bin limen-proxy --bin limen-worker --bin limen --bin fake-datadog \
  && mkdir -p /out /state/ca /state/ca-public /state/audit /state/spool /state/recordings /state/proxy /state/worker \
- && cp target/release/limen-control-plane target/release/limen-proxy target/release/limen-worker target/release/limen /out/
+ && cp target/release/limen-control-plane target/release/limen-audit-verify target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.
 FROM gcr.io/distroless/cc-debian13:nonroot AS runtime-base
@@ -31,6 +31,7 @@ USER nonroot:nonroot
 
 FROM runtime-base AS control-plane
 COPY --from=builder /out/limen-control-plane /usr/local/bin/limen-control-plane
+COPY --from=builder /out/limen-audit-verify /usr/local/bin/limen-audit-verify
 EXPOSE 3080 3081
 ENTRYPOINT ["/usr/local/bin/limen-control-plane"]
 
@@ -48,3 +49,9 @@ ENTRYPOINT ["/usr/local/bin/limen-worker"]
 FROM runtime-base AS cli
 COPY --from=builder /out/limen /usr/local/bin/limen
 ENTRYPOINT ["/usr/local/bin/limen"]
+
+# Development only: a fake Datadog Logs intake for the local stack.
+FROM runtime-base AS fake-datadog
+COPY --from=builder /out/fake-datadog /usr/local/bin/fake-datadog
+EXPOSE 8126
+ENTRYPOINT ["/usr/local/bin/fake-datadog"]

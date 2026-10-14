@@ -14,6 +14,8 @@ use crate::SessionError;
 pub enum Purpose {
     SessionGrant,
     PolicySnapshot,
+    /// An S3 audit batch manifest (ADR-0009).
+    AuditManifest,
 }
 
 impl Purpose {
@@ -21,6 +23,7 @@ impl Purpose {
         match self {
             Purpose::SessionGrant => b"limen/v1/session-grant",
             Purpose::PolicySnapshot => b"limen/v1/policy-snapshot",
+            Purpose::AuditManifest => b"limen/v1/audit-manifest",
         }
     }
 
@@ -28,7 +31,7 @@ impl Purpose {
     fn signer_kind(self) -> ComponentKind {
         match self {
             Purpose::SessionGrant => ComponentKind::Proxy,
-            Purpose::PolicySnapshot => ComponentKind::ControlPlane,
+            Purpose::PolicySnapshot | Purpose::AuditManifest => ComponentKind::ControlPlane,
         }
     }
 }

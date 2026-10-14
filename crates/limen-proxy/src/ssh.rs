@@ -313,6 +313,7 @@ async fn relay(
     tracing::info!(session = %session_id, user = %user.username, resource = %request.resource, login = %request.principal, worker = %worker_id, "session started");
 
     let started = Instant::now();
+    metrics::gauge!("limen_sessions_active", "kind" => "ssh").increment(1.0);
     let (mut reader, mut writer) = tokio::io::split(tls);
     let upload = async {
         let mut bytes = 0u64;
@@ -396,6 +397,8 @@ async fn relay(
         "recording_uri": close.recording_uri,
         "recording_sha256": close.recording_sha256,
     });
+    metrics::gauge!("limen_sessions_active", "kind" => "ssh").decrement(1.0);
+    metrics::counter!("limen_sessions_total", "kind" => "ssh").increment(1);
     if let Err(e) = proxy.audit.emit(EventKind::SessionEnd, ctx, end).await {
         tracing::error!(error = %e, "failed to audit session end");
     }

@@ -58,7 +58,15 @@ jobs:
     env:
       LIMEN_TEST_DATABASE_URL: postgres://limen:limen-ci@localhost:5432/limen
       LIMEN_TEST_KMS_ENDPOINT: http://localhost:8099
+      LIMEN_TEST_S3_ENDPOINT: http://localhost:8333
+      # SeaweedFS accepts any credentials; the AWS SDK just needs some.
+      AWS_ACCESS_KEY_ID: ci
+      AWS_SECRET_ACCESS_KEY: ci-only-secret
+      AWS_REGION: us-east-1
     steps:
+      # Service containers can't take a command, so S3 starts here.
+      - name: Start SeaweedFS (S3)
+        run: docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.48 server -s3 -dir=/data
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

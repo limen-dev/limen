@@ -56,6 +56,14 @@ async fn fresh_database(base: &str) -> String {
 impl Harness {
     /// Returns `None` (and the test should return) if no test database is configured.
     pub async fn start() -> Option<Self> {
+        Self::start_with(&[]).await
+    }
+
+    /// Start with extra control plane flags.
+    pub async fn start_with(extra: &[String]) -> Option<Self> {
+        if std::env::var_os("LIMEN_TEST_LOG").is_some() {
+            limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
+        }
         let base = limen_testkit::database_url()?;
         let db_url = fresh_database(&base).await;
         let idp = MockIdp::start(CLIENT_ID).await;
@@ -81,6 +89,7 @@ impl Harness {
             "--admin-listen=127.0.0.1:0".into(),
             "--dns-name=localhost".into(),
         ];
+        let args: Vec<String> = args.into_iter().chain(extra.iter().cloned()).collect();
         let config = Wrapper::try_parse_from(args).expect("config").config;
         let state = build_state(config).await.expect("build state");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

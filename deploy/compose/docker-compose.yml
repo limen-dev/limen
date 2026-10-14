@@ -42,6 +42,20 @@ services:
     image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
     ports: ["127.0.0.1:8099:8080"]
 
+  # S3-compatible object store for audit batches and recordings (MinIO no
+  # longer publishes images). Open access, development only.
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: ["server", "-s3", "-dir=/data"]
+    ports: ["127.0.0.1:8333:8333"]
+    volumes: [s3-data:/data]
+
+  # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
+  fake-datadog:
+    build: { <<: *limen-build, target: fake-datadog }
+    image: limen-fake-datadog:dev
+    ports: ["127.0.0.1:8126:8126"]
+
   control-plane:
     build: { <<: *limen-build, target: control-plane }
     image: limen-control-plane:dev
@@ -49,6 +63,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       dex: { condition: service_started }
+      s3: { condition: service_started }
+      fake-datadog: { condition: service_started }
     environment:
       RUST_LOG: info
       LIMEN_ID: control-plane-1
@@ -65,6 +81,18 @@ services:
       LIMEN_PROXY_DNS_NAMES: localhost,proxy
       # Every component's audit events end up here (and in S3 and Datadog below).
       LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
+      LIMEN_AUDIT_S3_BUCKET: limen-audit
+      LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
+      LIMEN_AUDIT_S3_PATH_STYLE: "true"
+      LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
+      LIMEN_AUDIT_S3_FLUSH: 10s
+      # SeaweedFS accepts any credentials; the SDK just needs some.
+      AWS_ACCESS_KEY_ID: dev
+      AWS_SECRET_ACCESS_KEY: dev-only-secret
+      AWS_REGION: us-east-1
+      LIMEN_DATADOG_LOGS_URL: http://fake-datadog:8126/api/v2/logs
+      DD_API_KEY: dev-only-datadog-key
+      LIMEN_ENVIRONMENT: dev
     ports: ["127.0.0.1:3081:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca
@@ -126,4 +154,5 @@ volumes:
   proxy-data: {}
   worker-data: {}
   cp-spool: {}
+  s3-data: {}
   recordings: {}

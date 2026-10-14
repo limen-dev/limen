@@ -260,6 +260,11 @@ async fn policy_refresh(worker: Worker, mut shutdown: watch::Receiver<bool>) {
                 .map(|s| (time::OffsetDateTime::now_utc() - s.issued_at).whole_seconds());
             tracing::warn!(error = %e, snapshot_age_secs = ?age, "policy refresh failed; using the cached snapshot within the grace period");
         }
+        if let Some(snapshot) = worker.policy.latest() {
+            #[allow(clippy::cast_precision_loss)]
+            metrics::gauge!("limen_policy_snapshot_age_seconds")
+                .set((time::OffsetDateTime::now_utc() - snapshot.issued_at).whole_seconds() as f64);
+        }
     }
 }
 
@@ -318,6 +323,7 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
             {
                 Ok(tls) => {
                     worker.tunnels_up.fetch_add(1, Ordering::SeqCst);
+                    metrics::gauge!("limen_worker_tunnels_up").increment(1.0);
                     tracing::info!(tunnel = index, proxy = %worker.config.proxy_addr, "tunnel connected");
                     let peer = PeerInfo {
                         remote_addr: None,
@@ -328,6 +334,7 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
                         _ = shutdown.changed() => Ok(()),
                     };
                     worker.tunnels_up.fetch_sub(1, Ordering::SeqCst);
+                    metrics::gauge!("limen_worker_tunnels_up").decrement(1.0);
                     served
                 }
                 Err(e) => Err(e.into()),
@@ -416,6 +423,7 @@ async fn serve_admin(worker: Worker) -> anyhow::Result<()> {
     let ready = worker.clone();
     let app = axum::Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/metrics", get(|| async { limen_core::metrics::render() }))
         .route(
             "/readyz",
             get(move || {

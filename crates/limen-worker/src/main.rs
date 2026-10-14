@@ -18,6 +18,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    limen_core::metrics::install();
     telemetry::init(if args.log_json {
         LogFormat::Json
     } else {

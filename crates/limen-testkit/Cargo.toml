@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 axum.workspace = true
 chrono.workspace = true
+flate2.workspace = true
 openidconnect.workspace = true
 rcgen.workspace = true
 rand.workspace = true
@@ -18,6 +19,10 @@ serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+
+[[bin]]
+name = "fake-datadog"
+path = "src/bin/fake-datadog.rs"
 
 [lints]
 workspace = true

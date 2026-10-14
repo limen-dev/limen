@@ -32,6 +32,7 @@ async fn deny(
     user: Option<String>,
     reason: &'static str,
 ) -> Status {
+    metrics::counter!("limen_logins_total", "outcome" => "denied").increment(1);
     let data =
         json!({ "action": "login", "reason": reason, "client_addr": addr.map(|a| a.to_string()) });
     if let Err(e) = audit
@@ -222,6 +223,7 @@ async fn login(
             tracing::error!(error = %e, "audit unavailable; refusing login");
             Status::unavailable("audit unavailable")
         })?;
+    metrics::counter!("limen_logins_total", "outcome" => "success").increment(1);
     tracing::info!(user = %identity.username, ?roles, ttl_secs = ttl.as_secs(), "login");
 
     Ok(LoginResponse {

@@ -464,6 +464,11 @@ async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
                 .map(|s| (time::OffsetDateTime::now_utc() - s.issued_at).whole_seconds());
             tracing::warn!(error = %e, snapshot_age_secs = ?age, "policy refresh failed; using the cached snapshot within the grace period");
         }
+        if let Some(snapshot) = proxy.policy.latest() {
+            #[allow(clippy::cast_precision_loss)]
+            metrics::gauge!("limen_policy_snapshot_age_seconds")
+                .set((time::OffsetDateTime::now_utc() - snapshot.issued_at).whole_seconds() as f64);
+        }
     }
 }
 
@@ -476,6 +481,8 @@ async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             () = proxy.tunnels.changed.notified() => {}
             _ = shutdown.changed() => return,
         }
+        #[allow(clippy::cast_precision_loss)]
+        metrics::gauge!("limen_proxy_tunnels").set(proxy.tunnels.summaries().len() as f64);
         let tunnels = proxy
             .tunnels
             .summaries()
@@ -508,6 +515,7 @@ async fn serve_admin(proxy: Proxy, mut shutdown: watch::Receiver<bool>) -> anyho
     let listing = proxy.clone();
     let app = axum::Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/metrics", get(|| async { limen_core::metrics::render() }))
         .route(
             "/readyz",
             get(move || {

@@ -11,7 +11,9 @@ pub mod oidc;
 pub mod pipeline;
 pub mod server;
 pub mod services;
+pub mod sinks;
 pub mod state;
+pub mod verify;
 
 use std::sync::Arc;
 
@@ -61,7 +63,8 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
     let config = Arc::new(config);
-    let pipeline = pipeline::Pipeline::open(&config)?;
+    let snapshot_signer: sinks::SignerSlot = Arc::default();
+    let pipeline = pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await?;
     let sink = Arc::new(SpoolSink(pipeline.spool.clone()));
     let audit = Emitter::new("control-plane", &config.id, sink, config.audit_failure_mode);
     Ok(AppState {
@@ -73,7 +76,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         policy,
         audit,
         limits: Arc::new(Limits::default()),
-        snapshot_signer: Arc::default(),
+        snapshot_signer,
     })
 }
 

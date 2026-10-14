@@ -200,6 +200,7 @@ pub async fn serve_health(
 ) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/metrics", get(|| async { limen_core::metrics::render() }))
         .route(
             "/readyz",
             get(move || {
