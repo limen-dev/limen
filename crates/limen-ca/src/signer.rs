@@ -57,10 +57,46 @@ impl FileSigner {
             Ok(pem) => Self::from_pem(&pem),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let signer = Self::generate()?;
-                write_private(path, &signer.key.serialize_pem())
-                    .map_err(|e| CaError::Internal(format!("writing {}: {e}", path.display())))?;
-                tracing::info!(path = %path.display(), "generated new CA key");
-                Ok(signer)
+                let io = |e: std::io::Error| {
+                    CaError::Internal(format!("writing {}: {e}", path.display()))
+                };
+                // Several replicas may share the key directory and start at
+                // once. Write a complete private temp file, then link it into
+                // place: linking fails if another process got there first, and
+                // then its key (already complete) is the one everyone uses.
+                let tmp = path.with_extension(format!(
+                    "tmp-{}-{:016x}",
+                    std::process::id(),
+                    rand::random::<u64>()
+                ));
+                write_private(&tmp, &signer.key.serialize_pem()).map_err(io)?;
+                let linked = match std::fs::hard_link(&tmp, path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
+                        // No hard links on this filesystem: an atomic rename
+                        // still never exposes a half-written key.
+                        tracing::warn!(path = %path.display(), error = %e, "cannot hard-link the new CA key; replicas sharing this directory must not start at the same time");
+                        std::fs::rename(&tmp, path)
+                    }
+                    other => other,
+                };
+                let _ = std::fs::remove_file(&tmp);
+                match linked {
+                    Ok(()) => {
+                        if let Some(parent) = path.parent() {
+                            // Make the new directory entry durable.
+                            let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
+                        }
+                        tracing::info!(path = %path.display(), "generated new CA key");
+                        Ok(signer)
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        let pem = std::fs::read_to_string(path).map_err(|e| {
+                            CaError::Internal(format!("reading {}: {e}", path.display()))
+                        })?;
+                        Self::from_pem(&pem)
+                    }
+                    Err(e) => Err(io(e)),
+                }
             }
             Err(e) => Err(CaError::Internal(format!(
                 "reading {}: {e}",
@@ -150,5 +186,43 @@ mod tests {
         }
         let sig = a.sign(b"hello").await.expect("sign");
         assert_eq!(sig[0], 0x30, "ECDSA signature must be DER (SEQUENCE)");
+    }
+
+    /// Replicas sharing a key directory start at the same moment: exactly one
+    /// key must win, and nobody may read a half-written file.
+    #[test]
+    fn concurrent_creators_agree_on_one_key() {
+        for _ in 0..20 {
+            let dir = limen_testkit::temp_dir().expect("tempdir");
+            let path = dir.path().join("ca/internal-ca.key");
+            let barrier = std::sync::Barrier::new(8);
+            let keys: Vec<Vec<u8>> = std::thread::scope(|s| {
+                let handles: Vec<_> = (0..8)
+                    .map(|_| {
+                        s.spawn(|| {
+                            barrier.wait();
+                            FileSigner::load_or_create(&path)
+                                .expect("load or create")
+                                .public_key_raw()
+                                .to_vec()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().expect("thread"))
+                    .collect()
+            });
+            assert!(
+                keys.windows(2).all(|w| w[0] == w[1]),
+                "every creator got the same key"
+            );
+            let on_disk = FileSigner::load_or_create(&path).expect("reload");
+            assert_eq!(on_disk.public_key_raw(), &keys[0][..]);
+            let leftovers = std::fs::read_dir(path.parent().expect("parent"))
+                .expect("ls")
+                .count();
+            assert_eq!(leftovers, 1, "no temporary files left behind");
+        }
     }
 }
