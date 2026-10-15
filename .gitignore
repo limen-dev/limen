@@ -16,3 +16,4 @@
 # Modules leave provider pinning to the root configuration.
 deploy/terraform/modules/*/.terraform.lock.hcl
 deploy/compose/.state/
+deploy/compose/.state-scale/

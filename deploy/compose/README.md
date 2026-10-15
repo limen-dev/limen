@@ -115,3 +115,36 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 `https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
 
 The console's OIDC client (`limen-console`) and its dev secret are in `dex/config.yaml` and `docker-compose.yml`.
+
+## Scale-out (Phase 5)
+
+`docker-compose.scale.yml` is a separate compose project, `limen-scale`, with its own volumes and host ports, so it runs next to the dev stack without touching it:
+
+```sh
+docker compose -f deploy/compose/docker-compose.scale.yml up -d --build
+deploy/compose/demo-phase5.sh          # resets the scale stack, runs the exit test, stops it
+deploy/compose/demo-phase5.sh --keep   # reuse the running scale stack and leave it up
+```
+
+What is in it:
+
+- `control-plane-0`, `-1`, `-2` on one PostgreSQL. Each has its own `--id` (`LIMEN_ID`, also its S3 manifest writer), its own spool volume, and `--advertise-url https://control-plane-N:3080` (where peers hand off to). All three share the network alias `control-plane`, so DNS returns all three. Spool modes: `-1` is `durable`, `-0` and `-2` are `ephemeral`; override with `LIMEN_SCALE_SPOOL_MODE_0/1/2`. `stop_grace_period` (40 s) is longer than the drain timeout (20 s), so `docker compose stop` drains and hands off rather than being cut short.
+- The CA: the CA certificates are in the database, and with the file backend the keys are on one volume (`cp-ca`) every replica mounts. Whichever replica starts first creates them; the others read the same files (creation is race-free). Separate key volumes per replica do not work: a replica whose key does not match the stored certificate refuses to start. With the KMS backend, every replica gets the same KMS key ids instead.
+- `proxy-0`, `-1`, `-2` reach the control plane through the `control-plane` alias, and share the alias `proxy`; `worker-0`, `-1`, `-2` dial `proxy` and so land on any of them (sessions reach a worker on another proxy by peering). They enroll with the same multi-use static dev tokens as the dev stack.
+- The dev stack's `sshd-target`, SeaweedFS, PostgreSQL, and Dex (the same `dex/config.yaml`, rewritten at start for this stack's ports). No KMS, Datadog, Trino, or Grafana.
+
+Host ports (127.0.0.1): proxies `23443` / `23453` / `23463` (admin `23444` / `23454` / `23464`), control plane admin `23081` / `23082` / `23083`, Dex `25556`, S3 `28333`. To use the CLI against it:
+
+```sh
+docker compose -p limen-scale cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state-scale/internal-ca.pem
+LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state-scale/internal-ca.pem \
+  LIMEN_DEX_URL=http://localhost:25556 deploy/compose/dev-login.sh developer@example.com
+```
+
+`demo-phase5.sh` starts `control-plane-1` first and the proxies while it is the only replica, so all their traffic lands on it. It then opens a long SSH session and new sessions one after another, and while they run:
+
+1. SIGKILLs `control-plane-1` (durable) while it holds acked, unshipped events, and starts it again: its spool ships from the same volume.
+2. Stops S3, waits until an ephemeral replica holds events it cannot ship, and SIGTERMs it: it drains what it can, then hands the rest to a live peer (`handed the rest of the audit spool to a peer` in its log). S3 comes back and the replica is started again.
+3. SIGTERMs the other ephemeral replica (a plain drain) and starts it again.
+
+It asserts that the long session outlasted all of this without a stall, every new session worked, `limen-audit-verify` finds every chain intact and no producer sequence gap, there is one chain per replica id, and S3 holds exactly one `ssh.exec`, `session.start`, and `session.end` per session the demo ran. It never SIGKILLs an ephemeral replica: that loses what it had acked but not shipped (ADR-0020), which `limen-audit-verify` would report as a gap. `LIMEN_SCALE_PROXY_LOG` sets the proxies' `RUST_LOG` (for example `info,h2=debug`).
