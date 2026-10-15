@@ -28,7 +28,7 @@ LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 ```
 
-The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH: `cargo install --locked --path crates/limen-cli`. Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
+The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade). Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 ## Commits

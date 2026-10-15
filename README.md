@@ -124,8 +124,8 @@ You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Eve
 # 1. Start the stack: control plane, proxy, worker, Postgres, Dex (the identity provider), a test SSH host
 docker compose -f deploy/compose/docker-compose.yml up -d --build
 
-# 2. Build the CLI and trust the dev stack's CA once
-cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
+# 2. Install the CLI (once; re-run after pulling to upgrade) and trust the dev stack's CA
+scripts/install-cli.sh
 mkdir -p deploy/compose/.state
 docker compose -f deploy/compose/docker-compose.yml cp control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
 
