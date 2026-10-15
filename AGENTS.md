@@ -3,6 +3,7 @@
 Self-hosted, Rust, identity-aware access (SSH today; databases and more planned). Read `docs/design.md` §13 for phases and `docs/adr/` for decisions before changing behavior.
 
 ## Rules
+- **Always work in a git worktree.** Create one for every task under `.claude/worktrees/` in the repo (e.g. `git worktree add .claude/worktrees/<topic> -b <branch>`) and make all edits, builds, and commits there. Never edit files directly in the main checkout (the repo root), and don't switch its branch.
 - **Work phase by phase.** Roadmap = GitHub milestones. Don't start a phase the owner hasn't approved. Every phase ships tests, docs, and a runnable demo (`deploy/compose/demo-*.sh`).
 - **Never claim something works unless you ran it.** Anything only tested against a local stand-in is "unverified against real service" (label `unverified`).
 - **Secrets never appear in logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
