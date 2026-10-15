@@ -216,7 +216,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
         .await
         .expect("verify");
     assert!(report.ok(), "{:?}", report.problems);
-    assert!(report.events >= all.len());
+    assert!(report.events >= u64::try_from(all.len()).expect("fits"));
     assert!(report.batches >= 2);
 
     // ...and tampering is detected: edit a batch, then delete a manifest.
