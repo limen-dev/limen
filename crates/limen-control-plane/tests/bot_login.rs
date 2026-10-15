@@ -448,3 +448,45 @@ async fn a_bot_login_with_empty_or_odd_claims_still_gets_a_certificate_that_veri
     assert!(id.ci["workflow"].len() <= limen_ca::MAX_CI_VALUE);
     assert_eq!(resp.username, "bot:deploy-staging");
 }
+
+// ---- second review: keys come from the issuer's own origin ---------------------------
+
+#[tokio::test]
+async fn signing_keys_are_only_fetched_from_the_issuers_own_origin() {
+    use base64::Engine as _;
+    let Some(h) = start().await else { return };
+    // Somewhere the control plane must never call.
+    let trap = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind the trap");
+    let trap_url = format!("http://{}", trap.local_addr().expect("addr"));
+    // An issuer whose discovery document sends the keys to the trap.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind the issuer");
+    let evil = format!("http://{}", listener.local_addr().expect("addr"));
+    let document = serde_json::json!({ "issuer": evil, "jwks_uri": format!("{trap_url}/keys") });
+    let app = axum::Router::new().route(
+        "/.well-known/openid-configuration",
+        axum::routing::get(move || async move { axum::Json(document) }),
+    );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    h.set_policy(&[("roles.yaml", ROLES), ("bots.yaml", &bots_yaml(&evil))]);
+    // The signature can't matter: the keys must never be fetched.
+    let enc = |s: String| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s);
+    let token = format!(
+        "{}.{}.{}",
+        enc(r#"{"alg":"EdDSA","typ":"JWT"}"#.into()),
+        enc(serde_json::json!({ "iss": evil, "sub": "x", "aud": "limen", "iat": 0, "exp": 9_999_999_999_u64 }).to_string()),
+        enc("sig".into())
+    );
+    let err = h
+        .bot_login("github_actions", token, "")
+        .await
+        .expect_err("keys on another origin are refused");
+    assert_eq!(err.code(), Code::Unavailable);
+    let reached = tokio::time::timeout(std::time::Duration::from_millis(300), trap.accept()).await;
+    assert!(reached.is_err(), "nothing may connect to the other origin");
+}

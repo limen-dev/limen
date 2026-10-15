@@ -71,5 +71,8 @@ The CLI shows the control plane's reason. The audit trail has the details of the
 ## Pitfalls worth knowing
 - **Pull requests from forks.** A job triggered by a pull request runs code the author chose. For GitHub, a token from a pull request run (`pull_request` or `pull_request_target` events, or a `refs/pull/…` ref) **never matches a bot, whatever the rule says**, and the validator also refuses rules that name them. Match a protected branch or an **environment** with required reviewers instead.
 - **A compromised repository can still run its own jobs.** The defences are the exact match, the short lifetime, recordings, and the lock button. They narrow the damage; they don't remove it.
+- **Multi-tenant issuers.** If one issuer serves many customers (some cloud identity providers do), a `sub` alone is only unique within a tenant. Add a tenant claim to `match` (for example `tid`), or another tenant's job could present the same `sub`.
+- **Removing a bot from policy** stops new logins but not a credential it already holds (at most an hour). Lock it to end its sessions at once.
+- **Signing keys** are fetched from the issuer's own address only: if its discovery document points the keys at another host, the login is refused.
 - **Real issuers are https.** The control plane refuses plain `http` issuers unless `LIMEN_BOT_ALLOW_INSECURE_ISSUERS` is set, which is for the development stack only.
 - **Not built yet:** the AWS IAM join (a signed `sts:GetCallerIdentity`) is planned with the IAM join for proxies and workers in Phase 13 (ADR-0016), and a GitHub Action that wraps `limen login --bot` comes later.
