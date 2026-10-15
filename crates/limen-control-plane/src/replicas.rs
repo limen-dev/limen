@@ -124,6 +124,17 @@ pub async fn live_peers(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::
     .await
 }
 
+/// Whether a replica with this id has a fresh heartbeat.
+pub async fn is_live(db: &Db, id: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM control_plane_replicas \
+         WHERE id = $1 AND heartbeat_at >= now() - interval '15 seconds')",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await
+}
+
 /// Delete this replica's row, unless the id has since been taken over.
 pub async fn deregister(db: &Db, me: &Registration) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM control_plane_replicas WHERE id = $1 AND owner_nonce = $2")

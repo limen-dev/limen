@@ -1,6 +1,7 @@
 //! Limen control plane: API, identity, policy, CA, worker registry, and
 //! audit emission. Stateless: all state is in PostgreSQL (ADR-0010).
 
+pub mod adopt;
 pub mod bots;
 pub mod ca_store;
 pub mod caller;

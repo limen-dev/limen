@@ -10,6 +10,7 @@ use std::time::Duration;
 use common::Harness;
 use limen_audit::spool::{Spool, SpoolConfig};
 use limen_audit::{Event, EventKind, Producer};
+use limen_control_plane::adopt::{self, AdoptArgs, AdoptError};
 use limen_control_plane::handoff_client::{self, HandoffTls};
 use limen_control_plane::pipeline::DATADOG;
 use limen_control_plane::replicas::{self, Replica, SpoolMode};
@@ -351,7 +352,7 @@ async fn serve_stub(h: &Harness, service: DiesMidStream) -> Replica {
 }
 
 #[tokio::test]
-async fn handoff_retry_after_receiver_restart_loses_nothing() {
+async fn handoff_fails_over_to_next_peer_loses_nothing() {
     let Some(b) = Harness::start_with(&["--id=cp-b".into()]).await else {
         eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
         return;
@@ -397,4 +398,134 @@ async fn handoff_retry_after_receiver_restart_loses_nothing() {
     // The batch the dying receiver took but never acked went to B as well.
     let second: Vec<Uuid> = ids.difference(&at_dying).copied().collect();
     assert!(second.iter().all(|id| at_b.contains(id)));
+}
+
+#[derive(clap::Parser)]
+struct AdoptCli {
+    #[command(flatten)]
+    args: AdoptArgs,
+}
+
+/// `limen-spool-adopt` as an operator would run it with a replica's settings
+/// (the database and CA keys of `h`).
+fn adopt_args(h: &Harness, dir: &std::path::Path, extra: &[&str]) -> AdoptArgs {
+    use clap::Parser as _;
+    let mut argv: Vec<String> = vec![
+        "limen-spool-adopt".into(),
+        format!("--dir={}", dir.display()),
+        format!("--database-url={}", h.db_url),
+        format!("--ca-dir={}", h.ca_dir.display()),
+        "--oidc-issuer=http://127.0.0.1:1".into(),
+        "--oidc-client-id=limen-cli".into(),
+        "--bootstrap-admin-group=admins".into(),
+        "--deadline=20s".into(),
+    ];
+    argv.extend(extra.iter().map(|a| (*a).to_owned()));
+    AdoptCli::try_parse_from(argv).expect("adopt args").args
+}
+
+/// A spool a dead replica left behind: `n` events, the console consumer
+/// part-way, the datadog consumer at the start. The process is gone, so the
+/// spool is closed.
+async fn leftover_spool(dir: &std::path::Path, n: u64) -> BTreeSet<Uuid> {
+    let spool = Spool::open(SpoolConfig::new(dir, &["console", "datadog"])).expect("spool");
+    spool.start();
+    let ids = spool_events(&spool, n).await;
+    spool.commit("console", n / 2).expect("console is half way");
+    ids
+}
+
+async fn adopter_rows(h: &Harness) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM control_plane_replicas WHERE id LIKE 'spool-adopt-%'")
+        .fetch_one(&h.state.db)
+        .await
+        .expect("count")
+}
+
+#[tokio::test]
+async fn adopt_pushes_a_leftover_spool_to_a_live_peer() {
+    let Some(b) = Harness::start_with(&["--id=cp-b".into()]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let volume = tempfile::tempdir().expect("dir");
+    let ids = leftover_spool(volume.path(), 120).await;
+
+    // `console` is found from its offset file; `datadog` never committed, so
+    // the operator names it.
+    let args = adopt_args(
+        &b,
+        volume.path(),
+        &["--expect-id=cp-gone", "--consumers=datadog"],
+    );
+    let done = adopt::run(args).await.expect("adopt");
+    assert_eq!(done.sent, 120);
+    assert_eq!(done.peer.as_deref(), Some("cp-b"));
+
+    let at_b = ids_of(&b.audit_events().await);
+    assert!(ids.is_subset(&at_b), "every event reached the live peer");
+    let spool = Spool::open(SpoolConfig::new(volume.path(), &["console", "datadog"])).expect("re");
+    assert_eq!(spool.pending("console"), 0);
+    assert_eq!(spool.pending("datadog"), 0);
+    assert_eq!(adopter_rows(&b).await, 0, "the adopter deregistered");
+    b.begin_shutdown();
+    b.finish().await.expect("run b");
+}
+
+#[tokio::test]
+async fn adopt_refuses_a_spool_whose_owner_is_live_or_open() {
+    let Some(b) = Harness::start_with(&["--id=cp-b".into()]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let volume = tempfile::tempdir().expect("dir");
+    leftover_spool(volume.path(), 30).await;
+
+    // The registry says the owner is alive.
+    let err = adopt::run(adopt_args(&b, volume.path(), &["--expect-id=cp-b"]))
+        .await
+        .expect_err("owner is live");
+    assert!(
+        matches!(err, AdoptError::OwnerLive(ref id) if id == "cp-b"),
+        "{err}"
+    );
+
+    // Some process has the spool open.
+    let held = Spool::open(SpoolConfig::new(volume.path(), &["console", "datadog"])).expect("hold");
+    let err = adopt::run(adopt_args(&b, volume.path(), &[]))
+        .await
+        .expect_err("spool is open elsewhere");
+    assert!(matches!(err, AdoptError::Spool(_)), "{err}");
+    assert_eq!(held.pending("datadog"), 30, "nothing was touched");
+    drop(held);
+
+    // A directory that is not a spool is not turned into one.
+    let empty = tempfile::tempdir().expect("dir");
+    let err = adopt::run(adopt_args(&b, empty.path(), &[]))
+        .await
+        .expect_err("not a spool");
+    assert!(matches!(err, AdoptError::NotASpool(_)), "{err}");
+    assert!(!empty.path().join("segments").exists());
+    b.begin_shutdown();
+    b.finish().await.expect("run b");
+}
+
+#[tokio::test]
+async fn adopt_fails_without_a_live_peer_and_keeps_the_records() {
+    let Some(b) = Harness::start_with(&["--id=cp-b".into()]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let volume = tempfile::tempdir().expect("dir");
+    leftover_spool(volume.path(), 30).await;
+    b.begin_shutdown();
+    b.finish().await.expect("run b");
+
+    let err = adopt::run(adopt_args(&b, volume.path(), &[]))
+        .await
+        .expect_err("no peer");
+    assert!(matches!(err, AdoptError::Handoff(_)), "{err}");
+    let spool = Spool::open(SpoolConfig::new(volume.path(), &["console", "datadog"])).expect("re");
+    assert_eq!(spool.pending("datadog"), 30);
+    assert_eq!(adopter_rows(&b).await, 0, "the adopter deregistered anyway");
 }

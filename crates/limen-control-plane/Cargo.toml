@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "limen-audit-verify"
 path = "src/bin/limen-audit-verify.rs"
 
+[[bin]]
+name = "limen-spool-adopt"
+path = "src/bin/limen-spool-adopt.rs"
+
 [lib]
 path = "src/lib.rs"
 

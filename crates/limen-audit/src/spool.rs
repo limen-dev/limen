@@ -69,6 +69,8 @@ pub enum SpoolError {
     UnknownConsumer(String),
     #[error("spool closed")]
     Closed,
+    #[error("another process has the spool at {0} open")]
+    Locked(String),
 }
 
 #[derive(Debug)]
@@ -95,6 +97,10 @@ struct State {
 pub struct Spool {
     config: Arc<SpoolConfig>,
     state: Arc<Mutex<State>>,
+    /// Holds the advisory lock on `<dir>/lock` for as long as any clone lives.
+    /// (The background flusher's copy has none, so it never outlives the callers' hold.)
+    #[allow(dead_code)] // held for its Drop
+    dir_lock: Option<Arc<File>>,
     /// Everything below this record number is durable.
     synced: watch::Sender<u64>,
     /// Woken on every durable append, for consumers tailing the spool.
@@ -156,6 +162,21 @@ impl Spool {
         let off_dir = config.dir.join("offsets");
         std::fs::create_dir_all(&seg_dir)?;
         std::fs::create_dir_all(&off_dir)?;
+
+        // One process per spool: a second opener (say an operator adopting a
+        // volume a replica still uses) would truncate and race the writer.
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(config.dir.join("lock"))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(SpoolError::Locked(config.dir.display().to_string()));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
 
         let mut firsts: Vec<u64> = std::fs::read_dir(&seg_dir)?
             .filter_map(Result::ok)
@@ -240,6 +261,7 @@ impl Spool {
                 dirty: false,
                 offsets,
             })),
+            dir_lock: Some(Arc::new(lock)),
             synced,
             appended: Arc::new(Notify::new()),
         };
@@ -258,7 +280,8 @@ impl Spool {
 
     /// Start the group-commit flusher. Call once, inside a tokio runtime.
     pub fn start(&self) {
-        let spool = self.clone();
+        let mut spool = self.clone();
+        spool.dir_lock = None;
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(spool.config.fsync_interval);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -600,6 +623,25 @@ mod tests {
             Spool::open(config(dir2.path())),
             Err(SpoolError::Corrupt { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn a_second_opener_is_refused_until_the_first_is_gone() {
+        let dir = tempfile::tempdir().expect("dir");
+        let first = Spool::open(config(dir.path())).expect("open");
+        first.start();
+        assert!(matches!(
+            Spool::open(config(dir.path())),
+            Err(SpoolError::Locked(_))
+        ));
+        let clone = first.clone();
+        drop(first);
+        assert!(
+            Spool::open(config(dir.path())).is_err(),
+            "a clone still holds it"
+        );
+        drop(clone);
+        Spool::open(config(dir.path())).expect("free again");
     }
 
     #[tokio::test]

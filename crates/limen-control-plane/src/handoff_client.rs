@@ -149,7 +149,7 @@ pub async fn send_remaining(state: &AppState, deadline: Duration) -> Result<u64,
     .await
 }
 
-fn shuffle<T>(items: &mut [T]) {
+pub fn shuffle<T>(items: &mut [T]) {
     for i in (1..items.len()).rev() {
         let j = usize::try_from(rand::random::<u64>() % (i as u64 + 1)).unwrap_or(0);
         items.swap(i, j);
@@ -166,10 +166,23 @@ pub async fn send_spool(
     tls: &HandoffTls,
     deadline: Duration,
 ) -> Result<u64, HandoffError> {
+    send_spool_via(spool, peers, tls, deadline)
+        .await
+        .map(|(sent, _)| sent)
+}
+
+/// [`send_spool`], also naming the peer that took the records (`None` when
+/// there was nothing to send).
+pub async fn send_spool_via(
+    spool: &Spool,
+    peers: &[Replica],
+    tls: &HandoffTls,
+    deadline: Duration,
+) -> Result<(u64, Option<String>), HandoffError> {
     let until = Instant::now() + deadline;
     let mut sent = 0;
     if spool.read_from(spool.min_offset(), 1)?.is_empty() {
-        return Ok(0);
+        return Ok((0, None));
     }
     if peers.is_empty() {
         return Err(HandoffError::NoPeers { left: left(spool) });
@@ -181,7 +194,7 @@ pub async fn send_spool(
         match send_to(spool, peer, tls, until, &mut sent).await {
             Ok(()) => {
                 tracing::info!(peer = %peer.id, sent, "handed the audit spool to a peer");
-                return Ok(sent);
+                return Ok((sent, Some(peer.id.clone())));
             }
             Err(e) => {
                 tracing::warn!(peer = %peer.id, error = %e, "audit handoff to a peer failed; trying the next");
@@ -218,7 +231,11 @@ async fn step<T, E: std::fmt::Display>(
     what: &str,
     fut: impl Future<Output = Result<T, E>>,
 ) -> Result<T, String> {
-    let limit = until.min(Instant::now() + STEP_TIMEOUT);
+    // Never more than STEP_TIMEOUT, and leave half of what remains for the
+    // next peer.
+    let now = Instant::now();
+    let cap = STEP_TIMEOUT.min(until.saturating_duration_since(now) / 2);
+    let limit = until.min(now + cap);
     match tokio::time::timeout_at(limit, fut).await {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(format!("{what}: {e}")),
@@ -308,9 +325,10 @@ async fn send_to(
             return Ok(());
         };
         pending = (next.last_index, next.events.len() as u64);
-        tx.send(next)
-            .await
-            .map_err(|_| "the handoff stream closed".to_owned())?;
+        step(until, "sending a batch", async {
+            tx.send(next).await.map_err(|_| "the handoff stream closed")
+        })
+        .await?;
     }
 }
 

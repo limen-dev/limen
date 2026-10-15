@@ -135,15 +135,27 @@ pub struct Pipeline {
     tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
+/// The spool consumers a replica with this configuration runs.
+#[must_use]
+pub fn consumer_names(config: &Config) -> Vec<&'static str> {
+    let mut consumers = vec![CONSOLE];
+    if config.audit_file.is_some() {
+        consumers.push(JSONL);
+    }
+    if config.audit_s3_bucket.is_some() {
+        consumers.push(S3);
+    }
+    if config.datadog_logs_url.is_some() && config.datadog_api_key.is_some() {
+        consumers.push(DATADOG);
+    }
+    consumers
+}
+
 impl Pipeline {
     pub async fn open(config: &Arc<Config>, signer: SignerSlot) -> anyhow::Result<Self> {
-        let mut consumers: Vec<&str> = vec![CONSOLE];
-        if config.audit_file.is_some() {
-            consumers.push(JSONL);
-        }
+        let consumers = consumer_names(config);
         let s3 = match &config.audit_s3_bucket {
             Some(bucket) => {
-                consumers.push(S3);
                 let client = crate::sinks::s3_client(
                     config.audit_s3_endpoint.as_deref(),
                     config.audit_s3_path_style,
@@ -172,7 +184,6 @@ impl Pipeline {
         };
         let datadog = match (&config.datadog_logs_url, &config.datadog_api_key) {
             (Some(url), Some(key)) => {
-                consumers.push(DATADOG);
                 let http = reqwest::Client::builder()
                     .timeout(Duration::from_secs(30))
                     .redirect(reqwest::redirect::Policy::none())
