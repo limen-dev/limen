@@ -363,12 +363,19 @@ impl Spool {
 
     /// Up to `max` durable records for `consumer`, starting at its offset.
     pub fn read(&self, consumer: &str, max: usize) -> Result<Vec<(u64, Vec<u8>)>, SpoolError> {
-        let synced = *self.synced.borrow();
-        let st = self.lock();
-        let start = *st
+        let start = *self
+            .lock()
             .offsets
             .get(consumer)
             .ok_or_else(|| SpoolError::UnknownConsumer(consumer.to_owned()))?;
+        self.read_from(start, max)
+    }
+
+    /// Up to `max` durable records starting at record `start` (or at the
+    /// oldest retained record, if `start` was already deleted).
+    pub fn read_from(&self, start: u64, max: usize) -> Result<Vec<(u64, Vec<u8>)>, SpoolError> {
+        let synced = *self.synced.borrow();
+        let st = self.lock();
         let mut out = Vec::new();
         for seg in &st.segments {
             if Self::end(seg) <= start || seg.first >= synced || out.len() >= max {
@@ -411,6 +418,23 @@ impl Spool {
         while st.segments.len() > 1 && Self::end(&st.segments[0]) <= min {
             let seg = st.segments.remove(0);
             std::fs::remove_file(&seg.path)?;
+        }
+        Ok(())
+    }
+
+    /// The first record some consumer has not yet handled: everything from
+    /// here on is unshipped somewhere.
+    #[must_use]
+    pub fn min_offset(&self) -> u64 {
+        let st = self.lock();
+        st.offsets.values().copied().min().unwrap_or(st.next)
+    }
+
+    /// [`commit`](Self::commit) `upto` for every consumer (those already
+    /// past it stay where they are).
+    pub fn commit_all(&self, upto: u64) -> Result<(), SpoolError> {
+        for consumer in &self.config.consumers {
+            self.commit(consumer, upto)?;
         }
         Ok(())
     }
@@ -598,5 +622,44 @@ mod tests {
         indexes.sort_unstable();
         assert_eq!(indexes, (0..200).collect::<Vec<_>>());
         assert_eq!(spool.read("a", 1000).expect("read").len(), 200);
+    }
+
+    #[tokio::test]
+    async fn min_offset_read_from_and_commit_all_cover_every_consumer() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        assert_eq!(spool.min_offset(), 0);
+        for i in 0..30 {
+            spool
+                .append(format!("event-{i}").as_bytes())
+                .await
+                .expect("append");
+        }
+        // "a" shipped 20, "b" only 5: anything "b" hasn't passed is unshipped.
+        spool.commit("a", 20).expect("commit a");
+        spool.commit("b", 5).expect("commit b");
+        assert_eq!(spool.min_offset(), 5);
+        let batch = spool.read_from(spool.min_offset(), 10).expect("read");
+        assert_eq!(batch.len(), 10);
+        assert_eq!(batch[0], (5, b"event-5".to_vec()));
+        assert_eq!(batch[9].0, 14);
+
+        // Moving everyone to 15 leaves "a" (already further) where it was.
+        spool.commit_all(15).expect("commit all");
+        assert_eq!(spool.min_offset(), 15);
+        assert_eq!(spool.pending("a"), 10);
+        assert_eq!(spool.pending("b"), 15);
+        assert_eq!(spool.read_from(15, 100).expect("read").len(), 15);
+        spool.commit_all(30).expect("commit all");
+        assert_eq!(
+            spool.read_from(spool.min_offset(), 100).expect("read"),
+            vec![]
+        );
+
+        // Offsets are durable.
+        drop(spool);
+        let spool = Spool::open(config(dir.path())).expect("reopen");
+        assert_eq!(spool.min_offset(), 30);
     }
 }
