@@ -48,6 +48,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+http-body-util.workspace = true
 limen-testkit.workspace = true
 
 [lints]

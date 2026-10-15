@@ -3040,6 +3040,7 @@ dependencies = [
  "futures",
  "governor",
  "http",
+ "http-body-util",
  "hyper",
  "limen-audit",
  "limen-ca",
