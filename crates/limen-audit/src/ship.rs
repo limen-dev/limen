@@ -106,6 +106,10 @@ pub async fn run_consumer<F, Fut>(
             }
             continue;
         }
+        // Report the backlog now too, not only after the send: a lingering
+        // batch is acked by the producers but not shipped yet.
+        metrics::gauge!("limen_audit_spool_pending", "consumer" => config.name.clone())
+            .set(spool.pending(&config.name) as f64);
         // Give a small batch a moment to grow, unless it's already full or
         // we are draining.
         let batch = if batch.len() < config.batch_max && !config.linger.is_zero() && !stopping {
@@ -220,6 +224,48 @@ mod tests {
             (0..25).collect::<Vec<u64>>()
         );
         assert_eq!(spool.pending("out"), 0);
+    }
+
+    /// The backlog gauge must count records waiting out the linger, not only
+    /// what is left after a send: otherwise a replica holding acked,
+    /// unshipped events reports 0 for the whole flush interval.
+    #[tokio::test]
+    async fn pending_gauge_counts_records_waiting_to_ship() {
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::set_global_recorder(recorder).expect("first recorder in this test binary");
+        let dir = tempfile::tempdir().expect("dir");
+        let mut c = SpoolConfig::new(dir.path(), &["lingering"]);
+        c.fsync_interval = Duration::from_millis(2);
+        let spool = Spool::open(c).expect("open");
+        spool.start();
+        for i in 0..3u32 {
+            spool.append(&i.to_be_bytes()).await.expect("append");
+        }
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_deadline_tx, deadline_rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(run_consumer(
+            spool.clone(),
+            ConsumerConfig {
+                name: "lingering".into(),
+                batch_max: 100,
+                linger: Duration::from_secs(60),
+            },
+            |_| async { Ok(()) },
+            rx,
+            deadline_rx,
+        ));
+        let want = "limen_audit_spool_pending{consumer=\"lingering\"} 3";
+        let mut seen = false;
+        for _ in 0..100 {
+            if handle.render().contains(want) {
+                seen = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        task.abort();
+        assert!(seen, "{}", handle.render());
     }
 
     async fn spool_with(dir: &std::path::Path, n: u32) -> Spool {

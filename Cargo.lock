@@ -2821,6 +2821,7 @@ dependencies = [
  "limen-core",
  "limen-testkit",
  "metrics",
+ "metrics-exporter-prometheus",
  "rand 0.10.3",
  "serde",
  "serde_json",
