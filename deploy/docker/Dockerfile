@@ -13,6 +13,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
+# The cargo cache below is shared by every build on this machine, whatever
+# checkout it came from, and COPY keeps each file's own modification time. Cargo
+# decides what is stale by comparing those times, so a build from one worktree
+# can leave artifacts that look newer than another worktree's sources, and the
+# next build silently reuses them. Making every workspace file "new" forces
+# Cargo to rebuild the workspace crates (the registry dependencies stay cached).
+RUN find /src/crates /src/proto /src/Cargo.toml /src/Cargo.lock -exec touch {} +
 # rust-toolchain.toml pins the same version as the base image.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
