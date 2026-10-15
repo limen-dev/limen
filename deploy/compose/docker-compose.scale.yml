@@ -52,6 +52,9 @@ x-control-plane-env: &control-plane-env
   LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
   LIMEN_AUDIT_S3_FLUSH: 5s
   LIMEN_DRAIN_TIMEOUT: 20s
+  # Proxies' connections are closed (GOAWAY) after ~60 s instead of the
+  # default 300 s, so they rebalance onto replicas several times per demo run.
+  LIMEN_MAX_CONNECTION_AGE_SECS: ${LIMEN_SCALE_MAX_CONNECTION_AGE_SECS:-60}
   AWS_ACCESS_KEY_ID: dev
   AWS_SECRET_ACCESS_KEY: dev-only-secret
   AWS_REGION: us-east-1
