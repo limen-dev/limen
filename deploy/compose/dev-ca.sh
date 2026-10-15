@@ -5,10 +5,12 @@
 # checkout), so `docker compose down -v` and a different worktree get a CA with
 # the same key. This script keeps one public copy of the CA certificate at a
 # fixed path, ~/.limen-dev/internal-ca.pem, for you to trust once. After a
-# reset the CA certificate is re-issued with the same key, so a trust you gave
-# that file keeps working.
+# reset the CA certificate is re-issued with the same key. The copy is kept
+# while its key matches the running CA's and it hasn't expired, and replaced
+# (with a warning on stderr) when the key changed.
 #
-#   deploy/compose/dev-ca.sh           # print the path (creating the copy if needed)
+#   deploy/compose/dev-ca.sh --init    # create ~/.limen-dev/ca as you, mode 700 (run before the stack starts)
+#   deploy/compose/dev-ca.sh           # print the path (creating or refreshing the copy)
 #   deploy/compose/dev-ca.sh --trust   # print how to trust it, without doing anything
 #
 # This script never changes any trust setting. DEVELOPMENT ONLY: anyone who can
@@ -22,11 +24,26 @@ state="${LIMEN_DEV_STATE:-$HOME/.limen-dev}"
 stable="$state/internal-ca.pem"
 compose=(docker compose --progress=quiet -f "$here/docker-compose.yml")
 
-mkdir -p "$state"
-chmod 700 "$state" 2>/dev/null || true
-if [ ! -s "$stable" ]; then
-  "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$stable" >/dev/null \
-    || { echo "dev-ca.sh: the stack isn't running (start it first)" >&2; exit 1; }
+# Created by us, as the user, so Docker doesn't create it as root (Linux).
+mkdir -p "$state/ca"
+chmod 700 "$state" "$state/ca" 2>/dev/null || true
+if [ "${1:-}" = "--init" ]; then
+  exit 0
+fi
+
+pubkey() { openssl x509 -in "$1" -noout -pubkey; }
+live="$(mktemp)"
+trap 'rm -f "$live"' EXIT
+if "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$live" >/dev/null 2>&1; then
+  if [ ! -s "$stable" ]; then
+    cp "$live" "$stable"
+  elif [ "$(pubkey "$stable")" != "$(pubkey "$live")" ] || ! openssl x509 -in "$stable" -noout -checkend 86400 >/dev/null; then
+    echo "dev-ca.sh: $stable no longer matches the running CA (new key or expired); replaced it. Trust the new one." >&2
+    cp "$live" "$stable"
+  fi
+elif [ ! -s "$stable" ]; then
+  echo "dev-ca.sh: the stack isn't running (start it first)" >&2
+  exit 1
 fi
 
 if [ "${1:-}" = "--trust" ]; then

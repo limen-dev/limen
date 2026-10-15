@@ -48,6 +48,7 @@ A dependency is adopted only if all of these hold:
 | Recording | asciicast 0.2.2 | | **2018** | **Reject**. Write our own asciicast v3 writer (newline-delimited JSON, ~100 lines) |
 | Crypto | sha2 0.11, p256 0.14, ed25519-dalek 3.0 | | 2026 | Adopt |
 | IDs and time | uuid 1.28 (v7), time 0.3.55 | | 2026 | Adopt |
+| Dev stack init container | busybox 1.37 (`docker.io/library/busybox`) | 1.37 | 2024 | **Adopt, dev compose only** (never shipped). One-shot `chown`/`chmod` of the host CA key folder. Pinned by tag, not run in production |
 
 ## Accepted advisories
 

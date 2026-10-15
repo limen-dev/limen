@@ -76,7 +76,8 @@ services:
     image: busybox:1.37
     user: root
     restart: "no"
-    command: ["sh", "-c", "chown 65532:65532 /ca 2>/dev/null || chmod 0777 /ca; chmod 700 /ca 2>/dev/null || true"]
+    # Fails (and so does `up`) if the folder can't be handed to the control plane.
+    command: ["sh", "-c", "chown 65532:65532 /ca && chmod 700 /ca"]
     volumes:
       - ${LIMEN_DEV_STATE:-${HOME}/.limen-dev}/ca:/ca
 

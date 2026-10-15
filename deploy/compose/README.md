@@ -16,7 +16,7 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 
 ## A CA that survives resets and worktrees
 
-The CA keys live in `~/.limen-dev/ca` (change it with `LIMEN_DEV_STATE`), outside every Docker volume and every checkout. So `docker compose down -v`, a rebuilt stack, and a different git worktree all get the **same CA key**. The CA *certificate* is re-issued after a reset (the database that holds it is wiped), but because the key is the same, a browser or tool that trusts the file below keeps trusting it.
+The CA keys live in `~/.limen-dev/ca` (change it with `LIMEN_DEV_STATE`), outside every Docker volume and every checkout. So `docker compose down -v`, a rebuilt stack, and a different git worktree all get the **same CA key**. The CA *certificate* is re-issued after a reset (the database that holds it is wiped). Because the key and subject are the same, anything that verifies against the file below (`curl --cacert`, a trust store entry by key) keeps working. Clients that pin the certificate's own fingerprint do not: `dev-ca.sh` keeps the copy while its key matches and replaces it, with a warning, if the key changed or it is about to expire.
 
 ```sh
 deploy/compose/dev-ca.sh           # prints ~/.limen-dev/internal-ca.pem, the CA certificate to trust
@@ -26,6 +26,8 @@ deploy/compose/dev-ca.sh --trust   # prints how to trust it (it changes nothing 
 The demos run `dev-ca.sh` for you. Notes:
 - **Trusting is your choice.** Nothing here changes a trust setting. It's a development CA: whoever can read `~/.limen-dev/ca` can sign certificates your browser would accept if you trust it. Keep the folder private (it is created mode 700), and consider trusting it only in a separate browser profile or in Firefox.
 - **`deploy/compose/.state/internal-ca.pem`** (used by `curl --cacert` and the demos) is still refreshed on every run, per checkout.
+- **Create it first.** `dev-ca.sh --init` makes `~/.limen-dev/ca` as you (mode 700); the demos run it before starting the stack. If you start the stack by hand on Linux without it, Docker creates the folder as root. On Linux the control plane's uid (65532) owns the folder, so removing it needs `sudo`.
+- **One stack at a time on first start.** Worktrees share the key folder. Two stacks starting together on a fresh folder can each generate a key and overwrite the other's. Start one first. After a reset or a different database, a key that doesn't match the stored CA can stop the control plane from starting: `down -v` and remove `~/.limen-dev/ca` together.
 - **Switching to this layout** creates a new CA once. A database created by another branch (for example one that has newer migrations) can stop the control plane from starting: reset with `docker compose -f deploy/compose/docker-compose.yml down -v`.
 - **If you previously ran the stack**, an unused volume `limen_cp-ca` is left over: `docker volume rm limen_cp-ca`.
 

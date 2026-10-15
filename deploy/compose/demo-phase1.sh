@@ -34,6 +34,7 @@ if ! $keep; then
   docker rm -f limen-worker-2 limen-worker-3 >/dev/null 2>&1 || true
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
+"$here/dev-ca.sh" --init # the CA key folder, created by you (not by Docker as root)
 "${compose[@]}" up -d --build --quiet-pull >/dev/null
 wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 wait_for "control plane readiness" curl -sf http://localhost:3081/readyz

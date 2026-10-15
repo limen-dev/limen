@@ -51,6 +51,7 @@ if ! $keep; then
   echo "Resetting the dev stack (docker compose down -v). Use --keep to skip."
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
+"$here/dev-ca.sh" --init # the CA key folder, created by you (not by Docker as root)
 if [ "$release_images" = 1 ]; then
   "${compose[@]}" up -d --no-build --quiet-pull >/dev/null
 else
