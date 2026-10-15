@@ -172,7 +172,7 @@ impl BotVerifier {
         if let Some(c) = caches.get(issuer) {
             return Ok(c.clone());
         }
-        let c = KeyCache::new(issuer, None, self.http.clone())?;
+        let c = KeyCache::new(issuer, None, self.http.clone())?.same_origin_keys();
         caches.insert(issuer.to_owned(), c.clone());
         Ok(c)
     }
@@ -215,10 +215,7 @@ impl BotVerifier {
             time::OffsetDateTime::from_unix_timestamp(minted + max_age + skew)
                 .map_err(|e| BotTokenError::Invalid(format!("iat: {e}")))?,
         );
-        let replay_key = match text.get("jti") {
-            Some(jti) => Sha256::digest(format!("bot-jti\0{issuer}\0{jti}").as_bytes()).to_vec(),
-            None => Sha256::digest(raw.as_bytes()).to_vec(),
-        };
+        let replay_key = replay_key(issuer, text.get("jti").map(String::as_str), raw);
         Ok(BotToken {
             issuer: issuer.trim_end_matches('/').to_owned(),
             subject,
@@ -227,6 +224,26 @@ impl BotVerifier {
             replay_key,
             replay_until,
         })
+    }
+}
+
+/// What identifies one token for the purpose of "one login per token".
+///
+/// GitHub and GitLab put a `jti` in every token. Without one, the token's
+/// *signed part* (`header.payload`) does the same job. The signature must not
+/// be part of it: an ECDSA signature has a second valid form, and a lenient
+/// base64 decoder may accept other spellings of the same one, so a signature
+/// could be altered without invalidating the token and the whole-token hash
+/// would change.
+fn replay_key(issuer: &str, jti: Option<&str>, raw: &str) -> Vec<u8> {
+    match jti {
+        Some(jti) => Sha256::digest(format!("bot-jti\0{issuer}\0{jti}").as_bytes()).to_vec(),
+        None => {
+            let signed = raw
+                .rsplit_once('.')
+                .map_or(raw, |(signed, _signature)| signed);
+            Sha256::digest(format!("bot-signed\0{signed}").as_bytes()).to_vec()
+        }
     }
 }
 
@@ -273,6 +290,35 @@ mod tests {
         assert_eq!(unverified_issuer(&jwt(r#"{"iss":7}"#)), None);
         assert_eq!(unverified_issuer("not-a-jwt"), None);
         assert_eq!(unverified_issuer("a.!!!.c"), None);
+    }
+
+    #[test]
+    fn a_token_without_a_jti_is_identified_by_what_was_signed_not_by_its_signature() {
+        let signed = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJodHRwczovL2kifQ";
+        let original = format!("{signed}.c2lnbmF0dXJl");
+        // The same token with the signature's other valid form (or another spelling).
+        let altered = format!("{signed}.b3RoZXItZm9ybQ");
+        let key = |t: &str| replay_key("https://i", None, t);
+        assert_eq!(
+            key(&original),
+            key(&altered),
+            "a changed signature is the same token"
+        );
+        assert_ne!(
+            key(&original),
+            key("eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJodHRwczovL290aGVyIn0.c2lnbmF0dXJl"),
+            "different content is a different token"
+        );
+        // With a jti, that and the issuer decide, whatever else changes.
+        assert_eq!(
+            replay_key("https://i", Some("abc"), &original),
+            replay_key("https://i", Some("abc"), "anything.at.all")
+        );
+        assert_ne!(
+            replay_key("https://i", Some("abc"), &original),
+            replay_key("https://other", Some("abc"), &original),
+            "the same jti from another issuer is another token"
+        );
     }
 
     #[test]

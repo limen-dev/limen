@@ -66,6 +66,8 @@ pub struct KeyCache {
     internal_base: String,
     http: HttpClient,
     keys: Arc<RwLock<Option<Keys>>>,
+    /// Refuse a `jwks_uri` on another origin than the issuer's.
+    same_origin_keys: bool,
 }
 
 impl KeyCache {
@@ -85,7 +87,18 @@ impl KeyCache {
             internal_base,
             http,
             keys: Arc::new(RwLock::new(None)),
+            same_origin_keys: false,
         })
+    }
+
+    /// Only fetch signing keys from the issuer's own origin. The discovery
+    /// document is the issuer's to write, and without this a compromised
+    /// issuer could make the control plane fetch any URL it names. Used for
+    /// bots' issuers (ADR-0019); people's IdP keeps its own, internal, address.
+    #[must_use]
+    pub fn same_origin_keys(mut self) -> Self {
+        self.same_origin_keys = true;
+        self
     }
 
     #[must_use]
@@ -122,6 +135,11 @@ impl KeyCache {
             .get("jwks_uri")
             .and_then(|v| v.as_str())
             .ok_or_else(|| OidcError::Unavailable("discovery document has no jwks_uri".into()))?;
+        if self.same_origin_keys && !same_origin(self.issuer.as_str(), jwks_uri) {
+            return Err(OidcError::Unavailable(format!(
+                "jwks_uri {jwks_uri:?} is not on the issuer's origin"
+            )));
+        }
         let public_base = self.issuer.as_str().trim_end_matches('/');
         let jwks_uri = match jwks_uri.strip_prefix(public_base) {
             Some(path) => format!("{}{path}", self.internal_base),
@@ -149,6 +167,19 @@ impl KeyCache {
             fetched: Instant::now(),
         });
         Ok(jwks)
+    }
+}
+
+/// Whether two URLs share a scheme, host, and port.
+fn same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a), url::Url::parse(b)) {
+        (Ok(a), Ok(b)) => {
+            a.scheme() == b.scheme()
+                && a.host_str().is_some()
+                && a.host_str() == b.host_str()
+                && a.port_or_known_default() == b.port_or_known_default()
+        }
+        _ => false,
     }
 }
 
@@ -247,4 +278,42 @@ impl OidcVerifier {
 fn constant_time_eq(a: &str, b: &str) -> bool {
     use sha2::{Digest, Sha256};
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::same_origin;
+
+    #[test]
+    fn origins_compare_scheme_host_and_port() {
+        assert!(same_origin(
+            "https://i.example.com",
+            "https://i.example.com/keys"
+        ));
+        assert!(same_origin(
+            "https://i.example.com:443/",
+            "https://i.example.com/a/b"
+        ));
+        assert!(!same_origin(
+            "https://i.example.com",
+            "http://i.example.com/keys"
+        ));
+        assert!(!same_origin(
+            "https://i.example.com",
+            "https://evil.example.com/keys"
+        ));
+        assert!(!same_origin(
+            "https://i.example.com",
+            "https://i.example.com.evil.net/keys"
+        ));
+        assert!(!same_origin(
+            "https://i.example.com",
+            "https://i.example.com:8443/keys"
+        ));
+        assert!(!same_origin(
+            "https://i.example.com",
+            "https://169.254.169.254/latest"
+        ));
+        assert!(!same_origin("https://i.example.com", "not a url"));
+    }
 }
