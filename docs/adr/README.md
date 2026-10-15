@@ -35,5 +35,6 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0028](0028-policy-tooling.md) | Policy tooling: test, simulate, diff, explain | Proposed |
 | [0029](0029-access-reviews-and-evidence.md) | Access reviews and compliance evidence packs | Proposed |
 | [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Proposed |
+| [0031](0031-positioning.md) | Positioning: access you can prove (provable, explainable, justified, agent-ready, open) | Proposed |
 
-ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0030 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
+ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0031 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
