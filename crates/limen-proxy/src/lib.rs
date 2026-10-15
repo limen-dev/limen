@@ -220,18 +220,21 @@ pub async fn run(
     listener: TcpListener,
     mut shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    tokio::spawn(apply_renewals(proxy.clone()));
+    // Background jobs hold clones of the proxy (and so of its audit spool,
+    // whose lock must be free once `run` returns): stopped at the end.
+    let mut background = tokio::task::JoinSet::new();
+    background.spawn(apply_renewals(proxy.clone()));
     let data_dir = proxy.config.data_dir.clone();
     let renew_proxy = proxy.clone();
-    tokio::spawn(limen_component::renewal_loop(
+    background.spawn(limen_component::renewal_loop(
         data_dir,
         creds_tx,
         move |creds| build_cp_channel(&renew_proxy.config, creds),
     ));
-    tokio::spawn(report_tunnels(proxy.clone(), shutdown.clone()));
-    tokio::spawn(policy_refresh(proxy.clone(), shutdown.clone()));
+    background.spawn(report_tunnels(proxy.clone(), shutdown.clone()));
+    background.spawn(policy_refresh(proxy.clone(), shutdown.clone()));
     let shipper = proxy.clone();
-    tokio::spawn(limen_component::audit::ship(
+    background.spawn(limen_component::audit::ship(
         proxy.audit_spool.clone(),
         move || Ok(shipper.cp_channel()),
         shutdown.clone(),
@@ -280,6 +283,9 @@ pub async fn run(
     connections.abort_all();
     while connections.join_next().await.is_some() {}
     admin.abort();
+    let _ = admin.await;
+    background.abort_all();
+    while background.join_next().await.is_some() {}
     Ok(())
 }
 
