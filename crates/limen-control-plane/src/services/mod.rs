@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod auth;
+pub mod bot_login;
 pub mod enrollment;
 pub mod ingest;
 pub mod ops;

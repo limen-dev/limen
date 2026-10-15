@@ -89,6 +89,20 @@ pub struct Config {
     #[arg(long, env = "LIMEN_CONSOLE_PUBLIC_URL")]
     pub console_public_url: Option<String>,
 
+    /// The `aud` bots' workload identity tokens must carry (ADR-0019). The CLI
+    /// asks the CI platform for a token with this audience.
+    #[arg(long, env = "LIMEN_BOT_AUDIENCE", default_value = "limen")]
+    pub bot_audience: String,
+
+    /// How old a bot's token may be (by its `iat`) when it logs in.
+    #[arg(long, env = "LIMEN_BOT_MAX_TOKEN_AGE", value_parser = parse_duration, default_value = "15m")]
+    pub bot_max_token_age: Duration,
+
+    /// Accept bot token issuers that use plain `http://`. Development only:
+    /// real issuers are https, and the tokens' keys travel over that channel.
+    #[arg(long, env = "LIMEN_BOT_ALLOW_INSECURE_ISSUERS")]
+    pub bot_allow_insecure_issuers: bool,
+
     /// The console's own OIDC client. Its redirect URI is
     /// `<console public URL>/console/callback`.
     #[arg(

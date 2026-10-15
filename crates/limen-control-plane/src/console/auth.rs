@@ -179,6 +179,16 @@ pub async fn callback(
             .await;
         }
     };
+    if limen_core::identity::is_bot(&identity.username) {
+        return deny(
+            &state,
+            addr.0,
+            Some(identity.username),
+            "reserved username",
+            "That user name is reserved for machine identities.",
+        )
+        .await;
+    }
     finish_login(&state, addr.0, identity).await
 }
 

@@ -35,6 +35,30 @@ pub async fn upsert_user(
     .map(|_| ())
 }
 
+/// Record a bot's login: a row in `users` named `bot:<name>`, with the facts
+/// about the run (ADR-0019).
+pub async fn upsert_bot(
+    db: &Db,
+    username: &str,
+    subject: &str,
+    roles: &[String],
+    ci: &std::collections::BTreeMap<String, String>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO users (username, subject, roles, groups, actor_type, last_ci)
+         VALUES ($1, $2, $3, '{}', 'bot', $4)
+         ON CONFLICT (username) DO UPDATE SET subject = $2, roles = $3, actor_type = 'bot',
+           last_ci = $4, last_login_at = now(), login_count = users.login_count + 1",
+    )
+    .bind(username)
+    .bind(subject)
+    .bind(roles)
+    .bind(serde_json::json!(ci))
+    .execute(db)
+    .await
+    .map(|_| ())
+}
+
 #[derive(Debug, Clone)]
 pub struct UserRow {
     pub username: String,
