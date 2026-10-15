@@ -69,6 +69,7 @@ wait_for "the fake CI issuer" curl -sf "$issuer_url/.well-known/openid-configura
 mkdir -p "$state"
 ca="$state/internal-ca.pem"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$ca" >/dev/null
+"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$state/home-admin" "$state/home-developer" "$state/home-bot" "$state/phase4"
 mkdir -p "$state/phase4"
 login admin
