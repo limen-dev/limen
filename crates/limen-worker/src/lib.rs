@@ -24,7 +24,7 @@ use limen_core::backoff::Backoff;
 use limen_core::secret::Secret;
 use limen_proto::v1::worker_tunnel_server::{WorkerTunnel, WorkerTunnelServer};
 use limen_proto::v1::{PingRequest, PingResponse, TunnelFrame};
-use limen_tunnel::connect::{SharedClientConfig, channel, dial};
+use limen_tunnel::connect::{SharedClientConfig, channel, dial, retry_if_went_away};
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::tls::client_config;
 use limen_tunnel::{PeerInfo, alpn};
@@ -241,12 +241,18 @@ async fn policy_refresh(worker: Worker, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         let result = async {
-            let mut client =
-                limen_proto::v1::policy_sync_client::PolicySyncClient::new(worker.control_plane()?);
-            let signed = client
-                .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
-                .await?
-                .into_inner();
+            let channel = worker.control_plane()?;
+            let signed = retry_if_went_away("policy snapshot", || {
+                let mut client =
+                    limen_proto::v1::policy_sync_client::PolicySyncClient::new(channel.clone());
+                async move {
+                    client
+                        .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+                        .await
+                }
+            })
+            .await?
+            .into_inner();
             let snapshot = worker
                 .policy
                 .update(&signed, &worker.credentials().internal_ca()?)?;
@@ -344,14 +350,13 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
         if *shutdown.borrow() {
             return;
         }
-        // A tunnel that stayed up a while was healthy: start backoff over.
-        if started.elapsed() > Duration::from_secs(30) {
-            backoff.reset();
-        }
-        let delay = backoff.next_delay(rand::random());
+        let delay = after_tunnel(result.is_ok(), started.elapsed(), &mut backoff);
         match result {
+            Ok(()) if delay.is_zero() => {
+                tracing::info!(tunnel = index, "tunnel closed by the proxy; reconnecting");
+            }
             Ok(()) => {
-                tracing::warn!(tunnel = index, retry_in = ?delay, "tunnel closed by proxy; reconnecting");
+                tracing::warn!(tunnel = index, retry_in = ?delay, "tunnel closed by the proxy right after it opened; reconnecting");
             }
             Err(e) => {
                 tracing::warn!(tunnel = index, error = %e, retry_in = ?delay, "tunnel failed; reconnecting");
@@ -362,6 +367,26 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
             _ = shutdown.changed() => return,
         }
     }
+}
+
+/// A tunnel that stayed up this long was healthy.
+const HEALTHY_TUNNEL: Duration = Duration::from_secs(30);
+/// A clean close sooner than this after connecting is treated as a failure,
+/// so a proxy that keeps closing at once does not make us spin.
+const MIN_TUNNEL_UPTIME: Duration = Duration::from_secs(1);
+
+/// How long to wait before redialing after a tunnel ended. A clean close
+/// (the proxy ended the connection on purpose: shutdown, rebalancing) is a
+/// normal reconnect: at once, and the name is resolved again. Failures back
+/// off.
+fn after_tunnel(clean: bool, uptime: Duration, backoff: &mut Backoff) -> Duration {
+    if uptime > HEALTHY_TUNNEL || (clean && uptime >= MIN_TUNNEL_UPTIME) {
+        backoff.reset();
+    }
+    if clean && uptime >= MIN_TUNNEL_UPTIME {
+        return Duration::ZERO;
+    }
+    backoff.next_delay(rand::random())
 }
 
 /// Run until `shutdown` flips, then drain.
@@ -443,4 +468,41 @@ async fn serve_admin(worker: Worker) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(worker.config.admin_listen).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::*;
+
+    fn backoff() -> Backoff {
+        Backoff::new(Duration::from_secs(1), Duration::from_mins(1))
+    }
+
+    #[test]
+    fn a_clean_close_reconnects_at_once_and_forgets_earlier_failures() {
+        let mut b = backoff();
+        for _ in 0..5 {
+            b.next_delay(0.5);
+        }
+        assert_eq!(
+            after_tunnel(true, Duration::from_secs(5), &mut b),
+            Duration::ZERO
+        );
+        assert_eq!(b.current_ceiling(), Duration::from_secs(1), "backoff reset");
+    }
+
+    #[test]
+    fn failures_and_instant_closes_back_off() {
+        let mut b = backoff();
+        after_tunnel(false, Duration::from_secs(5), &mut b);
+        after_tunnel(true, Duration::from_millis(10), &mut b);
+        assert_eq!(
+            b.current_ceiling(),
+            Duration::from_secs(4),
+            "two attempts counted"
+        );
+        // A long-lived tunnel that then failed starts the backoff over.
+        after_tunnel(false, Duration::from_mins(5), &mut b);
+        assert_eq!(b.current_ceiling(), Duration::from_secs(2));
+    }
 }

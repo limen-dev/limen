@@ -12,6 +12,7 @@ use limen_core::backoff::Backoff;
 use limen_core::secret::Secret;
 use limen_proto::v1::enrollment_client::EnrollmentClient;
 use limen_proto::v1::{EnrollRequest, RenewCertificateRequest};
+use limen_tunnel::connect::retry_if_went_away;
 use limen_tunnel::tls::{self, Identity};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls_pki_types::CertificateDer;
@@ -189,16 +190,20 @@ pub async fn enroll(
     dns_names: &[String],
 ) -> anyhow::Result<ComponentCredentials> {
     let (key, csr_der) = new_key_and_csr()?;
-    let resp = EnrollmentClient::new(channel)
-        .enroll(EnrollRequest {
-            join_token: join_token.expose().clone(),
-            csr_der,
-            kind: kind.to_owned(),
-            dns_names: dns_names.to_vec(),
-        })
-        .await
-        .map_err(|s| classify("enrollment", &s))?
-        .into_inner();
+    let request = EnrollRequest {
+        join_token: join_token.expose().clone(),
+        csr_der,
+        kind: kind.to_owned(),
+        dns_names: dns_names.to_vec(),
+    };
+    let resp = retry_if_went_away("enrollment", || {
+        let mut client = EnrollmentClient::new(channel.clone());
+        let request = request.clone();
+        async move { client.enroll(request).await }
+    })
+    .await
+    .map_err(|s| classify("enrollment", &s))?
+    .into_inner();
     let (not_before, not_after) = validity(&resp.cert_pem)?;
     Ok(ComponentCredentials {
         id: resp.component_id,
@@ -220,11 +225,18 @@ pub async fn renew(
     current: &ComponentCredentials,
 ) -> anyhow::Result<ComponentCredentials> {
     let (key, csr_der) = new_key_and_csr()?;
-    let resp = EnrollmentClient::new(channel)
-        .renew_certificate(RenewCertificateRequest { csr_der })
-        .await
-        .map_err(|s| classify("renewal", &s))?
-        .into_inner();
+    let resp = retry_if_went_away("renewal", || {
+        let mut client = EnrollmentClient::new(channel.clone());
+        let csr_der = csr_der.clone();
+        async move {
+            client
+                .renew_certificate(RenewCertificateRequest { csr_der })
+                .await
+        }
+    })
+    .await
+    .map_err(|s| classify("renewal", &s))?
+    .into_inner();
     let (not_before, not_after) = validity(&resp.cert_pem)?;
     Ok(ComponentCredentials {
         key_pem: Secret::new(key.serialize_pem()),

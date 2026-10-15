@@ -52,12 +52,17 @@ where
             let channel = Arc::clone(&channel);
             async move {
                 let ch = channel().map_err(|e| ShipError::Retry(e.to_string()))?;
-                let events = batch.into_iter().map(|(_, e)| e).collect();
-                AuditIngestClient::new(ch)
-                    .ingest(IngestRequest { events })
-                    .await
-                    .map(|_| ())
-                    .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
+                let events: Vec<_> = batch.into_iter().map(|(_, e)| e).collect();
+                // Ingest is idempotent (events keep their ids), so a call that
+                // crossed a graceful close is simply sent again.
+                limen_tunnel::connect::retry_if_went_away("audit ingest", || {
+                    let mut client = AuditIngestClient::new(ch.clone());
+                    let events = events.clone();
+                    async move { client.ingest(IngestRequest { events }).await }
+                })
+                .await
+                .map(|_| ())
+                .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
             }
         },
         // Proxies and workers stop at once; the deadline is the shutdown.

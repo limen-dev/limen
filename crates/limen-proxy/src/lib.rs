@@ -24,7 +24,7 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
 use limen_proto::v1::{PingRequest, ReportTunnelsRequest, TunnelReport};
-use limen_tunnel::connect::{SharedClientConfig, channel};
+use limen_tunnel::connect::{SharedClientConfig, channel, retry_if_went_away};
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::tls::{ClientAuth, client_config, server_config};
 use limen_tunnel::tunnel::TunnelChannel;
@@ -475,12 +475,17 @@ async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         let result = async {
-            let mut client =
-                limen_proto::v1::policy_sync_client::PolicySyncClient::new(proxy.cp_channel());
-            let signed = client
-                .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
-                .await?
-                .into_inner();
+            let signed = retry_if_went_away("policy snapshot", || {
+                let mut client =
+                    limen_proto::v1::policy_sync_client::PolicySyncClient::new(proxy.cp_channel());
+                async move {
+                    client
+                        .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+                        .await
+                }
+            })
+            .await?
+            .into_inner();
             proxy
                 .policy
                 .update(&signed, &proxy.credentials().internal_ca()?)?;
@@ -526,10 +531,13 @@ async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             tunnels,
             peer_address: proxy.config.peer_address.clone().unwrap_or_default(),
         };
-        match RegistryClient::new(proxy.cp_channel())
-            .report_tunnels(req)
-            .await
-        {
+        let result = retry_if_went_away("report tunnels", || {
+            let mut client = RegistryClient::new(proxy.cp_channel());
+            let req = req.clone();
+            async move { client.report_tunnels(req).await }
+        })
+        .await;
+        match result {
             Ok(_) => proxy.last_report_ok.store(
                 time::OffsetDateTime::now_utc().unix_timestamp(),
                 Ordering::SeqCst,
