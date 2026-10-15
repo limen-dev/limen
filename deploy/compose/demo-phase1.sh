@@ -39,6 +39,7 @@ wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 wait_for "control plane readiness" curl -sf http://localhost:3081/readyz
 mkdir -p "$here/.state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$here/.state/internal-ca.pem" >/dev/null
+"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$LIMEN_HOME"
 pass "stack is up"
 

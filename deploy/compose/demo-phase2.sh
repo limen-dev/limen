@@ -38,6 +38,7 @@ fi
 wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 mkdir -p "$state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
+"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$LIMEN_HOME"
 "$here/dev-login.sh" "$ADMIN" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase2 >/dev/null

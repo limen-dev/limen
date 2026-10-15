@@ -2,7 +2,7 @@
 
 # Local development stack
 
-Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and CA keys sit on a Docker volume.
+Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and the CA keys sit in a plain folder on your machine (`~/.limen-dev/ca`).
 
 | Service | What it is | Host port |
 |---|---|---|
@@ -13,6 +13,21 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `proxy` | Public entry point (3443) and admin/debug endpoints (3444) | 3443, 3444 |
 | `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
 | `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
+
+## A CA that survives resets and worktrees
+
+The CA keys live in `~/.limen-dev/ca` (change it with `LIMEN_DEV_STATE`), outside every Docker volume and every checkout. So `docker compose down -v`, a rebuilt stack, and a different git worktree all get the **same CA key**. The CA *certificate* is re-issued after a reset (the database that holds it is wiped), but because the key is the same, a browser or tool that trusts the file below keeps trusting it.
+
+```sh
+deploy/compose/dev-ca.sh           # prints ~/.limen-dev/internal-ca.pem, the CA certificate to trust
+deploy/compose/dev-ca.sh --trust   # prints how to trust it (it changes nothing itself)
+```
+
+The demos run `dev-ca.sh` for you. Notes:
+- **Trusting is your choice.** Nothing here changes a trust setting. It's a development CA: whoever can read `~/.limen-dev/ca` can sign certificates your browser would accept if you trust it. Keep the folder private (it is created mode 700), and consider trusting it only in a separate browser profile or in Firefox.
+- **`deploy/compose/.state/internal-ca.pem`** (used by `curl --cacert` and the demos) is still refreshed on every run, per checkout.
+- **Switching to this layout** creates a new CA once. A database created by another branch (for example one that has newer migrations) can stop the control plane from starting: reset with `docker compose -f deploy/compose/docker-compose.yml down -v`.
+- **If you previously ran the stack**, an unused volume `limen_cp-ca` is left over: `docker volume rm limen_cp-ca`.
 
 ## Quick start
 
