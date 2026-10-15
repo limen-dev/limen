@@ -138,10 +138,20 @@ rm -f "$state/loop.stop" "$state/loop.log"
   i=0
   while [ ! -e "$state/loop.stop" ]; do
     i=$((i + 1))
-    if out="$(limen ssh web-staging-1 -- "echo new-$run-$i" 2>&1)" && [ "$out" = "new-$run-$i" ]; then
+    # A watchdog fails a session that hangs instead of stalling the loop.
+    limen ssh web-staging-1 -- "echo new-$run-$i" > "$state/loop.out" 2>&1 &
+    pid=$!
+    ( sleep 30; kill "$pid" 2>/dev/null ) &
+    dog=$!
+    status=0
+    wait "$pid" || status=$?
+    kill "$dog" 2>/dev/null || true
+    wait "$dog" 2>/dev/null || true
+    out="$(cat "$state/loop.out")"
+    if [ "$status" -eq 0 ] && [ "$out" = "new-$run-$i" ]; then
       echo "$(date +%s) ok $i" >> "$state/loop.log"
     else
-      echo "$(date +%s) FAILED $i: $(tr '\n' ' ' <<<"$out")" >> "$state/loop.log"
+      echo "$(date +%s) FAILED $i (exit $status): $(tr '\n' ' ' <<<"$out")" >> "$state/loop.log"
     fi
     sleep 1
   done
@@ -164,12 +174,16 @@ if [ "$(cp1_pending || echo 0)" -gt 0 ] 2>/dev/null; then
 else
   fail "control-plane-1 never held a backlog, so this kill proves nothing (killing anyway)"
 fi
+# Disruption windows (epoch seconds), checked against loop.log at the end.
+windows=()
+w0=$(date +%s)
 "${compose[@]}" kill -s KILL control-plane-1 >/dev/null
 note "killed at $(date +%T)"
 sleep 5
 "${compose[@]}" start control-plane-1 >/dev/null
 wait_for "control-plane-1 back" cp_ready 1
 note "control-plane-1 ready again at $(date +%T)"
+windows+=("control-plane-1 SIGKILL until ready again:$w0:$(date +%s)")
 
 s3_pending() {
   curl -sf "http://localhost:${cp_health[$1]}/metrics" | awk '/^limen_audit_spool_pending\{consumer="s3"\}/ {print $2 + 0}'
@@ -206,6 +220,7 @@ restart() { # <n> <what>
 }
 
 step "Rolling restart 1: SIGTERM control-plane-$first (ephemeral) while S3 is down"
+w0=$(date +%s)
 restart "$first"
 if grep -q 'handed the rest of the audit spool to a peer' "$state/stop-$first.log"; then
   pass "control-plane-$first handed its unshipped events to a peer before exiting"
@@ -217,13 +232,16 @@ note "S3 is back"
 "${compose[@]}" start control-plane-"$first" >/dev/null
 wait_for "control-plane-$first back" cp_ready "$first"
 note "control-plane-$first ready again"
+windows+=("restart 1 (control-plane-$first, S3 down) until ready again:$w0:$(date +%s)")
 sleep 5
 
 step "Rolling restart 2: SIGTERM control-plane-$second (ephemeral)"
+w0=$(date +%s)
 restart "$second"
 "${compose[@]}" start control-plane-"$second" >/dev/null
 wait_for "control-plane-$second back" cp_ready "$second"
 note "control-plane-$second ready again"
+windows+=("restart 2 (control-plane-$second) until ready again:$w0:$(date +%s)")
 sleep 5
 
 step "Settle: stop opening sessions, let the long session finish"
@@ -257,6 +275,17 @@ else
   fail "new sessions during the disruption: $new_failed of $((new_ok + new_failed)) failed"
   grep FAILED "$state/loop.log" | head -5 | sed 's/^/    /'
 fi
+
+# 3. Sessions really opened inside each disruption window, not only around it.
+for w in "${windows[@]}"; do
+  IFS=: read -r name from to <<<"$w"
+  inside="$(awk -v a="$from" -v b="$to" '$2 == "ok" && $1 >= a && $1 <= b' "$state/loop.log" | wc -l | tr -d ' ')"
+  if [ "$inside" -gt 0 ]; then
+    pass "$inside new session(s) succeeded during $name ($((to - from)) s)"
+  else
+    fail "no new session succeeded during $name ($((to - from)) s)"
+  fi
+done
 
 # Wait for every spool to drain and S3 to hold every session of this run.
 for _ in $(seq 1 120); do [ "$(pending || echo 1)" = "0" ] && break; sleep 0.5; done
@@ -309,7 +338,9 @@ else
 fi
 
 # 4. The audit trail verifies: every writer's chain, and no producer seq gap.
-verify | tee "$state/verify.txt" | sed 's/^/  /'
+# The verifier exits 2 on a problem; the checks below read its output.
+verify > "$state/verify.txt" || true
+sed 's/^/  /' "$state/verify.txt"
 writers="$(sed -n 's/^writers: \([0-9]*\).*/\1/p' "$state/verify.txt")"
 manifest_writers="$(s3curl "$s3?list-type=2&prefix=manifests/&delimiter=/" | grep -o '<Prefix>manifests/[^<]*</Prefix>' | sed 's/<[^>]*>//g; s#manifests/##; s#/$##' | grep . | sort | tr '\n' ' ')"
 if grep -q '^OK: every batch' "$state/verify.txt"; then
@@ -317,10 +348,11 @@ if grep -q '^OK: every batch' "$state/verify.txt"; then
 else
   fail "limen-audit-verify: chain problems"
 fi
-if grep -q '^OK: no producer has a sequence gap' "$state/verify.txt"; then
-  pass "limen-audit-verify: no sequence gap for any producer"
+if grep -q '^OK: no producer has a sequence gap' "$state/verify.txt" \
+   && grep -q '^OK: no sequence number is used by two events' "$state/verify.txt"; then
+  pass "limen-audit-verify: no sequence gap or conflict for any producer"
 else
-  fail "limen-audit-verify: sequence gaps (lost events)"
+  fail "limen-audit-verify: sequence gaps (lost events) or conflicts"
 fi
 if [ "$writers" = "3" ] && [ "$manifest_writers" = "control-plane-0 control-plane-1 control-plane-2 " ]; then
   pass "writers: 3 (control-plane-0, -1, -2), one chain per replica id"
