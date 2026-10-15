@@ -65,6 +65,7 @@ async fn kms_backed_ca_issues_certificates_that_verify() {
             roles: vec!["sre".into()],
             login_id: uuid::Uuid::now_v7(),
             ttl: Duration::from_secs(600),
+            ci: None,
         })
         .await
         .expect("issue via KMS");

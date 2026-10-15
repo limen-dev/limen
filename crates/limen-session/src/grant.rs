@@ -168,6 +168,7 @@ mod tests {
                 roles: vec!["dev".into()],
                 login_id: login,
                 ttl: Duration::from_secs(600),
+                ci: None,
             })
             .await
             .expect("issue");

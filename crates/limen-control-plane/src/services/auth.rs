@@ -201,6 +201,7 @@ async fn login(
             roles: roles.clone(),
             login_id,
             ttl,
+            ci: None,
         })
         .await
         .map_err(|e| match e {
