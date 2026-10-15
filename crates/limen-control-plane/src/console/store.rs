@@ -36,19 +36,21 @@ pub async fn upsert_user(
 }
 
 /// Record a bot's login: a row in `users` named `bot:<name>`, with the facts
-/// about the run (ADR-0019).
+/// about the run (ADR-0019). Returns `false`, changing nothing, when a row of
+/// that name exists and isn't a bot's: a person's row is never taken over.
 pub async fn upsert_bot(
     db: &Db,
     username: &str,
     subject: &str,
     roles: &[String],
     ci: &std::collections::BTreeMap<String, String>,
-) -> Result<(), sqlx::Error> {
+) -> Result<bool, sqlx::Error> {
     sqlx::query(
         "INSERT INTO users (username, subject, roles, groups, actor_type, last_ci)
          VALUES ($1, $2, $3, '{}', 'bot', $4)
-         ON CONFLICT (username) DO UPDATE SET subject = $2, roles = $3, actor_type = 'bot',
-           last_ci = $4, last_login_at = now(), login_count = users.login_count + 1",
+         ON CONFLICT (username) DO UPDATE SET subject = $2, roles = $3,
+           last_ci = $4, last_login_at = now(), login_count = users.login_count + 1
+         WHERE users.actor_type = 'bot'",
     )
     .bind(username)
     .bind(subject)
@@ -56,7 +58,7 @@ pub async fn upsert_bot(
     .bind(serde_json::json!(ci))
     .execute(db)
     .await
-    .map(|_| ())
+    .map(|done| done.rows_affected() == 1)
 }
 
 #[derive(Debug, Clone)]

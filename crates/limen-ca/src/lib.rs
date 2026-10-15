@@ -12,7 +12,10 @@ pub mod signer;
 pub mod ssh;
 pub mod verify;
 
-pub use authority::{CertificateAuthority, ComponentCertRequest, IssuedCert, UserCertRequest};
+pub use authority::{
+    CertificateAuthority, ComponentCertRequest, IssuedCert, MAX_CI_FACTS, MAX_CI_VALUE,
+    UserCertRequest,
+};
 pub use signer::{FileSigner, SignError, Signer};
 pub use verify::{ComponentIdentity, UserIdentity, VerifyError};
 

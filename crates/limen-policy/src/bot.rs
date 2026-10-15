@@ -121,14 +121,33 @@ impl BotJoin {
     }
 
     /// Whether verified `claims` satisfy every entry of the rule.
+    ///
+    /// A GitHub Actions token from a pull request run **never** matches, whatever
+    /// the rule says: such a job runs code from a fork or a branch anyone can
+    /// open. The validator refuses rules that name those refs or events, but a
+    /// rule that names neither (a repository and an environment, say) would
+    /// otherwise accept them.
     #[must_use]
     pub fn matches(&self, claims: &BTreeMap<String, String>) -> bool {
+        if self.method == JoinMethod::GithubActions && is_pull_request_run(claims) {
+            return false;
+        }
         self.claims.iter().all(|(key, want)| {
             claims
                 .get(key)
                 .is_some_and(|got| want.values().iter().any(|v| v == got))
         })
     }
+}
+
+/// Whether GitHub Actions token claims describe a pull request run.
+fn is_pull_request_run(claims: &BTreeMap<String, String>) -> bool {
+    claims
+        .get("event_name")
+        .is_some_and(|e| e == "pull_request" || e == "pull_request_target")
+        || claims
+            .get("ref")
+            .is_some_and(|r| r.starts_with("refs/pull/"))
 }
 
 impl BotDoc {

@@ -320,3 +320,131 @@ async fn the_cli_can_ask_for_the_audience() {
         .into_inner();
     assert_eq!(config.bot_audience, "limen");
 }
+
+// ---- review fixes: a token is spent only when a credential is issued ---------------
+
+#[tokio::test]
+async fn a_malformed_csr_does_not_spend_the_token() {
+    let Some(h) = start().await else { return };
+    let token = h.idp.workload_token(&good());
+    let err = h
+        .bot_login_with_csr("github_actions", token.clone(), "", b"not a csr".to_vec())
+        .await
+        .expect_err("bad CSR");
+    assert_eq!(err.code(), Code::InvalidArgument);
+    // The job can retry with the same token and a good key.
+    let (resp, _) = h
+        .bot_login("github_actions", token, "")
+        .await
+        .expect("the token wasn't spent");
+    assert_eq!(resp.username, "bot:deploy-staging");
+}
+
+#[tokio::test]
+async fn a_wrong_bot_name_does_not_spend_the_token() {
+    let Some(h) = start().await else { return };
+    let token = h.idp.workload_token(&good());
+    let err = h
+        .bot_login("github_actions", token.clone(), "deploy-twin")
+        .await
+        .expect_err("that bot doesn't match this token");
+    assert_eq!(err.code(), Code::PermissionDenied);
+    h.bot_login("github_actions", token, "")
+        .await
+        .expect("the token wasn't spent");
+}
+
+#[tokio::test]
+async fn a_failure_after_the_nonce_is_taken_releases_it() {
+    let Some(h) = start().await else { return };
+    // A person's row already has the bot's name: recording the bot must not
+    // take it over, and the login must fail rather than hand out a bot with
+    // no row.
+    sqlx::query(
+        "INSERT INTO users (username, subject, roles, groups) VALUES ('bot:deploy-staging', 's', '{}', '{}')",
+    )
+    .execute(&h.state.db)
+    .await
+    .expect("seed a person's row");
+    let token = h.idp.workload_token(&good());
+    let err = h
+        .bot_login("github_actions", token.clone(), "")
+        .await
+        .expect_err("name taken by a person");
+    assert_eq!(err.code(), Code::Internal);
+    let kind: String =
+        sqlx::query_scalar("SELECT actor_type FROM users WHERE username = 'bot:deploy-staging'")
+            .fetch_one(&h.state.db)
+            .await
+            .expect("row");
+    assert_eq!(kind, "user", "the person's row was not taken over");
+    // Nothing was issued, so the token is still good once the conflict is gone.
+    sqlx::query("DELETE FROM users WHERE username = 'bot:deploy-staging'")
+        .execute(&h.state.db)
+        .await
+        .expect("clean up");
+    h.bot_login("github_actions", token, "")
+        .await
+        .expect("released nonce lets the retry through");
+}
+
+#[tokio::test]
+async fn the_replay_record_outlives_the_age_window() {
+    let Some(h) = start().await else { return };
+    // A token that expires soon but was minted just now: usable for up to
+    // max age + skew by its `iat`, so the record must last at least that long.
+    let token = h.idp.workload_token(&WorkloadToken {
+        ttl_secs: 30,
+        issued_secs_ago: 0,
+        ..good()
+    });
+    h.bot_login("github_actions", token, "")
+        .await
+        .expect("login");
+    let lives_secs: f64 = sqlx::query_scalar(
+        "SELECT extract(epoch FROM (max(expires_at) - now()))::float8 FROM login_nonces",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .expect("nonce");
+    assert!(
+        lives_secs > 900.0,
+        "the replay record must cover max age (15m) plus skew, not just exp: {lives_secs}s"
+    );
+}
+
+#[tokio::test]
+async fn an_issuer_with_and_without_a_trailing_slash_shares_one_key_cache() {
+    let Some(h) = start().await else { return };
+    let with_slash = WorkloadToken {
+        issuer: Some(format!("{}/", h.idp.issuer)),
+        ..good()
+    };
+    h.bot_login("github_actions", h.idp.workload_token(&with_slash), "")
+        .await
+        .expect("token with a trailing slash in iss");
+    h.bot_login("github_actions", h.idp.workload_token(&good()), "")
+        .await
+        .expect("token without");
+    assert_eq!(h.state.bots.cached_issuers(), 1);
+}
+
+#[tokio::test]
+async fn a_bot_login_with_empty_or_odd_claims_still_gets_a_certificate_that_verifies() {
+    let Some(h) = start().await else { return };
+    // Claims that clip to nothing, and a wide-character value, must not make
+    // a certificate the proxy can't verify.
+    let mut token = good();
+    token.claims.insert("actor".into(), "\u{7}".into());
+    token
+        .claims
+        .insert("workflow".into(), "é".repeat(200).into());
+    let (resp, der) = h
+        .bot_login("github_actions", h.idp.workload_token(&token), "")
+        .await
+        .expect("login");
+    let id = verify_user(&der, h.state.cas.user.cert_der()).expect("certificate verifies");
+    assert!(!id.ci.contains_key("actor"));
+    assert!(id.ci["workflow"].len() <= limen_ca::MAX_CI_VALUE);
+    assert_eq!(resp.username, "bot:deploy-staging");
+}

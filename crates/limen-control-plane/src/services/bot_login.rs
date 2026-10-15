@@ -15,10 +15,22 @@ use uuid::Uuid;
 use crate::bots::BotTokenError;
 use crate::state::{AppState, internal, unix};
 
+/// Claim names that are never copied into the facts of a run: they are the
+/// token's own plumbing, or names Limen sets itself.
+const RESERVED: [&str; 10] = [
+    "provider", "iss", "sub", "aud", "exp", "iat", "nbf", "jti", "nonce", "at_hash",
+];
+
 /// The claims worth recording about the run behind a login, by provider.
 /// Everything else in the token stays out of the certificate and the audit
-/// trail.
-fn ci_facts(method: JoinMethod, claims: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+/// trail. For a generic provider, which has no known claim names, the facts are
+/// the claims the matched rule relied on (`rule_claims`): nothing else is
+/// recorded, and nothing a token claims can replace what Limen sets itself.
+fn ci_facts(
+    method: JoinMethod,
+    claims: &BTreeMap<String, String>,
+    rule_claims: &[&str],
+) -> BTreeMap<String, String> {
     let wanted: &[&str] = match method {
         JoinMethod::GithubActions => &[
             "repository",
@@ -50,34 +62,36 @@ fn ci_facts(method: JoinMethod, claims: &BTreeMap<String, String>) -> BTreeMap<S
         ],
         JoinMethod::Oidc => &[],
     };
+    // A rule can name many claims; the certificate carries a fixed few.
+    let from_rule = rule_claims.iter().take(limen_ca::MAX_CI_FACTS - 4);
     let mut facts: BTreeMap<String, String> = wanted
         .iter()
+        .chain(from_rule)
+        .filter(|k| !RESERVED.contains(*k))
         .filter_map(|k| claims.get(*k).map(|v| ((*k).to_owned(), clip(v))))
+        .filter(|(_, v)| !v.is_empty())
         .collect();
+    // Set last, so nothing above can have replaced them.
     facts.insert("provider".into(), method.as_str().to_owned());
     for key in ["iss", "sub"] {
-        if let Some(v) = claims.get(key) {
-            facts.insert(key.to_owned(), clip(v));
-        }
-    }
-    // A generic provider has no known claim names: keep a few scalars.
-    if method == JoinMethod::Oidc {
-        const SKIP: [&str; 9] = [
-            "iss", "sub", "aud", "exp", "iat", "nbf", "jti", "nonce", "at_hash",
-        ];
-        for (k, v) in claims
-            .iter()
-            .filter(|(k, _)| !SKIP.contains(&k.as_str()) && k.len() <= 64)
-            .take(10)
-        {
-            facts.insert(k.clone(), clip(v));
+        if let Some(v) = claims.get(key).map(|v| clip(v)).filter(|v| !v.is_empty()) {
+            facts.insert(key.to_owned(), v);
         }
     }
     facts
 }
 
+/// Without control characters, and no longer than a certificate carries
+/// (in bytes, cut on a character boundary).
 fn clip(v: &str) -> String {
-    v.chars().filter(|c| !c.is_control()).take(240).collect()
+    let mut out = String::new();
+    for c in v.chars().filter(|c| !c.is_control()) {
+        if out.len() + c.len_utf8() > limen_ca::MAX_CI_VALUE {
+            break;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Audit a denied bot login and build the error to return. `facts` says which
@@ -143,22 +157,8 @@ pub async fn bot_login(
             return Err(deny(&state, addr, &req.method, None, "invalid token").await);
         }
     };
-    let facts = ci_facts(method, &token.claims);
-
-    // One login per token.
-    let fresh = crate::db::use_nonce(state.db.clone(), token.replay_key.clone(), token.expires_at)
-        .await
-        .map_err(|e| internal("recording bot token use", e))?;
-    if !fresh {
-        return Err(deny(
-            &state,
-            addr,
-            &req.method,
-            Some(&facts),
-            "token already used",
-        )
-        .await);
-    }
+    // What a refusal records about the run, before a bot is chosen.
+    let refused_run = ci_facts(method, &token.claims, &[]);
 
     let named = (!req.bot.is_empty()).then_some(req.bot.as_str());
     let matches = loaded
@@ -171,7 +171,7 @@ pub async fn bot_login(
                 &state,
                 addr,
                 &req.method,
-                Some(&facts),
+                Some(&refused_run),
                 "no bot matches this token",
             )
             .await);
@@ -181,13 +181,15 @@ pub async fn bot_login(
                 &state,
                 addr,
                 &req.method,
-                Some(&facts),
+                Some(&refused_run),
                 "more than one bot matches this token",
             )
             .await);
         }
     };
     let username = bot.username();
+    let rule_claims: Vec<&str> = bot.spec.join.claims.keys().map(String::as_str).collect();
+    let facts = ci_facts(method, &token.claims, &rule_claims);
 
     if crate::db::is_locked(&state.db, &username)
         .await
@@ -195,7 +197,51 @@ pub async fn bot_login(
     {
         return Err(deny(&state, addr, &req.method, Some(&facts), "bot locked").await);
     }
+    // A bad key is the caller's mistake: say so before the token is spent.
+    super::auth::csr_spki(&req.csr_der)?;
 
+    // One login per token, taken as late as possible: only a login that is
+    // about to issue credentials spends it. (A token that matched no bot, named
+    // the wrong bot, or came with a bad key stays usable until it expires.)
+    let fresh = crate::db::use_nonce(
+        state.db.clone(),
+        token.replay_key.clone(),
+        token.replay_until,
+    )
+    .await
+    .map_err(|e| internal("recording bot token use", e))?;
+    if !fresh {
+        return Err(deny(
+            &state,
+            addr,
+            &req.method,
+            Some(&facts),
+            "token already used",
+        )
+        .await);
+    }
+    let issued = issue(&state, addr, method, bot, &token, facts, req.csr_der).await;
+    if issued.is_err()
+        && let Err(e) = crate::db::release_nonce(&state.db, &token.replay_key).await
+    {
+        // The job will have to mint a new token. Say so.
+        tracing::error!(error = %e, "couldn't release a bot token after a failed login");
+    }
+    issued
+}
+
+/// Issue the credentials, record the bot, and audit the login. If this fails
+/// nothing was handed out, so the caller releases the token.
+async fn issue(
+    state: &AppState,
+    addr: Option<IpAddr>,
+    method: JoinMethod,
+    bot: &BotDoc,
+    token: &crate::bots::BotToken,
+    facts: BTreeMap<String, String>,
+    csr_der: Vec<u8>,
+) -> Result<LoginResponse, Status> {
+    let username = bot.username();
     let roles = bot.spec.roles.clone();
     let ttl = bot.ttl().min(state.config.max_cert_ttl);
     let login_id = Uuid::now_v7();
@@ -203,7 +249,7 @@ pub async fn bot_login(
         .cas
         .user
         .issue_user(UserCertRequest {
-            csr_der: req.csr_der,
+            csr_der,
             username: username.clone(),
             roles: roles.clone(),
             login_id,
@@ -218,11 +264,19 @@ pub async fn bot_login(
             other => internal("issuing bot certificate", other),
         })?;
 
-    if let Err(e) =
-        crate::console::store::upsert_bot(&state.db, &username, &token.subject, &roles, &facts)
-            .await
+    // A bot without a row is missing from the Bots page and its lock would show
+    // as an orphan: if it can't be recorded, the login fails.
+    match crate::console::store::upsert_bot(&state.db, &username, &token.subject, &roles, &facts)
+        .await
     {
-        tracing::warn!(error = %e, "recording the bot");
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(internal(
+                "recording the bot",
+                format!("{username} is already the name of someone who isn't a bot"),
+            ));
+        }
+        Err(e) => return Err(internal("recording the bot", e)),
     }
     // Fail closed: no audit event, no credentials.
     let data = json!({
@@ -297,6 +351,7 @@ mod tests {
                 ("jti", "abc"),
                 ("some_future_claim", "x"),
             ]),
+            &["repository"],
         );
         assert_eq!(facts["provider"], "github_actions");
         assert_eq!(facts["repository"], "acme/infra");
@@ -305,26 +360,87 @@ mod tests {
     }
 
     #[test]
-    fn generic_providers_keep_a_few_scalars_without_the_standard_ones() {
-        let facts = ci_facts(
-            JoinMethod::Oidc,
-            &claims(&[
-                ("sub", "svc"),
-                ("iss", "https://i"),
-                ("exp", "1"),
-                ("team", "platform"),
-            ]),
-        );
+    fn generic_providers_record_only_the_claims_the_rule_relied_on() {
+        let token = claims(&[
+            ("sub", "svc"),
+            ("iss", "https://i"),
+            ("exp", "1"),
+            ("team", "platform"),
+            ("unrelated", "x"),
+        ]);
+        let facts = ci_facts(JoinMethod::Oidc, &token, &["sub", "team", "exp"]);
         assert_eq!(facts["team"], "platform");
-        assert!(!facts.contains_key("exp"));
+        assert!(!facts.contains_key("unrelated"), "not named by the rule");
+        assert!(!facts.contains_key("exp"), "token plumbing stays out");
         assert_eq!(facts["provider"], "oidc");
+        // Before a bot is chosen (a refusal), nothing but the basics.
+        let refused = ci_facts(JoinMethod::Oidc, &token, &[]);
+        assert_eq!(refused.len(), 3, "{refused:?}");
     }
 
     #[test]
-    fn values_are_clipped_and_stripped_of_control_characters() {
+    fn a_claim_cannot_overwrite_what_limen_sets() {
+        // A generic provider can mint any claim names it likes, `provider`
+        // included; the rule can even name it. Neither may win.
+        let token = claims(&[
+            ("sub", "svc"),
+            ("iss", "https://i"),
+            ("provider", "github_actions"),
+        ]);
+        let facts = ci_facts(JoinMethod::Oidc, &token, &["provider", "sub"]);
+        assert_eq!(facts["provider"], "oidc");
+        assert_eq!(facts["sub"], "svc");
+        let facts = ci_facts(JoinMethod::GithubActions, &token, &[]);
+        assert_eq!(
+            facts["provider"], "github_actions",
+            "GitHub's own value is Limen's too"
+        );
+        assert_eq!(facts["iss"], "https://i");
+    }
+
+    #[test]
+    fn values_fit_what_a_certificate_carries() {
+        // Control characters go; a value is cut by bytes on a character boundary.
         let long = format!("{}\n{}", "a".repeat(500), "b");
-        let facts = ci_facts(JoinMethod::Gitlab, &claims(&[("ref", &long)]));
-        assert_eq!(facts["ref"].len(), 240);
+        let facts = ci_facts(JoinMethod::Gitlab, &claims(&[("ref", &long)]), &[]);
+        assert_eq!(facts["ref"].len(), limen_ca::MAX_CI_VALUE);
         assert!(!facts["ref"].contains('\n'));
+        // Two-byte characters: 200 of them are 400 bytes, and the cut must not split one.
+        let wide = "é".repeat(200);
+        let facts = ci_facts(JoinMethod::Gitlab, &claims(&[("ref", &wide)]), &[]);
+        assert!(facts["ref"].len() <= limen_ca::MAX_CI_VALUE);
+        assert!(facts["ref"].chars().all(|c| c == 'é'));
+        assert_eq!(facts["ref"].len() % 2, 0);
+    }
+
+    #[test]
+    fn empty_values_are_dropped() {
+        let facts = ci_facts(
+            JoinMethod::GithubActions,
+            &claims(&[
+                ("repository", "acme/infra"),
+                ("environment", ""),
+                ("actor", "\u{7}"),
+            ]),
+            &[],
+        );
+        assert!(!facts.contains_key("environment"), "empty");
+        assert!(!facts.contains_key("actor"), "only control characters");
+        assert!(facts.values().all(|v| !v.is_empty()));
+    }
+
+    #[test]
+    fn the_facts_never_outgrow_a_certificate() {
+        let many: BTreeMap<String, String> = (0..40)
+            .map(|i| (format!("claim{i}"), "v".to_owned()))
+            .chain([
+                ("sub".to_owned(), "s".to_owned()),
+                ("iss".to_owned(), "https://i".to_owned()),
+            ])
+            .collect();
+        let names: Vec<String> = (0..40).map(|i| format!("claim{i}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let facts = ci_facts(JoinMethod::Oidc, &many, &names);
+        assert!(facts.len() <= limen_ca::MAX_CI_FACTS, "{}", facts.len());
     }
 }

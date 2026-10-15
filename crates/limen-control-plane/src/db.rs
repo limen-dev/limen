@@ -401,6 +401,16 @@ pub async fn use_nonce(
     Ok(result.rows_affected() == 1)
 }
 
+/// Forget a nonce, for a login that failed after taking it and issued
+/// nothing, so the caller can try again with the same token.
+pub async fn release_nonce(db: &Db, nonce_hash: &[u8]) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM login_nonces WHERE nonce_hash = $1")
+        .bind(nonce_hash.to_vec())
+        .execute(db)
+        .await
+        .map(|_| ())
+}
+
 // ---- Housekeeping ----------------------------------------------------------
 
 /// Delete expired rows. Runs on one replica at a time (advisory lock).
