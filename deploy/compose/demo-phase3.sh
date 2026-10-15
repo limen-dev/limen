@@ -122,7 +122,7 @@ pass "a modified batch fails verification; restoring it passes"
 step "Dashboards: the panels' SQL over the same S3 data (Trino stands in for Athena)"
 trino "CALL audit.system.sync_partition_metadata('limen', 'events_raw', 'FULL')" >/dev/null
 echo "  Who accessed what:"; trino "$(query 'Who accessed what')" | sed 's/^/    /'
-trino "$(query 'Who accessed what')" | grep -q "$DEVELOPER,web-staging-1,ubuntu" || fail "who-accessed-what"
+trino "$(query 'Who accessed what')" | grep -q "$DEVELOPER,user,web-staging-1,ubuntu" || fail "who-accessed-what"
 echo "  Privileged commands:"; trino "$(query 'Privileged commands')" | cut -d, -f2-5 | sed 's/^/    /'
 trino "$(query 'Privileged commands')" | grep -q 'sudo' || fail "privileged commands panel"
 echo "  Failed and denied attempts:"; trino "$(query 'Failed and denied attempts')" | cut -d, -f2-7 | sed 's/^/    /'
