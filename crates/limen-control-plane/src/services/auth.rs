@@ -108,7 +108,7 @@ impl Auth for AuthService {
 
 /// The CSR's SubjectPublicKeyInfo DER. A plain function so the parsed CSR
 /// isn't held across awaits in `login`.
-fn csr_spki(csr_der: &[u8]) -> Result<Vec<u8>, Status> {
+pub(super) fn csr_spki(csr_der: &[u8]) -> Result<Vec<u8>, Status> {
     let csr =
         CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
             .map_err(|e| Status::invalid_argument(format!("invalid CSR: {e}")))?;

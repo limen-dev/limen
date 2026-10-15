@@ -51,6 +51,16 @@ pub fn verify_user(
 ) -> Result<UserIdentity, VerifyError> {
     verify_chain(cert, ca_cert, KeyUsage::client_auth())?;
     let (uris, not_after) = identity_uris(cert)?;
+    user_identity(uris, not_after)
+}
+
+/// The user identity a certificate's SAN URIs describe. Strict: anything
+/// repeated, oversized, or inconsistent is an error, because the issuer never
+/// produces it.
+fn user_identity(
+    uris: Vec<IdentityUri>,
+    not_after: OffsetDateTime,
+) -> Result<UserIdentity, VerifyError> {
     let mut username = None;
     let mut login_id = None;
     let mut roles = Vec::new();
@@ -63,7 +73,15 @@ pub fn verify_user(
             IdentityUri::Role(r) => roles.push(r),
             IdentityUri::Bot if !bot => bot = true,
             IdentityUri::Ci { key, value } => {
-                ci.insert(key, value);
+                if value.len() > crate::authority::MAX_CI_VALUE {
+                    return Err(VerifyError::Identity(format!("CI fact {key} is too long")));
+                }
+                if ci.insert(key.clone(), value).is_some() {
+                    return Err(VerifyError::Identity(format!("CI fact {key} is repeated")));
+                }
+                if ci.len() > crate::authority::MAX_CI_FACTS {
+                    return Err(VerifyError::Identity("too many CI facts".into()));
+                }
             }
             other => {
                 return Err(VerifyError::Identity(format!(
@@ -310,6 +328,78 @@ mod tests {
             .expect("issue");
         let id = verify_user(&issued.der, user_ca.cert_der()).expect("verify");
         assert!(!id.bot && id.ci.is_empty());
+    }
+
+    fn uris(parts: &[&str]) -> Vec<IdentityUri> {
+        parts
+            .iter()
+            .map(|p| IdentityUri::parse(p).expect("valid SAN"))
+            .collect()
+    }
+
+    #[test]
+    fn the_identity_parser_is_strict_about_ci_facts() {
+        let now = OffsetDateTime::now_utc();
+        let base = [
+            "limen://user/bot:deploy",
+            "limen://login/0192f1d2-0000-7000-8000-000000000000",
+            "limen://actor/bot",
+        ];
+        let with = |extra: &[&str]| uris(&[&base[..], extra].concat());
+        let ok = user_identity(with(&["limen://ci/repository/acme%2Finfra"]), now).expect("valid");
+        assert_eq!(ok.ci["repository"], "acme/infra");
+        // The same fact twice: the issuer never writes that, so the last can't win.
+        let dup = user_identity(
+            with(&["limen://ci/repository/a", "limen://ci/repository/b"]),
+            now,
+        );
+        assert!(matches!(dup, Err(VerifyError::Identity(m)) if m.contains("repeated")));
+        // More facts than the issuer allows.
+        let many: Vec<String> = (0..=crate::authority::MAX_CI_FACTS)
+            .map(|i| format!("limen://ci/k{i}/v"))
+            .collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        assert!(matches!(
+            user_identity(with(&many), now),
+            Err(VerifyError::Identity(m)) if m.contains("too many")
+        ));
+        // A value longer than the issuer allows.
+        let long = format!(
+            "limen://ci/k/{}",
+            "x".repeat(crate::authority::MAX_CI_VALUE + 1)
+        );
+        assert!(user_identity(with(&[long.as_str()]), now).is_err());
+        // A marker twice, or facts on a person.
+        assert!(user_identity(with(&["limen://actor/bot"]), now).is_err());
+        assert!(
+            user_identity(
+                uris(&["limen://user/alice", "limen://login/x", "limen://ci/k/v"]),
+                now
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_ci_values_are_refused_at_issuance() {
+        let user_ca = ca(CaPurpose::UserX509).await;
+        let (_k, csr_der) = csr();
+        let facts: std::collections::BTreeMap<String, String> =
+            [("repository".to_owned(), String::new())].into();
+        let refused = user_ca
+            .issue_user(UserCertRequest {
+                csr_der,
+                username: "bot:x".into(),
+                roles: vec![],
+                login_id: Uuid::now_v7(),
+                ttl: Duration::from_secs(60),
+                ci: Some(facts),
+            })
+            .await;
+        assert!(
+            refused.is_err(),
+            "an empty value would make a certificate that can't verify"
+        );
     }
 
     #[tokio::test]

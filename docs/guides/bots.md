@@ -48,7 +48,7 @@ If more than one bot could match a token, name it: `--bot-name deploy-staging`. 
 
 ## What the bot gets
 - **A certificate that lasts at most an hour** (15 minutes by default), with **no refresh**: the next job logs in again.
-- **One login per token.** A token that was already used is refused, so a leaked token is useless once the job has run, and the control plane insists the token was minted within `LIMEN_BOT_MAX_TOKEN_AGE` (15 minutes).
+- **One login per token.** A token that was already used is refused, so a leaked token is useless once the job has run, and the control plane insists the token was minted within `LIMEN_BOT_MAX_TOKEN_AGE` (15 minutes). A token is only *spent* when credentials are issued: a bad key, a wrong `--bot-name`, or a token that matches no bot leaves it usable, and a login that fails after the control plane took the token gives it back.
 - **The same roles as anyone**, so it gets the same least-privilege grants and the same recordings.
 
 ## What you can see
@@ -69,7 +69,7 @@ The CLI shows the control plane's reason. The audit trail has the details of the
 | `reserved username` | A person's IdP user name starts with `bot:`, which is reserved |
 
 ## Pitfalls worth knowing
-- **Pull requests from forks.** A job triggered by a pull request runs code the author chose. The validator refuses `refs/pull/…` refs and `pull_request` events for GitHub, so a fork can't borrow a bot. Match a protected branch or an **environment** with required reviewers instead.
+- **Pull requests from forks.** A job triggered by a pull request runs code the author chose. For GitHub, a token from a pull request run (`pull_request` or `pull_request_target` events, or a `refs/pull/…` ref) **never matches a bot, whatever the rule says**, and the validator also refuses rules that name them. Match a protected branch or an **environment** with required reviewers instead.
 - **A compromised repository can still run its own jobs.** The defences are the exact match, the short lifetime, recordings, and the lock button. They narrow the damage; they don't remove it.
 - **Real issuers are https.** The control plane refuses plain `http` issuers unless `LIMEN_BOT_ALLOW_INSECURE_ISSUERS` is set, which is for the development stack only.
 - **Not built yet:** the AWS IAM join (a signed `sts:GetCallerIdentity`) is planned with the IAM join for proxies and workers in Phase 13 (ADR-0016), and a GitHub Action that wraps `limen login --bot` comes later.

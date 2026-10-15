@@ -47,8 +47,9 @@ pub struct UserCertRequest {
 }
 
 /// Most CI facts a bot certificate carries, and how long each may be.
-const MAX_CI_FACTS: usize = 16;
-const MAX_CI_VALUE: usize = 256;
+pub const MAX_CI_FACTS: usize = 16;
+/// In bytes.
+pub const MAX_CI_VALUE: usize = 256;
 
 /// A request for a control plane, proxy, or worker certificate.
 #[derive(Debug, Clone)]
@@ -170,7 +171,12 @@ impl CertificateAuthority {
             }
             for (key, value) in ci {
                 validate_name("CI fact name", key)?;
-                if value.len() > MAX_CI_VALUE || value.chars().any(char::is_control) {
+                // An empty value can't be written into a certificate that
+                // verifies: the SAN would not parse.
+                if value.is_empty()
+                    || value.len() > MAX_CI_VALUE
+                    || value.chars().any(char::is_control)
+                {
                     return Err(CaError::InvalidRequest(format!("invalid CI fact {key}")));
                 }
             }

@@ -229,6 +229,26 @@ impl Harness {
         Ok((resp, der))
     }
 
+    /// Like [`bot_login`](Self::bot_login), with a CSR of the caller's choosing.
+    pub async fn bot_login_with_csr(
+        &self,
+        method: &str,
+        token: String,
+        bot: &str,
+        csr_der: Vec<u8>,
+    ) -> Result<limen_proto::v1::LoginResponse, tonic::Status> {
+        let mut client = limen_proto::v1::auth_client::AuthClient::new(self.channel(None));
+        client
+            .bot_login(limen_proto::v1::BotLoginRequest {
+                method: method.into(),
+                token,
+                csr_der,
+                bot: bot.into(),
+            })
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
     /// Replace the active policy, as if an admin had applied it.
     pub fn set_policy(&self, yaml: &[(&str, &str)]) {
         let policy = limen_policy::Policy::parse_yaml(yaml.iter().copied()).expect("policy");

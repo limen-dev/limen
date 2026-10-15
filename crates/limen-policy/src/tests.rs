@@ -620,6 +620,49 @@ mod bots {
     }
 
     #[test]
+    fn a_pull_request_run_never_matches_a_github_rule_whatever_it_names() {
+        // Valid: a repository and an environment. Nothing in it mentions pull
+        // requests, so only the matcher can keep them out.
+        let policy = Policy::parse_yaml([(
+            "b.yaml",
+            bot_doc("  join:\n    method: github_actions\n    match: { repository: acme/infra, environment: staging }\n")
+                .as_str(),
+        )])
+        .expect("valid rule");
+        let issuer = "https://token.actions.githubusercontent.com";
+        let run = |event: &str, git_ref: &str| {
+            claims(&[
+                ("repository", "acme/infra"),
+                ("environment", "staging"),
+                ("event_name", event),
+                ("ref", git_ref),
+            ])
+        };
+        let found = |c: &BTreeMap<String, String>| {
+            policy
+                .match_bots(JoinMethod::GithubActions, issuer, c, None)
+                .len()
+        };
+        assert_eq!(found(&run("push", "refs/heads/main")), 1);
+        assert_eq!(found(&run("workflow_dispatch", "refs/heads/main")), 1);
+        assert_eq!(
+            found(&run("pull_request", "refs/pull/7/merge")),
+            0,
+            "pull_request"
+        );
+        assert_eq!(
+            found(&run("pull_request_target", "refs/heads/main")),
+            0,
+            "pull_request_target"
+        );
+        assert_eq!(
+            found(&run("push", "refs/pull/7/merge")),
+            0,
+            "a pull request ref on its own"
+        );
+    }
+
+    #[test]
     fn issuers_are_listed_per_method() {
         let p = with_bots();
         assert_eq!(

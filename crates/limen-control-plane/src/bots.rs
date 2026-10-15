@@ -43,8 +43,12 @@ pub struct BotToken {
     /// Policy matches against these.
     pub claims: BTreeMap<String, String>,
     pub expires_at: time::OffsetDateTime,
-    /// What to record so the same token can't log in twice.
+    /// What to record so the same token can't log in twice...
     pub replay_key: Vec<u8>,
+    /// ...and until when: the later of the token's `exp` and the end of the
+    /// window in which its `iat` still lets it log in. Forgetting it earlier
+    /// would let a token that expires soon be used again.
+    pub replay_until: time::OffsetDateTime,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -76,7 +80,8 @@ pub struct BotVerifier {
     max_age: Duration,
     allow_insecure: bool,
     http: HttpClient,
-    /// Key caches by the exact `iss` string a token carries.
+    /// Key caches by issuer, without a trailing slash, so `https://x` and
+    /// `https://x/` share one.
     caches: Arc<Mutex<HashMap<String, KeyCache>>>,
 }
 
@@ -121,7 +126,7 @@ impl BotVerifier {
                 "issuer {normalized:?} is not https"
             )));
         }
-        let cache = self.cache_for(&issuer)?;
+        let cache = self.cache_for(normalized)?;
 
         let token: BotIdToken = raw
             .parse()
@@ -148,6 +153,15 @@ impl BotVerifier {
             }
         }
         Err(BotTokenError::Invalid(last_err))
+    }
+
+    /// How many issuers have a key cache (for tests).
+    #[must_use]
+    pub fn cached_issuers(&self) -> usize {
+        self.caches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     fn cache_for(&self, issuer: &str) -> Result<KeyCache, BotTokenError> {
@@ -197,6 +211,10 @@ impl BotVerifier {
 
         // GitHub and GitLab put a `jti` in every token. Without one, the
         // token's own hash does the same job.
+        let replay_until = expires_at.max(
+            time::OffsetDateTime::from_unix_timestamp(minted + max_age + skew)
+                .map_err(|e| BotTokenError::Invalid(format!("iat: {e}")))?,
+        );
         let replay_key = match text.get("jti") {
             Some(jti) => Sha256::digest(format!("bot-jti\0{issuer}\0{jti}").as_bytes()).to_vec(),
             None => Sha256::digest(raw.as_bytes()).to_vec(),
@@ -207,6 +225,7 @@ impl BotVerifier {
             claims: text,
             expires_at,
             replay_key,
+            replay_until,
         })
     }
 }
