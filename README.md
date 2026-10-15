@@ -124,8 +124,8 @@ You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Eve
 # 1. Start the stack (control plane, proxy, worker, Postgres, Dex, a test SSH host) and export its CA
 deploy/compose/up.sh
 
-# 2. Build the CLI
-cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
+# 2. Install the CLI (once; re-run after pulling to upgrade)
+scripts/install-cli.sh
 
 # 3. Sign in as the dev admin, admin@example.com (password: "password"), then load the example policy
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # opens your browser on Dex

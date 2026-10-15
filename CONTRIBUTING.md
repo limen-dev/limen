@@ -28,11 +28,14 @@ LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 ```
 
-The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH: `cargo install --locked --path crates/limen-cli`. Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
+The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade). Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 ## Commits
 Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `chore:`, `ci:`, `test:`, `refactor:`, `perf:`, `build:`. Add a scope where it helps, for example `feat(proxy): ...`. Keep each commit small, with one logical change.
+
+## Continuous integration
+CI skips the jobs a change doesn't need: a docs-only change runs no builds. Which jobs run, where they run and how to revert are in the [CI runbook](docs/runbooks/ci-runners.md).
 
 ## Planning and pull requests
 The roadmap is GitHub milestones (one per phase) with an epic issue holding each phase's checklist ([ADR-0023](docs/adr/0023-roadmap-in-github.md)). Open a pull request per change, put it in the phase's milestone, and write `Closes #N` (or `Part of #N` for the epic) so progress and release notes update themselves. Labels: `area: …` for the part of the system, `unverified` when something has only run against a local stand-in.
