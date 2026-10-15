@@ -2,7 +2,7 @@
 
 # Local development stack
 
-Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and the CA keys sit in a plain folder on your machine (`~/.limen-dev/ca`).
+Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and CA keys sit on a Docker volume.
 
 | Service | What it is | Host port |
 |---|---|---|
@@ -14,23 +14,9 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
 | `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
 
-## A CA that survives resets and worktrees
+## One CA across resets and worktrees
 
-The CA keys live in `~/.limen-dev/ca` (change it with `LIMEN_DEV_STATE`), outside every Docker volume and every checkout. So `docker compose down -v`, a rebuilt stack, and a different git worktree all get the **same CA key**. The CA *certificate* is re-issued after a reset (the database that holds it is wiped). Because the key and subject are the same, anything that verifies against the file below (`curl --cacert`, a trust store entry by key) keeps working. Clients that pin the certificate's own fingerprint do not: `dev-ca.sh` keeps the copy while its key matches and replaces it, with a warning, if the key changed or it is about to expire.
-
-```sh
-deploy/compose/dev-ca.sh           # prints ~/.limen-dev/internal-ca.pem, the CA certificate to trust
-deploy/compose/dev-ca.sh --trust   # prints how to trust it (it changes nothing itself)
-deploy/compose/dev-ca.sh --install # macOS: trust it in your login keychain (you run it; --uninstall undoes it)
-```
-
-The demos run `dev-ca.sh` for you. Notes:
-- **Trusting is your choice.** Only `--install`/`--uninstall`, run by you, change a trust setting (your login keychain, never the system one). The demos never do. It's a development CA: whoever can read `~/.limen-dev/ca` can sign certificates your browser would accept if you trust it. Keep the folder private (it is created mode 700), and consider trusting it only in a separate browser profile or in Firefox.
-- **`deploy/compose/.state/internal-ca.pem`** (used by `curl --cacert` and the demos) is still refreshed on every run, per checkout.
-- **Create it first.** `dev-ca.sh --init` makes `~/.limen-dev/ca` as you (mode 700); the demos run it before starting the stack. If you start the stack by hand on Linux without it, Docker creates the folder as root. On Linux the control plane's uid (65532) owns the folder, so removing it needs `sudo`.
-- **One stack at a time on first start.** Worktrees share the key folder. Two stacks starting together on a fresh folder can each generate a key and overwrite the other's. Start one first. After a reset or a different database, a key that doesn't match the stored CA can stop the control plane from starting: `down -v` and remove `~/.limen-dev/ca` together.
-- **Switching to this layout** creates a new CA once. A database created by another branch (for example one that has newer migrations) can stop the control plane from starting: reset with `docker compose -f deploy/compose/docker-compose.yml down -v`.
-- **If you previously ran the stack**, an unused volume `limen_cp-ca` is left over: `docker volume rm limen_cp-ca`.
+The CA key *and certificate* live in the Docker volume `limen-dev-ca`, which `docker compose down -v` leaves alone and every worktree shares. So the CA stays the same, and a client that trusts `deploy/compose/.state/internal-ca.pem` (the same certificate in every checkout) keeps trusting it after a reset. Nothing is trusted for you: that is your choice, and the key never leaves Docker. It is a development CA: anyone who can run Docker commands on your machine can read its key, so trust it only in a separate browser profile, and never reuse it. To get a new CA, `docker volume rm limen-dev-ca` (with the stack down).
 
 ## Quick start
 
@@ -43,6 +29,7 @@ deploy/compose/demo-phase1.sh        # builds everything, resets the stack, chec
 Or step by step:
 
 ```sh
+docker volume create limen-dev-ca   # the CA's home (once). The demos do this for you
 docker compose -f deploy/compose/docker-compose.yml up -d --build
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
 

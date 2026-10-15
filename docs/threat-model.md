@@ -149,7 +149,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | Rate limiting | `governor`: per IP before auth, per user after, stricter for login and enrollment |
 | Supply chain | `cargo-deny` (advisories, licenses, sources, bans), `cargo-audit`, pinned toolchain and tools (mise), GitHub Actions pinned to commit SHAs, minimal `permissions:` in workflows, distroless images, SBOM in release (Phase 13) |
 | Memory safety | `unsafe_code = "forbid"` workspace-wide. Hand-written protocol codecs (MySQL, RESP) are fuzzed |
-| Dev CA key on the host | Dev compose only (`deploy/compose/dev-ca.sh`): CA private keys live in `~/.limen-dev/ca` (mode 700, outside every volume, shared by worktrees) so a trusted dev CA survives resets. Whoever reads that folder can sign certs a browser would accept if the user trusted the dev CA. Nothing trusts it automatically: `--install` (macOS login keychain only, run by the owner by hand) is the one opt-in, never called by demos or agents; use a separate browser profile; never reuse these keys. Production uses KMS (ADR-0007) |
+| Dev CA persistence | Dev compose only: the file-backend CA key and certificate live in the external Docker volume `limen-dev-ca`, so `down -v` and worktrees keep one CA. Same exposure as the old `cp-ca` volume (readable by anyone with Docker access); nothing is trusted automatically and no key is on the host filesystem. The certificate is also kept next to the key as a seed only: the database stays the source of truth, a file that doesn't match the key is ignored. Production uses KMS (ADR-0007) |
 | Clock skew | Certs are back-dated 1 minute. TTL checks allow ±2 minutes |
 
 ## 6. Accepted residual risks (v1)
@@ -168,4 +168,4 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
 | 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |
-| 2026-10-15 | dev | Dev stack CA keys kept on the host (`~/.limen-dev/ca`), shared across worktrees; dev only, trust never automatic |
+| 2026-10-15 | dev | Dev CA key and certificate kept in an external Docker volume so resets and worktrees share one CA; dev only, trust never automatic |

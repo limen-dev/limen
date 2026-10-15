@@ -34,13 +34,12 @@ if ! $keep; then
   docker rm -f limen-worker-2 limen-worker-3 >/dev/null 2>&1 || true
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
-"$here/dev-ca.sh" --init # the CA key folder, created by you (not by Docker as root)
+docker volume create limen-dev-ca >/dev/null # the CA outlives `down -v` and is shared by worktrees
 "${compose[@]}" up -d --build --quiet-pull >/dev/null
 wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 wait_for "control plane readiness" curl -sf http://localhost:3081/readyz
 mkdir -p "$here/.state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$here/.state/internal-ca.pem" >/dev/null
-"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$LIMEN_HOME"
 pass "stack is up"
 

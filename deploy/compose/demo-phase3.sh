@@ -47,12 +47,11 @@ if ! $keep; then
   echo "Resetting the dev stack (docker compose down -v). Use --keep to skip."
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
-"$here/dev-ca.sh" --init # the CA key folder, created by you (not by Docker as root)
+docker volume create limen-dev-ca >/dev/null # the CA outlives `down -v` and is shared by worktrees
 "${compose[@]}" up -d --build --quiet-pull >/dev/null
 wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 mkdir -p "$state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
-"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$LIMEN_HOME"
 "$here/dev-login.sh" "$ADMIN" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase3 >/dev/null

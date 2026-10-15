@@ -9,7 +9,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases and more planned)
 - **Secrets never appear in logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
 - New dependency: add a row to ADR-0012 and check maintenance/advisories first. New entry point or data store: update `docs/threat-model.md`.
 - Conventional commits, small and focused. Stage specific files (never `git add -A` over someone else's edits). Don't push or tag without being asked.
-- Don't bypass browser certificate warnings or touch trust stores (never run `dev-ca.sh --install`/`--uninstall`; the owner runs those); dev CA is `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
+- Don't bypass browser certificate warnings or touch trust stores; dev CA is `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Commands
 ```sh

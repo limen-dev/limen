@@ -59,6 +59,7 @@ if ! $keep; then
   echo "Resetting the dev stack (docker compose down -v). Use --keep to skip."
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
+docker volume create limen-dev-ca >/dev/null # the CA outlives `down -v` and is shared by worktrees
 if [ "$release_images" = 1 ]; then
   "${compose[@]}" up -d --no-build --quiet-pull >/dev/null
 else
@@ -69,7 +70,6 @@ wait_for "the fake CI issuer" curl -sf "$issuer_url/.well-known/openid-configura
 mkdir -p "$state"
 ca="$state/internal-ca.pem"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$ca" >/dev/null
-"$here/dev-ca.sh" >/dev/null # a fixed copy of the CA, the same after every reset
 rm -rf "$state/home-admin" "$state/home-developer" "$state/home-bot" "$state/phase4"
 mkdir -p "$state/phase4"
 login admin

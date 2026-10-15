@@ -67,26 +67,11 @@ services:
     image: limen-fake-ci-issuer:dev
     ports: ["127.0.0.1:8130:8130"]
 
-  # The CA keys live on the host, outside every compose volume and every
-  # worktree (default ~/.limen-dev/ca), so `down -v`, a rebuilt stack, and a
-  # different checkout all keep the same CA key. A browser or tool that trusts
-  # the dev CA keeps trusting it. DEVELOPMENT ONLY: never reuse these keys. This
-  # one-shot step makes the folder writable by the control plane (uid 65532).
-  ca-init:
-    image: busybox:1.37
-    user: root
-    restart: "no"
-    # Fails (and so does `up`) if the folder can't be handed to the control plane.
-    command: ["sh", "-c", "chown 65532:65532 /ca && chmod 700 /ca"]
-    volumes:
-      - ${LIMEN_DEV_STATE:-${HOME}/.limen-dev}/ca:/ca
-
   control-plane:
     build: { <<: *limen-build, target: control-plane }
     image: limen-control-plane:dev
     restart: unless-stopped
     depends_on:
-      ca-init: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       dex: { condition: service_started }
       s3: { condition: service_started }
@@ -126,7 +111,7 @@ services:
       LIMEN_BOT_ALLOW_INSECURE_ISSUERS: "true"
     ports: ["127.0.0.1:3081:3081"]
     volumes:
-      - ${LIMEN_DEV_STATE:-${HOME}/.limen-dev}/ca:/var/lib/limen/ca
+      - cp-ca:/var/lib/limen/ca
       - ca-public:/var/lib/limen/ca-public
       - audit:/var/lib/limen/audit
       - cp-spool:/var/lib/limen/spool
@@ -210,6 +195,11 @@ services:
 
 volumes:
   postgres: {}
+  # The CA keys and certificates. External, so `down -v` keeps them and every
+  # worktree gets the same CA (a browser that trusts it keeps trusting it).
+  # DEVELOPMENT ONLY. The demos create it; by hand: docker volume create limen-dev-ca
+  # Remove it to get a new CA: docker volume rm limen-dev-ca
+  cp-ca: { external: true, name: limen-dev-ca }
   ca-public: {}
   audit: {}
   proxy-data: {}
