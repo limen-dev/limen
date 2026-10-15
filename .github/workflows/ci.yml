@@ -51,9 +51,9 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
-      # Full history, so the merge base with the target branch is available.
-      # Fetches this run's commit without actions/checkout: GitHub rate limits the
-      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # Fetches this run's commit with full history (for the merge base), without
+      # actions/checkout: GitHub rate limits that download (HTTP 429) when several
+      # self-hosted runners fetch it at once.
       # The token reaches git through the environment and is never written to disk.
       - name: Check out the commit
         env:

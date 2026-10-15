@@ -126,6 +126,20 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in audit (PII in SQL literals, Redis values) | Redis values redacted by default. SQL full text by default (owner decision), with per-resource literal normalization. Bound parameters redacted by default. Access to the bucket and Grafana is limited to auditors |
 | S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
+### TB9: GitHub Actions ↔ self-hosted runners (CI)
+Pull request code runs on the owner's machines: a macOS runner and two OrbStack VMs on it, under the owner's user account. See [the CI runbook](runbooks/ci-runners.md).
+
+| Threat | Mitigation |
+|---|---|
+| E: a pull request runs commands on the owner's machines (a PR's workflow is code) | The repository is private, so only collaborators can open pull requests. Keep it private, and never point the runners at forks or public repositories. Limit: anyone who can push a branch can run code on the runners |
+| E: a workflow reads the owner's files or secrets | The Linux VMs are separate from the Mac. Workflows use `permissions: contents: read`. Publishing secrets are used only by `release.yml`, which runs on hosted runners. Limit: the macOS runner runs as the owner's user, so a workflow there can read the laptop's files |
+| T: one job leaves state for the next | Each VM runs one job at a time. The checkout cleans the workspace (`git clean -ffdx`). The macOS runner is not isolated per job |
+| I: the checkout token leaks into logs or onto disk | The fetch step passes the token through the environment (`GIT_CONFIG_*`) and writes no credentials into `.git/config`. Nothing echoes it |
+| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint`. Only repository admins can set the `CI_RUNNERS` variable |
+| D: a runner stops or runs out of memory mid-job | Every job has a timeout. Integration tests compile two crates at a time on the 8 GiB VM. A lost runner fails its job, which is then rerun by hand |
+
+Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
+
 ## 5. Cross-cutting
 
 | Concern | Control |
@@ -153,3 +167,4 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
 | 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |
+| 2026-10-15 | CI | Self-hosted runners run pull request code on the owner's machines (TB9). Private repository only |
