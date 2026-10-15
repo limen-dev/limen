@@ -1,6 +1,7 @@
 -- The audit table over the S3 batches (ADR-0014), matching the Glue table
 -- Terraform creates for Athena (deploy/terraform/modules/audit). Fields the
--- table doesn't list are ignored; add them here and in Terraform together.
+-- table doesn't list are ignored (for a bot's CI run, that includes claims a generic
+-- OIDC rule names); add them here and in Terraform together.
 CREATE SCHEMA IF NOT EXISTS audit.limen;
 
 CREATE TABLE IF NOT EXISTS audit.limen.events_raw (
@@ -20,8 +21,31 @@ CREATE TABLE IF NOT EXISTS audit.limen.events_raw (
     roles array(varchar), groups array(varchar),
     version bigint, digest varchar, source_ref varchar, component_id varchar,
     actor_type varchar, method varchar, bot varchar,
-    ci row(provider varchar, repository varchar, project_path varchar, ref varchar, environment varchar,
-           workflow varchar, run_id varchar, sha varchar, actor varchar)
+    ci row(
+      provider varchar,
+      repository varchar,
+      repository_owner varchar,
+      project_path varchar,
+      namespace_path varchar,
+      ref varchar,
+      ref_type varchar,
+      ref_protected varchar,
+      environment varchar,
+      workflow varchar,
+      job_workflow_ref varchar,
+      run_id varchar,
+      run_attempt varchar,
+      pipeline_id varchar,
+      pipeline_source varchar,
+      job_id varchar,
+      event_name varchar,
+      runner_environment varchar,
+      sha varchar,
+      actor varchar,
+      user_login varchar,
+      iss varchar,
+      sub varchar
+    )
   ),
   dt varchar,
   hour varchar

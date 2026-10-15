@@ -14,7 +14,7 @@ locals {
     "version:bigint", "digest:string", "source_ref:string", "component_id:string",
     # Machine identities (ADR-0019): who the actor was, and the CI run behind a bot.
     "actor_type:string", "method:string", "bot:string",
-    "ci:struct<provider:string,repository:string,project_path:string,ref:string,environment:string,workflow:string,run_id:string,sha:string,actor:string>",
+    "ci:struct<provider:string,repository:string,repository_owner:string,project_path:string,namespace_path:string,ref:string,ref_type:string,ref_protected:string,environment:string,workflow:string,job_workflow_ref:string,run_id:string,run_attempt:string,pipeline_id:string,pipeline_source:string,job_id:string,event_name:string,runner_environment:string,sha:string,actor:string,user_login:string,iss:string,sub:string>",
   ])
   columns = [
     { name = "schema_version", type = "int" },
