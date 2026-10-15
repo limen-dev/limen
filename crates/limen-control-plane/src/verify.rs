@@ -6,12 +6,19 @@
 //! It also checks the events themselves: every producer numbers its events
 //! (`producer.seq`, from 0 per process start; a restart gets a new
 //! `instance_id`), so a missing run of `seq` for one
-//! `(component, instance_id)` is an event lost between the producer and S3.
-//! Duplicates (at-least-once retries, handoff) are expected: they are counted
-//! once and never hide or create a gap.
+//! `(component, instance_id)`, including a missing head (lowest `seq` above
+//! 0), means an event was not recorded or not shipped. Not recorded
+//! includes an emit that failed under the `fail_closed` audit mode: it uses
+//! up its `seq` and the action it audited was refused. Lost events after a
+//! producer's highest `seq` can't be seen. Duplicates (at-least-once
+//! retries, handoff) are expected: they are counted once and never hide or
+//! create a gap. One `seq` carried by two different `event_id`s is reported
+//! as a conflict: a producer never does that.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+
 use std::io::Read;
+use uuid::Uuid;
 
 use base64::Engine as _;
 use limen_proto::v1::Signed;
@@ -31,16 +38,18 @@ pub struct VerifyReport {
     pub events: u64,
     /// Chain, signature, and batch problems.
     pub problems: Vec<String>,
-    /// Missing runs of `seq` per producer, between the lowest and highest
-    /// `seq` seen for it. Sorted by producer, then `seq`.
+    /// Missing runs of `seq` per producer, from 0 to the highest `seq`
+    /// seen for it. Sorted by producer, then `seq`.
     pub seq_gaps: Vec<SeqGap>,
+    /// `seq` values that two or more different events carry.
+    pub seq_conflicts: Vec<SeqConflict>,
 }
 
 impl VerifyReport {
-    /// Every chain verifies and no producer has a gap.
+    /// Every chain verifies, and no producer has a gap or a conflict.
     #[must_use]
     pub fn ok(&self) -> bool {
-        self.chain_ok() && self.seq_gaps.is_empty()
+        self.chain_ok() && self.seq_gaps.is_empty() && self.seq_conflicts.is_empty()
     }
 
     /// Every batch is present, unmodified, signed, and chained.
@@ -74,18 +83,42 @@ impl std::fmt::Display for SeqGap {
     }
 }
 
+/// Several different events of one producer carry the same `seq`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeqConflict {
+    pub component: String,
+    pub instance_id: String,
+    pub seq: u64,
+    pub event_ids: Vec<Uuid>,
+}
+
+impl std::fmt::Display for SeqConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ids: Vec<String> = self.event_ids.iter().map(Uuid::to_string).collect();
+        write!(
+            f,
+            "{} {}: seq {} is used by {} different events ({})",
+            self.component,
+            self.instance_id,
+            self.seq,
+            ids.len(),
+            ids.join(", ")
+        )
+    }
+}
+
 /// The parts of an event the gap check needs.
 #[derive(serde::Deserialize)]
 struct EventSeq {
-    event_id: uuid::Uuid,
+    event_id: Uuid,
     producer: limen_audit::Producer,
 }
 
-/// Distinct events and the `seq` values seen per producer.
+/// Distinct events, and the events seen per producer and `seq`.
 #[derive(Default)]
 struct Tally {
-    ids: HashSet<uuid::Uuid>,
-    seqs: BTreeMap<(String, String), BTreeSet<u64>>,
+    ids: HashSet<Uuid>,
+    seqs: BTreeMap<(String, String), BTreeMap<u64, BTreeSet<Uuid>>>,
 }
 
 impl Tally {
@@ -95,29 +128,47 @@ impl Tally {
         self.seqs
             .entry((e.producer.component, e.producer.instance_id))
             .or_default()
-            .insert(e.producer.seq);
+            .entry(e.producer.seq)
+            .or_default()
+            .insert(e.event_id);
         Ok(())
     }
 
     fn gaps(&self) -> Vec<SeqGap> {
         let mut gaps = Vec::new();
         for ((component, instance_id), seqs) in &self.seqs {
-            let mut prev: Option<u64> = None;
-            for &seq in seqs {
-                if let Some(p) = prev
-                    && seq > p + 1
-                {
+            // Every instance starts at 0: anything below the lowest is lost.
+            let mut next = 0;
+            for &seq in seqs.keys() {
+                if seq > next {
                     gaps.push(SeqGap {
                         component: component.clone(),
                         instance_id: instance_id.clone(),
-                        missing_from: p + 1,
+                        missing_from: next,
                         missing_to: seq - 1,
                     });
                 }
-                prev = Some(seq);
+                next = seq + 1;
             }
         }
         gaps
+    }
+
+    fn conflicts(&self) -> Vec<SeqConflict> {
+        let mut out = Vec::new();
+        for ((component, instance_id), seqs) in &self.seqs {
+            for (&seq, ids) in seqs {
+                if ids.len() > 1 {
+                    out.push(SeqConflict {
+                        component: component.clone(),
+                        instance_id: instance_id.clone(),
+                        seq,
+                        event_ids: ids.iter().copied().collect(),
+                    });
+                }
+            }
+        }
+        out
     }
 }
 
@@ -272,6 +323,7 @@ pub async fn verify_bucket(
     }
     report.events = tally.ids.len() as u64;
     report.seq_gaps = tally.gaps();
+    report.seq_conflicts = tally.conflicts();
     Ok(report)
 }
 
@@ -297,10 +349,17 @@ mod tests {
     fn one_missing_seq_is_one_gap_and_duplicates_count_once() {
         let mut t = Tally::default();
         let two = line("p/a", 2);
-        for l in [line("p/a", 1), two.clone(), two, line("p/a", 4)] {
+        for l in [
+            line("p/a", 0),
+            line("p/a", 1),
+            two.clone(),
+            two,
+            line("p/a", 4),
+        ] {
             t.add(&l).expect("event");
         }
-        assert_eq!(t.ids.len(), 3);
+        assert_eq!(t.ids.len(), 4);
+        assert_eq!(t.conflicts(), vec![]);
         assert_eq!(
             t.gaps(),
             vec![SeqGap {
@@ -310,6 +369,38 @@ mod tests {
                 missing_to: 3,
             }]
         );
+    }
+
+    /// `seq` starts at 0 for every instance, so a missing head is a gap too.
+    #[test]
+    fn a_lost_head_is_a_gap_from_zero() {
+        let mut t = Tally::default();
+        for l in [line("p/a", 3), line("p/a", 4)] {
+            t.add(&l).expect("event");
+        }
+        assert_eq!(
+            t.gaps(),
+            vec![SeqGap {
+                component: "proxy".into(),
+                instance_id: "p/a".into(),
+                missing_from: 0,
+                missing_to: 2,
+            }]
+        );
+    }
+
+    /// One producer can't give one `seq` to two events.
+    #[test]
+    fn a_seq_used_by_two_events_is_a_conflict() {
+        let mut t = Tally::default();
+        let (a, b) = (line("p/a", 0), line("p/a", 0));
+        for l in [&a, &b, &a] {
+            t.add(l).expect("event");
+        }
+        let conflicts = t.conflicts();
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!((conflicts[0].seq, conflicts[0].event_ids.len()), (0, 2));
+        assert_eq!(t.gaps(), vec![]);
     }
 
     #[test]

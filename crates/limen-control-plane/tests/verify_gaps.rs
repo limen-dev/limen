@@ -81,7 +81,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
     let signer = EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer");
     let slot = Arc::new(RwLock::new(Some(Arc::new(signer))));
 
-    // Two writers (as after a handoff). Producer proxy-1/a: seq 1, 2, 4 with
+    // Two writers (as after a handoff). Producer proxy-1/a: seq 0, 1, 2, 4 with
     // seq 2 shipped twice (same event, by both writers): one gap, 3..=3.
     // Producer proxy-1/b (the same proxy after a restart: new boot id, seq
     // from 0 again): 0, 1, no gap. Producer worker-1/a: 0, 3, 4, 7 -> 1..=2, 5..=6.
@@ -97,6 +97,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
     ship(
         &a,
         vec![
+            (0, event("proxy", "proxy-1/a", 0)),
             (0, event("proxy", "proxy-1/a", 1)),
             (1, dup.clone()),
             (2, event("proxy", "proxy-1/b", 0)),
@@ -130,8 +131,9 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
         .expect("verify");
     assert!(report.problems.is_empty(), "{:?}", report.problems);
     assert_eq!(report.writers, 2);
-    assert_eq!(report.records, 10, "every line in every batch");
-    assert_eq!(report.events, 9, "the duplicate is counted once");
+    assert_eq!(report.records, 11, "every line in every batch");
+    assert_eq!(report.events, 10, "the duplicate is counted once");
+    assert_eq!(report.seq_conflicts, vec![]);
     let gap = |component: &str, instance_id: &str, from: u64, to: u64| SeqGap {
         component: component.into(),
         instance_id: instance_id.into(),
