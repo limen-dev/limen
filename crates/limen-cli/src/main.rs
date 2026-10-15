@@ -60,6 +60,25 @@ struct Cli {
     command: Command,
 }
 
+/// Where a bot's identity token comes from (ADR-0019).
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum BotMethod {
+    GithubActions,
+    Gitlab,
+    Oidc,
+}
+
+impl BotMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            BotMethod::GithubActions => "github_actions",
+            BotMethod::Gitlab => "gitlab",
+            BotMethod::Oidc => "oidc",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum ColorWhen {
     Auto,
@@ -80,6 +99,27 @@ enum Command {
         /// CA certificate to trust for the proxy. Pinned for later commands.
         #[arg(long)]
         ca_file: Option<PathBuf>,
+        /// Log in as a bot with this CI platform's identity token, instead of
+        /// as a person. In GitHub Actions the token is requested for you.
+        #[arg(long, value_enum, value_name = "METHOD", conflicts_with_all = ["device", "no_browser"])]
+        bot: Option<BotMethod>,
+        /// Which bot, if more than one could match the token.
+        #[arg(long, requires = "bot", value_name = "NAME")]
+        bot_name: Option<String>,
+        /// Read the token from this environment variable (default for gitlab and oidc: LIMEN_ID_TOKEN).
+        #[arg(long, requires = "bot", value_name = "VAR")]
+        token_env: Option<String>,
+        /// Read the token from this file, or `-` for standard input.
+        #[arg(
+            long,
+            requires = "bot",
+            value_name = "FILE",
+            conflicts_with = "token_env"
+        )]
+        token_file: Option<PathBuf>,
+        /// The audience to ask GitHub for. Defaults to the one the control plane expects.
+        #[arg(long, requires = "bot", value_name = "AUD")]
+        audience: Option<String>,
     },
     /// Delete local credentials.
     Logout,
@@ -282,9 +322,30 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.proxy.as_deref();
     match cli.command {
         Command::Login {
+            bot: Some(method),
+            bot_name,
+            token_env,
+            token_file,
+            audience,
+            ca_file,
+            ..
+        } => {
+            commands::bot::run(commands::bot::BotLogin {
+                proxy,
+                method: method.as_str(),
+                bot: bot_name.as_deref(),
+                token_env: token_env.as_deref(),
+                token_file: token_file.as_deref(),
+                audience: audience.as_deref(),
+                ca_file: ca_file.as_deref(),
+            })
+            .await
+        }
+        Command::Login {
             device,
             no_browser,
             ca_file,
+            ..
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
         Command::Logout => commands::logout(proxy),
         Command::Status => commands::status(proxy),
@@ -351,6 +412,48 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn bot_login_options_parse_and_conflict_where_they_should() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["login", "--bot", "github_actions"]).is_ok());
+        assert!(
+            ok(&[
+                "login",
+                "--bot",
+                "gitlab",
+                "--token-env",
+                "CI_TOKEN",
+                "--bot-name",
+                "nightly"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["login", "--bot", "oidc", "--token-file", "-"]).is_ok());
+        // A bot has no browser or device flow, and bot options mean nothing without --bot.
+        assert!(ok(&["login", "--bot", "gitlab", "--device"]).is_err());
+        assert!(ok(&["login", "--token-env", "X"]).is_err());
+        assert!(
+            ok(&[
+                "login",
+                "--bot",
+                "oidc",
+                "--token-env",
+                "X",
+                "--token-file",
+                "f"
+            ])
+            .is_err()
+        );
+        assert!(
+            ok(&["login", "--bot", "circleci"]).is_err(),
+            "unknown methods are refused"
+        );
     }
 
     #[test]

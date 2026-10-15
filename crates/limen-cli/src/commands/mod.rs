@@ -1,6 +1,7 @@
 //! Command implementations.
 
 pub mod admin;
+pub mod bot;
 pub mod login;
 pub mod ssh;
 
