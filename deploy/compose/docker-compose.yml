@@ -60,6 +60,13 @@ services:
     image: limen-fake-datadog:dev
     ports: ["127.0.0.1:8126:8126"]
 
+  # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).
+  # DEVELOPMENT ONLY: it mints any token to anyone who asks.
+  fake-ci-issuer:
+    build: { <<: *limen-build, target: fake-ci-issuer }
+    image: limen-fake-ci-issuer:dev
+    ports: ["127.0.0.1:8130:8130"]
+
   control-plane:
     build: { <<: *limen-build, target: control-plane }
     image: limen-control-plane:dev
@@ -100,6 +107,8 @@ services:
       # The web console, served by the proxy at https://localhost:3443/console/
       LIMEN_CONSOLE_PUBLIC_URL: https://localhost:3443
       LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
+      # Bots (ADR-0019): the dev stack's fake CI issuer is plain http.
+      LIMEN_BOT_ALLOW_INSECURE_ISSUERS: "true"
     ports: ["127.0.0.1:3081:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca

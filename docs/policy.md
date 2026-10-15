@@ -1,6 +1,6 @@
 # Policy reference
 
-Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are three document kinds. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
+Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are four document kinds. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
 
 ## Evaluation
 
@@ -92,3 +92,33 @@ These kinds are accepted by policy, listed by `limen ls` and the console, and te
 | `tcp` | `address` | `tcp: {}` | `limen tcp` (Phase 12) |
 
 Aurora, DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. `web` and `tcp` have no upstream identity to choose, so their grant is access itself (`web: {}`).
+
+## `bot`
+
+Machine identities for CI jobs and automation (ADR-0019, [the guide](guides/bots.md)).
+
+```yaml
+kind: bot
+version: v1
+metadata: { name: deploy-staging, description: optional }
+spec:
+  join:
+    method: github_actions      # github_actions | gitlab | oidc
+    issuer: https://...         # optional for github_actions and gitlab; required for oidc
+    match:                      # every entry must equal a claim of the token exactly
+      repository: acme/infra
+      ref: [refs/heads/main, refs/heads/release]   # a list means "any of these"
+      environment: staging
+  roles: [deployer]
+  max_ttl: 15m                  # at most 1h (the default is 15m); logins don't refresh
+```
+
+The bot logs in as `bot:<name>`. Rules the validator enforces, so a bot can't be written too broadly:
+- `match` is **exact**: no wildcards, anywhere.
+- `github_actions` must match `repository` **and** `ref` or `environment`, never a pull request ref (`refs/pull/…`) or the `pull_request` and `pull_request_target` events.
+- `gitlab` must match `project_path` and `ref` or `environment`, and a matched `ref` also needs `ref_protected: "true"`.
+- `oidc` needs `issuer` and an exact `sub`.
+- `roles` must exist, and can't be built-in (`limen:…`). At most one hour of lifetime.
+- When a token matches more than one bot the login is refused, so an overlap can't pick a winner.
+
+Default issuers: `https://token.actions.githubusercontent.com` for GitHub Actions and `https://gitlab.com` for GitLab (set `issuer` for GitHub Enterprise Server and self-managed GitLab). Examples: [`examples/policy/bots.yaml`](../examples/policy/bots.yaml).

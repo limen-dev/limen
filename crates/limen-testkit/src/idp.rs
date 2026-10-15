@@ -172,7 +172,21 @@ impl MockIdp {
             .await
             .expect("bind mock IdP");
         let addr = listener.local_addr().expect("addr");
-        let issuer = format!("http://{addr}");
+        let idp = Self::new(&format!("http://{addr}"), client_id, addr);
+        let app = idp.router();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        idp
+    }
+
+    /// An issuer that isn't serving yet: `issuer` is the URL clients will
+    /// use, `addr` where it listens. Serve [`router`](Self::router) on it.
+    ///
+    /// # Panics
+    /// If the key can't be generated. Tests and the development stack only.
+    #[must_use]
+    pub fn new(issuer: &str, client_id: &str, addr: SocketAddr) -> Self {
         let pem = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
             .expect("ed25519 key")
             .serialize_pem();
@@ -183,9 +197,24 @@ impl MockIdp {
             )
             .expect("signing key"),
         );
+        Self {
+            issuer: issuer.to_owned(),
+            client_id: client_id.to_owned(),
+            addr,
+            key,
+            browser: Arc::default(),
+        }
+    }
 
-        let jwks = serde_json::to_value(CoreJsonWebKeySet::new(vec![key.as_verification_key()]))
-            .expect("jwks");
+    /// Discovery, the signing keys, and the browser flow's endpoints.
+    ///
+    /// # Panics
+    /// If the keys can't be encoded.
+    pub fn router(&self) -> Router {
+        let issuer = self.issuer.clone();
+        let jwks =
+            serde_json::to_value(CoreJsonWebKeySet::new(vec![self.key.as_verification_key()]))
+                .expect("jwks");
         let discovery = serde_json::json!({
             "issuer": issuer,
             "authorization_endpoint": format!("{issuer}/auth"),
@@ -195,14 +224,7 @@ impl MockIdp {
             "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": ["EdDSA"],
         });
-        let idp = Self {
-            issuer,
-            client_id: client_id.to_owned(),
-            addr,
-            key,
-            browser: Arc::default(),
-        };
-        let app = Router::new()
+        Router::new()
             .route(
                 "/.well-known/openid-configuration",
                 get(move || async move { Json(discovery) }),
@@ -210,11 +232,7 @@ impl MockIdp {
             .route("/keys", get(move || async move { Json(jwks) }))
             .route("/auth", get(browser_auth))
             .route("/token", post(browser_token))
-            .with_state(idp.clone());
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-        idp
+            .with_state(self.clone())
     }
 
     /// Register the console's OIDC client (confidential).

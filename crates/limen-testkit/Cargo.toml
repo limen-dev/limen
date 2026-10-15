@@ -27,5 +27,9 @@ uuid.workspace = true
 name = "fake-datadog"
 path = "src/bin/fake-datadog.rs"
 
+[[bin]]
+name = "fake-ci-issuer"
+path = "src/bin/fake-ci-issuer.rs"
+
 [lints]
 workspace = true

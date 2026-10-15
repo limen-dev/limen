@@ -10,9 +10,10 @@ Open **`https://<your proxy>/console/`** (locally `https://localhost:3443/consol
 | **Resources** | Search and filter by kind. Open a resource to see its labels and, for admins, its target, **which roles grant access**, **which live workers can serve it** (a red *none* means sessions will fail), and its sessions | everyone sees their own; admins see all |
 | **Sessions** | Browse live and past sessions. Open one to **replay the recording** (the control plane verifies its hash first) and, as an admin, **end it** with a reason | everyone sees their own; admins see all |
 | **Users** | See who has signed in and their roles. **Lock** a user (they are signed out, can't log in, and their open sessions end within seconds) or **unlock** them, always with an audited reason | admins |
+| **Bots** | The CI jobs that can log in (from the `bot` documents in policy): what each one matches, its last login and **CI run** (with a link to the run), and its sessions. Lock one from its page, like a person. See [the bots guide](bots.md) | admins |
 | **Workers** | See enrolled proxies and workers and their tunnels. See which **join tokens are still outstanding** (who made them, when they expire; never their values), **create single-use join tokens** (shown once) and **revoke** a component | admins |
 | **Audit trail** | The last 30 days of events (sign-ins, denials, locks, kills, revokes, token creation, policy changes), filterable by event and user. A user's page shows their recent activity. It is a summary: the complete, signed events live in your audit sinks | admins |
-| **Dashboards** | Built-in charts for the last 24 hours, 7 days or 30 days: sessions over time, sign-ins next to denials, busiest resources and people, session length, why access was denied, and admin actions. Drawn by the console itself, nothing to install | admins |
+| **Dashboards** | Built-in charts for the last 24 hours, 7 days or 30 days: sessions over time (people and bots apart), sign-ins next to denials, bot sessions by repository, busiest resources and people, session length, why access was denied, and admin actions. Drawn by the console itself, nothing to install | admins |
 | **Policy** | Browse roles, mappings, and resources as the YAML behind them, and **check a change**: paste YAML, see the diff, nothing is applied | admins |
 
 A few things worth knowing:

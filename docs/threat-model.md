@@ -116,6 +116,20 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in the console's audit trail | The `audit_events` table stores only a fixed list of summary fields (never statements, claims, or payloads), is readable by admins only, and is trimmed after 30 days. The sinks remain the record |
 | S: a stolen cookie lives longer now that sign-ins last 8 hours (A-console) | Lock, kill and every-request lock checks still end it at once; the lifetime is configurable (`LIMEN_CONSOLE_SESSION_TTL`) and capped by the maximum certificate lifetime. Limit: no device binding |
 
+### TB8: CI platform ↔ control plane (bot login, ADR-0019)
+| Threat | Mitigation |
+|---|---|
+| S: someone else's token (another repository, a fork's pull request, another branch) logs in as a bot | Exact claim matching with no wildcards; the validator refuses a repository alone, pull request refs and events, an unprotected GitLab ref, and `oidc` rules without an exact `sub`; a token matching two bots logs nobody in |
+| S: a forged token, or one for another audience | Signature checked against the issuer's published keys (RS256, ES256, EdDSA only); `aud` must be the control plane's bot audience; `exp` honoured; `iat` required and no older than 15 minutes |
+| S: the control plane is tricked into fetching keys from an attacker's issuer (SSRF) | Only issuers that a `bot` document names are contacted, chosen from the token's *unverified* `iss` against that allow-list; redirects are off; plain `http` issuers are refused unless the development flag is set |
+| S/R: a leaked or intercepted token is reused | One login per token (its `jti`, or its hash, is recorded until it expires); a stolen, still-unused token works until it expires. Limit: a token minted for a job can be used by whoever holds it first; the short lifetime and the exact match narrow that |
+| E: a person impersonates a bot (or the reverse) | `bot:` names are reserved: a person whose IdP name starts with it is refused; the certificate marker and the prefix must agree at issuance and at every verification; bot certificates can't carry built-in roles (the validator refuses them) |
+| T: a bot keeps working after the repository is compromised | Lock works by name (login refused, open sessions end); credentials last at most an hour and never refresh; sessions are recorded |
+| R: bot actions can't be tied to a run | `auth.login` and `session.start` carry the CI run (repository, workflow, run id, commit, ref, who triggered it); denied logins carry the refused run; every session and command event carries `actor_type` |
+| I: tokens in logs or the audit trail | Tokens are never logged, audited, or placed in certificates; only a fixed list of claims (the "CI facts") is kept, clipped and stripped of control characters; the Phase 4 demo checks the audit file and the service logs for the token and its signature |
+| D: login flooding | The same per-IP limit as people's logins (30 a minute, bursts of 10) |
+| Limit | The CI platform is trusted for what its tokens claim. Everything here is verified against a stand-in issuer, not real GitHub or GitLab tokens |
+
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|
