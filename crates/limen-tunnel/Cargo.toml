@@ -16,6 +16,7 @@ http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 prost.workspace = true
+rand.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
 thiserror.workspace = true
@@ -32,6 +33,10 @@ limen-proto.workspace = true
 rcgen.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tokio-stream.workspace = true
+
+[features]
+# Lets tests make a name resolve to chosen addresses (`connect::set_test_resolution`).
+test-hooks = []
 
 [lints]
 workspace = true

@@ -3125,6 +3125,7 @@ dependencies = [
  "limen-core",
  "limen-proto",
  "prost",
+ "rand 0.10.3",
  "rcgen",
  "rustls",
  "rustls-pki-types",
