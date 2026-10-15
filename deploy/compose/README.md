@@ -23,20 +23,16 @@ The CA key *and certificate* live in the Docker volume `limen-dev-ca`, which `do
 You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`.
 
 ```sh
-deploy/compose/demo-phase1.sh        # builds everything, resets the stack, checks every Phase 1 criterion
+deploy/compose/up.sh                 # builds and starts the stack, waits until it answers, exports the CA
+deploy/compose/up.sh --reset         # the same, with a fresh database (the CA stays)
+deploy/compose/demo-phase1.sh        # resets the stack and checks every Phase 1 criterion
 ```
 
-Or step by step:
+`up.sh` creates the CA volume (`limen-dev-ca`) for you if it's missing. Then build the CLI and log in with the exported CA:
 
 ```sh
-docker volume create limen-dev-ca   # the CA's home (once). The demos do this for you
-docker compose -f deploy/compose/docker-compose.yml up -d --build
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
-
-# The proxy's certificate comes from the Limen internal CA. Pin it once.
-mkdir -p deploy/compose/.state
-docker compose -f deploy/compose/docker-compose.yml cp \
-  control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
+# the proxy's certificate comes from the Limen internal CA (deploy/compose/.state/internal-ca.pem)
 
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 # A browser opens on Dex. Log in as admin@example.com / password.

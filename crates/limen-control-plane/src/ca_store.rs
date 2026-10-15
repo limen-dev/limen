@@ -111,7 +111,16 @@ async fn load_x509(
         .execute(&mut *tx)
         .await?;
     let ca = if let Some(pem) = db::ca_cert(&mut tx, purpose.as_str(), key_ref).await? {
-        CertificateAuthority::from_existing(purpose, signer, &pem)?
+        CertificateAuthority::from_existing(purpose, signer, &pem).map_err(|error| {
+            if cert_file.is_some() {
+                // A dev stack from before the limen-dev-ca volume: its key is gone.
+                anyhow::anyhow!(
+                    "{error}. This dev database was created with a different CA key; run `docker compose -f deploy/compose/docker-compose.yml down -v` once (or deploy/compose/up.sh --reset)"
+                )
+            } else {
+                error.into()
+            }
+        })?
     } else if let Some(ca) = cert_file
         .as_deref()
         .and_then(|path| restore_cert(path, purpose, &signer))
@@ -161,7 +170,10 @@ fn keep_cert(path: &Path, pem: &str) {
     if std::fs::read_to_string(path).is_ok_and(|saved| saved == pem) {
         return;
     }
-    if let Err(error) = std::fs::write(path, pem) {
+    // Write a temp file and rename it, so a crash can't leave a half-written PEM.
+    let tmp = path.with_extension("crt.tmp");
+    let saved = std::fs::write(&tmp, pem).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(error) = saved {
         tracing::warn!(path = %path.display(), %error, "couldn't save the CA certificate next to its key");
     }
 }

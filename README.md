@@ -121,13 +121,11 @@ Behind both: short-lived certificates instead of keys and passwords, deny-by-def
 You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Everything below runs on your machine against local stand-ins.
 
 ```sh
-# 1. Start the stack: control plane, proxy, worker, Postgres, Dex (the identity provider), a test SSH host
-docker compose -f deploy/compose/docker-compose.yml up -d --build
+# 1. Start the stack (control plane, proxy, worker, Postgres, Dex, a test SSH host) and export its CA
+deploy/compose/up.sh
 
-# 2. Build the CLI and trust the dev stack's CA once
+# 2. Build the CLI
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
-mkdir -p deploy/compose/.state
-docker compose -f deploy/compose/docker-compose.yml cp control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
 
 # 3. Sign in as the dev admin, admin@example.com (password: "password"), then load the example policy
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # opens your browser on Dex
