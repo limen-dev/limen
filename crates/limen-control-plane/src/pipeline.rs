@@ -1,8 +1,9 @@
 //! The control plane end of the audit pipeline (ADR-0009): its spool, the
 //! sinks that drain it, and where session recordings are stored.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -97,6 +98,28 @@ impl RecordingStore {
     }
 }
 
+/// What a drain left behind: records not yet shipped, per consumer (every
+/// consumer is listed, zero included).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrainReport {
+    pub pending: BTreeMap<String, u64>,
+}
+
+impl DrainReport {
+    /// Every sink has everything.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.pending.values().all(|n| *n == 0)
+    }
+}
+
+async fn all_done(tasks: &mut [tokio::task::JoinHandle<()>]) {
+    futures::future::join_all(tasks.iter_mut()).await;
+}
+
+/// How long consumers get to notice the deadline and stop.
+const DEADLINE_GRACE: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub spool: Spool,
@@ -104,6 +127,12 @@ pub struct Pipeline {
     s3: Option<S3Sink>,
     datadog: Option<DatadogSink>,
     config: Arc<Config>,
+    names: Arc<[String]>,
+    /// Consumers stop shipping once empty when this flips.
+    stop: Arc<watch::Sender<bool>>,
+    /// Consumers give up immediately when this flips.
+    deadline: Arc<watch::Sender<bool>>,
+    tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Pipeline {
@@ -183,34 +212,49 @@ impl Pipeline {
             s3,
             datadog,
             config: Arc::clone(config),
+            names: consumers.iter().map(|c| (*c).to_owned()).collect(),
+            stop: Arc::new(watch::channel(false).0),
+            deadline: Arc::new(watch::channel(false).0),
+            tasks: Arc::default(),
         })
     }
 
-    /// Start every configured sink.
-    pub fn start_sinks(&self, db: &crate::db::Db, shutdown: &watch::Receiver<bool>) {
-        let db = db.clone();
-        tokio::spawn(run_consumer(
+    fn spawn_consumer<F, Fut>(&self, config: ConsumerConfig, send: F)
+    where
+        F: Fn(Vec<(u64, Vec<u8>)>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<(), ShipError>> + Send + 'static,
+    {
+        let task = tokio::spawn(run_consumer(
             self.spool.clone(),
+            config,
+            send,
+            self.stop.subscribe(),
+            self.deadline.subscribe(),
+        ));
+        self.tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(task);
+    }
+
+    /// Start every configured sink. They run until [`Pipeline::drain`].
+    pub fn start_sinks(&self, db: &crate::db::Db) {
+        let db = db.clone();
+        self.spawn_consumer(
             ConsumerConfig {
                 name: CONSOLE.into(),
                 batch_max: 500,
                 linger: Duration::from_millis(200),
             },
             move |batch| project(db.clone(), batch),
-            shutdown.clone(),
-        ));
+        );
         if let Some(path) = self.config.audit_file.clone() {
             let consumer = ConsumerConfig {
                 name: JSONL.into(),
                 batch_max: 500,
                 linger: Duration::ZERO,
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| write_jsonl(path.clone(), batch),
-                shutdown.clone(),
-            ));
+            self.spawn_consumer(consumer, move |batch| write_jsonl(path.clone(), batch));
         }
         if let Some(sink) = self.s3.clone() {
             let consumer = ConsumerConfig {
@@ -218,15 +262,10 @@ impl Pipeline {
                 batch_max: 10_000,
                 linger: self.config.audit_s3_flush,
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| {
-                    let sink = sink.clone();
-                    async move { sink.ship(batch).await }
-                },
-                shutdown.clone(),
-            ));
+            self.spawn_consumer(consumer, move |batch| {
+                let sink = sink.clone();
+                async move { sink.ship(batch).await }
+            });
         }
         if let Some(sink) = self.datadog.clone() {
             let consumer = ConsumerConfig {
@@ -234,16 +273,44 @@ impl Pipeline {
                 batch_max: 1000,
                 linger: Duration::from_secs(1),
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| {
-                    let sink = sink.clone();
-                    async move { sink.ship(batch).await }
-                },
-                shutdown.clone(),
-            ));
+            self.spawn_consumer(consumer, move |batch| {
+                let sink = sink.clone();
+                async move { sink.ship(batch).await }
+            });
         }
+    }
+
+    /// Ship what is spooled to every sink, then stop them. Gives up on any
+    /// sink still behind after `deadline`, abandoning its in-flight send.
+    pub async fn drain(&self, deadline: Duration) -> DrainReport {
+        let _ = self.stop.send(true);
+        let mut tasks = std::mem::take(
+            &mut *self
+                .tasks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if tokio::time::timeout(deadline, all_done(&mut tasks))
+            .await
+            .is_err()
+        {
+            tracing::warn!("audit drain deadline reached; giving up on the remaining records");
+            let _ = self.deadline.send(true);
+            if tokio::time::timeout(DEADLINE_GRACE, all_done(&mut tasks))
+                .await
+                .is_err()
+            {
+                for t in &tasks {
+                    t.abort();
+                }
+            }
+        }
+        let pending = self
+            .names
+            .iter()
+            .map(|n| (n.clone(), self.spool.pending(n)))
+            .collect();
+        DrainReport { pending }
     }
 }
 

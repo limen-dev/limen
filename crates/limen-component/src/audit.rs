@@ -60,6 +60,8 @@ where
                     .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
             }
         },
+        // Proxies and workers stop at once; the deadline is the shutdown.
+        shutdown.clone(),
         shutdown,
     )
     .await;

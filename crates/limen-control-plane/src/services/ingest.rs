@@ -34,6 +34,11 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        if self.0.draining.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Status::unavailable(
+                "this control plane is shutting down; try another replica",
+            ));
+        }
         let caller = caller::resolve(&request, &self.0.cas)?;
         let component = caller.component()?.clone();
         let events = request.into_inner().events;

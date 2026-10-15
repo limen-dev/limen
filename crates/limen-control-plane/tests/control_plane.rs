@@ -595,3 +595,39 @@ async fn ingest_accepts_own_events_and_rejects_forgery_and_bad_recordings() {
         .expect_err("proxy upload");
     assert_eq!(err.code(), Code::PermissionDenied);
 }
+
+/// Shutdown ships the spool: after `drain`, every sink has every record and
+/// the report says so.
+#[tokio::test]
+async fn drain_ships_the_spool_to_every_sink() {
+    let Some(h) = common::Harness::start().await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let before = h.audit_events().await.len();
+    for i in 0..40 {
+        let event = limen_audit::Event::new(
+            limen_audit::EventKind::SessionRecording,
+            limen_audit::Producer {
+                component: "control-plane".into(),
+                instance_id: "cp-test".into(),
+                seq: i,
+            },
+            serde_json::json!({ "n": i }),
+        );
+        h.state
+            .pipeline
+            .spool
+            .append(&serde_json::to_vec(&event).expect("json"))
+            .await
+            .expect("append");
+    }
+    let report = h
+        .state
+        .pipeline
+        .drain(std::time::Duration::from_secs(10))
+        .await;
+    assert!(report.is_clean(), "left behind: {:?}", report.pending);
+    let text = std::fs::read_to_string(&h.audit_file).expect("audit file");
+    assert!(text.lines().count() >= before + 40);
+}

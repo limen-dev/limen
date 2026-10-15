@@ -37,16 +37,27 @@ pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
     }
 }
 
-/// Keep this replica's registry row alive.
-pub async fn replica_heartbeat(state: AppState, mut shutdown: watch::Receiver<bool>) {
+/// Keep this replica's registry row alive. If the id was taken over by
+/// another process, this replica has lost it: shut down via `stop`.
+pub async fn replica_heartbeat(
+    state: AppState,
+    mut done: watch::Receiver<bool>,
+    stop: std::sync::Arc<watch::Sender<bool>>,
+) {
     let mut tick = tokio::time::interval(Duration::from_secs(crate::replicas::HEARTBEAT_SECS));
     loop {
         tokio::select! {
             _ = tick.tick() => {}
-            _ = shutdown.changed() => return,
+            _ = done.changed() => return,
         }
-        if let Err(e) = crate::replicas::heartbeat(&state.db, &state.config.id).await {
-            tracing::warn!(error = %e, "replica heartbeat failed");
+        match crate::replicas::heartbeat(&state.db, &state.registration).await {
+            Ok(()) => {}
+            Err(crate::replicas::HeartbeatError::Lost) => {
+                tracing::error!(id = %state.registration.id, "another process took over this replica id; shutting down");
+                let _ = stop.send(true);
+                return;
+            }
+            Err(e) => tracing::warn!(error = %e, "replica heartbeat failed"),
         }
     }
 }

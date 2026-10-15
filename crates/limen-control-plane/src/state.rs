@@ -29,6 +29,10 @@ pub struct AppState {
     /// Present when `--console-public-url` is set.
     pub console: Option<crate::console::Console>,
     pub limits: Arc<Limits>,
+    /// Proof that this process owns its row in the replica registry.
+    pub registration: crate::replicas::Registration,
+    /// Set once shutdown starts: not ready, and `Ingest` is refused.
+    pub draining: Arc<std::sync::atomic::AtomicBool>,
     /// Signs policy snapshots with this replica's own (rotating) key. Set
     /// once the server certificate is issued.
     pub snapshot_signer: Arc<RwLock<Option<Arc<limen_session::envelope::EnvelopeSigner>>>>,

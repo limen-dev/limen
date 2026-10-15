@@ -74,7 +74,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     policy.refresh(&db).await.context("loading policy")?;
     // Claim the id before the pipeline opens the spool, so a duplicate
     // replica never touches it.
-    replicas::register(&db, &config.id, &config.ingest_url(), config.spool_mode)
+    let registration = replicas::register(&db, &config.id, &config.ingest_url(), config.spool_mode)
         .await
         .context("registering this replica")?;
     let config = Arc::new(config);
@@ -93,6 +93,8 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         policy,
         audit,
         limits: Arc::new(Limits::default()),
+        registration,
+        draining: Arc::default(),
         snapshot_signer,
     })
 }
@@ -135,26 +137,82 @@ fn build_console(
     Ok(Some(console::Console { origin, oidc }))
 }
 
-/// Run until `shutdown` flips to true.
+/// Share of the drain timeout kept back for handing the spool to a peer.
+const HANDOFF_RESERVE_PERCENT: u32 = 20;
+
+/// Time for shipping the spool: the drain timeout less the handoff reserve.
+fn ship_budget(drain_timeout: std::time::Duration) -> std::time::Duration {
+    drain_timeout * (100 - HANDOFF_RESERVE_PERCENT) / 100
+}
+
+/// Run until `shutdown` flips to true, then wind down in order: stop being
+/// ready and refuse new audit ingest, finish in-flight calls, ship the spool.
 pub async fn run(
     state: AppState,
     api: TcpListener,
-    shutdown: watch::Receiver<bool>,
+    mut shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    state.pipeline.start_sinks(&state.db, &shutdown);
-    tokio::spawn(jobs::policy_refresh(state.clone(), shutdown.clone()));
-    tokio::spawn(jobs::cleanup(state.clone(), shutdown.clone()));
-    tokio::spawn(jobs::replica_heartbeat(state.clone(), shutdown.clone()));
+    // Our own stop signal: the outside world or a lost replica id flips it.
+    let (stop_tx, stop) = watch::channel(false);
+    let stop_tx = Arc::new(stop_tx);
+    let forward = {
+        let stop_tx = Arc::clone(&stop_tx);
+        tokio::spawn(async move {
+            // A dropped sender counts as shutdown, too.
+            let _ = shutdown.wait_for(|stop| *stop).await;
+            let _ = stop_tx.send(true);
+        })
+    };
+    // The heartbeat outlives the API drain, or the row would go stale while
+    // the spool ships.
+    let (heartbeat_stop_tx, heartbeat_stop) = watch::channel(false);
+    state.pipeline.start_sinks(&state.db);
+    tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
+    tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
+    let heartbeat = tokio::spawn(jobs::replica_heartbeat(
+        state.clone(),
+        heartbeat_stop,
+        Arc::clone(&stop_tx),
+    ));
     let health = tokio::spawn(server::serve_health(
         state.clone(),
         state.config.admin_listen,
-        shutdown.clone(),
+        stop.clone(),
     ));
-    let served = server::serve_api(state.clone(), api, shutdown).await;
+    let flag = Arc::clone(&state.draining);
+    let mut draining = stop.clone();
+    tokio::spawn(async move {
+        let _ = draining.wait_for(|stop| *stop).await;
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    let served = server::serve_api(state.clone(), api, stop).await;
+    let report = state
+        .pipeline
+        .drain(ship_budget(state.config.drain_timeout))
+        .await;
+    if report.is_clean() {
+        tracing::info!("audit spool shipped to every sink");
+    } else {
+        tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline");
+    }
+    let _ = heartbeat_stop_tx.send(true);
+    let _ = heartbeat.await;
     health.abort();
-    if let Err(e) = replicas::deregister(&state.db, &state.config.id).await {
+    forward.abort();
+    if let Err(e) = replicas::deregister(&state.db, &state.registration).await {
         tracing::warn!(error = %e, "could not deregister this replica; its row expires");
     }
     served?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ship_budget_keeps_a_fifth_back() {
+        assert_eq!(
+            super::ship_budget(std::time::Duration::from_secs(30)),
+            std::time::Duration::from_secs(24)
+        );
+    }
 }

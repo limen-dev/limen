@@ -212,7 +212,11 @@ pub async fn serve_health(
             "/readyz",
             get(move || {
                 let db = state.db.clone();
+                let draining = Arc::clone(&state.draining);
                 async move {
+                    if draining.load(Ordering::SeqCst) {
+                        return (StatusCode::SERVICE_UNAVAILABLE, "shutting down");
+                    }
                     match crate::db::ping(&db).await {
                         Ok(()) => (StatusCode::OK, "ready"),
                         Err(e) => {

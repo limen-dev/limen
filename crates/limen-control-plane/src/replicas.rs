@@ -46,37 +46,70 @@ pub enum RegisterError {
     Db(#[from] sqlx::Error),
 }
 
+/// Proof that this process owns a registry row. `heartbeat` and
+/// `deregister` only touch the row while the nonce still matches.
+#[derive(Debug, Clone)]
+pub struct Registration {
+    pub id: String,
+    nonce: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum HeartbeatError {
+    #[error("this replica's id was taken over by another process")]
+    Lost,
+    #[error("replica registry: {0}")]
+    Db(#[from] sqlx::Error),
+}
+
 /// Claim `id`. Fails if a live row has it; takes over a stale one.
 pub async fn register(
     db: &Db,
     id: &str,
     ingest_url: &str,
     mode: SpoolMode,
-) -> Result<(), RegisterError> {
+) -> Result<Registration, RegisterError> {
+    let nonce = format!("{:032x}", rand::random::<u128>());
     let claimed = sqlx::query(
-        "INSERT INTO control_plane_replicas (id, ingest_url, spool_mode) VALUES ($1, $2, $3) \
+        "INSERT INTO control_plane_replicas (id, ingest_url, spool_mode, owner_nonce) \
+         VALUES ($1, $2, $3, $4) \
          ON CONFLICT (id) DO UPDATE SET ingest_url = EXCLUDED.ingest_url, \
-         spool_mode = EXCLUDED.spool_mode, started_at = now(), heartbeat_at = now() \
+         spool_mode = EXCLUDED.spool_mode, owner_nonce = EXCLUDED.owner_nonce, \
+         started_at = now(), heartbeat_at = now() \
          WHERE control_plane_replicas.heartbeat_at < now() - interval '15 seconds'",
     )
     .bind(id)
     .bind(ingest_url)
     .bind(mode.as_str())
+    .bind(&nonce)
     .execute(db)
     .await?
     .rows_affected();
     if claimed == 0 {
         return Err(RegisterError::IdInUse(id.to_owned()));
     }
-    Ok(())
+    Ok(Registration {
+        id: id.to_owned(),
+        nonce,
+    })
 }
 
-pub async fn heartbeat(db: &Db, id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE control_plane_replicas SET heartbeat_at = now() WHERE id = $1")
-        .bind(id)
-        .execute(db)
-        .await
-        .map(|_| ())
+/// Refresh the row. [`HeartbeatError::Lost`] means someone else owns the id
+/// now (or the row is gone): this replica must stop.
+pub async fn heartbeat(db: &Db, me: &Registration) -> Result<(), HeartbeatError> {
+    let touched = sqlx::query(
+        "UPDATE control_plane_replicas SET heartbeat_at = now() \
+         WHERE id = $1 AND owner_nonce = $2",
+    )
+    .bind(&me.id)
+    .bind(&me.nonce)
+    .execute(db)
+    .await?
+    .rows_affected();
+    if touched == 0 {
+        return Err(HeartbeatError::Lost);
+    }
+    Ok(())
 }
 
 /// Live replicas other than `except_id`, oldest first.
@@ -91,9 +124,11 @@ pub async fn live_peers(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::
     .await
 }
 
-pub async fn deregister(db: &Db, id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM control_plane_replicas WHERE id = $1")
-        .bind(id)
+/// Delete this replica's row, unless the id has since been taken over.
+pub async fn deregister(db: &Db, me: &Registration) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM control_plane_replicas WHERE id = $1 AND owner_nonce = $2")
+        .bind(&me.id)
+        .bind(&me.nonce)
         .execute(db)
         .await
         .map(|_| ())
@@ -131,14 +166,14 @@ mod tests {
     async fn second_register_with_live_id_is_refused() {
         let Some(db) = db().await else { return };
         let id = uid("live");
-        register(&db, &id, "https://a:1", SpoolMode::Durable)
+        let first = register(&db, &id, "https://a:1", SpoolMode::Durable)
             .await
             .expect("first");
         let err = register(&db, &id, "https://b:1", SpoolMode::Durable)
             .await
             .expect_err("second must fail");
         assert!(matches!(err, RegisterError::IdInUse(ref i) if *i == id));
-        deregister(&db, &id).await.expect("cleanup");
+        deregister(&db, &first).await.expect("cleanup");
     }
 
     #[tokio::test]
@@ -149,7 +184,7 @@ mod tests {
             .await
             .expect("first");
         age(&db, &id).await;
-        register(&db, &id, "https://new:1", SpoolMode::Ephemeral)
+        let second = register(&db, &id, "https://new:1", SpoolMode::Ephemeral)
             .await
             .expect("takeover");
         let (url, mode): (String, String) = sqlx::query_as(
@@ -163,21 +198,24 @@ mod tests {
             (url.as_str(), mode.as_str()),
             ("https://new:1", "ephemeral")
         );
-        deregister(&db, &id).await.expect("cleanup");
+        deregister(&db, &second).await.expect("cleanup");
     }
 
     #[tokio::test]
     async fn live_peers_excludes_self_and_stale() {
         let Some(db) = db().await else { return };
         let (me, peer, dead) = (uid("me"), uid("peer"), uid("dead"));
+        let mut regs = Vec::new();
         for (id, url) in [
             (&me, "https://me:1"),
             (&peer, "https://peer:1"),
             (&dead, "https://dead:1"),
         ] {
-            register(&db, id, url, SpoolMode::Durable)
-                .await
-                .expect("register");
+            regs.push(
+                register(&db, id, url, SpoolMode::Durable)
+                    .await
+                    .expect("register"),
+            );
         }
         age(&db, &dead).await;
         let peers = live_peers(&db, &me).await.expect("peers");
@@ -187,8 +225,8 @@ mod tests {
                 .any(|r| r.id == peer && r.ingest_url == "https://peer:1")
         );
         assert!(!peers.iter().any(|r| r.id == me || r.id == dead));
-        for id in [&me, &peer, &dead] {
-            deregister(&db, id).await.expect("cleanup");
+        for r in &regs {
+            deregister(&db, r).await.expect("cleanup");
         }
     }
 
@@ -196,13 +234,116 @@ mod tests {
     async fn deregister_removes_row() {
         let Some(db) = db().await else { return };
         let id = uid("gone");
-        register(&db, &id, "https://a:1", SpoolMode::Durable)
+        let me = register(&db, &id, "https://a:1", SpoolMode::Durable)
             .await
             .expect("register");
-        deregister(&db, &id).await.expect("deregister");
-        register(&db, &id, "https://a:1", SpoolMode::Durable)
+        deregister(&db, &me).await.expect("deregister");
+        let again = register(&db, &id, "https://a:1", SpoolMode::Durable)
             .await
             .expect("id is free again");
-        deregister(&db, &id).await.expect("cleanup");
+        deregister(&db, &again).await.expect("cleanup");
+    }
+
+    async fn set_age(db: &Db, id: &str, secs: i32) {
+        sqlx::query(
+            "UPDATE control_plane_replicas \
+             SET heartbeat_at = now() - make_interval(secs => $2) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(f64::from(secs))
+        .execute(db)
+        .await
+        .expect("set age");
+    }
+
+    #[tokio::test]
+    async fn liveness_boundary_is_between_14_and_16_seconds() {
+        let Some(db) = db().await else { return };
+        let id = uid("edge");
+        let first = register(&db, &id, "https://a:1", SpoolMode::Durable)
+            .await
+            .expect("first");
+        set_age(&db, &id, 14).await;
+        assert!(
+            register(&db, &id, "https://b:1", SpoolMode::Durable)
+                .await
+                .is_err(),
+            "a 14 s old heartbeat is still live"
+        );
+        assert!(
+            live_peers(&db, "nobody")
+                .await
+                .expect("peers")
+                .iter()
+                .any(|r| r.id == id)
+        );
+        set_age(&db, &id, 16).await;
+        assert!(
+            !live_peers(&db, "nobody")
+                .await
+                .expect("peers")
+                .iter()
+                .any(|r| r.id == id)
+        );
+        let second = register(&db, &id, "https://b:1", SpoolMode::Durable)
+            .await
+            .expect("a 16 s old heartbeat is dead");
+        deregister(&db, &first).await.expect("no-op");
+        deregister(&db, &second).await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn stale_heartbeat_after_takeover_is_refused() {
+        let Some(db) = db().await else { return };
+        let id = uid("takeover");
+        let old = register(&db, &id, "https://old:1", SpoolMode::Durable)
+            .await
+            .expect("first");
+        age(&db, &id).await;
+        let new = register(&db, &id, "https://new:1", SpoolMode::Durable)
+            .await
+            .expect("takeover");
+        // The stalled old owner wakes up.
+        assert!(matches!(
+            heartbeat(&db, &old).await,
+            Err(HeartbeatError::Lost)
+        ));
+        age(&db, &id).await;
+        assert!(matches!(
+            heartbeat(&db, &old).await,
+            Err(HeartbeatError::Lost)
+        ));
+        let (stale,): (bool,) = sqlx::query_as(
+            "SELECT heartbeat_at < now() - interval '15 seconds' \
+             FROM control_plane_replicas WHERE id = $1",
+        )
+        .bind(&id)
+        .fetch_one(&db)
+        .await
+        .expect("row");
+        assert!(stale, "the old owner must not refresh the new owner's row");
+        heartbeat(&db, &new).await.expect("the new owner can");
+        deregister(&db, &new).await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn stale_deregister_does_not_delete_the_new_owner() {
+        let Some(db) = db().await else { return };
+        let id = uid("keep");
+        let old = register(&db, &id, "https://old:1", SpoolMode::Durable)
+            .await
+            .expect("first");
+        age(&db, &id).await;
+        let new = register(&db, &id, "https://new:1", SpoolMode::Durable)
+            .await
+            .expect("takeover");
+        deregister(&db, &old).await.expect("a no-op");
+        assert!(
+            register(&db, &id, "https://x:1", SpoolMode::Durable)
+                .await
+                .is_err(),
+            "the new owner's row must survive"
+        );
+        deregister(&db, &new).await.expect("cleanup");
     }
 }
