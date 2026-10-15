@@ -83,6 +83,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/sessions/{id}", get(pages::session_detail))
         .route("/console/sessions/{id}/recording", get(pages::recording))
         .route("/console/sessions/{id}/kill", post(pages::kill_session))
+        .route("/console/bots", get(pages::bots))
         .route("/console/users", get(pages::users))
         .route("/console/users/{name}", get(pages::user_detail))
         .route("/console/users/{name}/lock", post(pages::lock_user))

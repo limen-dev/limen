@@ -31,6 +31,14 @@
 <div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg><div>{{ s.recording_note }}</div></div>
 {% endif %}
 
+{% if s.bot %}
+<h2>The CI run</h2>
+<div class="card facts-card"><table class="facts">
+  {% for f in s.ci %}<tr><th>{{ f.key }}</th><td class="mono">{{ f.value }}</td></tr>{% endfor %}
+  {% if let Some(u) = s.run_url %}<tr><th>Run</th><td><a href="{{ u }}" target="_blank" rel="noopener noreferrer">Open the run</a></td></tr>{% endif %}
+</table></div>
+{% endif %}
+
 <h2>Details</h2>
 <div class="card facts-card"><table class="facts">
   <tr><th>User</th><td>{% if chrome.is_admin %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>

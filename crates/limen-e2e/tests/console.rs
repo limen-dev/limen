@@ -8,6 +8,7 @@ use std::time::Duration;
 use limen_e2e::{Deployment, eventually, ssh_client};
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
+use limen_testkit::idp::WorkloadToken;
 use limen_testkit::ssh_target::SshTarget;
 use limen_testkit::users::{ADMIN, ADMIN_ENC, DEVELOPER, DEVELOPER_ENC, GUEST};
 
@@ -161,7 +162,7 @@ async fn wait_until(what: &str, secs: u64, mut check: impl AsyncFnMut() -> bool)
     panic!("timed out waiting for {what}");
 }
 
-fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
+fn policy(target_addr: &str, host_key: &str, issuer: &str) -> Vec<PolicySource> {
     let yaml = format!(
         r#"
 kind: role
@@ -171,6 +172,16 @@ spec:
   allow:
     - resources: {{ kind: [ssh], labels: {{ env: [test] }} }}
       ssh: {{ logins: [ubuntu] }}
+---
+kind: bot
+version: v1
+metadata: {{ name: deploy-e2e, description: "the e2e deploy job" }}
+spec:
+  join:
+    method: github_actions
+    issuer: {issuer}
+    match: {{ repository: acme/infra, ref: refs/heads/main }}
+  roles: [ops]
 ---
 kind: role_mapping
 version: v1
@@ -223,7 +234,7 @@ async fn console_end_to_end() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_cli)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
-            sources: policy(&target.addr.to_string(), &target.host_key),
+            sources: policy(&target.addr.to_string(), &target.host_key, &d.idp.issuer),
             dry_run: false,
             source_ref: String::new(),
         })
@@ -412,6 +423,7 @@ async fn console_end_to_end() {
     assert!(!page.body.contains(">Users<"), "no admin navigation");
     assert!(!page.body.contains("active sessions"), "no admin stats");
     for path in [
+        "/console/bots",
         "/console/users",
         "/console/workers",
         "/console/policy",
@@ -632,6 +644,118 @@ async fn console_end_to_end() {
         .await;
     assert_eq!(page.status, 303);
     assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
+
+    // ---- a bot: a CI job's session, with the run behind it ----------------------------
+    let bot_token = d.idp.workload_token(&WorkloadToken::github(
+        "acme/infra",
+        "refs/heads/main",
+        None,
+    ));
+    let bot_cli = d
+        .bot_login("github_actions", bot_token)
+        .await
+        .expect("bot login");
+    let conn = ssh_client::connect(
+        &proxy_addr,
+        &ca_pem,
+        bot_cli.clone(),
+        &host_ca,
+        "web-1",
+        "ubuntu",
+    )
+    .await
+    .expect("the bot's ssh");
+    let (out, _) = ssh_client::exec(&conn, "whoami").await.expect("exec");
+    assert!(out.contains("login=ubuntu"));
+    drop(conn);
+    let bots_page = admin_user.get("/console/bots").await;
+    assert_eq!(bots_page.status, 200);
+    for needle in [
+        "bot:deploy-e2e",
+        "acme/infra",
+        "github_actions",
+        "the e2e deploy job",
+        "424242",
+    ] {
+        assert!(bots_page.body.contains(needle), "Bots page lacks {needle}");
+    }
+    assert!(
+        bots_page
+            .body
+            .contains("https://github.com/acme/infra/actions/runs/424242")
+    );
+    let people_page = admin_user.get("/console/users").await;
+    assert!(
+        !people_page.body.contains("bot%3Adeploy-e2e")
+            && !people_page.body.contains("bot:deploy-e2e"),
+        "bots are not listed among people"
+    );
+    wait_until("the bot's session in the admin view", 20, async || {
+        admin_user
+            .get("/console/sessions")
+            .await
+            .body
+            .contains("bot:deploy-e2e")
+    })
+    .await;
+    let sessions = admin_user
+        .get("/console/sessions?user=bot%3Adeploy-e2e")
+        .await;
+    assert!(
+        sessions.body.contains("class=\"pill bot\""),
+        "marked as a bot"
+    );
+    let bot_session = sessions
+        .body
+        .split("/console/sessions/")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect("a session link")
+        .to_owned();
+    let detail = admin_user
+        .get(&format!("/console/sessions/{bot_session}"))
+        .await;
+    assert_eq!(detail.status, 200);
+    assert!(detail.body.contains("The CI run") && detail.body.contains("acme/infra"));
+    let events = read_jsonl(&d);
+    let start = events
+        .iter()
+        .find(|e| e["kind"] == "session.start" && e["user"] == "bot:deploy-e2e")
+        .expect("the bot's session.start");
+    assert_eq!(start["data"]["actor_type"], "bot");
+    assert_eq!(start["data"]["ci"]["repository"], "acme/infra");
+    let people_start = events
+        .iter()
+        .find(|e| e["kind"] == "session.start" && e["user"] == DEVELOPER)
+        .expect("a person's session.start");
+    assert_eq!(people_start["data"]["actor_type"], "user");
+    assert!(people_start["data"].get("ci").is_none());
+    // Locking a bot works like locking a person.
+    let csrf = Browser::csrf(&detail);
+    let page = admin_user
+        .post(
+            "/console/users/bot%3Adeploy-e2e/lock",
+            &[("csrf", &csrf), ("reason", "suspicious run")],
+        )
+        .await;
+    assert_eq!(page.status, 303, "{}", page.body);
+    let err = ssh_client::connect(&proxy_addr, &ca_pem, bot_cli, &host_ca, "web-1", "ubuntu")
+        .await
+        .err()
+        .expect("locked bot");
+    assert!(err.contains("user locked"), "{err}");
+    let relogin = d
+        .bot_login(
+            "github_actions",
+            d.idp.workload_token(&WorkloadToken::github(
+                "acme/infra",
+                "refs/heads/main",
+                None,
+            )),
+        )
+        .await
+        .expect_err("a locked bot can't log in again");
+    assert_eq!(relogin.code(), tonic::Code::PermissionDenied);
 
     // ---- workers: token and revoke -----------------------------------------------------
     let workers = admin_user.get("/console/workers").await;

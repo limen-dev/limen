@@ -34,6 +34,13 @@ pub fn is_bot(username: &str) -> bool {
     username.starts_with(BOT_PREFIX)
 }
 
+/// `user` or `bot`: the `actor_type` audit events carry, so people and
+/// automation can be told apart (and filtered) everywhere.
+#[must_use]
+pub fn actor_type(username: &str) -> &'static str {
+    if is_bot(username) { "bot" } else { "user" }
+}
+
 /// Built-in role that grants administrative APIs. The colon is reserved for
 /// built-in roles, and user-defined role names can't contain it.
 pub const ADMIN_ROLE: &str = "limen:admin";

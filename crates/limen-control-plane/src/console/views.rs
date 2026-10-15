@@ -219,6 +219,9 @@ pub struct SessionView {
     pub client_addr: String,
     pub proxy: String,
     pub worker: String,
+    pub bot: bool,
+    pub ci: Vec<Fact>,
+    pub run_url: Option<String>,
 }
 
 impl From<&SessionRow> for SessionView {
@@ -271,7 +274,103 @@ impl From<&SessionRow> for SessionView {
             client_addr: dash(s.client_addr.as_deref()),
             proxy: dash(s.proxy_id.as_deref()),
             worker: dash(s.worker_id.as_deref()),
+            bot: s.actor_type == "bot",
+            ci: ci_facts(s.ci.as_ref()),
+            run_url: run_url(s.ci.as_ref()),
         }
+    }
+}
+
+// ---- bots (ADR-0019) -----------------------------------------------------------------
+
+/// One fact about a bot's CI run, ready to show.
+pub struct Fact {
+    pub key: String,
+    pub value: String,
+}
+
+/// The facts of a CI run in a readable order: where it ran, what ran, who
+/// triggered it. Values are text from a signed token; templates escape them.
+#[must_use]
+pub fn ci_facts(ci: Option<&serde_json::Value>) -> Vec<Fact> {
+    const ORDER: [&str; 14] = [
+        "provider",
+        "repository",
+        "project_path",
+        "ref",
+        "environment",
+        "workflow",
+        "job_workflow_ref",
+        "run_id",
+        "run_attempt",
+        "pipeline_id",
+        "job_id",
+        "sha",
+        "actor",
+        "user_login",
+    ];
+    let Some(map) = ci.and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+    let show = |k: &str, v: &serde_json::Value| {
+        let text = v.as_str()?;
+        let text = if k == "sha" {
+            text.chars().take(12).collect()
+        } else {
+            text.to_owned()
+        };
+        Some(Fact {
+            key: k.to_owned(),
+            value: text,
+        })
+    };
+    let mut out: Vec<Fact> = ORDER
+        .iter()
+        .filter_map(|k| map.get(*k).and_then(|v| show(k, v)))
+        .collect();
+    out.extend(
+        map.iter()
+            .filter(|(k, _)| !ORDER.contains(&k.as_str()) && !matches!(k.as_str(), "iss" | "sub"))
+            .filter_map(|(k, v)| show(k, v)),
+    );
+    out
+}
+
+/// A link to the CI run, when the provider has a stable address for one and
+/// every piece of it is plain. Anything unusual yields no link.
+#[must_use]
+pub fn run_url(ci: Option<&serde_json::Value>) -> Option<String> {
+    let map = ci?.as_object()?;
+    let get = |k: &str| map.get(k)?.as_str();
+    let plain = |s: &str, slash: bool| {
+        !s.is_empty()
+            && s.len() <= 200
+            && s.bytes().all(|b| {
+                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.') || (slash && b == b'/')
+            })
+    };
+    match get("provider")? {
+        "github_actions" => {
+            let (repo, run) = (get("repository")?, get("run_id")?);
+            (plain(repo, true) && run.bytes().all(|b| b.is_ascii_digit()) && !run.is_empty())
+                .then(|| format!("https://github.com/{repo}/actions/runs/{run}"))
+        }
+        "gitlab" => {
+            let (base, project, pipeline) =
+                (get("iss")?, get("project_path")?, get("pipeline_id")?);
+            (base.starts_with("https://")
+                && !base.contains(['?', '#', '@', ' '])
+                && plain(project, true)
+                && !pipeline.is_empty()
+                && pipeline.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| {
+                format!(
+                    "{}/{project}/-/pipelines/{pipeline}",
+                    base.trim_end_matches('/')
+                )
+            })
+        }
+        _ => None,
     }
 }
 
@@ -291,6 +390,9 @@ pub struct UserView {
     pub lock_reason: String,
     pub locked_by: String,
     pub locked_at: String,
+    pub is_bot: bool,
+    pub ci: Vec<Fact>,
+    pub run_url: Option<String>,
 }
 
 impl From<&UserRow> for UserView {
@@ -313,6 +415,9 @@ impl From<&UserRow> for UserView {
             lock_reason: u.lock_reason.clone().unwrap_or_default(),
             locked_by: u.locked_by.clone().unwrap_or_default(),
             locked_at: time_text(u.locked_at),
+            is_bot: u.actor_type == "bot",
+            ci: ci_facts(u.last_ci.as_ref()),
+            run_url: run_url(u.last_ci.as_ref()),
         }
     }
 }
@@ -365,6 +470,35 @@ pub struct SessionsPage {
 pub struct SessionPage {
     pub chrome: Chrome,
     pub s: SessionView,
+}
+
+/// One bot from policy, with what the control plane has seen of it.
+pub struct BotView {
+    pub av: String,
+    pub name: String,
+    pub path: String,
+    pub description: String,
+    pub method: &'static str,
+    pub issuer: String,
+    pub rules: Vec<Fact>,
+    pub roles: Vec<Chip>,
+    pub ttl: String,
+    pub seen: bool,
+    pub last_login: String,
+    pub logins: i64,
+    pub sessions: i64,
+    pub locked: bool,
+    pub lock_reason: String,
+    pub last_run: Vec<Fact>,
+    pub run_url: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "bots.html")]
+pub struct BotsPage {
+    pub chrome: Chrome,
+    pub notice: Option<&'static str>,
+    pub bots: Vec<BotView>,
 }
 
 #[derive(Template)]
@@ -580,4 +714,67 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
         *response.status_mut() = status;
     }
     response.into_response()
+}
+
+#[cfg(test)]
+mod bot_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn facts_come_in_a_readable_order_and_hide_token_plumbing() {
+        let ci = json!({
+            "run_id": "42", "repository": "acme/infra", "provider": "github_actions",
+            "sha": "0123456789abcdef0123456789", "sub": "repo:x", "iss": "https://i", "zzz": "last",
+            "nested": { "a": 1 },
+        });
+        let keys: Vec<String> = ci_facts(Some(&ci)).into_iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["provider", "repository", "run_id", "sha", "zzz"]);
+        let sha = ci_facts(Some(&ci))
+            .into_iter()
+            .find(|f| f.key == "sha")
+            .expect("sha");
+        assert_eq!(sha.value, "0123456789ab", "shortened");
+        assert!(ci_facts(None).is_empty());
+    }
+
+    #[test]
+    fn run_links_exist_only_when_every_piece_is_plain() {
+        let github = |repo: &str, run: &str| {
+            run_url(Some(
+                &json!({ "provider": "github_actions", "repository": repo, "run_id": run }),
+            ))
+        };
+        assert_eq!(
+            github("acme/infra", "424242").as_deref(),
+            Some("https://github.com/acme/infra/actions/runs/424242")
+        );
+        for (repo, run) in [
+            ("acme/infra?x=1", "1"),
+            ("acme/infra#frag", "1"),
+            ("acme infra", "1"),
+            ("acme/infra", "1/../../x"),
+            ("acme/infra", ""),
+            ("", "1"),
+        ] {
+            assert_eq!(github(repo, run), None, "{repo} {run}");
+        }
+        let gitlab = |iss: &str, project: &str, pipeline: &str| {
+            run_url(Some(
+                &json!({ "provider": "gitlab", "iss": iss, "project_path": project, "pipeline_id": pipeline }),
+            ))
+        };
+        assert_eq!(
+            gitlab("https://gitlab.com", "acme/reports", "7").as_deref(),
+            Some("https://gitlab.com/acme/reports/-/pipelines/7")
+        );
+        assert_eq!(
+            gitlab("http://gitlab.internal", "acme/r", "7"),
+            None,
+            "https only"
+        );
+        assert_eq!(gitlab("https://u@evil.example", "acme/r", "7"), None);
+        assert_eq!(run_url(Some(&json!({ "provider": "oidc" }))), None);
+        assert_eq!(run_url(None), None);
+    }
 }

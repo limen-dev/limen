@@ -309,3 +309,13 @@ td.empty { text-align: center; }
 
 .cmd.soon { opacity: .65; }
 .cmd.soon code { text-decoration: none; }
+
+/* Bots (ADR-0019) */
+.pill.bot { background: rgba(139, 92, 246, .14); color: #7c3aed; border-color: transparent; }
+:root[data-theme="dark"] .pill.bot { color: #c4b5fd; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.bot { color: #c4b5fd; } }
+.bot-card { padding: 18px 20px; margin-bottom: 14px; }
+.bot-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.bot-head h2 { margin: 0; font-size: 16px; }
+.bot-head .sub { margin: 2px 0 0; }
+.bot-head .avatar .i { width: 20px; height: 20px; }

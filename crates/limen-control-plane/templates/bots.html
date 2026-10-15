@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Bots{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Bots</h1>
+    <p class="sub">CI jobs and automation that log in with their platform's identity token, from the <code>bot</code> documents in policy. Nothing secret is stored: each login is one token, used once, for a credential that lasts minutes.</p>
+  </div>
+</div>
+{% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
+{% if bots.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#bot"/></svg><div>No bots are defined. Add a <code>kind: bot</code> document to policy (see <code>examples/policy/bots.yaml</code>).</div></div>
+{% else %}
+{% for b in bots %}
+<div class="card bot-card">
+  <div class="bot-head">
+    <span class="avatar {{ b.av }}" aria-hidden="true"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#bot"/></svg></span>
+    <div>
+      <h2><a href="/console/users/{{ b.path }}">{{ b.name }}</a>
+        {% if b.locked %}<span class="pill bad v-mid">locked</span>{% else if b.seen %}<span class="pill ok v-mid">active</span>{% else %}<span class="pill v-mid">never logged in</span>{% endif %}
+      </h2>
+      {% if !b.description.is_empty() %}<p class="sub">{{ b.description }}</p>{% endif %}
+    </div>
+  </div>
+  <table class="facts">
+    <tr><th>Joins with</th><td><span class="chip">{{ b.method }}</span> <span class="muted mono">{{ b.issuer }}</span></td></tr>
+    <tr><th>Only when</th><td><div class="chips">{% for r in b.rules %}<span class="chip"><b>{{ r.key }}</b>&nbsp;{{ r.value }}</span>{% endfor %}</div></td></tr>
+    <tr><th>Roles</th><td><div class="chips">{% for r in b.roles %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td></tr>
+    <tr><th>Credential lifetime</th><td>{{ b.ttl }}, no refresh</td></tr>
+    <tr><th>Last login</th><td>{{ b.last_login }} <span class="muted">· {{ b.logins }} logins · {{ b.sessions }} sessions in 30 days</span></td></tr>
+    {% if !b.last_run.is_empty() %}
+    <tr><th>Last run</th><td><div class="chips">{% for f in b.last_run %}<span class="chip"><b>{{ f.key }}</b>&nbsp;{{ f.value }}</span>{% endfor %}</div>{% if let Some(u) = b.run_url %}<a href="{{ u }}" target="_blank" rel="noopener noreferrer">Open the run</a>{% endif %}</td></tr>
+    {% endif %}
+    {% if b.locked %}<tr><th>Lock</th><td>{{ b.lock_reason }}</td></tr>{% endif %}
+  </table>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}
