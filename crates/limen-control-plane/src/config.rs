@@ -252,13 +252,16 @@ pub struct Config {
     /// Close each API connection gracefully (HTTP/2 GOAWAY) after about this
     /// many seconds, ±10 % per connection, so clients reconnect, re-resolve
     /// the control plane's name, and spread over replicas, including new
-    /// ones. 0 keeps connections for life.
-    #[arg(long, env = "LIMEN_MAX_CONNECTION_AGE_SECS", default_value_t = 300)]
+    /// ones. 0 keeps connections for life. At most 604800 (7 days).
+    #[arg(long, env = "LIMEN_MAX_CONNECTION_AGE_SECS", default_value_t = 300,
+          value_parser = clap::value_parser!(u64).range(0..=604_800))]
     pub max_connection_age_secs: u64,
 
     /// After the maximum age, how long in-flight calls on that connection
-    /// may finish before it is cut.
-    #[arg(long, env = "LIMEN_CONNECTION_AGE_GRACE_SECS", default_value_t = 30)]
+    /// may finish before it is cut. 1 to 3600: 0 would cut every busy
+    /// connection the moment it reaches its age.
+    #[arg(long, env = "LIMEN_CONNECTION_AGE_GRACE_SECS", default_value_t = 30,
+          value_parser = clap::value_parser!(u64).range(1..=3600))]
     pub connection_age_grace_secs: u64,
 }
 
@@ -390,6 +393,49 @@ mod tests {
         assert!(parse_static_token("worker:short").is_err());
         assert!(parse_static_token("admin:0123456789abcdef0123456789abcdef").is_err());
         assert!(parse_static_token("worker:0123456789abcdef0123456789abcdef:BAD=x").is_err());
+    }
+
+    #[derive(clap::Parser)]
+    struct Cli {
+        #[command(flatten)]
+        config: Config,
+    }
+
+    fn parse_with(extra: &[&str]) -> Result<Config, clap::Error> {
+        use clap::Parser as _;
+        let mut argv = vec![
+            "limen-control-plane",
+            "--database-url=postgres://x",
+            "--oidc-issuer=https://idp.example",
+            "--oidc-client-id=limen",
+        ];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn connection_age_flags_are_bounded() {
+        let ok = parse_with(&[]).expect("defaults");
+        assert_eq!(ok.max_connection_age_secs, 300);
+        assert_eq!(ok.connection_age_grace_secs, 30);
+        assert!(
+            parse_with(&["--max-connection-age-secs=0"]).is_ok(),
+            "0 disables it"
+        );
+        assert!(parse_with(&["--max-connection-age-secs=604800"]).is_ok());
+        // Absurd ages fail at startup with a clear message, never later in
+        // the accept loop.
+        let err =
+            parse_with(&["--max-connection-age-secs=18446744073709551615"]).expect_err("too large");
+        assert!(err.to_string().contains("max-connection-age-secs"), "{err}");
+        assert!(parse_with(&["--max-connection-age-secs=604801"]).is_err());
+        // A grace of 0 would cut every busy connection at its age.
+        let err = parse_with(&["--connection-age-grace-secs=0"]).expect_err("zero grace");
+        assert!(
+            err.to_string().contains("connection-age-grace-secs"),
+            "{err}"
+        );
+        assert!(parse_with(&["--connection-age-grace-secs=3601"]).is_err());
     }
 
     #[test]

@@ -222,13 +222,15 @@ pub async fn serve_api(
 /// How long one connection may live: `max_age` ±10 %, from `unit` (uniform
 /// in [0, 1), clamped). Jitter keeps connections opened together (say,
 /// after a restart) from all closing together. Never zero; `None` when
-/// `max_age` is zero (disabled).
+/// `max_age` is zero (disabled). Never panics: an age too large to jitter
+/// is used as is (the flag is bounded anyway).
 fn connection_age(max_age: Duration, unit: f64) -> Option<Duration> {
     if max_age.is_zero() {
         return None;
     }
     let factor = 0.9 + 0.2 * unit.clamp(0.0, 1.0);
-    Some(max_age.mul_f64(factor).max(Duration::from_millis(1)))
+    let age = Duration::try_from_secs_f64(max_age.as_secs_f64() * factor).unwrap_or(max_age);
+    Some(age.max(Duration::from_millis(1)))
 }
 
 async fn sleep_or_forever(after: Option<Duration>) {
@@ -321,6 +323,12 @@ mod tests {
         let tiny = connection_age(Duration::from_secs(1), 0.0).expect("enabled");
         assert!(tiny >= Duration::from_millis(900));
         assert!(connection_age(Duration::from_nanos(1), 0.0).is_some_and(|d| !d.is_zero()));
+    }
+
+    #[test]
+    fn huge_ages_never_panic() {
+        assert!(connection_age(Duration::MAX, 1.0).is_some());
+        assert!(connection_age(Duration::from_secs(u64::MAX), 0.0).is_some());
     }
 
     #[test]
