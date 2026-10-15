@@ -16,7 +16,7 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 
 ## One CA across resets and worktrees
 
-The CA key *and certificate* live in the Docker volume `limen-dev-ca`, which `docker compose down -v` leaves alone and every worktree shares. So the CA stays the same, and a client that trusts `deploy/compose/.state/internal-ca.pem` (the same certificate in every checkout) keeps trusting it after a reset. Nothing is trusted for you: that is your choice, and the key never leaves Docker. It is a development CA: anyone who can run Docker commands on your machine can read its key, so trust it only in a separate browser profile, and never reuse it. To get a new CA, `docker volume rm limen-dev-ca` (with the stack down).
+The CA key *and certificate* live in the Docker volume `limen-dev-ca`, which `docker compose down -v` leaves alone and every worktree shares. So the CA stays the same, and a client that trusts `deploy/compose/.state/internal-ca.pem` (the same certificate in every checkout) keeps trusting it after a reset. Nothing is trusted for you: that is your choice, and the key never leaves Docker. It is a development CA, and the stack's own services trust it (the internal certificates, the user X.509 and SSH certificates). Anyone who can run Docker commands on your machine can read its key and sign certificates those services accept, not just browser ones. Never reuse it outside this stack, and trust it in a browser only in a separate profile. To get a new CA, `docker volume rm limen-dev-ca` (with the stack down).
 
 ## Quick start
 
