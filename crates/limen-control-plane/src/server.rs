@@ -19,7 +19,7 @@ use limen_proto::v1::registry_server::RegistryServer;
 use limen_proto::v1::resources_server::ResourcesServer;
 use limen_proto::v1::ssh_certificates_server::SshCertificatesServer;
 use limen_tunnel::PeerInfo;
-use limen_tunnel::serve::{H2Settings, serve_h2};
+use limen_tunnel::serve::{H2Settings, serve_h2_until};
 use limen_tunnel::tls::{ClientAuth, Identity, server_config};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::ServerConfig;
@@ -75,11 +75,15 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
     )?)
 }
 
-/// Serve the gRPC API until `shutdown` flips, then drain.
+/// Serve the gRPC API until `shutdown` flips, then drain: connections get a
+/// GOAWAY (idle ones close at once), and in-flight calls have until
+/// `started + crate::ship_budget(drain_timeout)` before they are cut off.
+/// `started` is when shutdown began; the first caller to touch it sets it.
 pub async fn serve_api(
     state: AppState,
     listener: TcpListener,
     mut shutdown: watch::Receiver<bool>,
+    started: Arc<std::sync::OnceLock<tokio::time::Instant>>,
 ) -> anyhow::Result<()> {
     let tls = Arc::new(RwLock::new(Arc::new(issue_server_config(&state).await?)));
     tokio::spawn(rotate_server_cert(state.clone(), Arc::clone(&tls)));
@@ -143,6 +147,7 @@ pub async fn serve_api(
         );
         let routes = routes.clone();
         let active = Arc::clone(&active);
+        let mut conn_stop = shutdown.clone();
         active.fetch_add(1, Ordering::SeqCst);
         // Reap finished connections so the set doesn't grow forever.
         while connections.try_join_next().is_some() {}
@@ -153,7 +158,12 @@ pub async fn serve_api(
             {
                 Ok(Ok(stream)) => {
                     let peer = PeerInfo::from_tls(&stream, Some(remote));
-                    if let Err(e) = serve_h2(stream, peer, routes, H2Settings::default()).await {
+                    let stop = async move {
+                        let _ = conn_stop.wait_for(|stop| *stop).await;
+                    };
+                    if let Err(e) =
+                        serve_h2_until(stream, peer, routes, H2Settings::default(), stop).await
+                    {
                         tracing::debug!(error = %e, %remote, "connection ended with error");
                     }
                 }
@@ -167,7 +177,8 @@ pub async fn serve_api(
         connections = active.load(Ordering::SeqCst),
         "shutting down: no longer accepting, draining"
     );
-    let deadline = tokio::time::Instant::now() + state.config.drain_timeout;
+    let t0 = *started.get_or_init(tokio::time::Instant::now);
+    let deadline = t0 + crate::ship_budget(state.config.drain_timeout);
     while active.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -203,7 +214,7 @@ async fn rotate_server_cert(state: AppState, tls: Arc<RwLock<Arc<ServerConfig>>>
 pub async fn serve_health(
     state: AppState,
     addr: SocketAddr,
-    mut shutdown: watch::Receiver<bool>,
+    mut done: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
@@ -231,7 +242,7 @@ pub async fn serve_health(
     tracing::info!(%addr, "health endpoints listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            let _ = shutdown.changed().await;
+            let _ = done.wait_for(|done| *done).await;
         })
         .await?;
     Ok(())

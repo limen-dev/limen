@@ -38,6 +38,18 @@ pub struct AppState {
     pub snapshot_signer: Arc<RwLock<Option<Arc<limen_session::envelope::EnvelopeSigner>>>>,
 }
 
+impl AppState {
+    /// `unavailable` once shutdown has started, so callers move to a peer.
+    pub fn refuse_if_draining(&self) -> Result<(), Status> {
+        if self.draining.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Status::unavailable(
+                "this control plane is shutting down; try another replica",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// The currently active policy, cached in memory.
 #[derive(Debug, Clone)]
 pub struct LoadedPolicy {

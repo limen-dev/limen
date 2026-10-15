@@ -30,7 +30,8 @@ pub struct Harness {
     pub idp: MockIdp,
     pub audit_file: PathBuf,
     _dir: tempfile::TempDir,
-    _shutdown: watch::Sender<bool>,
+    shutdown: watch::Sender<bool>,
+    run_task: std::sync::Mutex<Option<tokio::task::JoinHandle<anyhow::Result<()>>>>,
 }
 
 #[derive(clap::Parser)]
@@ -89,7 +90,14 @@ impl Harness {
             "--admin-listen=127.0.0.1:0".into(),
             "--dns-name=localhost".into(),
         ];
-        let args: Vec<String> = args.into_iter().chain(extra.iter().cloned()).collect();
+        // Extra flags replace the defaults they repeat.
+        let flag = |a: &str| a.split('=').next().unwrap_or_default().to_owned();
+        let overridden: Vec<String> = extra.iter().map(|a| flag(a)).collect();
+        let args: Vec<String> = args
+            .into_iter()
+            .filter(|a| !overridden.contains(&flag(a)))
+            .chain(extra.iter().cloned())
+            .collect();
         let config = Wrapper::try_parse_from(args).expect("config").config;
         let state = build_state(config).await.expect("build state");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -97,15 +105,27 @@ impl Harness {
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
         let (tx, rx) = watch::channel(false);
-        tokio::spawn(run(state.clone(), listener, rx));
+        let run_task = tokio::spawn(run(state.clone(), listener, rx));
         Some(Self {
             state,
             addr,
             idp,
             audit_file,
             _dir: dir,
-            _shutdown: tx,
+            shutdown: tx,
+            run_task: std::sync::Mutex::new(Some(run_task)),
         })
+    }
+
+    /// Start shutting the control plane down.
+    pub fn begin_shutdown(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Wait for `run` to return (after `begin_shutdown`).
+    pub async fn finish(&self) -> anyhow::Result<()> {
+        let task = self.run_task.lock().expect("lock").take();
+        task.expect("run task").await.expect("join")
     }
 
     pub fn internal_ca(&self) -> CertificateDer<'static> {

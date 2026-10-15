@@ -140,8 +140,11 @@ fn build_console(
 /// Share of the drain timeout kept back for handing the spool to a peer.
 const HANDOFF_RESERVE_PERCENT: u32 = 20;
 
+/// Longest the heartbeat or the final deregister may delay the exit.
+const WIND_DOWN_STEP: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Time for shipping the spool: the drain timeout less the handoff reserve.
-fn ship_budget(drain_timeout: std::time::Duration) -> std::time::Duration {
+pub(crate) fn ship_budget(drain_timeout: std::time::Duration) -> std::time::Duration {
     drain_timeout * (100 - HANDOFF_RESERVE_PERCENT) / 100
 }
 
@@ -155,6 +158,8 @@ pub async fn run(
     // Our own stop signal: the outside world or a lost replica id flips it.
     let (stop_tx, stop) = watch::channel(false);
     let stop_tx = Arc::new(stop_tx);
+    // The whole wind-down is timed from the moment the stop flips.
+    let started: Arc<std::sync::OnceLock<tokio::time::Instant>> = Arc::default();
     let forward = {
         let stop_tx = Arc::clone(&stop_tx);
         tokio::spawn(async move {
@@ -163,45 +168,66 @@ pub async fn run(
             let _ = stop_tx.send(true);
         })
     };
-    // The heartbeat outlives the API drain, or the row would go stale while
-    // the spool ships.
-    let (heartbeat_stop_tx, heartbeat_stop) = watch::channel(false);
+    // Health and the heartbeat outlive the API drain: /readyz must report
+    // "shutting down" and the registry row must stay fresh while the spool
+    // ships.
+    let (done_tx, done) = watch::channel(false);
     state.pipeline.start_sinks(&state.db);
     tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
-        heartbeat_stop,
+        done.clone(),
         Arc::clone(&stop_tx),
     ));
     let health = tokio::spawn(server::serve_health(
         state.clone(),
         state.config.admin_listen,
-        stop.clone(),
+        done,
     ));
-    let flag = Arc::clone(&state.draining);
-    let mut draining = stop.clone();
-    tokio::spawn(async move {
-        let _ = draining.wait_for(|stop| *stop).await;
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    });
-    let served = server::serve_api(state.clone(), api, stop).await;
+    {
+        let flag = Arc::clone(&state.draining);
+        let started = Arc::clone(&started);
+        let mut flipped = stop.clone();
+        tokio::spawn(async move {
+            let _ = flipped.wait_for(|stop| *stop).await;
+            started.get_or_init(tokio::time::Instant::now);
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+    let served = server::serve_api(state.clone(), api, stop, Arc::clone(&started)).await;
+    let t0 = *started.get_or_init(tokio::time::Instant::now);
     let report = state
         .pipeline
-        .drain(ship_budget(state.config.drain_timeout))
+        .drain(ship_budget(state.config.drain_timeout).saturating_sub(t0.elapsed()))
         .await;
     if report.is_clean() {
         tracing::info!("audit spool shipped to every sink");
     } else {
         tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline");
     }
-    let _ = heartbeat_stop_tx.send(true);
-    let _ = heartbeat.await;
-    health.abort();
-    forward.abort();
-    if let Err(e) = replicas::deregister(&state.db, &state.registration).await {
-        tracing::warn!(error = %e, "could not deregister this replica; its row expires");
+    let _ = done_tx.send(true);
+    if tokio::time::timeout(WIND_DOWN_STEP, heartbeat)
+        .await
+        .is_err()
+    {
+        tracing::warn!("the replica heartbeat did not stop in time");
     }
+    forward.abort();
+    match tokio::time::timeout(
+        WIND_DOWN_STEP,
+        replicas::deregister(&state.db, &state.registration),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "could not deregister this replica; its row expires");
+        }
+        Err(_) => tracing::warn!("deregistering timed out; this replica's row expires"),
+    }
+    // The health server stops with `done`; this is only a backstop.
+    health.abort();
     served?;
     Ok(())
 }

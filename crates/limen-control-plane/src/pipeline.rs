@@ -118,7 +118,7 @@ async fn all_done(tasks: &mut [tokio::task::JoinHandle<()>]) {
 }
 
 /// How long consumers get to notice the deadline and stop.
-const DEADLINE_GRACE: Duration = Duration::from_secs(2);
+const DEADLINE_GRACE: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct Pipeline {
@@ -281,7 +281,9 @@ impl Pipeline {
     }
 
     /// Ship what is spooled to every sink, then stop them. Gives up on any
-    /// sink still behind after `deadline`, abandoning its in-flight send.
+    /// sink still behind, abandoning its in-flight send, so the call takes
+    /// at most `deadline` in all (a short grace for consumers to notice is
+    /// taken from the end of it).
     pub async fn drain(&self, deadline: Duration) -> DrainReport {
         let _ = self.stop.send(true);
         let mut tasks = std::mem::take(
@@ -290,13 +292,16 @@ impl Pipeline {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
-        if tokio::time::timeout(deadline, all_done(&mut tasks))
+        let grace = DEADLINE_GRACE.min(deadline / 10);
+        if tokio::time::timeout(deadline.saturating_sub(grace), all_done(&mut tasks))
             .await
             .is_err()
         {
             tracing::warn!("audit drain deadline reached; giving up on the remaining records");
             let _ = self.deadline.send(true);
-            if tokio::time::timeout(DEADLINE_GRACE, all_done(&mut tasks))
+            // Handles that finished must not be polled again.
+            tasks.retain(|t| !t.is_finished());
+            if tokio::time::timeout(grace, all_done(&mut tasks))
                 .await
                 .is_err()
             {

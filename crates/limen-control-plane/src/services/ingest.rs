@@ -34,11 +34,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
-        if self.0.draining.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Status::unavailable(
-                "this control plane is shutting down; try another replica",
-            ));
-        }
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let component = caller.component()?.clone();
         let events = request.into_inner().events;
@@ -76,6 +72,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<Streaming<RecordingChunk>>,
     ) -> Result<Response<UploadRecordingResponse>, Status> {
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
