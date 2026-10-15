@@ -136,7 +136,7 @@ step "Grafana"
 wait_for "grafana" curl -sf http://localhost:3000/api/health
 health="$(curl -sf -u admin:limen-dev-only http://localhost:3000/api/datasources/uid/limen-trino/health)"
 echo "  data source: $health"
-echo "$health" | grep -q '"status":"OK"' || fail "Trino data source"
+grep -q '"status":"OK"' <<<"$health" || fail "Trino data source"
 curl -sf -u admin:limen-dev-only http://localhost:3000/api/dashboards/uid/limen-audit | grep -q '"title":"Limen audit"' || fail "dashboard"
 rules="$(curl -sf -u admin:limen-dev-only http://localhost:3000/api/v1/provisioning/alert-rules | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 echo "  $rules alert rules provisioned"

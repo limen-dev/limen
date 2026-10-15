@@ -5,6 +5,11 @@
 #
 #   deploy/compose/demo-phase35.sh          # resets the dev stack first (down -v)
 #   deploy/compose/demo-phase35.sh --keep   # reuse the running stack
+#
+# LIMEN_RELEASE_IMAGES=1 uses the images already on this machine as
+# limen-{control-plane,proxy,worker}:dev instead of building them, and the
+# `limen` binary in LIMEN_BIN instead of compiling one. deploy/compose/smoke-release.sh
+# uses it to run this demo against a published release.
 set -euo pipefail
 keep=false
 [ "${1:-}" = "--keep" ] && keep=true
@@ -37,12 +42,20 @@ wait_for() {
 command -v ssh >/dev/null || fail "OpenSSH client (ssh) is required"
 
 step "Build and start the stack"
-(cd "$root" && cargo build --release -q -p limen-cli)
+release_images="${LIMEN_RELEASE_IMAGES:-0}"
+if [ "$release_images" != 1 ]; then
+  (cd "$root" && cargo build --release -q -p limen-cli)
+fi
+[ -x "$LIMEN_BIN" ] || fail "no limen binary at $LIMEN_BIN"
 if ! $keep; then
   echo "Resetting the dev stack (docker compose down -v). Use --keep to skip."
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 fi
-"${compose[@]}" up -d --build --quiet-pull >/dev/null
+if [ "$release_images" = 1 ]; then
+  "${compose[@]}" up -d --no-build --quiet-pull >/dev/null
+else
+  "${compose[@]}" up -d --build --quiet-pull >/dev/null
+fi
 wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
 mkdir -p "$state"
 ca="$state/internal-ca.pem"
@@ -71,8 +84,8 @@ alice_jar="$state/admin.jar"
 code="$(browser_login "$alice_jar" $ADMIN)"
 echo "  callback answered $code (a redirect to the console)"
 home="$(page "$alice_jar" /console/)"
-echo "$home" | grep -q ''"$ADMIN"'' || fail "admin isn't signed in"
-echo "$home" | grep -q 'Users' || fail "admin navigation is missing"
+grep -q ''"$ADMIN"'' <<<"$home" || fail "admin isn't signed in"
+grep -q 'Users' <<<"$home" || fail "admin navigation is missing"
 curl -sI --cacert "$ca" "$base/console/login" | grep -qi 'content-security-policy' || true
 curl -sI --cacert "$ca" -b "$alice_jar" "$base/console/" | tr -d '\r' | grep -i '^content-security-policy' | sed 's/^/  /'
 pass "signed in; the console is served by the proxy, with a strict CSP"
@@ -122,8 +135,8 @@ step "developer signs in to the console: he sees only himself"
 bob_jar="$state/developer.jar"
 code="$(browser_login "$bob_jar" $DEVELOPER)"
 bob_home="$(page "$bob_jar" /console/)"
-echo "$bob_home" | grep -q 'web-staging-1' || fail "developer doesn't see his resource"
-if echo "$bob_home" | grep -q '>Users<'; then fail "developer sees the admin navigation"; fi
+grep -q 'web-staging-1' <<<"$bob_home" || fail "developer doesn't see his resource"
+if grep -q '>Users<' <<<"$bob_home"; then fail "developer sees the admin navigation"; fi
 [ "$(status "$bob_jar" /console/users)" = 403 ] || fail "developer reached the users page"
 [ "$(status "$bob_jar" /console/workers)" = 403 ] || fail "developer reached the workers page"
 [ "$(status "$bob_jar" /console/policy)" = 403 ] || fail "developer reached the policy page"
@@ -132,10 +145,10 @@ pass "non-admins see their own resources and sessions only"
 step "Session recording: stored, hashed, and served by the console"
 sleep 6
 detail="$(page "$alice_jar" "/console/sessions/$session_id")"
-if echo "$detail" | grep -q 'asciinema-player.min.js'; then
+if grep -q 'asciinema-player.min.js' <<<"$detail"; then
   cast="$(page "$alice_jar" "/console/sessions/$session_id/recording")"
   echo "$cast" | head -1 | cut -c1-120 | sed 's/^/  /'
-  echo "$cast" | grep -q 'tick' || fail "the recording has no output"
+  grep -q 'tick' <<<"$cast" || fail "the recording has no output"
   pass "recording served after an integrity check"
 else
   fail "the killed session has no recording"

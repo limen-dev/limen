@@ -69,7 +69,7 @@ pass "deny by default; developer can't administer"
 
 step "A user with no mapped groups is denied"
 if out="$("$here/dev-login.sh" $GUEST 2>&1)"; then fail "guest must be denied"; fi
-echo "$out" | grep -q "no roles are mapped" || fail "unexpected error for guest: $out"
+grep -q "no roles are mapped" <<<"$out" || fail "unexpected error for guest: $out"
 pass "guest denied: $(echo "$out" | grep -o 'login denied.*')"
 
 step "Single-use join token enrolls a second worker; reuse is rejected"

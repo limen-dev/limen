@@ -50,7 +50,7 @@ step "developer runs a command on web-staging-1 with plain OpenSSH, through Lime
 "$here/dev-login.sh" "$DEVELOPER" >/dev/null
 out="$(limen ssh web-staging-1 -- 'echo "I am $(whoami) on $(hostname)"')"
 echo "$out"
-echo "$out" | grep -q "I am ubuntu on" || fail "unexpected output: $out"
+grep -q "I am ubuntu on" <<<"$out" || fail "unexpected output: $out"
 pass "login inferred from policy (ubuntu), command ran on the target"
 
 step "The target only accepted a Limen certificate naming the session and user"

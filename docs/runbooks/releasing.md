@@ -12,6 +12,9 @@ Releases are made by merging a pull request. Read [ADR-0024](../adr/0024-release
 ## What you get
 `limen-vX-<target>.tar.gz` (four targets), `SHA256SUMS`, `limen-vX.sbom.cdx.json`, `limen-vX-deploy.zip`, `image-refs.txt` (the pinned image digests), and `ghcr.io/<owner>/limen-{control-plane,proxy,worker}:vX.Y.Z`. There is no `latest` tag.
 
+## Checking a release by hand
+`deploy/compose/smoke-release.sh vX.Y.Z` (or `--dir DIR` with the assets of a draft) verifies `SHA256SUMS`, runs the CLI from the tarball for your OS, pulls the three images by digest, and runs the Phase 3.5 demo against them. It needs `gh`, and `docker` signed in to `ghcr.io` while the repository is private. It is the check ADR-0024 asks for before a pre-release becomes a release.
+
 ## Upgrading a deployment
 Control plane first, then proxies, then workers. Database migrations run when the control plane starts and only move forward, so a rollback means restoring a backup.
 
