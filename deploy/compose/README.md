@@ -21,10 +21,11 @@ The CA keys live in `~/.limen-dev/ca` (change it with `LIMEN_DEV_STATE`), outsid
 ```sh
 deploy/compose/dev-ca.sh           # prints ~/.limen-dev/internal-ca.pem, the CA certificate to trust
 deploy/compose/dev-ca.sh --trust   # prints how to trust it (it changes nothing itself)
+deploy/compose/dev-ca.sh --install # macOS: trust it in your login keychain (you run it; --uninstall undoes it)
 ```
 
 The demos run `dev-ca.sh` for you. Notes:
-- **Trusting is your choice.** Nothing here changes a trust setting. It's a development CA: whoever can read `~/.limen-dev/ca` can sign certificates your browser would accept if you trust it. Keep the folder private (it is created mode 700), and consider trusting it only in a separate browser profile or in Firefox.
+- **Trusting is your choice.** Only `--install`/`--uninstall`, run by you, change a trust setting (your login keychain, never the system one). The demos never do. It's a development CA: whoever can read `~/.limen-dev/ca` can sign certificates your browser would accept if you trust it. Keep the folder private (it is created mode 700), and consider trusting it only in a separate browser profile or in Firefox.
 - **`deploy/compose/.state/internal-ca.pem`** (used by `curl --cacert` and the demos) is still refreshed on every run, per checkout.
 - **Create it first.** `dev-ca.sh --init` makes `~/.limen-dev/ca` as you (mode 700); the demos run it before starting the stack. If you start the stack by hand on Linux without it, Docker creates the folder as root. On Linux the control plane's uid (65532) owns the folder, so removing it needs `sudo`.
 - **One stack at a time on first start.** Worktrees share the key folder. Two stacks starting together on a fresh folder can each generate a key and overwrite the other's. Start one first. After a reset or a different database, a key that doesn't match the stored CA can stop the control plane from starting: `down -v` and remove `~/.limen-dev/ca` together.

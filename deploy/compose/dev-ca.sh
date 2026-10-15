@@ -12,8 +12,12 @@
 #   deploy/compose/dev-ca.sh --init    # create ~/.limen-dev/ca as you, mode 700 (run before the stack starts)
 #   deploy/compose/dev-ca.sh           # print the path (creating or refreshing the copy)
 #   deploy/compose/dev-ca.sh --trust   # print how to trust it, without doing anything
+#   deploy/compose/dev-ca.sh --install    # macOS: trust it in YOUR login keychain (you run this; asks you to confirm)
+#   deploy/compose/dev-ca.sh --uninstall  # macOS: remove that trust again
 #
-# This script never changes any trust setting. DEVELOPMENT ONLY: anyone who can
+# Only --install and --uninstall change a trust setting, only when you run them
+# yourself, and never the system keychain. The demos and agents never call them.
+# DEVELOPMENT ONLY: anyone who can
 # read ~/.limen-dev/ca can sign certificates your browser would accept if you
 # trust the CA, so keep that folder private, and consider trusting the CA only
 # in a separate browser profile.
@@ -46,13 +50,31 @@ elif [ ! -s "$stable" ]; then
   exit 1
 fi
 
+login_keychain="$HOME/Library/Keychains/login.keychain-db"
+case "${1:-}" in
+  --install | --uninstall)
+    [ "$(uname -s)" = Darwin ] || { echo "dev-ca.sh: $1 is macOS only; see --trust" >&2; exit 1; }
+    if [ "$1" = "--install" ]; then
+      security add-trusted-cert -r trustRoot -k "$login_keychain" "$stable"
+      echo "Trusted $stable in your login keychain. Restart your browser. Undo: $0 --uninstall"
+    else
+      security remove-trusted-cert "$stable" 2>/dev/null || true
+      security delete-certificate -c "Limen Internal CA" "$login_keychain" 2>/dev/null || true
+      echo "Removed the dev CA from your login keychain."
+    fi
+    exit 0
+    ;;
+esac
+
 if [ "${1:-}" = "--trust" ]; then
   fingerprint="$(openssl x509 -in "$stable" -noout -fingerprint -sha256 | cut -d= -f2)"
   cat <<TEXT
 The dev CA is $stable
   SHA-256 $fingerprint
 
-Nothing has been changed. To trust it yourself:
+Nothing has been changed. Easiest on macOS (your login keychain only, undo with --uninstall):
+    deploy/compose/dev-ca.sh --install
+Or by hand:
   macOS (system-wide, asks for your password):
     sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$stable"
   Firefox: Settings > Privacy & Security > Certificates > View Certificates > Authorities > Import.

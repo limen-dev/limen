@@ -149,7 +149,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | Rate limiting | `governor`: per IP before auth, per user after, stricter for login and enrollment |
 | Supply chain | `cargo-deny` (advisories, licenses, sources, bans), `cargo-audit`, pinned toolchain and tools (mise), GitHub Actions pinned to commit SHAs, minimal `permissions:` in workflows, distroless images, SBOM in release (Phase 13) |
 | Memory safety | `unsafe_code = "forbid"` workspace-wide. Hand-written protocol codecs (MySQL, RESP) are fuzzed |
-| Dev CA key on the host | Dev compose only (`deploy/compose/dev-ca.sh`): CA private keys live in `~/.limen-dev/ca` (mode 700, outside every volume, shared by worktrees) so a trusted dev CA survives resets. Whoever reads that folder can sign certs a browser would accept if the user trusted the dev CA. Nothing trusts it automatically (the script only prints how); use a separate browser profile; never reuse these keys. Production uses KMS (ADR-0007) |
+| Dev CA key on the host | Dev compose only (`deploy/compose/dev-ca.sh`): CA private keys live in `~/.limen-dev/ca` (mode 700, outside every volume, shared by worktrees) so a trusted dev CA survives resets. Whoever reads that folder can sign certs a browser would accept if the user trusted the dev CA. Nothing trusts it automatically: `--install` (macOS login keychain only, run by the owner by hand) is the one opt-in, never called by demos or agents; use a separate browser profile; never reuse these keys. Production uses KMS (ADR-0007) |
 | Clock skew | Certs are back-dated 1 minute. TTL checks allow ±2 minutes |
 
 ## 6. Accepted residual risks (v1)
