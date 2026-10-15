@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::Context as _;
 use limen_proto::v1::auth_client::AuthClient;
-use limen_proto::v1::{GetAuthConfigRequest, LoginFlow, LoginRequest};
+use limen_proto::v1::{GetAuthConfigRequest, LoginFlow, LoginRequest, LoginResponse};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256, PublicKeyData};
 
 use crate::oidc::{self, IdpSettings};
@@ -19,13 +19,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let proxy = api::resolve_proxy(proxy)?;
     api::server_name(&proxy)?;
-    if let Some(path) = ca_file {
-        let pem =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        limen_tunnel::tls::certs_from_pem(&pem)
-            .context("--ca-file must contain a PEM certificate")?;
-        profile::pin_ca(&proxy, &pem)?;
-    }
+    pin_ca_file(&proxy, ca_file)?;
 
     let channel = api::connect(&proxy, None)?;
     let mut auth = AuthClient::new(channel);
@@ -68,27 +62,45 @@ pub async fn run(
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
+    finish(&proxy, &key, resp)
+}
+
+/// Save the credentials a login returned, and show who we are now. Shared by
+/// people's logins and bots'.
+pub fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::Result<()> {
     let meta = ProfileMeta {
-        proxy: proxy.clone(),
+        proxy: proxy.to_owned(),
         username: resp.username.clone(),
         roles: resp.roles.clone(),
         login_id: resp.login_id,
         expires_at_unix: resp.expires_at_unix,
     };
     Profile::save(
-        &profile::dir_for(&proxy)?,
+        &profile::dir_for(proxy)?,
         &meta,
         &key.serialize_pem(),
         &resp.cert_pem,
     )?;
     if !resp.ssh_host_ca_public_key.is_empty() {
-        commands::ssh::write_known_hosts(&proxy, &resp.ssh_host_ca_public_key)?;
+        commands::ssh::write_known_hosts(proxy, &resp.ssh_host_ca_public_key)?;
     }
-    profile::set_current(&proxy)?;
+    profile::set_current(proxy)?;
     ui::success(&format!(
         "Signed in to {} as {}",
-        ui::bold(&proxy),
+        ui::bold(proxy),
         ui::accent(&resp.username)
     ));
-    commands::status(Some(&proxy))
+    commands::status(Some(proxy))
+}
+
+/// Pin the CA the user named, once, for this proxy.
+pub fn pin_ca_file(proxy: &str, ca_file: Option<&Path>) -> anyhow::Result<()> {
+    if let Some(path) = ca_file {
+        let pem =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        limen_tunnel::tls::certs_from_pem(&pem)
+            .context("--ca-file must contain a PEM certificate")?;
+        profile::pin_ca(proxy, &pem)?;
+    }
+    Ok(())
 }
