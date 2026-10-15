@@ -43,4 +43,9 @@ message PingRequest {}
 message PingResponse {
   string worker_id = 1;
   bool draining = 2;
+  // Sessions the worker holds now (admitted or being admitted), and its cap.
+  // Workers before Phase 5 send neither: 0/0 reads as "load unknown, no cap".
+  // max_sessions 0 also means the worker has no cap.
+  uint32 active_sessions = 3;
+  uint32 max_sessions = 4;
 }

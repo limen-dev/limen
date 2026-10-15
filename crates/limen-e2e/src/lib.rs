@@ -283,7 +283,17 @@ impl Deployment {
     }
 
     pub async fn start_worker(&self, join_token: &str, name: &str) -> RunningWorker {
-        let config: limen_worker::Config = parse(&[
+        self.start_worker_with(join_token, name, &[]).await
+    }
+
+    /// [`start_worker`](Self::start_worker) with extra flags, such as `--max-sessions=1`.
+    pub async fn start_worker_with(
+        &self,
+        join_token: &str,
+        name: &str,
+        extra: &[&str],
+    ) -> RunningWorker {
+        let mut args = vec![
             format!("--proxy-addr={}", self.proxy_addr),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={join_token}"),
@@ -292,7 +302,9 @@ impl Deployment {
             "--drain-timeout=1s".into(),
             "--policy-refresh=1s".into(),
             "--policy-grace=3s".into(),
-        ]);
+        ];
+        args.extend(extra.iter().map(|&a| a.to_owned()));
+        let config: limen_worker::Config = parse(&args);
         let (worker, creds_tx) = limen_worker::Worker::start(config)
             .await
             .expect("worker start");

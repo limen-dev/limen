@@ -266,7 +266,8 @@ pub async fn run(
         // Reap finished connections so the set doesn't grow forever.
         while connections.try_join_next().is_some() {}
         connections.spawn(async move {
-            handle_connection(&proxy, tcp, remote, conn_shutdown).await;
+            // Boxed: the connection's state is large and lives as long as it does.
+            Box::pin(handle_connection(&proxy, tcp, remote, conn_shutdown)).await;
             proxy.active.fetch_sub(1, Ordering::SeqCst);
         });
     }
@@ -386,14 +387,14 @@ async fn accept_tunnel(
 
     // The tunnel must answer a ping before it is used.
     let mut client = WorkerTunnelClient::new(channel.clone());
-    match tokio::time::timeout(PING_TIMEOUT, client.ping(PingRequest {})).await {
-        Ok(Ok(pong)) if pong.get_ref().worker_id == worker.id => {}
+    let first = match tokio::time::timeout(PING_TIMEOUT, client.ping(PingRequest {})).await {
+        Ok(Ok(pong)) if pong.get_ref().worker_id == worker.id => pong.into_inner(),
         result => {
             tracing::warn!(worker = %worker.id, ?result, "tunnel failed its first ping");
             connection.abort();
             return;
         }
-    }
+    };
     proxy.tunnels.insert(Tunnel {
         worker_id: worker.id.clone(),
         labels: worker.labels.clone(),
@@ -401,6 +402,9 @@ async fn accept_tunnel(
         connected_at: time::OffsetDateTime::now_utc(),
         channel,
     });
+    proxy
+        .tunnels
+        .record_ping(&worker.id, first.active_sessions, first.max_sessions);
     tracing::info!(worker = %worker.id, tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
 
     let mut tick = tokio::time::interval(PING_INTERVAL);
@@ -422,7 +426,11 @@ async fn accept_tunnel(
                         // Leave the tunnel up for in-flight sessions, but stop advertising it.
                         proxy.tunnels.remove(&tunnel_id);
                     }
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(pong)) => {
+                        // Load for worker selection (old workers report 0/0: unknown).
+                        let pong = pong.get_ref();
+                        proxy.tunnels.record_ping(&worker.id, pong.active_sessions, pong.max_sessions);
+                    }
                     other => break format!("ping failed: {other:?}"),
                 }
             }
@@ -525,6 +533,8 @@ async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             .map(|t| TunnelReport {
                 worker_id: t.worker_id,
                 tunnel_id: t.tunnel_id,
+                active_sessions: t.active_sessions,
+                max_sessions: t.max_sessions,
             })
             .collect();
         let req = ReportTunnelsRequest {

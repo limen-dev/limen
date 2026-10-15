@@ -28,6 +28,7 @@ use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::Proxy;
+use crate::tunnels::{NoWorker, SessionSlot};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const CHUNK: usize = 32 * 1024;
@@ -48,7 +49,8 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
     match establish(proxy, &user, user_cert_der, &request).await {
-        Ok((session_id, worker_id, inbound, outbound)) => {
+        Ok((session_id, worker_id, inbound, outbound, _slot)) => {
+            // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
                 return;
             }
@@ -67,7 +69,12 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
         }
         Err(denial) => {
             if denial.audit {
-                let data = json!({ "action": "ssh", "resource": request.resource, "login": request.principal, "reason": denial.reason, "client_addr": client_addr });
+                let mut data = json!({ "action": "ssh", "resource": request.resource, "login": request.principal, "reason": denial.reason, "client_addr": client_addr });
+                if let Some(code) = denial.code {
+                    // A machine-readable reason; the message stays for people.
+                    data["reason"] = json!(code);
+                    data["message"] = json!(denial.reason);
+                }
                 if let Err(e) = proxy
                     .audit
                     .emit(
@@ -137,12 +144,15 @@ struct Denial {
     reason: String,
     /// Policy denials are audited; infrastructure failures are logged.
     audit: bool,
+    /// For the audit event's `data.reason` instead of the message.
+    code: Option<&'static str>,
 }
 
 fn denied(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: true,
+        code: None,
     }
 }
 
@@ -150,18 +160,46 @@ fn failed(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: false,
+        code: None,
+    }
+}
+
+/// Every worker that may serve the resource is at its session cap. Audited
+/// (`auth.denied`, `data.reason = "capacity"`): a sign the pool is too small.
+fn no_capacity(resource: &str) -> Denial {
+    Denial {
+        reason: format!(
+            "no capacity: every worker that can reach {resource} is at its session limit; try again shortly"
+        ),
+        audit: true,
+        code: Some("capacity"),
+    }
+}
+
+/// A refusal from the worker, or from the peer proxy holding its tunnel.
+/// `resource_exhausted` means it is full.
+fn refused(resource: &str, s: &tonic::Status) -> Denial {
+    match s.code() {
+        tonic::Code::ResourceExhausted => no_capacity(resource),
+        tonic::Code::PermissionDenied => {
+            denied(format!("worker refused the session: {}", s.message()))
+        }
+        _ => failed(format!("worker couldn't open the session: {}", s.message())),
     }
 }
 
 type Outbound = tokio::sync::mpsc::Sender<TunnelFrame>;
 type Inbound = tonic::Streaming<TunnelFrame>;
+/// Counts a local session in the worker's load (peered ones are counted by
+/// the proxy holding the tunnel).
+type Slot = Option<SessionSlot>;
 
 async fn establish(
     proxy: &Proxy,
     user: &UserIdentity,
     user_cert_der: Vec<u8>,
     request: &SessionRequest,
-) -> Result<(Uuid, String, Inbound, Outbound), Denial> {
+) -> Result<(Uuid, String, Inbound, Outbound, Slot), Denial> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
         .policy
@@ -183,24 +221,37 @@ async fn establish(
         )));
     }
     // A worker tunnelled to this proxy if possible, otherwise one held by a
-    // peer proxy (ADR-0004).
+    // peer proxy (ADR-0004). Among eligible workers, the less loaded of two;
+    // full ones never.
+    let mut slot = None;
     let route = match proxy
         .tunnels
         .pick(|labels| policy.worker_may_serve(&request.resource, labels))
     {
-        Some((worker_id, channel)) => Route::Local { worker_id, channel },
-        None => match crate::peer::find(proxy, |labels| {
+        Ok(picked) => {
+            slot = Some(picked.slot);
+            Route::Local {
+                worker_id: picked.worker_id,
+                channel: picked.channel,
+            }
+        }
+        Err(local) => match crate::peer::find(proxy, |labels| {
             policy.worker_may_serve(&request.resource, labels)
         })
         .await
         {
-            Ok(Some(remote)) => Route::Peer(remote),
-            Ok(None) => {
+            Ok(Ok(remote)) => Route::Peer(remote),
+            Ok(Err(NoWorker::Full)) => return Err(no_capacity(&request.resource)),
+            Ok(Err(NoWorker::None)) if local == NoWorker::Full => {
+                return Err(no_capacity(&request.resource));
+            }
+            Ok(Err(NoWorker::None)) => {
                 return Err(failed(format!(
                     "no worker is connected that can reach {}",
                     request.resource
                 )));
             }
+            Err(_) if local == NoWorker::Full => return Err(no_capacity(&request.resource)),
             Err(e) => {
                 return Err(failed(format!(
                     "no local worker for {}, and peer lookup failed: {}",
@@ -261,28 +312,16 @@ async fn establish(
         }
     };
     let mut inbound = opened
-        .map_err(|s| match s.code() {
-            tonic::Code::PermissionDenied => {
-                denied(format!("worker refused the session: {}", s.message()))
-            }
-            _ => failed(format!("worker couldn't open the session: {}", s.message())),
-        })?
+        .map_err(|s| refused(&request.resource, &s))?
         .into_inner();
     match tokio::time::timeout(Duration::from_secs(30), inbound.message()).await {
         Ok(Ok(Some(TunnelFrame {
             frame: Some(Frame::Opened(_)),
-        }))) => Ok((session_id, worker_id, inbound, tx)),
+        }))) => Ok((session_id, worker_id, inbound, tx, slot)),
         Ok(Ok(Some(TunnelFrame {
             frame: Some(Frame::Close(c)),
         }))) => Err(failed(format!("worker closed the session: {}", c.reason))),
-        Ok(Err(s)) if s.code() == tonic::Code::PermissionDenied => Err(denied(format!(
-            "worker refused the session: {}",
-            s.message()
-        ))),
-        Ok(Err(s)) => Err(failed(format!(
-            "worker couldn't open the session: {}",
-            s.message()
-        ))),
+        Ok(Err(s)) => Err(refused(&request.resource, &s)),
         Ok(_) => Err(failed("worker ended the session before it started")),
         Err(_) => Err(failed("worker didn't answer in time")),
     }

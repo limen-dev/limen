@@ -231,6 +231,10 @@ message RenewCertificateResponse {
 message TunnelReport {
   string worker_id = 1;
   string tunnel_id = 2;
+  // The reporting proxy's view of the worker's load (its last ping plus the
+  // sessions this proxy opened since). 0/0: unknown, no cap.
+  uint32 active_sessions = 3;
+  uint32 max_sessions = 4;
 }
 
 message ReportTunnelsRequest {
@@ -251,6 +255,9 @@ message PeerTunnel {
   string proxy_id = 3;
   // Where to reach the proxy holding the tunnel (its --peer-address).
   string peer_address = 4;
+  // The worker's load as that proxy last reported it. 0/0: unknown, no cap.
+  uint32 active_sessions = 5;
+  uint32 max_sessions = 6;
 }
 
 message ListTunnelsResponse {

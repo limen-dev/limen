@@ -80,6 +80,12 @@ pub struct Config {
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,
+
+    /// Most sessions this worker serves at once. Over it, new sessions are
+    /// refused (`resource_exhausted`), and proxies stop choosing this worker
+    /// until it has room. 0: no cap.
+    #[arg(long, env = "LIMEN_MAX_SESSIONS", default_value_t = 200)]
+    pub max_sessions: u32,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -108,7 +114,7 @@ pub struct Worker {
     creds: watch::Receiver<Arc<ComponentCredentials>>,
     draining: Arc<AtomicBool>,
     tunnels_up: Arc<AtomicUsize>,
-    sessions: Arc<AtomicUsize>,
+    sessions: SessionSlots,
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
@@ -157,13 +163,14 @@ impl Worker {
             config.audit_failure_mode,
         )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
+        let sessions = SessionSlots::new(config.max_sessions);
         Ok((
             Self {
                 config: Arc::new(config),
                 creds: rx,
                 draining: Arc::new(AtomicBool::new(false)),
                 tunnels_up: Arc::new(AtomicUsize::new(0)),
-                sessions: Arc::new(AtomicUsize::new(0)),
+                sessions,
                 policy,
                 nonces: Arc::default(),
                 audit,
@@ -197,14 +204,9 @@ impl Worker {
         self.config.data_dir.join("recordings")
     }
 
-    pub(crate) fn session_started(&self) -> SessionGuard {
-        self.sessions.fetch_add(1, Ordering::SeqCst);
-        SessionGuard(Arc::clone(&self.sessions))
-    }
-
     #[must_use]
     pub fn active_sessions(&self) -> usize {
-        self.sessions.load(Ordering::SeqCst)
+        self.sessions.active()
     }
 
     #[must_use]
@@ -223,7 +225,48 @@ impl Worker {
     }
 }
 
-/// Decrements the session count when dropped.
+/// Sessions held, against the `--max-sessions` cap. A session takes its
+/// slot before anything else (so the sessions being admitted count too) and
+/// gives it back when its [`SessionGuard`] drops, on every path: the
+/// session ending, an error, a panic, or the task being cancelled.
+#[derive(Debug, Clone)]
+pub(crate) struct SessionSlots {
+    count: Arc<AtomicUsize>,
+    /// 0: no cap.
+    max: usize,
+}
+
+impl SessionSlots {
+    pub(crate) fn new(max: u32) -> Self {
+        Self {
+            count: Arc::default(),
+            max: usize::try_from(max).unwrap_or(usize::MAX),
+        }
+    }
+
+    /// A slot, or `None` at the cap. Check and increment are one atomic step,
+    /// so concurrent sessions can't overshoot.
+    pub(crate) fn try_acquire(&self) -> Option<SessionGuard> {
+        let max = self.max;
+        self.count
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (max == 0 || n < max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| SessionGuard(Arc::clone(&self.count)))
+    }
+
+    pub(crate) fn active(&self) -> usize {
+        self.count.load(Ordering::SeqCst)
+    }
+
+    fn max(&self) -> usize {
+        self.max
+    }
+}
+
+/// Gives a session slot back when dropped.
+#[derive(Debug)]
 pub(crate) struct SessionGuard(Arc<AtomicUsize>);
 
 impl Drop for SessionGuard {
@@ -289,13 +332,26 @@ impl WorkerTunnel for TunnelService {
         if self.0.draining.load(Ordering::SeqCst) {
             return Err(Status::unavailable("worker is draining"));
         }
-        session::open(self.0.clone(), request.into_inner()).await
+        let Some(slot) = self.0.sessions.try_acquire() else {
+            tracing::info!(
+                max_sessions = self.0.sessions.max(),
+                "session refused: at the session cap"
+            );
+            return Err(Status::resource_exhausted(format!(
+                "no capacity: this worker is at its limit of {} sessions",
+                self.0.sessions.max()
+            )));
+        };
+        session::open(self.0.clone(), slot, request.into_inner()).await
     }
 
     async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
+        let sessions = &self.0.sessions;
         Ok(Response::new(PingResponse {
             worker_id: self.0.id(),
             draining: self.0.draining.load(Ordering::SeqCst),
+            active_sessions: u32::try_from(sessions.active()).unwrap_or(u32::MAX),
+            max_sessions: u32::try_from(sessions.max()).unwrap_or(u32::MAX),
         }))
     }
 }
@@ -432,11 +488,8 @@ pub async fn run(
     let _ = shutdown.changed().await;
     worker.draining.store(true, Ordering::SeqCst);
     let deadline = Instant::now() + worker.config.drain_timeout;
-    tracing::info!(
-        sessions = worker.sessions.load(Ordering::SeqCst),
-        "draining"
-    );
-    while worker.sessions.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+    tracing::info!(sessions = worker.sessions.active(), "draining");
+    while worker.sessions.active() > 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     let _ = stop_tunnels.send(true);
@@ -504,5 +557,85 @@ mod reconnect_tests {
         // A long-lived tunnel that then failed starts the backoff over.
         after_tunnel(false, Duration::from_mins(5), &mut b);
         assert_eq!(b.current_ceiling(), Duration::from_secs(2));
+    }
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::*;
+
+    #[test]
+    fn slots_stop_at_the_cap_and_come_back_when_released() {
+        let slots = SessionSlots::new(2);
+        let a = slots.try_acquire().expect("first");
+        let b = slots.try_acquire().expect("second");
+        assert!(slots.try_acquire().is_none(), "over the cap");
+        assert_eq!(slots.active(), 2);
+        drop(a);
+        assert_eq!(slots.active(), 1);
+        let _c = slots.try_acquire().expect("a slot was released");
+        drop(b);
+        assert_eq!(slots.active(), 1);
+    }
+
+    #[test]
+    fn zero_means_unlimited() {
+        let slots = SessionSlots::new(0);
+        let held: Vec<_> = (0..1000)
+            .map(|_| slots.try_acquire().expect("no cap"))
+            .collect();
+        assert_eq!(slots.active(), 1000);
+        drop(held);
+        assert_eq!(slots.active(), 0);
+    }
+
+    #[test]
+    fn a_panicking_session_releases_its_slot() {
+        let slots = SessionSlots::new(1);
+        let inner = slots.clone();
+        let result = std::panic::catch_unwind(move || {
+            let _slot = inner.try_acquire().expect("slot");
+            panic!("session handler panicked");
+        });
+        assert!(result.is_err());
+        assert_eq!(slots.active(), 0);
+        assert!(slots.try_acquire().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_session_releases_its_slot() {
+        let slots = SessionSlots::new(1);
+        let inner = slots.clone();
+        let task = tokio::spawn(async move {
+            let _slot = inner.try_acquire().expect("slot");
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        while slots.active() == 0 {
+            tokio::task::yield_now().await;
+        }
+        task.abort();
+        let _ = task.await;
+        assert_eq!(slots.active(), 0);
+    }
+
+    #[test]
+    fn concurrent_acquires_never_exceed_the_cap() {
+        let slots = SessionSlots::new(5);
+        let peak = Arc::new(AtomicUsize::new(0));
+        std::thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| {
+                    for _ in 0..2000 {
+                        if let Some(slot) = slots.try_acquire() {
+                            peak.fetch_max(slots.active(), Ordering::SeqCst);
+                            drop(slot);
+                        }
+                    }
+                });
+            }
+        });
+        assert!(peak.load(Ordering::SeqCst) <= 5);
+        assert_eq!(slots.active(), 0);
     }
 }

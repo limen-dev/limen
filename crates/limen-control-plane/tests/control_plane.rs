@@ -14,8 +14,8 @@ use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, ListComponentsRequest,
-    ListResourcesRequest, LoginFlow, PolicySource, RenewCertificateRequest, ReportTunnelsRequest,
-    TunnelReport, WhoAmIRequest,
+    ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource, RenewCertificateRequest,
+    ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
 use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
@@ -418,6 +418,8 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
             tunnels: vec![TunnelReport {
                 worker_id: worker.id.clone(),
                 tunnel_id: "t1".into(),
+                active_sessions: 3,
+                max_sessions: 200,
             }],
             peer_address: "10.0.0.5:3024".into(),
         }))
@@ -435,6 +437,22 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         .expect("worker listed");
     assert_eq!(w.tunnels.len(), 1);
     assert_eq!(w.tunnels[0].proxy_id, proxy_id);
+
+    // Another proxy finds the worker through the registry, with the load the
+    // first one reported, for its least-loaded choice.
+    let (_, other) = h.enroll_proxy().await;
+    let listed = RegistryClient::new(h.channel(Some(other)))
+        .list_tunnels(tonic::Request::new(ListTunnelsRequest {}))
+        .await
+        .expect("list tunnels")
+        .into_inner()
+        .tunnels;
+    let t = listed
+        .iter()
+        .find(|t| t.worker_id == worker.id)
+        .expect("the worker is listed to other proxies");
+    assert_eq!(t.peer_address, "10.0.0.5:3024");
+    assert_eq!((t.active_sessions, t.max_sessions), (3, 200));
 }
 
 #[tokio::test]

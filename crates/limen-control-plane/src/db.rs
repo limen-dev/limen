@@ -299,14 +299,23 @@ pub async fn list_components(db: &Db) -> Result<(Vec<ComponentRow>, Vec<TunnelRo
     Ok((components, tunnels))
 }
 
-/// Replace every tunnel lease held by `proxy_id` with `tunnels`
-/// (`(tunnel_id, worker_id)` pairs), and mark the proxy and those workers as seen.
-/// Unknown or revoked workers are skipped and returned.
+/// One tunnel a proxy reports, with the worker load it last saw (0/0: unknown).
+#[derive(Debug, Clone, Default)]
+pub struct ReportedTunnel {
+    pub tunnel_id: String,
+    pub worker_id: String,
+    pub active_sessions: u32,
+    pub max_sessions: u32,
+}
+
+/// Replace every tunnel lease held by `proxy_id` with `tunnels`, and mark the
+/// proxy and those workers as seen. Unknown or revoked workers are skipped
+/// and returned.
 pub async fn replace_tunnels(
     db: &Db,
     proxy_id: &str,
     peer_address: Option<&str>,
-    tunnels: &[(String, String)],
+    tunnels: &[ReportedTunnel],
     lease: Duration,
 ) -> Result<Vec<String>, sqlx::Error> {
     let mut tx = db.begin().await?;
@@ -321,24 +330,26 @@ pub async fn replace_tunnels(
         .await?;
     let lease_secs = f64::from(u32::try_from(lease.as_secs()).unwrap_or(u32::MAX));
     let mut skipped = Vec::new();
-    for (tunnel_id, worker_id) in tunnels {
+    for t in tunnels {
         let inserted = sqlx::query(
-            "INSERT INTO tunnels (proxy_id, tunnel_id, worker_id, lease_expires_at)
-             SELECT $1, $2, id, now() + make_interval(secs => $4)
+            "INSERT INTO tunnels (proxy_id, tunnel_id, worker_id, lease_expires_at, active_sessions, max_sessions)
+             SELECT $1, $2, id, now() + make_interval(secs => $4), $5, $6
              FROM components WHERE id = $3 AND kind = 'worker' AND revoked_at IS NULL",
         )
         .bind(proxy_id)
-        .bind(tunnel_id)
-        .bind(worker_id)
+        .bind(&t.tunnel_id)
+        .bind(&t.worker_id)
         .bind(lease_secs)
+        .bind(i32::try_from(t.active_sessions).unwrap_or(i32::MAX))
+        .bind(i32::try_from(t.max_sessions).unwrap_or(i32::MAX))
         .execute(&mut *tx)
         .await?;
         if inserted.rows_affected() == 0 {
-            skipped.push(worker_id.clone());
+            skipped.push(t.worker_id.clone());
             continue;
         }
         sqlx::query("UPDATE components SET last_seen_at = now() WHERE id = $1")
-            .bind(worker_id)
+            .bind(&t.worker_id)
             .execute(&mut *tx)
             .await?;
     }
@@ -354,15 +365,20 @@ pub struct PeerTunnelRow {
     pub worker_labels: serde_json::Value,
     pub proxy_id: String,
     pub peer_address: String,
+    /// The worker's load as that proxy last reported it (0/0: unknown).
+    pub active_sessions: u32,
+    pub max_sessions: u32,
 }
 
 pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Error> {
     sqlx::query(
-        "SELECT DISTINCT t.worker_id, w.labels AS worker_labels, t.proxy_id, p.peer_address
+        "SELECT t.worker_id, w.labels AS worker_labels, t.proxy_id, p.peer_address,
+                MAX(t.active_sessions) AS active_sessions, MAX(t.max_sessions) AS max_sessions
          FROM tunnels t
          JOIN components w ON w.id = t.worker_id AND w.revoked_at IS NULL
          JOIN components p ON p.id = t.proxy_id AND p.revoked_at IS NULL AND p.peer_address IS NOT NULL
          WHERE t.lease_expires_at > now()
+         GROUP BY t.worker_id, w.labels, t.proxy_id, p.peer_address
          ORDER BY t.worker_id, t.proxy_id",
     )
     .fetch_all(db)
@@ -374,6 +390,9 @@ pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Erro
             worker_labels: r.try_get("worker_labels")?,
             proxy_id: r.try_get("proxy_id")?,
             peer_address: r.try_get("peer_address")?,
+            active_sessions: u32::try_from(r.try_get::<i32, _>("active_sessions")?)
+                .unwrap_or(0),
+            max_sessions: u32::try_from(r.try_get::<i32, _>("max_sessions")?).unwrap_or(0),
         })
     })
     .collect()

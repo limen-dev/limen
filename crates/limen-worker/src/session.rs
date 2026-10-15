@@ -21,16 +21,19 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
-use crate::Worker;
 use crate::ssh::{SshSessionConfig, serve};
+use crate::{SessionGuard, Worker};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
 
 const FRAME_CHUNK: usize = 32 * 1024;
 
+/// `guard` holds the session's slot under the worker's cap: dropped on any
+/// early return, otherwise moved into the session task.
 pub(crate) async fn open(
     worker: Worker,
+    guard: SessionGuard,
     mut inbound: Streaming<TunnelFrame>,
 ) -> Result<Response<FrameStream>, Status> {
     let first = tokio::time::timeout(std::time::Duration::from_secs(10), inbound.message())
@@ -52,7 +55,6 @@ pub(crate) async fn open(
         e
     })?;
 
-    let guard = worker.session_started();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<TunnelFrame, Status>>(64);
     let _ = tx
         .send(Ok(TunnelFrame {
