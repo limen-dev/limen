@@ -29,6 +29,65 @@ pub struct GroupClaims {
 
 impl AdditionalClaims for GroupClaims {}
 
+/// Any extra claims, for the workload identity tokens CI platforms mint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FreeClaims {
+    #[serde(flatten)]
+    pub all: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl AdditionalClaims for FreeClaims {}
+
+/// A GitHub-Actions-shaped (or any CI-shaped) token: a subject, free claims,
+/// and the knobs tests need to break it.
+#[derive(Debug, Clone)]
+pub struct WorkloadToken {
+    pub subject: String,
+    pub claims: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Defaults to `limen`, the control plane's default bot audience.
+    pub audience: String,
+    pub ttl_secs: i64,
+    /// How long ago the token was "minted" (its `iat`).
+    pub issued_secs_ago: i64,
+    pub issuer: Option<String>,
+}
+
+impl WorkloadToken {
+    /// The claims GitHub Actions puts in its OIDC tokens, for `repository` on `git_ref`.
+    #[must_use]
+    pub fn github(repository: &str, git_ref: &str, environment: Option<&str>) -> Self {
+        let mut claims = std::collections::BTreeMap::new();
+        let mut put = |k: &str, v: serde_json::Value| {
+            claims.insert(k.to_owned(), v);
+        };
+        put("repository", repository.into());
+        put(
+            "repository_owner",
+            repository.split('/').next().unwrap_or_default().into(),
+        );
+        put("ref", git_ref.into());
+        put("ref_type", "branch".into());
+        put("sha", "0123456789abcdef0123456789abcdef01234567".into());
+        put("workflow", "deploy".into());
+        put("run_id", "424242".into());
+        put("run_attempt", "1".into());
+        put("event_name", "push".into());
+        put("actor", "octocat".into());
+        put("jti", uuid::Uuid::now_v7().to_string().into());
+        if let Some(env) = environment {
+            put("environment", env.into());
+        }
+        Self {
+            subject: format!("repo:{repository}:ref:{git_ref}"),
+            claims,
+            audience: "limen".into(),
+            ttl_secs: 300,
+            issued_secs_ago: 5,
+            issuer: None,
+        }
+    }
+}
+
 /// What to put in a minted ID token.
 #[derive(Debug, Clone)]
 pub struct Claims {
@@ -222,6 +281,41 @@ impl MockIdp {
             None,
         )
         .expect("sign ID token");
+        token.to_string()
+    }
+
+    /// Mint a signed workload identity token.
+    ///
+    /// # Panics
+    /// If the claims can't be encoded. Tests only.
+    #[must_use]
+    pub fn workload_token(&self, spec: &WorkloadToken) -> String {
+        let now = chrono::Utc::now();
+        let issuer = IssuerUrl::new(spec.issuer.clone().unwrap_or_else(|| self.issuer.clone()))
+            .expect("issuer");
+        let claims = IdTokenClaims::new(
+            issuer,
+            vec![Audience::new(spec.audience.clone())],
+            now + chrono::Duration::seconds(spec.ttl_secs),
+            now - chrono::Duration::seconds(spec.issued_secs_ago),
+            StandardClaims::new(SubjectIdentifier::new(spec.subject.clone())),
+            FreeClaims {
+                all: spec.claims.clone(),
+            },
+        );
+        let token: IdToken<
+            FreeClaims,
+            CoreGenderClaim,
+            CoreJweContentEncryptionAlgorithm,
+            CoreJwsSigningAlgorithm,
+        > = IdToken::new(
+            claims,
+            self.key.as_ref(),
+            CoreJwsSigningAlgorithm::EdDsa,
+            None,
+            None,
+        )
+        .expect("sign workload token");
         token.to_string()
     }
 

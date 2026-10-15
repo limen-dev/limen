@@ -55,26 +55,23 @@ struct Keys {
     fetched: Instant,
 }
 
-/// Verifies ID tokens. Keys are cached, and refetched at most every 30
-/// seconds when verification fails, so IdP key rotation is picked up.
+const REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(30);
+
+/// An issuer's published signing keys, cached. Refetched at most every 30
+/// seconds when verification fails, so key rotation is picked up. Shared by
+/// people's logins and bots' (ADR-0019).
 #[derive(Debug, Clone)]
-pub struct OidcVerifier {
+pub struct KeyCache {
     issuer: IssuerUrl,
-    client_id: ClientId,
     internal_base: String,
-    username_claim: UsernameClaim,
     http: HttpClient,
     keys: Arc<RwLock<Option<Keys>>>,
 }
 
-const REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(30);
-
-impl OidcVerifier {
+impl KeyCache {
     pub fn new(
         issuer: &str,
         internal_url: Option<&str>,
-        client_id: &str,
-        username_claim: UsernameClaim,
         http: HttpClient,
     ) -> Result<Self, OidcError> {
         let issuer = IssuerUrl::new(issuer.to_owned())
@@ -85,12 +82,15 @@ impl OidcVerifier {
             .to_owned();
         Ok(Self {
             issuer,
-            client_id: ClientId::new(client_id.to_owned()),
             internal_base,
-            username_claim,
             http,
             keys: Arc::new(RwLock::new(None)),
         })
+    }
+
+    #[must_use]
+    pub fn issuer(&self) -> &IssuerUrl {
+        &self.issuer
     }
 
     /// Fetch the discovery document and the JWKS. Paths published by the IdP
@@ -134,7 +134,7 @@ impl OidcVerifier {
             .map_err(|e| OidcError::Unavailable(format!("{jwks_uri}: {e}")))
     }
 
-    async fn current_keys(&self, force: bool) -> Result<CoreJsonWebKeySet, OidcError> {
+    pub async fn current_keys(&self, force: bool) -> Result<CoreJsonWebKeySet, OidcError> {
         {
             let guard = self.keys.read().await;
             if let Some(keys) = guard.as_ref()
@@ -149,6 +149,30 @@ impl OidcVerifier {
             fetched: Instant::now(),
         });
         Ok(jwks)
+    }
+}
+
+/// Verifies ID tokens for people's logins.
+#[derive(Debug, Clone)]
+pub struct OidcVerifier {
+    keys: KeyCache,
+    client_id: ClientId,
+    username_claim: UsernameClaim,
+}
+
+impl OidcVerifier {
+    pub fn new(
+        issuer: &str,
+        internal_url: Option<&str>,
+        client_id: &str,
+        username_claim: UsernameClaim,
+        http: HttpClient,
+    ) -> Result<Self, OidcError> {
+        Ok(Self {
+            keys: KeyCache::new(issuer, internal_url, http)?,
+            client_id: ClientId::new(client_id.to_owned()),
+            username_claim,
+        })
     }
 
     /// Verify signature, issuer, audience, and expiry. When `required_nonce`
@@ -166,11 +190,11 @@ impl OidcVerifier {
             .map_err(|e| OidcError::Invalid(format!("malformed: {e}")))?;
         let mut last_err = None;
         for force in [false, true] {
-            let jwks = self.current_keys(force).await?;
+            let jwks = self.keys.current_keys(force).await?;
             // Asymmetric algorithms only. RS256 is what Okta and Dex use.
             let verifier = CoreIdTokenVerifier::new_public_client(
                 self.client_id.clone(),
-                self.issuer.clone(),
+                self.keys.issuer().clone(),
                 jwks,
             )
             .set_allowed_algs([

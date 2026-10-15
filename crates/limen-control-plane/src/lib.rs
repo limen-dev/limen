@@ -1,6 +1,7 @@
 //! Limen control plane: API, identity, policy, CA, worker registry, and
 //! audit emission. Stateless: all state is in PostgreSQL (ADR-0010).
 
+pub mod bots;
 pub mod ca_store;
 pub mod caller;
 pub mod config;
@@ -61,6 +62,12 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         config.oidc_username_claim,
         http.clone(),
     )?;
+    let bots = bots::BotVerifier::new(
+        &config.bot_audience,
+        config.bot_max_token_age,
+        config.bot_allow_insecure_issuers,
+        http.clone(),
+    );
     let console = build_console(&config, &http)?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
@@ -76,6 +83,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         db,
         cas,
         oidc,
+        bots,
         policy,
         audit,
         limits: Arc::new(Limits::default()),

@@ -22,6 +22,7 @@ pub struct AppState {
     pub db: Db,
     pub cas: Cas,
     pub oidc: OidcVerifier,
+    pub bots: crate::bots::BotVerifier,
     pub policy: PolicyStore,
     pub audit: Emitter,
     pub pipeline: crate::pipeline::Pipeline,

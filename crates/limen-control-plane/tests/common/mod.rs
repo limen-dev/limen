@@ -204,6 +204,44 @@ impl Harness {
         Ok((resp, der))
     }
 
+    /// Log a bot in with a workload identity token. Returns the response and
+    /// the certificate DER.
+    pub async fn bot_login(
+        &self,
+        method: &str,
+        token: String,
+        bot: &str,
+    ) -> Result<(limen_proto::v1::LoginResponse, CertificateDer<'static>), tonic::Status> {
+        let key = new_key();
+        let mut client = limen_proto::v1::auth_client::AuthClient::new(self.channel(None));
+        let resp = client
+            .bot_login(limen_proto::v1::BotLoginRequest {
+                method: method.into(),
+                token,
+                csr_der: csr(&key),
+                bot: bot.into(),
+            })
+            .await?
+            .into_inner();
+        let der = limen_tunnel::tls::certs_from_pem(&resp.cert_pem)
+            .expect("cert")
+            .remove(0);
+        Ok((resp, der))
+    }
+
+    /// Replace the active policy, as if an admin had applied it.
+    pub fn set_policy(&self, yaml: &[(&str, &str)]) {
+        let policy = limen_policy::Policy::parse_yaml(yaml.iter().copied()).expect("policy");
+        self.state
+            .policy
+            .set(limen_control_plane::state::LoadedPolicy {
+                version: 1,
+                policy: std::sync::Arc::new(policy),
+                author: "test".into(),
+                created_at: None,
+            });
+    }
+
     pub async fn login_raw(
         &self,
         id_token: String,

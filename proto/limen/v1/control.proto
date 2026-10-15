@@ -12,6 +12,9 @@ service Auth {
   rpc GetAuthConfig(GetAuthConfigRequest) returns (GetAuthConfigResponse);
   // Exchanges an IdP ID token and a CSR for short-lived credentials. Unauthenticated.
   rpc Login(LoginRequest) returns (LoginResponse);
+  // Exchanges a CI platform's workload identity token and a CSR for the
+  // short-lived credentials of a bot (ADR-0019). Unauthenticated.
+  rpc BotLogin(BotLoginRequest) returns (LoginResponse);
   // Identity and roles of the calling user certificate.
   rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
 }
@@ -59,6 +62,8 @@ message GetAuthConfigResponse {
   string client_id = 2;
   repeated string scopes = 3;
   string server_version = 4;
+  // The `aud` a bot's workload identity token must carry.
+  string bot_audience = 5;
 }
 
 enum LoginFlow {
@@ -76,6 +81,17 @@ message LoginRequest {
   // nonce = base64url(SHA-256(CSR SubjectPublicKeyInfo DER || nonce_salt)).
   bytes nonce_salt = 3;
   LoginFlow flow = 4;
+}
+
+message BotLoginRequest {
+  // github_actions, gitlab, or oidc.
+  string method = 1;
+  // The workload identity token (a JWT) minted for this job.
+  string token = 2;
+  // DER PKCS#10 CSR for the bot's X.509 key.
+  bytes csr_der = 3;
+  // Optional: which bot the token is for, when more than one could match.
+  string bot = 4;
 }
 
 message LoginResponse {

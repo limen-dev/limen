@@ -6,8 +6,8 @@ use limen_audit::{Context, Emitter, EventKind};
 use limen_ca::UserCertRequest;
 use limen_proto::v1::auth_server::Auth;
 use limen_proto::v1::{
-    GetAuthConfigRequest, GetAuthConfigResponse, LoginFlow, LoginRequest, LoginResponse,
-    WhoAmIRequest, WhoAmIResponse,
+    BotLoginRequest, GetAuthConfigRequest, GetAuthConfigResponse, LoginFlow, LoginRequest,
+    LoginResponse, WhoAmIRequest, WhoAmIResponse,
 };
 use rcgen::CertificateSigningRequestParams;
 use rustls_pki_types::CertificateSigningRequestDer;
@@ -65,6 +65,7 @@ impl Auth for AuthService {
             client_id: c.oidc_client_id.clone(),
             scopes: c.oidc_scopes.clone(),
             server_version: limen_core::VERSION.to_owned(),
+            bot_audience: c.bot_audience.clone(),
         }))
     }
 
@@ -75,6 +76,17 @@ impl Auth for AuthService {
         let caller = caller::resolve(&request, &self.0.cas)?;
         self.0.limits.check_unauthenticated(caller.addr())?;
         login(self.0.clone(), caller.addr(), request.into_inner())
+            .await
+            .map(Response::new)
+    }
+
+    async fn bot_login(
+        &self,
+        request: Request<BotLoginRequest>,
+    ) -> Result<Response<LoginResponse>, Status> {
+        let caller = caller::resolve(&request, &self.0.cas)?;
+        self.0.limits.check_unauthenticated(caller.addr())?;
+        super::bot_login::bot_login(self.0.clone(), caller.addr(), request.into_inner())
             .await
             .map(Response::new)
     }
@@ -103,6 +115,25 @@ fn csr_spki(csr_der: &[u8]) -> Result<Vec<u8>, Status> {
     Ok(rcgen::PublicKeyData::subject_public_key_info(
         &csr.public_key,
     ))
+}
+
+/// `bot:` names belong to machine identities (ADR-0019). A person whose IdP
+/// user name starts with it must not be able to look like one.
+async fn refuse_reserved_name(
+    state: &AppState,
+    addr: Option<IpAddr>,
+    username: &str,
+) -> Result<(), Status> {
+    if limen_core::identity::is_bot(username) {
+        return Err(deny(
+            state.audit.clone(),
+            addr,
+            Some(username.to_owned()),
+            "reserved username",
+        )
+        .await);
+    }
+    Ok(())
 }
 
 /// The login flow. A free function over owned values: borrowing `self`
@@ -140,6 +171,8 @@ async fn login(
             return Err(deny(state.audit.clone(), addr, None, "invalid ID token").await);
         }
     };
+
+    refuse_reserved_name(&state, addr, &identity.username).await?;
 
     // One login per ID token: record the nonce (PKCE) or the token hash (device).
     let replay_key = match flow {
