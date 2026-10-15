@@ -175,6 +175,9 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
+      # The self-hosted VMs have 8 GiB. Compiling test binaries in parallel ran them
+      # out of memory (the OOM killer stopped the runner), so compile two at a time.
+      CARGO_BUILD_JOBS: "2"
       # Warnings from the components under test show up in the log when a test fails.
       LIMEN_TEST_LOG: "1"
       RUST_LOG: warn
