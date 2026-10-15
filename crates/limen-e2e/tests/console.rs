@@ -866,6 +866,10 @@ async fn console_end_to_end() {
         "the resource that had sessions shows up as busy"
     );
     assert!(dash.body.contains("<title>"), "bars carry tooltips");
+    assert!(
+        dash.body.contains("Bot sessions by repository") && dash.body.contains("acme/infra"),
+        "the bot's session shows up under its repository"
+    );
 
     // ---- policy browsing and dry run -------------------------------------------------------
     let policy_page = admin_user.get("/console/policy").await;
