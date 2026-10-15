@@ -11,6 +11,7 @@ pub mod http_client;
 pub mod jobs;
 pub mod oidc;
 pub mod pipeline;
+pub mod replicas;
 pub mod server;
 pub mod services;
 pub mod sinks;
@@ -71,6 +72,11 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let console = build_console(&config, &http)?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
+    // Claim the id before the pipeline opens the spool, so a duplicate
+    // replica never touches it.
+    replicas::register(&db, &config.id, &config.ingest_url(), config.spool_mode)
+        .await
+        .context("registering this replica")?;
     let config = Arc::new(config);
     let snapshot_signer: sinks::SignerSlot = Arc::default();
     let pipeline = pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await?;
@@ -138,12 +144,17 @@ pub async fn run(
     state.pipeline.start_sinks(&state.db, &shutdown);
     tokio::spawn(jobs::policy_refresh(state.clone(), shutdown.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), shutdown.clone()));
+    tokio::spawn(jobs::replica_heartbeat(state.clone(), shutdown.clone()));
     let health = tokio::spawn(server::serve_health(
         state.clone(),
         state.config.admin_listen,
         shutdown.clone(),
     ));
-    server::serve_api(state, api, shutdown).await?;
+    let served = server::serve_api(state.clone(), api, shutdown).await;
     health.abort();
+    if let Err(e) = replicas::deregister(&state.db, &state.config.id).await {
+        tracing::warn!(error = %e, "could not deregister this replica; its row expires");
+    }
+    served?;
     Ok(())
 }

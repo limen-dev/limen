@@ -9,11 +9,24 @@ use clap::{Args, ValueEnum};
 use limen_audit::FailureMode;
 use limen_core::secret::Secret;
 
+use crate::replicas::SpoolMode;
+
 #[derive(Debug, Clone, Args)]
 pub struct Config {
-    /// Stable identifier of this replica. Appears in audit events and its certificate.
-    #[arg(long, env = "LIMEN_ID", default_value = "control-plane")]
+    /// Stable identifier of this replica. Appears in audit events and its
+    /// certificate, and is the audit manifest writer. Defaults to the
+    /// hostname. Two live replicas with the same id refuse to start.
+    #[arg(long, env = "LIMEN_ID", default_value_t = default_id())]
     pub id: String,
+
+    /// Whether the audit spool directory survives this replica.
+    #[arg(long, env = "LIMEN_SPOOL_MODE", value_enum, default_value = "durable")]
+    pub spool_mode: SpoolMode,
+
+    /// URL peers use to reach this replica's ingest service. Defaults to
+    /// `https://<first --dns-name>:<--listen port>`.
+    #[arg(long, env = "LIMEN_ADVERTISE_URL")]
+    pub advertise_url: Option<String>,
 
     /// gRPC listener (mTLS). Proxies connect here.
     #[arg(long, env = "LIMEN_LISTEN", default_value = "0.0.0.0:3080")]
@@ -307,9 +320,46 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     limen_policy::duration::DurationStr::parse(s).map(|d| d.0)
 }
 
+/// The hostname: `HOSTNAME`, then `/etc/hostname`, else `control-plane`.
+fn default_id() -> String {
+    let from_env = std::env::var("HOSTNAME").ok();
+    let from_file = || std::fs::read_to_string("/etc/hostname").ok();
+    pick_hostname(from_env, from_file)
+}
+
+fn pick_hostname(env: Option<String>, file: impl FnOnce() -> Option<String>) -> String {
+    [env, file()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.trim().to_owned())
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| "control-plane".to_owned())
+}
+
+impl Config {
+    /// Where peers reach this replica's ingest service.
+    #[must_use]
+    pub fn ingest_url(&self) -> String {
+        self.advertise_url.clone().unwrap_or_else(|| {
+            let host = self.dns_names.first().map_or("localhost", String::as_str);
+            format!("https://{host}:{}", self.listen.port())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hostname_default_prefers_env_then_file_then_fallback() {
+        assert_eq!(
+            pick_hostname(Some(" cp-0\n".into()), || Some("x".into())),
+            "cp-0"
+        );
+        assert_eq!(pick_hostname(None, || Some("box\n".into())), "box");
+        assert_eq!(pick_hostname(Some(String::new()), || None), "control-plane");
+    }
 
     #[test]
     fn static_tokens_with_labels() {

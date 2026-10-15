@@ -453,6 +453,12 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query(
+        "DELETE FROM control_plane_replicas WHERE heartbeat_at < now() - interval '1 day'",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
     tx.commit().await?;
     Ok(Some(deleted))
 }
