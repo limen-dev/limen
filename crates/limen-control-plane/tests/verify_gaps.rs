@@ -29,6 +29,20 @@ fn event(component: &str, instance_id: &str, seq: u64) -> Vec<u8> {
     serde_json::to_vec(&event).expect("json")
 }
 
+/// Ship like the pipeline does: a failed batch is retried (the shared dev
+/// `SeaweedFS` sometimes answers 500).
+async fn ship(sink: &S3Sink, batch: Vec<(u64, Vec<u8>)>) {
+    let mut last = None;
+    for _ in 0..10 {
+        match sink.ship(batch.clone()).await {
+            Ok(()) => return,
+            Err(e) => last = Some(e),
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    panic!("ship: {last:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn seq_gaps_are_reported_and_duplicates_are_not() {
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
@@ -80,15 +94,17 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
         "cp-a".into(),
         slot.clone(),
     );
-    a.ship(vec![
-        (0, event("proxy", "proxy-1/a", 1)),
-        (1, dup.clone()),
-        (2, event("proxy", "proxy-1/b", 0)),
-        (3, event("worker", "worker-1/a", 0)),
-        (4, event("worker", "worker-1/a", 3)),
-    ])
-    .await
-    .expect("ship a");
+    ship(
+        &a,
+        vec![
+            (0, event("proxy", "proxy-1/a", 1)),
+            (1, dup.clone()),
+            (2, event("proxy", "proxy-1/b", 0)),
+            (3, event("worker", "worker-1/a", 0)),
+            (4, event("worker", "worker-1/a", 3)),
+        ],
+    )
+    .await;
     let b = S3Sink::new(
         client.clone(),
         bucket.clone(),
@@ -97,15 +113,17 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
         "cp-b".into(),
         slot,
     );
-    b.ship(vec![
-        (0, dup),
-        (1, event("proxy", "proxy-1/a", 4)),
-        (2, event("proxy", "proxy-1/b", 1)),
-        (3, event("worker", "worker-1/a", 7)),
-        (4, event("worker", "worker-1/a", 4)),
-    ])
-    .await
-    .expect("ship b");
+    ship(
+        &b,
+        vec![
+            (0, dup),
+            (1, event("proxy", "proxy-1/a", 4)),
+            (2, event("proxy", "proxy-1/b", 1)),
+            (3, event("worker", "worker-1/a", 7)),
+            (4, event("worker", "worker-1/a", 4)),
+        ],
+    )
+    .await;
 
     let report = verify_bucket(&client, &bucket, "", ca.cert_der())
         .await
