@@ -70,6 +70,10 @@ pub struct UserRow {
     pub lock_reason: Option<String>,
     pub locked_by: Option<String>,
     pub locked_at: Option<OffsetDateTime>,
+    /// `user` or `bot`.
+    pub actor_type: String,
+    /// The CI run of a bot's latest login.
+    pub last_ci: Option<serde_json::Value>,
 }
 
 fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
@@ -83,24 +87,43 @@ fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
         lock_reason: r.try_get("lock_reason")?,
         locked_by: r.try_get("locked_by")?,
         locked_at: r.try_get("locked_at")?,
+        actor_type: r.try_get("actor_type")?,
+        last_ci: r.try_get("last_ci")?,
     })
 }
 
 macro_rules! user_select {
     () => {
         "SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
-        l.reason AS lock_reason, l.locked_by, l.locked_at
+        l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci
      FROM users u LEFT JOIN user_locks l ON l.username = u.username AND l.released_at IS NULL"
     };
 }
 
+/// People. Bots are listed by [`list_bots`].
 pub async fn list_users(db: &Db) -> Result<Vec<UserRow>, sqlx::Error> {
-    sqlx::query(concat!(user_select!(), " ORDER BY u.username"))
-        .fetch_all(db)
-        .await?
-        .iter()
-        .map(user_from_row)
-        .collect()
+    sqlx::query(concat!(
+        user_select!(),
+        " WHERE u.actor_type = 'user' ORDER BY u.username"
+    ))
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(user_from_row)
+    .collect()
+}
+
+/// Bots that have logged in at least once (ADR-0019).
+pub async fn list_bots(db: &Db) -> Result<Vec<UserRow>, sqlx::Error> {
+    sqlx::query(concat!(
+        user_select!(),
+        " WHERE u.actor_type = 'bot' ORDER BY u.username"
+    ))
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(user_from_row)
+    .collect()
 }
 
 pub async fn user(db: &Db, username: &str) -> Result<Option<UserRow>, sqlx::Error> {
@@ -134,12 +157,17 @@ pub struct SessionRow {
     pub recording_uri: Option<String>,
     pub recording_sha256: Option<String>,
     pub active: bool,
+    /// `user` or `bot`.
+    pub actor_type: String,
+    /// The CI run, for a bot's session.
+    pub ci: Option<serde_json::Value>,
 }
 
 macro_rules! session_select {
     () => {
         "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
         started_at, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_uri, recording_sha256,
+        actor_type, ci,
         (ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1)) AS active
      FROM sessions"
     };
@@ -164,6 +192,8 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
         recording_uri: r.try_get("recording_uri")?,
         recording_sha256: r.try_get("recording_sha256")?,
         active: r.try_get("active")?,
+        actor_type: r.try_get("actor_type")?,
+        ci: r.try_get("ci")?,
     })
 }
 
@@ -260,7 +290,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 10] = [
+const SUMMARY_KEYS: [&str; 12] = [
     "action",
     "target_user",
     "component_id",
@@ -271,7 +301,12 @@ const SUMMARY_KEYS: [&str; 10] = [
     "by",
     "via",
     "worker_id",
+    "bot",
+    "method",
 ];
+
+/// Facts about a bot's CI run that may appear in the trail.
+const CI_SUMMARY_KEYS: [&str; 4] = ["repository", "project_path", "ref", "run_id"];
 
 /// The wire name of an event kind, such as `auth.login`.
 fn kind_name(kind: limen_audit::EventKind) -> String {
@@ -282,11 +317,18 @@ fn kind_name(kind: limen_audit::EventKind) -> String {
 }
 
 fn summarize(data: &serde_json::Value) -> String {
-    let mut out = SUMMARY_KEYS
+    let mut parts: Vec<String> = SUMMARY_KEYS
         .iter()
         .filter_map(|k| text(data, k).map(|v| format!("{k}={v}")))
-        .collect::<Vec<_>>()
-        .join("  ");
+        .collect();
+    if let Some(ci) = data.get("ci") {
+        parts.extend(
+            CI_SUMMARY_KEYS
+                .iter()
+                .filter_map(|k| text(ci, k).map(|v| format!("{k}={v}"))),
+        );
+    }
+    let mut out = parts.join("  ");
     if out.len() > 300 {
         let mut end = 300;
         while !out.is_char_boundary(end) {
@@ -323,11 +365,12 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                      ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
                        resource = EXCLUDED.resource, login = EXCLUDED.login, worker_id = EXCLUDED.worker_id,
-                       proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at",
+                       proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at,
+                       actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci",
                 )
                 .bind(session_id)
                 .bind(&e.user)
@@ -338,13 +381,15 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(text(&e.data, "proxy_id"))
                 .bind(text(&e.data, "client_addr"))
                 .bind(e.time)
+                .bind(text(&e.data, "actor_type").unwrap_or("user"))
+                .bind(e.data.get("ci").filter(|c| c.is_object()))
                 .execute(&mut *tx)
                 .await?;
             }
             EventKind::SessionEnd => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_sha256)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_sha256, actor_type)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                      ON CONFLICT (session_id) DO UPDATE SET ended_at = EXCLUDED.ended_at, end_reason = EXCLUDED.end_reason,
                        duration_ms = EXCLUDED.duration_ms, bytes_in = EXCLUDED.bytes_in, bytes_out = EXCLUDED.bytes_out,
                        recording_sha256 = EXCLUDED.recording_sha256,
@@ -366,6 +411,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(number(&e.data, "bytes_in"))
                 .bind(number(&e.data, "bytes_out"))
                 .bind(text(&e.data, "recording_sha256"))
+                .bind(text(&e.data, "actor_type").unwrap_or("user"))
                 .execute(&mut *tx)
                 .await?;
             }
@@ -489,6 +535,20 @@ pub async fn take_login(
         return Ok(None);
     }
     Ok(Some((r.try_get("nonce")?, r.try_get("pkce_verifier")?)))
+}
+
+/// Bot sessions started in the last 30 days, by bot.
+pub async fn bot_session_counts(db: &Db) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT username, count(*) AS n FROM sessions
+         WHERE actor_type = 'bot' AND username IS NOT NULL AND started_at > now() - interval '30 days'
+         GROUP BY username",
+    )
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| Ok((r.try_get("username")?, r.try_get("n")?)))
+        .collect()
 }
 
 // ---- the audit trail ---------------------------------------------------------

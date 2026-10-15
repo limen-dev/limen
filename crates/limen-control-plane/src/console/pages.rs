@@ -16,10 +16,10 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab, PendingTokenView,
-    PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage,
-    RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage, UserView,
-    UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
+    self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
+    PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView,
+    ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage,
+    UserView, UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -659,9 +659,18 @@ pub async fn users(
         Ok(l) => l,
         Err(e) => return db_error("listing locks", &e),
     };
+    // A locked bot has a row too: it isn't "never signed in".
+    let known: Vec<String> = match store::list_bots(&state.db).await {
+        Ok(bots) => users
+            .iter()
+            .chain(&bots)
+            .map(|u| u.username.clone())
+            .collect(),
+        Err(e) => return db_error("listing bots", &e),
+    };
     let orphan_locks = locks
         .iter()
-        .filter(|l| !users.iter().any(|u| u.username == l.username))
+        .filter(|l| !known.contains(&l.username))
         .map(|l| lock_only_view(&l.username, l))
         .collect();
     html(
@@ -693,7 +702,85 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         lock_reason: l.reason.clone(),
         locked_by: l.locked_by.clone(),
         locked_at: time_text(Some(l.locked_at)),
+        is_bot: limen_core::identity::is_bot(name),
+        ci: Vec::new(),
+        run_url: None,
     }
+}
+
+pub async fn bots(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<DoneQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let seen = match store::list_bots(&state.db).await {
+        Ok(rows) => rows,
+        Err(e) => return db_error("listing bots", &e),
+    };
+    let counts: BTreeMap<String, i64> = store::bot_session_counts(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let locks = db::active_locks(&state.db).await.unwrap_or_default();
+    let policy = state.policy.current();
+    let bots = policy
+        .policy
+        .bots()
+        .map(|b| {
+            let username = b.username();
+            let row = seen.iter().find(|r| r.username == username);
+            let lock = locks.iter().find(|l| l.username == username);
+            BotView {
+                av: views::avatar_class(&username),
+                path: path_segment(&username),
+                name: username.clone(),
+                description: b.metadata.description.clone().unwrap_or_default(),
+                method: b.spec.join.method.as_str(),
+                issuer: b.spec.join.issuer().unwrap_or_default(),
+                rules: b
+                    .spec
+                    .join
+                    .claims
+                    .iter()
+                    .map(|(k, v)| views::Fact {
+                        key: k.clone(),
+                        value: v.values().join(" or "),
+                    })
+                    .collect(),
+                roles: b
+                    .spec
+                    .roles
+                    .iter()
+                    .map(|r| views::Chip {
+                        text: r.clone(),
+                        c: views::chip_color(r),
+                    })
+                    .collect(),
+                ttl: format!("{} minutes", b.ttl().as_secs() / 60),
+                seen: row.is_some(),
+                last_login: row
+                    .map_or_else(|| "never".into(), |r| time_text(Some(r.last_login_at))),
+                logins: row.map_or(0, |r| r.login_count),
+                sessions: counts.get(&username).copied().unwrap_or(0),
+                locked: lock.is_some(),
+                lock_reason: lock.map(|l| l.reason.clone()).unwrap_or_default(),
+                last_run: views::ci_facts(row.and_then(|r| r.last_ci.as_ref())),
+                run_url: views::run_url(row.and_then(|r| r.last_ci.as_ref())),
+            }
+        })
+        .collect();
+    html(
+        BotsPage {
+            chrome: chrome(&state, &auth, "bots"),
+            notice: notice(q.done.as_deref()),
+            bots,
+        }
+        .render(),
+    )
 }
 
 pub async fn user_detail(

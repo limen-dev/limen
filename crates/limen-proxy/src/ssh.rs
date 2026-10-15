@@ -304,7 +304,11 @@ async fn relay(
         user: Some(user.username.clone()),
         session_id: Some(session_id),
     };
-    let start = json!({ "kind": "ssh", "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
+    let mut start = json!({ "kind": "ssh", "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
+    if user.bot {
+        // Which CI run this session belongs to (ADR-0019).
+        start["ci"] = json!(user.ci);
+    }
     if let Err(e) = proxy
         .audit
         .emit(EventKind::SessionStart, ctx.clone(), start)
@@ -425,8 +429,10 @@ async fn relay(
         }
     };
     let close = close.unwrap_or_default();
+    let ctx_user = ctx.user.clone().unwrap_or_default();
     let end = json!({
         "kind": "ssh",
+        "actor_type": limen_core::identity::actor_type(&ctx_user),
         "resource": request.resource,
         "login": request.principal,
         "worker_id": worker_id,

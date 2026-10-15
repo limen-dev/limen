@@ -137,6 +137,8 @@ impl Deployment {
             ),
             "--admin-listen=127.0.0.1:0".into(),
             "--drain-timeout=0s".into(),
+            // The mock issuer is plain http.
+            "--bot-allow-insecure-issuers".into(),
         ]);
         let cp_config: limen_control_plane::Config = parse(&cp_args);
         let state = limen_control_plane::build_state(cp_config)
@@ -273,6 +275,27 @@ impl Deployment {
             "localhost",
             SharedClientConfig::new(tls),
         )
+    }
+
+    /// Log a bot in through the proxy with a workload identity token, as
+    /// `limen login --bot` does. Returns a TLS identity.
+    pub async fn bot_login(&self, method: &str, token: String) -> Result<Identity, tonic::Status> {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let csr = CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr")
+            .der()
+            .to_vec();
+        let resp = limen_proto::v1::auth_client::AuthClient::new(self.proxy_channel(None))
+            .bot_login(limen_proto::v1::BotLoginRequest {
+                method: method.into(),
+                token,
+                csr_der: csr,
+                bot: String::new(),
+            })
+            .await?
+            .into_inner();
+        Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
     }
 
     /// Log in through the proxy, as the CLI does. Returns a TLS identity.

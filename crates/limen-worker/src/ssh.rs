@@ -354,7 +354,7 @@ async fn bridge(
                     Some(ChannelMsg::Exec { command, .. }) => {
                         ensure_recorder(80, 24);
                         let cmd = String::from_utf8_lossy(&command).into_owned();
-                        let data = json!({ "resource": config.resource, "login": config.login, "command": cmd });
+                        let data = json!({ "actor_type": limen_core::identity::actor_type(&config.username), "resource": config.resource, "login": config.login, "command": cmd });
                         if let Err(e) = audit.emit(EventKind::SshExec, ctx.clone(), data).await {
                             // Fail closed: a command we can't audit doesn't run.
                             tracing::error!(error = %e, "audit unavailable; refusing exec");
@@ -365,7 +365,7 @@ async fn bridge(
                     }
                     Some(ChannelMsg::RequestSubsystem { name, .. }) => {
                         ensure_recorder(80, 24);
-                        let data = json!({ "resource": config.resource, "login": config.login, "command": format!("subsystem {name}") });
+                        let data = json!({ "actor_type": limen_core::identity::actor_type(&config.username), "resource": config.resource, "login": config.login, "command": format!("subsystem {name}") });
                         if audit.emit(EventKind::SshExec, ctx.clone(), data).await.is_err() {
                             let _ = user.close().await;
                             break;
