@@ -44,6 +44,9 @@ jobs:
   # Releases and manual runs (workflow_dispatch) always run everything.
   changes:
     name: what changed
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 10
     outputs:
@@ -52,10 +55,27 @@ jobs:
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       # Full history, so the merge base with the target branch is available.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          fetch_args=(--no-tags origin "$GITHUB_REF")
+          [ -f .git/shallow ] && fetch_args+=(--unshallow)
+          git fetch "${fetch_args[@]}"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - id: filter
         shell: bash
         env:
@@ -93,12 +113,31 @@ jobs:
     name: fmt + clippy
     needs: changes
     if: needs.changes.outputs.rust == 'true'
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Don't depend on how the toolchain was installed or cached.
@@ -121,6 +160,9 @@ jobs:
             self-hosted: '["self-hosted","Linux","X64"]'
           - os: ubuntu-24.04-arm
             self-hosted: '["self-hosted","Linux","ARM64"]'
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}-{2}', github.run_id, github.job, matrix.os) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && matrix.os || fromJSON(matrix.self-hosted) }}
     services:
       postgres:
@@ -160,9 +202,25 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h /
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       # Service containers can't take a command or mount repo files, so S3 starts here.
       - name: Start SeaweedFS (S3)
         run: >-
@@ -185,11 +243,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 45
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64"]') }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --workspace --all-features --locked
@@ -199,11 +276,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 20
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - run: cargo deny --locked check
       - run: cargo audit
@@ -215,14 +311,33 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 60
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64"]') }}
     env:
       # The Dockerfile uses BuildKit's --mount. Hosted runners enable it by default.
       DOCKER_BUILDKIT: "1"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - name: Build and smoke test
         run: |
           set -euo pipefail
@@ -236,11 +351,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     timeout-minutes: 10
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - run: actionlint
 
@@ -249,11 +383,30 @@ jobs:
     needs: changes
     if: needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
+    concurrency:
+      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
+      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Fetches this run's commit without actions/checkout: GitHub rate limits the
+      # action download (HTTP 429) when several self-hosted runners fetch it at once.
+      # The token reaches git through the environment and is never written to disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
           install_args: terraform
