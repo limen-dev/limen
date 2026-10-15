@@ -298,6 +298,7 @@ td.empty { text-align: center; }
 .bar-b { fill: #6366f1; background: #6366f1; }
 .bar-c { fill: #d97706; background: #d97706; }
 .bar-d { fill: #8b5cf6; background: #8b5cf6; }
+.bar-bot { fill: #8b5cf6; background: #8b5cf6; }
 .bar-bad { fill: var(--bad); background: var(--bad); }
 .chart-empty { margin: 6px 0 0; color: var(--text-3); font-size: 13px; text-align: center; }
 .ranked { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

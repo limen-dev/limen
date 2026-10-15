@@ -348,11 +348,12 @@ async fn time_series(
     unit: &'static str,
     starts: &[PrimitiveDateTime],
     since: OffsetDateTime,
-) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>), sqlx::Error> {
+) -> Result<TimeSeries, sqlx::Error> {
     let mut sessions = vec![0_i64; starts.len()];
+    let mut bot_sessions = vec![0_i64; starts.len()];
     for r in sqlx::query(
-        "SELECT date_trunc($1, started_at AT TIME ZONE 'UTC') AS b, count(*) AS n FROM sessions
-         WHERE started_at >= $2 GROUP BY 1",
+        "SELECT date_trunc($1, started_at AT TIME ZONE 'UTC') AS b, actor_type, count(*) AS n FROM sessions
+         WHERE started_at >= $2 GROUP BY 1, 2",
     )
     .bind(unit)
     .bind(since)
@@ -360,7 +361,12 @@ async fn time_series(
     .await?
     {
         if let Some(i) = slot(starts, r.try_get("b")?) {
-            sessions[i] = r.try_get("n")?;
+            let n: i64 = r.try_get("n")?;
+            if r.try_get::<String, _>("actor_type")? == "bot" {
+                bot_sessions[i] = n;
+            } else {
+                sessions[i] = n;
+            }
         }
     }
     let mut logins = vec![0_i64; starts.len()];
@@ -383,7 +389,20 @@ async fn time_series(
             }
         }
     }
-    Ok((sessions, logins, denied))
+    Ok(TimeSeries {
+        sessions,
+        bot_sessions,
+        logins,
+        denied,
+    })
+}
+
+/// Counts per bucket: people's sessions, bots' sessions, sign-ins, denials.
+struct TimeSeries {
+    sessions: Vec<i64>,
+    bot_sessions: Vec<i64>,
+    logins: Vec<i64>,
+    denied: Vec<i64>,
 }
 
 /// The ranked lists: busiest resources and people, session length, denials, admin actions.
@@ -397,8 +416,15 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
     .await?;
     let top_users = counts(
         db,
-        "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL
+        "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
          GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+        since,
+    )
+    .await?;
+    let bot_repos = counts(
+        db,
+        "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
+         WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
         since,
     )
     .await?;
@@ -448,6 +474,12 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
             class: "bar-b",
         },
         RankPanel {
+            title: "Bot sessions by repository",
+            sub: "CI jobs, by the repository or project that ran them",
+            rows: rank(bot_repos, |_| None),
+            class: "bar-bot",
+        },
+        RankPanel {
             title: "Session length",
             sub: "Finished sessions",
             rows: rank(lengths, |_| None),
@@ -478,10 +510,17 @@ async fn build(
     let since = starts.first().copied().unwrap_or_else(utc_now).assume_utc();
     let unit = range.unit();
 
-    let (sessions, logins, denied) = time_series(db, unit, &starts, since).await?;
+    let TimeSeries {
+        sessions,
+        bot_sessions,
+        logins,
+        denied,
+    } = time_series(db, unit, &starts, since).await?;
 
     let people: i64 =
-        sqlx::query_scalar("SELECT count(DISTINCT username) FROM sessions WHERE started_at >= $1")
+        sqlx::query_scalar(
+            "SELECT count(DISTINCT username) FROM sessions WHERE started_at >= $1 AND actor_type = 'user'",
+        )
             .bind(since)
             .fetch_one(db)
             .await?;
@@ -492,7 +531,8 @@ async fn build(
     .fetch_one(db)
     .await?;
 
-    let total_sessions: i64 = sessions.iter().sum();
+    let total_bot_sessions: i64 = bot_sessions.iter().sum();
+    let total_sessions: i64 = sessions.iter().sum::<i64>() + total_bot_sessions;
     let total_denied: i64 = denied.iter().sum();
     let tiles = vec![
         Tile {
@@ -506,6 +546,12 @@ async fn build(
             label: "People",
             icon: "users",
             tone: "c-blue",
+        },
+        Tile {
+            value: total_bot_sessions.to_string(),
+            label: "Bot sessions",
+            icon: "bot",
+            tone: "c-violet",
         },
         Tile {
             value: logins.iter().sum::<i64>().to_string(),
@@ -523,7 +569,7 @@ async fn build(
             value: average.map_or_else(|| "—".into(), duration_text),
             label: "Average session",
             icon: "clock",
-            tone: "c-violet",
+            tone: "c-amber",
         },
     ];
     let panels = vec![
@@ -532,13 +578,20 @@ async fn build(
             sub: "Started per period",
             chart: bar_chart(
                 &labels,
-                &[Series {
-                    name: "sessions",
-                    class: "bar-a",
-                    values: sessions,
-                }],
+                &[
+                    Series {
+                        name: "people's sessions",
+                        class: "bar-a",
+                        values: sessions,
+                    },
+                    Series {
+                        name: "bot sessions",
+                        class: "bar-bot",
+                        values: bot_sessions,
+                    },
+                ],
             ),
-            legend: vec![],
+            legend: vec![("bar-a", "People"), ("bar-bot", "Bots")],
         },
         Panel {
             title: "Sign-ins and denials",
