@@ -17,6 +17,7 @@ pub enum Document {
     Role(RoleDoc),
     RoleMapping(RoleMappingDoc),
     Resource(ResourceDoc),
+    Bot(crate::bot::BotDoc),
 }
 
 impl Document {
@@ -26,6 +27,7 @@ impl Document {
             Document::Role(_) => "role",
             Document::RoleMapping(_) => "role_mapping",
             Document::Resource(_) => "resource",
+            Document::Bot(_) => "bot",
         }
     }
 
@@ -35,6 +37,7 @@ impl Document {
             Document::Role(d) => &d.metadata.name,
             Document::RoleMapping(d) => &d.metadata.name,
             Document::Resource(d) => &d.metadata.name,
+            Document::Bot(d) => &d.metadata.name,
         }
     }
 }

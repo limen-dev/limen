@@ -1,6 +1,7 @@
 //! Policy: YAML roles, role mappings, and resources, with a deny-by-default
 //! evaluator (ADR-0008).
 
+pub mod bot;
 pub mod duration;
 pub mod model;
 
@@ -124,6 +125,8 @@ pub struct Policy {
     group_roles: BTreeMap<String, BTreeSet<String>>,
     mapping_docs: BTreeMap<String, model::RoleMappingDoc>,
     resources: BTreeMap<String, ResourceDoc>,
+    #[serde(default)]
+    bots: BTreeMap<String, bot::BotDoc>,
 }
 
 /// Changes between two policies, by `kind/name`.
@@ -180,6 +183,13 @@ impl Policy {
                         });
                     }
                 }
+                Document::Bot(bot) => {
+                    bot::validate_bot(&bot)?;
+                    let name = bot.metadata.name.clone();
+                    if policy.bots.insert(name.clone(), bot).is_some() {
+                        return Err(PolicyError::Duplicate { kind: "bot", name });
+                    }
+                }
                 Document::Resource(resource) => {
                     validate_resource(&resource)?;
                     let name = resource.metadata.name.clone();
@@ -217,6 +227,13 @@ impl Policy {
                 }
             }
         }
+        for (name, bot) in &policy.bots {
+            for role in &bot.spec.roles {
+                if !policy.roles.contains_key(role) {
+                    return Err(invalid("bot", name, format!("unknown role {role:?}")));
+                }
+            }
+        }
         Ok(policy)
     }
 
@@ -244,6 +261,7 @@ impl Policy {
                 .map(Document::RoleMapping),
         );
         out.extend(self.resources.values().cloned().map(Document::Resource));
+        out.extend(self.bots.values().cloned().map(Document::Bot));
         out
     }
 
@@ -320,6 +338,47 @@ impl Policy {
             .filter_map(|r| self.roles.get(r)?.spec.max_session_ttl.map(|d| d.0))
             .min()
             .unwrap_or(DEFAULT_MAX_SESSION_TTL)
+    }
+
+    #[must_use]
+    pub fn bot(&self, name: &str) -> Option<&bot::BotDoc> {
+        self.bots.get(name)
+    }
+
+    pub fn bots(&self) -> impl Iterator<Item = &bot::BotDoc> {
+        self.bots.values()
+    }
+
+    /// The issuers whose tokens can log a bot in with `method`, without a
+    /// trailing slash. The control plane only fetches keys for these.
+    #[must_use]
+    pub fn bot_issuers(&self, method: bot::JoinMethod) -> BTreeSet<String> {
+        self.bots
+            .values()
+            .filter(|b| b.spec.join.method == method)
+            .filter_map(|b| b.spec.join.issuer())
+            .collect()
+    }
+
+    /// Bots whose rule `claims` satisfy, for a token from `issuer` presented
+    /// with `method`. `named` narrows it to one bot. More than one match is
+    /// the caller's problem to refuse: an ambiguous token logs nobody in.
+    #[must_use]
+    pub fn match_bots(
+        &self,
+        method: bot::JoinMethod,
+        issuer: &str,
+        claims: &BTreeMap<String, String>,
+        named: Option<&str>,
+    ) -> Vec<&bot::BotDoc> {
+        let issuer = issuer.trim_end_matches('/');
+        self.bots
+            .values()
+            .filter(|b| named.is_none_or(|n| b.metadata.name == n))
+            .filter(|b| b.spec.join.method == method)
+            .filter(|b| b.spec.join.issuer().as_deref() == Some(issuer))
+            .filter(|b| b.spec.join.matches(claims))
+            .collect()
     }
 
     #[must_use]

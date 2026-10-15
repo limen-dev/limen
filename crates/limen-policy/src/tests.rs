@@ -428,3 +428,221 @@ fn every_example_resource_has_a_target_to_show() {
         );
     }
 }
+
+mod bots {
+    use super::*;
+    use crate::bot::JoinMethod;
+
+    const BOTS: &str = include_str!("../../../examples/policy/bots.yaml");
+
+    fn with_bots() -> Policy {
+        Policy::parse_yaml([
+            ("roles.yaml", ROLES),
+            ("mappings.yaml", MAPPINGS),
+            ("resources.yaml", RESOURCES),
+            ("bots.yaml", BOTS),
+        ])
+        .expect("example policy with bots is valid")
+    }
+
+    fn bot_doc(body: &str) -> String {
+        format!(
+            "kind: role\nversion: v1\nmetadata: {{ name: r }}\nspec:\n  allow:\n    - resources: {{ kind: [ssh], labels: {{ \"*\": [\"*\"] }} }}\n      ssh: {{ logins: [ubuntu] }}\n---\nkind: bot\nversion: v1\nmetadata: {{ name: b }}\nspec:\n  roles: [r]\n{body}"
+        )
+    }
+
+    fn rejected(body: &str) -> String {
+        match Policy::parse_yaml([("b.yaml", bot_doc(body).as_str())]) {
+            Ok(_) => panic!("accepted:\n{body}"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    fn claims(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect()
+    }
+
+    #[test]
+    fn the_example_bots_are_valid_and_have_usernames() {
+        let p = with_bots();
+        let names: Vec<_> = p.bots().map(BotDocExt::username_for_test).collect();
+        assert_eq!(
+            names,
+            ["bot:argo-sync", "bot:deploy-staging", "bot:nightly-report"]
+        );
+        assert_eq!(p.bot("deploy-staging").expect("bot").ttl().as_secs(), 900);
+        assert_eq!(
+            p.bot("argo-sync").expect("bot").ttl().as_secs(),
+            900,
+            "default is 15 minutes"
+        );
+    }
+
+    trait BotDocExt {
+        fn username_for_test(&self) -> String;
+    }
+    impl BotDocExt for crate::bot::BotDoc {
+        fn username_for_test(&self) -> String {
+            self.username()
+        }
+    }
+
+    #[test]
+    fn a_repository_alone_is_refused() {
+        let e = rejected(
+            "  join:\n    method: github_actions\n    match: { repository: acme/infra }\n",
+        );
+        assert!(e.contains("repository alone"), "{e}");
+    }
+
+    #[test]
+    fn wildcards_pull_requests_and_builtin_roles_are_refused() {
+        assert!(rejected("  join:\n    method: github_actions\n    match: { repository: \"acme/*\", ref: refs/heads/main }\n").contains("wildcard"));
+        assert!(rejected("  join:\n    method: github_actions\n    match: { repository: acme/infra, ref: refs/pull/7/merge }\n").contains("pull request"));
+        assert!(rejected("  join:\n    method: github_actions\n    match: { repository: acme/infra, ref: refs/heads/main, event_name: pull_request_target }\n").contains("pull request"));
+        let admin = bot_doc("  join:\n    method: github_actions\n    match: { repository: acme/infra, ref: refs/heads/main }\n").replace("roles: [r]", "roles: [\"limen:admin\"]");
+        assert!(
+            Policy::parse_yaml([("b.yaml", admin.as_str())])
+                .expect_err("rejected")
+                .to_string()
+                .contains("built-in role")
+        );
+    }
+
+    #[test]
+    fn method_specific_rules() {
+        assert!(
+            rejected(
+                "  join:\n    method: gitlab\n    match: { project_path: acme/x, ref: main }\n"
+            )
+            .contains("ref_protected")
+        );
+        assert!(
+            rejected("  join:\n    method: gitlab\n    match: { project_path: acme/x }\n")
+                .contains("`ref` or `environment`")
+        );
+        assert!(
+            rejected("  join:\n    method: oidc\n    match: { sub: x }\n")
+                .contains("needs join.issuer")
+        );
+        assert!(rejected("  join:\n    method: oidc\n    issuer: https://i.example.com\n    match: { aud: x }\n").contains("`sub`"));
+        assert!(rejected("  join:\n    method: oidc\n    issuer: \"https://u:p@i.example.com\"\n    match: { sub: x }\n").contains("credentials"));
+        assert!(
+            rejected("  join:\n    method: github_actions\n    match: {}\n")
+                .contains("at least one claim")
+        );
+    }
+
+    #[test]
+    fn lifetimes_and_unknown_roles() {
+        assert!(rejected("  max_ttl: 2h\n  join:\n    method: github_actions\n    match: { repository: a/b, ref: refs/heads/main }\n").contains("at most 1h"));
+        let unknown = bot_doc("  join:\n    method: github_actions\n    match: { repository: a/b, ref: refs/heads/main }\n").replace("roles: [r]", "roles: [nope]");
+        assert!(
+            Policy::parse_yaml([("b.yaml", unknown.as_str())])
+                .expect_err("rejected")
+                .to_string()
+                .contains("unknown role")
+        );
+        let typo = bot_doc("  join:\n    metod: github_actions\n    match: {}\n");
+        assert!(
+            Policy::parse_yaml([("b.yaml", typo.as_str())]).is_err(),
+            "typos are rejected"
+        );
+    }
+
+    #[test]
+    fn matching_is_exact_and_needs_every_claim() {
+        let p = with_bots();
+        let issuer = "https://token.actions.githubusercontent.com";
+        let good = claims(&[
+            ("repository", "acme/infra"),
+            ("ref", "refs/heads/main"),
+            ("environment", "staging"),
+            ("actor", "someone"),
+        ]);
+        let found = p.match_bots(JoinMethod::GithubActions, issuer, &good, None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].metadata.name, "deploy-staging");
+        // A trailing slash on the issuer makes no difference.
+        assert_eq!(
+            p.match_bots(
+                JoinMethod::GithubActions,
+                &format!("{issuer}/"),
+                &good,
+                None
+            )
+            .len(),
+            1
+        );
+        for wrong in [
+            claims(&[
+                ("repository", "acme/infra"),
+                ("ref", "refs/heads/feature"),
+                ("environment", "staging"),
+            ]),
+            claims(&[
+                ("repository", "acme/infra-evil"),
+                ("ref", "refs/heads/main"),
+                ("environment", "staging"),
+            ]),
+            claims(&[("repository", "acme/infra"), ("ref", "refs/heads/main")]),
+            claims(&[]),
+        ] {
+            assert!(
+                p.match_bots(JoinMethod::GithubActions, issuer, &wrong, None)
+                    .is_empty(),
+                "{wrong:?}"
+            );
+        }
+        assert!(
+            p.match_bots(
+                JoinMethod::GithubActions,
+                "https://evil.example.com",
+                &good,
+                None
+            )
+            .is_empty(),
+            "wrong issuer"
+        );
+        assert!(
+            p.match_bots(JoinMethod::Gitlab, issuer, &good, None)
+                .is_empty(),
+            "wrong method"
+        );
+        assert!(
+            p.match_bots(JoinMethod::GithubActions, issuer, &good, Some("argo-sync"))
+                .is_empty(),
+            "named bot must match"
+        );
+    }
+
+    #[test]
+    fn issuers_are_listed_per_method() {
+        let p = with_bots();
+        assert_eq!(
+            p.bot_issuers(JoinMethod::Gitlab)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["https://gitlab.com"]
+        );
+        assert_eq!(
+            p.bot_issuers(JoinMethod::Oidc)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["https://oidc.argo.example.com"]
+        );
+    }
+
+    #[test]
+    fn bots_show_up_in_digests_and_diffs() {
+        let without = example();
+        let with = with_bots();
+        assert_ne!(without.digest(), with.digest());
+        let diff = without.diff(&with);
+        assert!(diff.added.contains(&"bot/deploy-staging".to_owned()));
+        assert!(diff.added.contains(&"role/deployer".to_owned()));
+    }
+}

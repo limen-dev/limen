@@ -17,6 +17,21 @@ use serde::{Deserialize, Serialize};
 
 pub const SCHEME: &str = "limen";
 
+/// Bots log in as `bot:<name>`. The prefix is reserved: a person whose IdP
+/// username starts with it is refused at login, so it can be trusted wherever
+/// only the name is at hand.
+pub const BOT_PREFIX: &str = "bot:";
+
+#[must_use]
+pub fn bot_username(name: &str) -> String {
+    format!("{BOT_PREFIX}{name}")
+}
+
+#[must_use]
+pub fn is_bot(username: &str) -> bool {
+    username.starts_with(BOT_PREFIX)
+}
+
 /// Built-in role that grants administrative APIs. The colon is reserved for
 /// built-in roles, and user-defined role names can't contain it.
 pub const ADMIN_ROLE: &str = "limen:admin";
