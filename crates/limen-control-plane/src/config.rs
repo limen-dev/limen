@@ -248,6 +248,18 @@ pub struct Config {
     /// On shutdown, how long in-flight connections may finish before they're cut.
     #[arg(long, env = "LIMEN_DRAIN_TIMEOUT", value_parser = parse_duration_or_zero, default_value = "20s")]
     pub drain_timeout: Duration,
+
+    /// Close each API connection gracefully (HTTP/2 GOAWAY) after about this
+    /// many seconds, ±10 % per connection, so clients reconnect, re-resolve
+    /// the control plane's name, and spread over replicas, including new
+    /// ones. 0 keeps connections for life.
+    #[arg(long, env = "LIMEN_MAX_CONNECTION_AGE_SECS", default_value_t = 300)]
+    pub max_connection_age_secs: u64,
+
+    /// After the maximum age, how long in-flight calls on that connection
+    /// may finish before it is cut.
+    #[arg(long, env = "LIMEN_CONNECTION_AGE_GRACE_SECS", default_value_t = 30)]
+    pub connection_age_grace_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

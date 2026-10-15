@@ -14,7 +14,7 @@ limen-proxy.workspace = true
 limen-worker.workspace = true
 limen-proto.workspace = true
 limen-testkit.workspace = true
-limen-tunnel.workspace = true
+limen-tunnel = { workspace = true, features = ["test-hooks"] }
 anyhow.workspace = true
 clap.workspace = true
 rcgen.workspace = true

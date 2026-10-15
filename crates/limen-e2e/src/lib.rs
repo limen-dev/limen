@@ -44,6 +44,12 @@ pub struct Deployment {
     pub dir: tempfile::TempDir,
     pub idp: MockIdp,
     pub cp_addr: SocketAddr,
+    /// What proxies dial to reach the control plane: `cp_addr`, or a name
+    /// resolved by [`limen_tunnel::connect::set_test_resolution`] (see
+    /// [`Deployment::start_scaled`]).
+    pub cp_dial: String,
+    /// Control plane flags shared by every replica (not `--id` or paths).
+    cp_args: Vec<String>,
     pub proxy_addr: SocketAddr,
     pub proxy: Option<RunningProxy>,
     cp_shutdown: watch::Sender<bool>,
@@ -64,6 +70,21 @@ pub struct RunningWorker {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
+/// A control plane replica started next to the deployment's own.
+#[derive(Debug)]
+pub struct RunningControlPlane {
+    pub addr: SocketAddr,
+    shutdown: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<anyhow::Result<()>>,
+}
+
+impl RunningControlPlane {
+    pub async fn stop(self) {
+        let _ = self.shutdown.send(true);
+        let _ = self.task.await;
+    }
+}
+
 impl RunningWorker {
     pub async fn stop(self) {
         let _ = self.shutdown.send(true);
@@ -74,17 +95,25 @@ impl RunningWorker {
 impl Deployment {
     /// Start a control plane and one proxy. `None` without a test database.
     pub async fn start() -> Option<Self> {
-        Self::start_inner(false).await
+        Self::start_inner(false, &[], false).await
+    }
+
+    /// For tests with several control plane replicas: proxies dial a name
+    /// that resolves (through the test hook) to the first replica until the
+    /// test says otherwise. `cp_args` go to every replica.
+    pub async fn start_scaled(cp_args: &[&str]) -> Option<Self> {
+        let extra: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &extra, true).await
     }
 
     /// Like [`start`](Self::start), with the web console enabled. Its public
     /// URL is `https://localhost:<proxy port>`, and the mock IdP knows the
     /// console's OIDC client ([`CONSOLE_CLIENT_ID`], [`CONSOLE_SECRET`]).
     pub async fn start_with_console() -> Option<Self> {
-        Self::start_inner(true).await
+        Self::start_inner(true, &[], false).await
     }
 
-    async fn start_inner(console: bool) -> Option<Self> {
+    async fn start_inner(console: bool, extra_cp_args: &[String], named: bool) -> Option<Self> {
         if std::env::var_os("LIMEN_TEST_LOG").is_some() {
             limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
         }
@@ -113,7 +142,7 @@ impl Deployment {
             ));
             console_args.push(format!("--console-oidc-client-secret={CONSOLE_SECRET}"));
         }
-        let mut cp_args = vec!["--id=cp-e2e".to_owned(), format!("--database-url={db_url}")];
+        let mut cp_args = vec![format!("--database-url={db_url}")];
         cp_args.extend(console_args);
         cp_args.extend([
             format!("--ca-dir={}", dir.path().join("ca").display()),
@@ -124,14 +153,6 @@ impl Deployment {
             format!("--static-join-token=proxy:{PROXY_TOKEN}"),
             "--proxy-dns-name=localhost".into(),
             format!(
-                "--audit-file={}",
-                dir.path().join("audit/control-plane.jsonl").display()
-            ),
-            format!(
-                "--audit-spool-dir={}",
-                dir.path().join("cp-spool").display()
-            ),
-            format!(
                 "--recordings-dir={}",
                 dir.path().join("recordings").display()
             ),
@@ -140,21 +161,23 @@ impl Deployment {
             // The mock issuer is plain http.
             "--bot-allow-insecure-issuers".into(),
         ]);
-        let cp_config: limen_control_plane::Config = parse(&cp_args);
-        let state = limen_control_plane::build_state(cp_config)
-            .await
-            .expect("control plane state");
-        let cp_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let cp_addr = cp_listener.local_addr().expect("addr");
-        let (cp_tx, cp_rx) = watch::channel(false);
-        let cp_task = tokio::spawn(limen_control_plane::run(state, cp_listener, cp_rx));
+        cp_args.extend_from_slice(extra_cp_args);
+        let (cp_addr, cp_tx, cp_task) =
+            spawn_control_plane(&cp_args, dir.path(), "cp-e2e", "control-plane", "cp-spool").await;
+        let cp_dial = if named {
+            let name = format!("cp-{}.limen.test:3080", uuid::Uuid::now_v7().simple());
+            limen_tunnel::connect::set_test_resolution(&name, vec![cp_addr]);
+            name
+        } else {
+            cp_addr.to_string()
+        };
 
         let mut deployment = Self {
             dir,
             idp,
             cp_addr,
+            cp_dial,
+            cp_args,
             proxy_addr,
             proxy: None,
             cp_shutdown: cp_tx,
@@ -171,6 +194,25 @@ impl Deployment {
     /// An exported public CA file, such as `ssh-user-ca.pub` or `ssh-host-ca.pub`.
     pub fn public_ca(&self, name: &str) -> String {
         std::fs::read_to_string(self.dir.path().join("ca-public").join(name)).expect("exported CA")
+    }
+
+    /// Start another control plane replica on the same database and CA.
+    /// Proxies reach it only once the test adds its address to
+    /// [`cp_dial`](Self::cp_dial)'s resolution.
+    pub async fn start_extra_control_plane(&self, id: &str) -> RunningControlPlane {
+        let (addr, shutdown, task) = spawn_control_plane(
+            &self.cp_args,
+            self.dir.path(),
+            id,
+            id,
+            &format!("{id}-spool"),
+        )
+        .await;
+        RunningControlPlane {
+            addr,
+            shutdown,
+            task,
+        }
     }
 
     /// Stop the control plane abruptly: no drain, open connections are cut.
@@ -202,7 +244,7 @@ impl Deployment {
     ) -> RunningProxy {
         let addr = listener.local_addr().expect("addr");
         let config: limen_proxy::Config = parse(&[
-            format!("--control-plane-addr={}", self.cp_addr),
+            format!("--control-plane-addr={}", self.cp_dial),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={PROXY_TOKEN}"),
             format!("--data-dir={}", self.dir.path().join(name).display()),
@@ -325,6 +367,41 @@ impl Deployment {
             .into_inner();
         Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
     }
+}
+
+/// Start a control plane replica with `args` plus its own id, audit file,
+/// and spool under `dir`.
+async fn spawn_control_plane(
+    args: &[String],
+    dir: &std::path::Path,
+    id: &str,
+    audit_name: &str,
+    spool: &str,
+) -> (
+    SocketAddr,
+    watch::Sender<bool>,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    let mut args = args.to_vec();
+    args.extend([
+        format!("--id={id}"),
+        format!(
+            "--audit-file={}",
+            dir.join(format!("audit/{audit_name}.jsonl")).display()
+        ),
+        format!("--audit-spool-dir={}", dir.join(spool).display()),
+    ]);
+    let config: limen_control_plane::Config = parse(&args);
+    let state = limen_control_plane::build_state(config)
+        .await
+        .expect("control plane state");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(limen_control_plane::run(state, listener, rx));
+    (addr, tx, task)
 }
 
 /// Poll `check` until it returns true or `timeout` passes.

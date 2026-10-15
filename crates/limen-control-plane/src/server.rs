@@ -154,6 +154,11 @@ pub async fn serve_api(
         let routes = routes.clone();
         let active = Arc::clone(&active);
         let mut conn_stop = shutdown.clone();
+        let max_age = connection_age(
+            Duration::from_secs(state.config.max_connection_age_secs),
+            rand::random(),
+        );
+        let grace = Duration::from_secs(state.config.connection_age_grace_secs);
         active.fetch_add(1, Ordering::SeqCst);
         // Reap finished connections so the set doesn't grow forever.
         while connections.try_join_next().is_some() {}
@@ -164,13 +169,30 @@ pub async fn serve_api(
             {
                 Ok(Ok(stream)) => {
                     let peer = PeerInfo::from_tls(&stream, Some(remote));
+                    let (aged_tx, aged) = tokio::sync::oneshot::channel();
                     let stop = async move {
-                        let _ = conn_stop.wait_for(|stop| *stop).await;
+                        tokio::select! {
+                            _ = conn_stop.wait_for(|stop| *stop) => {}
+                            () = sleep_or_forever(max_age) => {
+                                tracing::debug!(%remote, "connection reached its maximum age; closing it gracefully");
+                                let _ = aged_tx.send(());
+                            }
+                        }
                     };
-                    if let Err(e) =
-                        serve_h2_until(stream, peer, routes, H2Settings::default(), stop).await
-                    {
-                        tracing::debug!(error = %e, %remote, "connection ended with error");
+                    let serve = serve_h2_until(stream, peer, routes, H2Settings::default(), stop);
+                    // After a GOAWAY for age, in-flight calls get `grace`.
+                    let cut = async move {
+                        if aged.await.is_ok() {
+                            tokio::time::sleep(grace).await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    };
+                    tokio::select! {
+                        result = serve => if let Err(e) = result {
+                            tracing::debug!(error = %e, %remote, "connection ended with error");
+                        },
+                        () = cut => tracing::debug!(%remote, "connection still busy after the age grace period; cut"),
                     }
                 }
                 Ok(Err(e)) => tracing::debug!(error = %e, %remote, "TLS handshake failed"),
@@ -195,6 +217,25 @@ pub async fn serve_api(
     connections.abort_all();
     while connections.join_next().await.is_some() {}
     Ok(())
+}
+
+/// How long one connection may live: `max_age` ±10 %, from `unit` (uniform
+/// in [0, 1), clamped). Jitter keeps connections opened together (say,
+/// after a restart) from all closing together. Never zero; `None` when
+/// `max_age` is zero (disabled).
+fn connection_age(max_age: Duration, unit: f64) -> Option<Duration> {
+    if max_age.is_zero() {
+        return None;
+    }
+    let factor = 0.9 + 0.2 * unit.clamp(0.0, 1.0);
+    Some(max_age.mul_f64(factor).max(Duration::from_millis(1)))
+}
+
+async fn sleep_or_forever(after: Option<Duration>) {
+    match after {
+        Some(after) => tokio::time::sleep(after).await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Reissue the server certificate at half its lifetime.
@@ -255,4 +296,35 @@ pub async fn serve_health(
         })
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_age_jitter_stays_within_ten_percent_and_is_never_zero() {
+        let max = Duration::from_mins(5);
+        for unit in [0.0, 0.25, 0.5, 0.75, 0.999_999] {
+            let age = connection_age(max, unit).expect("enabled");
+            assert!(
+                age >= Duration::from_secs(270) && age <= Duration::from_secs(330),
+                "{age:?} for {unit}"
+            );
+        }
+        assert_eq!(connection_age(max, 0.0), Some(Duration::from_secs(270)));
+        assert_eq!(connection_age(max, 0.5), Some(max));
+        // Out-of-range jitter is clamped, not trusted.
+        assert_eq!(connection_age(max, 7.0), Some(Duration::from_secs(330)));
+        assert_eq!(connection_age(max, -1.0), Some(Duration::from_secs(270)));
+        // The smallest age that can be configured is still not zero.
+        let tiny = connection_age(Duration::from_secs(1), 0.0).expect("enabled");
+        assert!(tiny >= Duration::from_millis(900));
+        assert!(connection_age(Duration::from_nanos(1), 0.0).is_some_and(|d| !d.is_zero()));
+    }
+
+    #[test]
+    fn zero_disables_the_connection_age() {
+        assert_eq!(connection_age(Duration::ZERO, 0.5), None);
+    }
 }
