@@ -42,19 +42,15 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         .context("loading CA keys")?;
     if let Some(dir) = &config.ca_export_dir {
         tokio::fs::create_dir_all(dir).await?;
-        tokio::fs::write(dir.join("internal-ca.pem"), cas.internal.cert_pem()).await?;
-        tokio::fs::write(dir.join("user-ca.pem"), cas.user.cert_pem()).await?;
+        // Replicas share this directory and rewrite it on every start, while
+        // sshd and enrolling components read it: replace each file atomically.
+        export(dir, "internal-ca.pem", cas.internal.cert_pem()).await?;
+        export(dir, "user-ca.pem", cas.user.cert_pem()).await?;
         // SSH targets trust this one (TrustedUserCAKeys); the CLI trusts the host CA.
-        tokio::fs::write(
-            dir.join("ssh-user-ca.pub"),
-            format!("{}\n", cas.ssh_user.public_key_openssh()?),
-        )
-        .await?;
-        tokio::fs::write(
-            dir.join("ssh-host-ca.pub"),
-            format!("{}\n", cas.ssh_host.public_key_openssh()?),
-        )
-        .await?;
+        let ssh_user = format!("{}\n", cas.ssh_user.public_key_openssh()?);
+        export(dir, "ssh-user-ca.pub", &ssh_user).await?;
+        let ssh_host = format!("{}\n", cas.ssh_host.public_key_openssh()?);
+        export(dir, "ssh-host-ca.pub", &ssh_host).await?;
         tracing::info!(dir = %dir.display(), "exported CA certificates");
     }
     let http = http_client::HttpClient::new()?;
@@ -102,6 +98,18 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
 }
 
 /// The web console is off unless `--console-public-url` is set.
+/// Replace `dir/name` with `contents` atomically: readers see the old file
+/// or the new one, never a partial one.
+async fn export(dir: &std::path::Path, name: &str, contents: &str) -> std::io::Result<()> {
+    let tmp = dir.join(format!(".{name}.{:016x}.tmp", rand::random::<u64>()));
+    tokio::fs::write(&tmp, contents).await?;
+    let renamed = tokio::fs::rename(&tmp, dir.join(name)).await;
+    if renamed.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    renamed
+}
+
 fn build_console(
     config: &Config,
     http: &http_client::HttpClient,
@@ -253,6 +261,22 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn export_replaces_the_file_and_leaves_nothing_else() {
+        let dir = tempfile::tempdir().expect("dir");
+        super::export(dir.path(), "ca.pem", "old")
+            .await
+            .expect("first");
+        super::export(dir.path(), "ca.pem", "new")
+            .await
+            .expect("second");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ca.pem")).expect("read"),
+            "new"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).expect("ls").count(), 1);
+    }
+
     #[test]
     fn ship_budget_keeps_a_fifth_back() {
         assert_eq!(
