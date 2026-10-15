@@ -179,6 +179,9 @@ pub async fn serve_api(
             active.fetch_sub(1, Ordering::SeqCst);
         });
     }
+    // Close the port now: a client dialing the shared name gets "refused"
+    // and tries the next replica, rather than waiting in our backlog.
+    drop(listener);
     tracing::info!(
         connections = active.load(Ordering::SeqCst),
         "shutting down: no longer accepting, draining"

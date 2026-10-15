@@ -103,13 +103,19 @@ async fn shutdown_is_ordered_and_stays_within_the_budget() {
     }
     let (_, body) = not_ready.expect("/readyz goes 503 during the drain");
     assert_eq!(body, "shutting down");
-    // The API port is closed at once, so a client dialing the shared name
-    // gets "refused" and moves on to another replica, instead of landing in
-    // the backlog of a listener nobody accepts from.
-    assert!(
-        tokio::net::TcpStream::connect(h.addr).await.is_err(),
-        "new connections are refused during the drain"
-    );
+    // The API port closes as soon as the accept loop stops, so a client
+    // dialing the shared name gets "refused" and moves on to another
+    // replica, instead of landing in the backlog of a listener nobody
+    // accepts from. (readyz flips first, from another task: allow a moment.)
+    let mut refused = false;
+    for _ in 0..50 {
+        if tokio::net::TcpStream::connect(h.addr).await.is_err() {
+            refused = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(refused, "new connections are refused during the drain");
     assert_eq!(
         get(&format!("http://{admin}/healthz")).await.map(|r| r.0),
         Some(200)
