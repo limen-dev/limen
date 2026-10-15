@@ -115,7 +115,11 @@ pub async fn run(args: AdoptArgs) -> Result<Adopted, AdoptError> {
     consumers.dedup();
     // Fails when any process (a replica still using the volume) holds it.
     let names: Vec<&str> = consumers.iter().map(String::as_str).collect();
-    let spool = Spool::open(SpoolConfig::new(&args.dir, &names))?;
+    // Unlike a replica, never proceed without the lock: it is the guard.
+    let spool = Spool::open(SpoolConfig {
+        require_lock: true,
+        ..SpoolConfig::new(&args.dir, &names)
+    })?;
 
     let config = &args.config;
     let db = crate::db::connect(config.database_url.expose()).await?;
@@ -144,8 +148,15 @@ pub async fn run(args: AdoptArgs) -> Result<Adopted, AdoptError> {
             let mut tick = tokio::time::interval(Duration::from_secs(replicas::HEARTBEAT_SECS));
             loop {
                 tick.tick().await;
-                if replicas::heartbeat(&db, &registration).await.is_err() {
-                    break;
+                match replicas::heartbeat(&db, &registration).await {
+                    Ok(()) => {}
+                    Err(e @ replicas::HeartbeatError::Lost) => {
+                        tracing::warn!(error = %e, "the adopter's registry row is gone; peers may refuse the handoff");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "adopter heartbeat failed; retrying (peers refuse the handoff once the row is 15 s old)");
+                    }
                 }
             }
         })

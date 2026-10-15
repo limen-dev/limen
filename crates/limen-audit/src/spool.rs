@@ -40,6 +40,10 @@ pub struct SpoolConfig {
     pub fsync_interval: Duration,
     /// Consumers that must read every record before it can be deleted.
     pub consumers: Vec<String>,
+    /// Refuse to open when the filesystem can't take the advisory lock
+    /// (some NFS). Off by default: a replica, proxy, or worker warns and runs
+    /// unlocked; a tool that relies on the lock as a guard turns it on.
+    pub require_lock: bool,
 }
 
 impl SpoolConfig {
@@ -51,6 +55,7 @@ impl SpoolConfig {
             max_bytes: 1024 * 1024 * 1024,
             fsync_interval: Duration::from_millis(10),
             consumers: consumers.iter().map(|c| (*c).to_owned()).collect(),
+            require_lock: false,
         }
     }
 }
@@ -155,6 +160,36 @@ fn scan(
     Ok((records, pos, torn))
 }
 
+/// Whether the filesystem can't do advisory locks at all (as opposed to
+/// someone else holding the lock). NFS without a lock manager gives `ENOLCK`.
+fn lock_unsupported(e: &std::io::Error) -> bool {
+    const ENOLCK: i32 = if cfg!(target_os = "linux") { 37 } else { 77 };
+    e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error() == Some(ENOLCK)
+}
+
+/// What to do with the result of taking the spool's lock.
+fn lock_outcome(
+    taken: Result<(), std::fs::TryLockError>,
+    config: &SpoolConfig,
+) -> Result<(), SpoolError> {
+    match taken {
+        Ok(()) => Ok(()),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err(SpoolError::Locked(config.dir.display().to_string()))
+        }
+        Err(std::fs::TryLockError::Error(e)) if lock_unsupported(&e) && !config.require_lock => {
+            tracing::warn!(
+                dir = %config.dir.display(),
+                error = %e,
+                "SPOOL NOT LOCKED: this filesystem does not support advisory locks; \
+                 make sure no other process (such as limen-spool-adopt) opens this spool"
+            );
+            Ok(())
+        }
+        Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+    }
+}
+
 impl Spool {
     /// Open (or create) the spool, recovering from a crash mid-append.
     pub fn open(config: SpoolConfig) -> Result<Self, SpoolError> {
@@ -170,13 +205,7 @@ impl Spool {
             .truncate(false)
             .write(true)
             .open(config.dir.join("lock"))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => {
-                return Err(SpoolError::Locked(config.dir.display().to_string()));
-            }
-            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
-        }
+        lock_outcome(lock.try_lock(), &config)?;
 
         let mut firsts: Vec<u64> = std::fs::read_dir(&seg_dir)?
             .filter_map(Result::ok)
@@ -622,6 +651,39 @@ mod tests {
         assert!(matches!(
             Spool::open(config(dir2.path())),
             Err(SpoolError::Corrupt { .. })
+        ));
+    }
+
+    #[test]
+    fn unsupported_locks_warn_unless_the_lock_is_required() {
+        let dir = tempfile::tempdir().expect("dir");
+        let unsupported = || {
+            Err(std::fs::TryLockError::Error(std::io::Error::from(
+                std::io::ErrorKind::Unsupported,
+            )))
+        };
+        let mut c = config(dir.path());
+        lock_outcome(unsupported(), &c).expect("a replica runs unlocked");
+        c.require_lock = true;
+        assert!(matches!(
+            lock_outcome(unsupported(), &c),
+            Err(SpoolError::Io(_))
+        ));
+        // Someone else holding it is refused either way.
+        c.require_lock = false;
+        assert!(matches!(
+            lock_outcome(Err(std::fs::TryLockError::WouldBlock), &c),
+            Err(SpoolError::Locked(_))
+        ));
+        // Other I/O errors are not mistaken for "unsupported".
+        assert!(matches!(
+            lock_outcome(
+                Err(std::fs::TryLockError::Error(std::io::Error::from(
+                    std::io::ErrorKind::PermissionDenied
+                ))),
+                &c
+            ),
+            Err(SpoolError::Io(_))
         ));
     }
 
