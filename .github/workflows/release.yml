@@ -80,6 +80,9 @@ jobs:
     needs: please
     if: needs.please.outputs.release_created == 'true'
     uses: ./.github/workflows/ci.yml
+    # Releases use GitHub-hosted runners only, never the self-hosted machines.
+    with:
+      hosted: true
     permissions:
       contents: read
 
