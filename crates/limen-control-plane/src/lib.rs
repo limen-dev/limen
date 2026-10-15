@@ -7,6 +7,7 @@ pub mod caller;
 pub mod config;
 pub mod console;
 pub mod db;
+pub mod handoff_client;
 pub mod http_client;
 pub mod jobs;
 pub mod oidc;
@@ -204,7 +205,24 @@ pub async fn run(
     if report.is_clean() {
         tracing::info!("audit spool shipped to every sink");
     } else {
-        tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline");
+        match state.config.spool_mode {
+            replicas::SpoolMode::Durable => {
+                tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline; they ship when this replica restarts on the same volume");
+            }
+            replicas::SpoolMode::Ephemeral => {
+                tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline; handing them to a peer");
+                // Whatever is left of the drain timeout: the handoff reserve.
+                let left = state.config.drain_timeout.saturating_sub(t0.elapsed());
+                match handoff_client::send_remaining(&state, left).await {
+                    Ok(sent) => {
+                        tracing::info!(sent, "handed the rest of the audit spool to a peer");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "audit records not handed off are lost with this replica's ephemeral spool");
+                    }
+                }
+            }
+        }
     }
     let _ = done_tx.send(true);
     if tokio::time::timeout(WIND_DOWN_STEP, heartbeat)

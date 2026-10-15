@@ -95,6 +95,25 @@ impl tower::Service<Uri> for TlsConnectorService {
     }
 }
 
+/// A tonic channel over a TLS connection the caller already made (and could
+/// inspect, e.g. to check the peer's identity). The channel never redials:
+/// once the connection drops, calls on it fail.
+pub async fn channel_over(
+    stream: TlsStream<TcpStream>,
+) -> Result<tonic::transport::Channel, tonic::transport::Error> {
+    let slot = Arc::new(std::sync::Mutex::new(Some(TokioIo::new(stream))));
+    let connector = tower::service_fn(move |_: Uri| {
+        let taken = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        async move { taken.ok_or_else(|| std::io::Error::other("connection already used")) }
+    });
+    tonic::transport::Endpoint::from_static("http://limen.invalid")
+        .connect_with_connector(connector)
+        .await
+}
+
 /// A lazily connecting tonic channel over our TLS, with HTTP/2 keepalives.
 #[must_use]
 pub fn channel(

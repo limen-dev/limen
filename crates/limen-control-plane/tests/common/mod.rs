@@ -29,6 +29,9 @@ pub struct Harness {
     pub addr: SocketAddr,
     pub idp: MockIdp,
     pub audit_file: PathBuf,
+    /// Shared with peers started by [`Harness::start_peer`].
+    pub db_url: String,
+    pub ca_dir: PathBuf,
     _dir: tempfile::TempDir,
     shutdown: watch::Sender<bool>,
     run_task: std::sync::Mutex<Option<tokio::task::JoinHandle<anyhow::Result<()>>>>,
@@ -62,15 +65,29 @@ impl Harness {
 
     /// Start with extra control plane flags.
     pub async fn start_with(extra: &[String]) -> Option<Self> {
+        let base = limen_testkit::database_url()?;
+        let db_url = fresh_database(&base).await;
+        Some(Self::start_on(db_url, None, extra).await)
+    }
+
+    /// Another replica on this one's database and CA keys. Give it its own `--id`.
+    pub async fn start_peer(&self, extra: &[String]) -> Self {
+        Self::start_on(self.db_url.clone(), Some(self.ca_dir.clone()), extra).await
+    }
+
+    async fn start_on(db_url: String, ca_dir: Option<PathBuf>, extra: &[String]) -> Self {
         if std::env::var_os("LIMEN_TEST_LOG").is_some() {
             limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
         }
-        let base = limen_testkit::database_url()?;
-        let db_url = fresh_database(&base).await;
         let idp = MockIdp::start(CLIENT_ID).await;
         let dir = limen_testkit::temp_dir().expect("tempdir");
         let audit_file = dir.path().join("audit.jsonl");
-        let ca_dir = dir.path().join("ca");
+        let ca_dir = ca_dir.unwrap_or_else(|| dir.path().join("ca"));
+        // Bound first, so the replica registers the address it really serves.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
         let args = [
             "test".to_owned(),
             "--id=cp-test".into(),
@@ -89,6 +106,7 @@ impl Harness {
             ),
             "--admin-listen=127.0.0.1:0".into(),
             "--dns-name=localhost".into(),
+            format!("--advertise-url=https://localhost:{}", addr.port()),
         ];
         // Extra flags replace the defaults they repeat.
         let flag = |a: &str| a.split('=').next().unwrap_or_default().to_owned();
@@ -100,21 +118,19 @@ impl Harness {
             .collect();
         let config = Wrapper::try_parse_from(args).expect("config").config;
         let state = build_state(config).await.expect("build state");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("addr");
         let (tx, rx) = watch::channel(false);
         let run_task = tokio::spawn(run(state.clone(), listener, rx));
-        Some(Self {
+        Self {
             state,
             addr,
             idp,
             audit_file,
+            db_url,
+            ca_dir,
             _dir: dir,
             shutdown: tx,
             run_task: std::sync::Mutex::new(Some(run_task)),
-        })
+        }
     }
 
     /// Start shutting the control plane down.
