@@ -243,7 +243,7 @@ td.actions form.inline { flex-wrap: nowrap; }
 .kind.lg { width: 44px; height: 44px; border-radius: 12px; } .kind.lg .i { width: 22px; height: 22px; }
 .k-ssh { --kc: #10b981; } .k-postgres { --kc: #4169e1; } .k-mysql { --kc: #4479a1; } .k-redis { --kc: #ff4438; }
 .k-kubernetes { --kc: #326ce5; } .k-mongodb { --kc: #47a248; } .k-opensearch { --kc: #005eb8; } .k-elasticsearch { --kc: #00a79d; }
-.k-rabbitmq { --kc: #ff6600; } .k-kafka { --kc: #6b7280; } .k-web { --kc: #8b5cf6; } .k-tcp { --kc: #64748b; } .k-other { --kc: #64748b; }
+.k-redshift { --kc: #8c4fff; } .k-rabbitmq { --kc: #ff6600; } .k-kafka { --kc: #6b7280; } .k-web { --kc: #8b5cf6; } .k-tcp { --kc: #64748b; } .k-other { --kc: #64748b; }
 .k-worker { --kc: #3b82f6; } .k-proxy { --kc: #8b5cf6; }
 .kind-cell { display: flex; align-items: center; gap: 12px; }
 
@@ -276,7 +276,7 @@ td.actions form.inline { flex-wrap: nowrap; }
 .kind-dot .i { width: 12px; height: 12px; }
 .kind-dot.k-ssh { --kc: #10b981; } .kind-dot.k-postgres { --kc: #4169e1; } .kind-dot.k-mysql { --kc: #4479a1; } .kind-dot.k-redis { --kc: #ff4438; }
 .kind-dot.k-kubernetes { --kc: #326ce5; } .kind-dot.k-mongodb { --kc: #47a248; } .kind-dot.k-opensearch { --kc: #005eb8; } .kind-dot.k-elasticsearch { --kc: #00a79d; }
-.kind-dot.k-rabbitmq { --kc: #ff6600; } .kind-dot.k-kafka { --kc: #6b7280; } .kind-dot.k-web { --kc: #8b5cf6; } .kind-dot.k-tcp { --kc: #64748b; }
+.kind-dot.k-redshift { --kc: #8c4fff; } .kind-dot.k-rabbitmq { --kc: #ff6600; } .kind-dot.k-kafka { --kc: #6b7280; } .kind-dot.k-web { --kc: #8b5cf6; } .kind-dot.k-tcp { --kc: #64748b; }
 
 .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 16px; }
 .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
@@ -306,3 +306,6 @@ td.empty { text-align: center; }
 .rk-n { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .rk-bar { grid-column: 1 / -1; width: 100%; height: 6px; }
 .rk-track { fill: var(--sunken); }
+
+.cmd.soon { opacity: .65; }
+.cmd.soon code { text-decoration: none; }

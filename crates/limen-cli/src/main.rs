@@ -1,8 +1,11 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts, databases, Redis, and Kubernetes.
+//! to SSH hosts today, and (planned) databases, Redis, Kubernetes, MongoDB,
+//! search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
+// Doc comments on commands become `--help` text, where product names read better without backticks.
+#![allow(clippy::doc_markdown)]
 
 mod api;
 mod commands;
@@ -102,20 +105,55 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Database access.
+    // The commands below are planned integrations (ADR-0018, ADR-0022). Their
+    // arguments are settled so scripts and docs can be written now; each one
+    // says plainly that it isn't available yet.
+    /// PostgreSQL, MySQL, Aurora, and Redshift (planned, Phase 6).
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
-    /// Redis access.
+    /// Redis and Valkey (planned, Phase 7).
     Redis {
         #[command(subcommand)]
         command: RedisCommand,
     },
-    /// Kubernetes access.
+    /// Kubernetes and EKS (planned, Phase 8).
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
+    },
+    /// MongoDB, Atlas, and DocumentDB (planned, Phase 9).
+    Mongo {
+        #[command(subcommand)]
+        command: MongoCommand,
+    },
+    /// OpenSearch and Elasticsearch (planned, Phase 10).
+    Search {
+        #[command(subcommand)]
+        command: SearchCommand,
+    },
+    /// RabbitMQ and Amazon MQ (planned, Phase 11).
+    Mq {
+        #[command(subcommand)]
+        command: MqCommand,
+    },
+    /// Kafka and MSK (planned, Phase 11).
+    Kafka {
+        #[command(subcommand)]
+        command: KafkaCommand,
+    },
+    /// Internal web apps (planned, Phase 12).
+    Web {
+        #[command(subcommand)]
+        command: WebCommand,
+    },
+    /// Raw TCP services (planned, Phase 12): `limen tcp <resource>`.
+    Tcp {
+        resource: String,
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
     },
     /// Administrative commands. These require the limen:admin role.
     Admin {
@@ -139,19 +177,89 @@ enum DbCommand {
         db_role: Option<String>,
         #[arg(long)]
         database: Option<String>,
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum RedisCommand {
     /// Open a local listener for redis-cli.
-    Connect { resource: String },
+    Connect {
+        resource: String,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum KubeCommand {
     /// Write a kubeconfig context that uses the limen exec credential plugin.
     Login { cluster: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum MongoCommand {
+    /// Open a local listener for mongosh and drivers.
+    Connect {
+        resource: String,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        database: Option<String>,
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SearchCommand {
+    /// Open a local listener for curl and the OpenSearch or Elasticsearch clients.
+    Connect {
+        resource: String,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MqCommand {
+    /// Open a local AMQP listener.
+    Connect {
+        resource: String,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum KafkaCommand {
+    /// Open local listeners for Kafka clients.
+    Connect {
+        resource: String,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WebCommand {
+    /// Open an internal web app in your browser after single sign-on.
+    Open {
+        app: String,
+        /// Print the address instead of opening a browser.
+        #[arg(long)]
+        no_browser: bool,
+    },
 }
 
 #[tokio::main]
@@ -187,14 +295,25 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Ssh,
         } => commands::ssh::config(proxy),
-        Command::Db { .. } => not_yet(6),
-        Command::Redis { .. } => not_yet(7),
-        Command::Kube { .. } => not_yet(8),
+        Command::Db { .. } => not_yet("limen db connect", "database access", "Phase 6"),
+        Command::Redis { .. } => not_yet("limen redis connect", "Redis access", "Phase 7"),
+        Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
+        Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
+        Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
+        Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
+        Command::Kafka { .. } => not_yet("limen kafka connect", "Kafka access", "Phase 11"),
+        Command::Web { .. } => not_yet("limen web open", "web app access", "Phase 12"),
+        Command::Tcp { .. } => not_yet("limen tcp", "TCP service access", "Phase 12"),
     }
 }
 
-fn not_yet(phase: u8) -> anyhow::Result<()> {
-    anyhow::bail!("not implemented yet: this command lands in Phase {phase}")
+/// The planned integrations are in policy and in the console already, but no
+/// worker serves them. Say so, and say when.
+fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
+    anyhow::bail!(
+        "`{command}` isn't available yet: {what} is planned for {phase}. \
+         You can already see these resources with `limen ls`. Roadmap: https://github.com/jfcmartins/limen/milestones"
+    )
 }
 
 #[cfg(test)]
@@ -202,6 +321,45 @@ mod tests {
     use clap::{CommandFactory, Parser};
 
     use super::{Cli, Command, DbCommand};
+
+    /// Every planned integration has a command whose arguments parse, and that
+    /// fails with the phase and no side effects.
+    #[test]
+    fn planned_commands_parse() {
+        for args in [
+            &[
+                "db",
+                "connect",
+                "r",
+                "--db-role",
+                "x",
+                "--database",
+                "d",
+                "--listen",
+                "127.0.0.1:5433",
+            ][..],
+            &["redis", "connect", "r", "--user", "u"],
+            &["kube", "login", "c"],
+            &["mongo", "connect", "r", "--role", "x", "--database", "d"],
+            &["search", "connect", "r", "--role", "x"],
+            &["mq", "connect", "r", "--user", "u"],
+            &["kafka", "connect", "r", "--user", "u"],
+            &["web", "open", "app", "--no-browser"],
+            &["tcp", "r", "--listen", "127.0.0.1:2121"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn planned_commands_say_when() {
+        let message = super::not_yet("limen mongo connect", "MongoDB access", "Phase 9")
+            .expect_err("not available")
+            .to_string();
+        assert!(message.contains("limen mongo connect") && message.contains("Phase 9"));
+    }
 
     #[test]
     fn cli_definition_is_valid() {

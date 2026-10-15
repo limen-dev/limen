@@ -170,6 +170,7 @@ pub fn kind_label(kind: &str) -> String {
         "ssh" => (16, 185, 129),
         "postgres" | "postgresql" => (65, 105, 225),
         "mysql" => (68, 121, 161),
+        "redshift" => (140, 79, 255),
         "redis" => (255, 68, 56),
         "kubernetes" => (50, 108, 229),
         "mongodb" => (71, 162, 72),

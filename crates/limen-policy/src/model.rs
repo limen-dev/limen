@@ -90,6 +90,21 @@ pub struct Rule {
     pub kube: Option<KubeGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redis: Option<RedisGrant>,
+    // Planned integrations (ADR-0018, ADR-0022): the policy accepts them so
+    // resources and roles can be written and reviewed now; no worker serves
+    // them yet. Redshift uses `db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mongo: Option<MongoGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mq: Option<UserGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kafka: Option<UserGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web: Option<OpenGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp: Option<OpenGrant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +149,34 @@ pub struct RedisGrant {
     pub users: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MongoGrant {
+    pub roles: Vec<String>,
+    #[serde(default = "all")]
+    pub databases: Vec<String>,
+}
+
+/// `OpenSearch` or `Elasticsearch` roles the session may act as.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchGrant {
+    pub roles: Vec<String>,
+}
+
+/// Broker users (`RabbitMQ`, `Kafka`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserGrant {
+    pub users: Vec<String>,
+}
+
+/// Web apps and TCP services have no upstream identity to choose: the grant is
+/// access itself, written `web: {}` or `tcp: {}`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenGrant {}
+
 fn all() -> Vec<String> {
     vec!["*".to_owned()]
 }
@@ -175,12 +218,67 @@ pub struct ResourceSpec {
     pub redis: Option<RedisTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubernetes: Option<KubeTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redshift: Option<DbTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mongodb: Option<MongoTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opensearch: Option<SearchTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elasticsearch: Option<SearchTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rabbitmq: Option<BrokerTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kafka: Option<BrokerTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web: Option<WebTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp: Option<TcpTarget>,
     /// Labels a worker must carry to serve this resource.
     #[serde(default)]
     pub worker_selector: Labels,
 }
 
 impl ResourceSpec {
+    /// Where the resource points, for admins: an address, or a cluster name.
+    #[must_use]
+    pub fn target(&self) -> Option<String> {
+        if let Some(t) = &self.ssh {
+            return Some(t.address.clone());
+        }
+        if let Some(t) = self
+            .postgres
+            .as_ref()
+            .or(self.mysql.as_ref())
+            .or(self.redshift.as_ref())
+        {
+            return Some(t.endpoint.clone());
+        }
+        if let Some(t) = &self.redis {
+            return Some(t.endpoint.clone());
+        }
+        if let Some(t) = &self.kubernetes {
+            return Some(t.cluster_name.clone());
+        }
+        if let Some(t) = &self.mongodb {
+            return Some(match t.flavor {
+                MongoFlavor::Standard => t.endpoint.clone(),
+                MongoFlavor::Atlas => format!("{} (Atlas)", t.endpoint),
+                MongoFlavor::Documentdb => format!("{} (DocumentDB)", t.endpoint),
+            });
+        }
+        if let Some(t) = self.opensearch.as_ref().or(self.elasticsearch.as_ref()) {
+            return Some(t.endpoint.clone());
+        }
+        if let Some(t) = self.rabbitmq.as_ref().or(self.kafka.as_ref()) {
+            return Some(t.endpoint.clone());
+        }
+        if let Some(t) = &self.web {
+            return Some(format!("{} → {}", t.host, t.address));
+        }
+        self.tcp.as_ref().map(|t| t.address.clone())
+    }
+
     #[must_use]
     pub fn kinds(&self) -> Vec<ResourceKind> {
         let mut kinds = Vec::new();
@@ -199,6 +297,17 @@ impl ResourceSpec {
         if self.kubernetes.is_some() {
             kinds.push(ResourceKind::Kubernetes);
         }
+        let planned = [
+            (self.redshift.is_some(), ResourceKind::Redshift),
+            (self.mongodb.is_some(), ResourceKind::Mongodb),
+            (self.opensearch.is_some(), ResourceKind::Opensearch),
+            (self.elasticsearch.is_some(), ResourceKind::Elasticsearch),
+            (self.rabbitmq.is_some(), ResourceKind::Rabbitmq),
+            (self.kafka.is_some(), ResourceKind::Kafka),
+            (self.web.is_some(), ResourceKind::Web),
+            (self.tcp.is_some(), ResourceKind::Tcp),
+        ];
+        kinds.extend(planned.into_iter().filter(|(set, _)| *set).map(|(_, k)| k));
         kinds
     }
 }
@@ -243,6 +352,70 @@ pub struct RedisTarget {
 #[serde(deny_unknown_fields)]
 pub struct KubeTarget {
     pub cluster_name: String,
+}
+
+/// Where a MongoDB-compatible server runs, which decides how the worker will
+/// authenticate (ADR-0018).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MongoFlavor {
+    #[default]
+    Standard,
+    Atlas,
+    Documentdb,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MongoTarget {
+    /// `host:port`.
+    pub endpoint: String,
+    #[serde(default)]
+    pub flavor: MongoFlavor,
+}
+
+/// `OpenSearch` or `Elasticsearch` over HTTP(S).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchTarget {
+    /// `host:port`.
+    pub endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// An AWS-managed domain (`OpenSearch` Service), reached with `SigV4`.
+    #[serde(default)]
+    pub aws: bool,
+}
+
+/// `RabbitMQ` or `Kafka`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrokerTarget {
+    /// `host:port` of one broker or bootstrap address.
+    pub endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Amazon MQ or `MSK`.
+    #[serde(default)]
+    pub aws: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebTarget {
+    /// `host:port` of the app, as the worker reaches it.
+    pub address: String,
+    /// The public host name users open, such as `grafana.apps.example.com`.
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TcpTarget {
+    /// `host:port`.
+    pub address: String,
 }
 
 fn yes() -> bool {

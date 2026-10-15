@@ -134,6 +134,7 @@ pub async fn home(
         .accessible(&auth.roles)
         .into_iter()
         .map(|r| ResourceView {
+            connect: views::connect_for(r.kind.as_str(), &r.name),
             name: r.name,
             kind: r.kind.as_str().to_owned(),
             icon: views::kind_icon(r.kind.as_str()).0,
@@ -205,19 +206,7 @@ pub async fn home(
 
 /// Where a resource points, for admins. Never shown to non-admins.
 fn target_text(spec: &limen_policy::model::ResourceSpec) -> String {
-    if let Some(t) = &spec.ssh {
-        return t.address.clone();
-    }
-    if let Some(t) = spec.postgres.as_ref().or(spec.mysql.as_ref()) {
-        return t.endpoint.clone();
-    }
-    if let Some(t) = &spec.redis {
-        return t.endpoint.clone();
-    }
-    if let Some(t) = &spec.kubernetes {
-        return t.cluster_name.clone();
-    }
-    "—".into()
+    spec.target().unwrap_or_else(|| "—".into())
 }
 
 fn spec_kind(spec: &limen_policy::model::ResourceSpec) -> &'static str {
@@ -427,6 +416,7 @@ pub async fn resource_detail(
     html(
         ResourcePage {
             chrome: chrome(&state, &auth, "resources"),
+            connect: views::connect_for(kind, &name),
             name: name.clone(),
             kind: kind.to_owned(),
             icon,

@@ -390,7 +390,7 @@ mod tests {
     fn collects_yaml_from_directories() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy");
         let sources = super::collect_sources(&[dir]).expect("collect");
-        assert_eq!(sources.len(), 3);
+        assert_eq!(sources.len(), 4);
         assert!(sources.iter().all(|s| {
             std::path::Path::new(&s.name)
                 .extension()

@@ -1,0 +1,155 @@
+# Resources and roles for integrations that are planned but not built yet
+# (ADR-0018, ADR-0022). Policy accepts them and the console and `limen ls` list
+# them, so the shape of the product is visible today. Nothing serves these
+# kinds yet: `limen db connect`, `limen mongo connect` and the others say so.
+# The addresses are placeholders.
+kind: resource
+version: v1
+metadata: { name: billing-mysql-staging, labels: { env: staging, team: payments } }
+spec:
+  mysql: { endpoint: "billing.cluster-example.eu-west-1.rds.amazonaws.com:3306", region: eu-west-1 }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: warehouse-prod, labels: { env: prod, team: data } }
+spec:
+  redshift: { endpoint: "warehouse.example.eu-west-1.redshift.amazonaws.com:5439", region: eu-west-1 }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: eks-staging, labels: { env: staging } }
+spec:
+  kubernetes: { cluster_name: staging }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: catalog-staging, labels: { env: staging, team: catalog } }
+spec:
+  mongodb: { endpoint: "mongo-target:27017" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: catalog-atlas, labels: { env: prod, team: catalog } }
+spec:
+  mongodb: { endpoint: "catalog-shard-00-00.example.mongodb.net:27017", flavor: atlas }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: reviews-docdb, labels: { env: prod, team: catalog } }
+spec:
+  mongodb: { endpoint: "reviews.cluster-example.eu-west-1.docdb.amazonaws.com:27017", flavor: documentdb }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: logs-opensearch, labels: { env: prod, team: platform } }
+spec:
+  opensearch: { endpoint: "search-logs-example.eu-west-1.es.amazonaws.com:443", region: eu-west-1, aws: true }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: search-staging, labels: { env: staging, team: catalog } }
+spec:
+  elasticsearch: { endpoint: "elasticsearch-target:9200" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: events-rabbit-staging, labels: { env: staging, team: platform } }
+spec:
+  rabbitmq: { endpoint: "rabbitmq-target:5672" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: orders-mq, labels: { env: prod, team: payments } }
+spec:
+  rabbitmq: { endpoint: "b-example.mq.eu-west-1.amazonaws.com:5671", region: eu-west-1, aws: true }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: events-kafka-staging, labels: { env: staging, team: platform } }
+spec:
+  kafka: { endpoint: "kafka-target:9092" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: payments-msk, labels: { env: prod, team: payments } }
+spec:
+  kafka: { endpoint: "b-1.payments.example.kafka.eu-west-1.amazonaws.com:9098", region: eu-west-1, aws: true }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: grafana, labels: { env: staging, team: platform } }
+spec:
+  web: { address: "grafana:3000", host: "grafana.apps.example.com", health_path: "/api/health" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: legacy-ftp, labels: { env: staging } }
+spec:
+  tcp: { address: "legacy-ftp:21" }
+  worker_selector: { pool: dev }
+---
+kind: role
+version: v1
+metadata:
+  name: dev-planned
+  description: Staging access to the planned integrations, for developers.
+spec:
+  cert_ttl: 10m
+  allow:
+    - resources: { kind: [mysql, redshift], labels: { env: [staging] } }
+      db: { roles: [limen_readonly] }
+    - resources: { kind: [mongodb], labels: { env: [staging] } }
+      mongo: { roles: [limen-read], databases: ["*"] }
+    - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
+      search: { roles: [limen-read] }
+    - resources: { kind: [rabbitmq], labels: { env: [staging] } }
+      mq: { users: [limen-consumer] }
+    - resources: { kind: [kafka], labels: { env: [staging] } }
+      kafka: { users: [limen-consumer] }
+    - resources: { kind: [web], labels: { env: [staging] } }
+      web: {}
+---
+kind: role
+version: v1
+metadata:
+  name: sre-planned
+  description: Everything the planned integrations will reach, for SRE.
+spec:
+  cert_ttl: 30m
+  max_session_ttl: 12h
+  allow:
+    - resources: { kind: [mysql, redshift], labels: { "*": ["*"] } }
+      db: { roles: [limen_readonly, limen_rw] }
+    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
+      mongo: { roles: [limen-read, limen-rw], databases: ["*"] }
+    - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
+      search: { roles: [limen-read, limen-write] }
+    - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }
+      mq: { users: [limen-consumer, limen-admin] }
+    - resources: { kind: [kafka], labels: { "*": ["*"] } }
+      kafka: { users: [limen-consumer, limen-admin] }
+    - resources: { kind: [web], labels: { "*": ["*"] } }
+      web: {}
+    - resources: { kind: [tcp], labels: { "*": ["*"] } }
+      tcp: {}
+---
+kind: role_mapping
+version: v1
+metadata:
+  name: planned-idp
+spec:
+  - { idp_group: developers, roles: [dev-planned] }
+  - { idp_group: sre, roles: [sre-planned] }

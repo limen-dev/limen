@@ -31,7 +31,7 @@
       <td><div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><div class="cell-main">{{ r.name }}</div><div class="cell-sub">{{ r.kind }}</div></div></div></td>
       <td><div class="chips">{% for p in r.principals %}<span class="chip">{{ p }}</span>{% endfor %}</div></td>
       <td><div class="chips">{% for l in r.labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
-      <td>{% if r.kind == "ssh" %}<span class="cmd"><code>limen ssh {{ r.name }}</code><button type="button" class="secondary" data-copy="limen ssh {{ r.name }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% else %}<span class="muted">Coming soon</span>{% endif %}</td>
+      <td>{% if let Some(phase) = r.connect.planned %}<span class="cmd soon"><code>{{ r.connect.command }}</code></span> <span class="pill">{{ phase }}</span>{% else %}<span class="cmd"><code>{{ r.connect.command }}</code><button type="button" class="secondary" data-copy="{{ r.connect.command }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

@@ -34,6 +34,17 @@ spec:
       kube: { groups: ["limen:view"] }
     - resources: { kind: [redis], labels: { env: [staging] } }
       redis: { users: [limen-ro] }
+    # Planned integrations (nothing serves them yet; see below):
+    - resources: { kind: [mongodb], labels: { env: [staging] } }
+      mongo: { roles: [limen-read], databases: ["*"] }
+    - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read] }
+    - resources: { kind: [rabbitmq], labels: { env: [staging] } }
+      mq: { users: [limen-consumer] }
+    - resources: { kind: [kafka], labels: { env: [staging] } }
+      kafka: { users: [limen-consumer] }
+    - resources: { kind: [web], labels: { env: [staging] } }
+      web: {}
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }   # no principals: denies the resource entirely
 ```
@@ -64,4 +75,20 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` (`endpoint`, `region`, `iam_auth`, `admin_secret_arn`), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `region`, `iam_auth`, `admin_secret_arn`), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+
+### Planned integrations
+
+These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. **Nothing serves them yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
+
+| Kind | Resource fields | Grant section | Command (planned) |
+|---|---|---|---|
+| `redshift` | `endpoint`, `region`, `iam_auth`, `admin_secret_arn` (as `postgres`) | `db: { roles, databases }` | `limen db connect` (Phase 6) |
+| `mongodb` | `endpoint`, `flavor: standard \| atlas \| documentdb` | `mongo: { roles, databases }` | `limen mongo connect` (Phase 9) |
+| `opensearch`, `elasticsearch` | `endpoint`, `region`, `aws` | `search: { roles }` | `limen search connect` (Phase 10) |
+| `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ) | `mq: { users }` | `limen mq connect` (Phase 11) |
+| `kafka` | `endpoint`, `region`, `aws` (MSK) | `kafka: { users }` | `limen kafka connect` (Phase 11) |
+| `web` | `address`, `host`, `health_path` | `web: {}` | `limen web open` (Phase 12) |
+| `tcp` | `address` | `tcp: {}` | `limen tcp` (Phase 12) |
+
+Aurora, DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. `web` and `tcp` have no upstream identity to choose, so their grant is access itself (`web: {}`).

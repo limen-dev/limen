@@ -15,7 +15,7 @@
   <tr><th>Worker selector</th><td><div class="chips">{% for l in selector %}<span class="chip">{{ l }}</span>{% endfor %}{% if selector.is_empty() %}<span class="muted">any worker</span>{% endif %}</div></td></tr>
   {% endif %}
   <tr><th>You can access as</th><td><div class="chips">{% for p in principals %}<span class="chip">{{ p }}</span>{% endfor %}{% if principals.is_empty() %}<span class="muted">not with your own roles</span>{% endif %}</div></td></tr>
-  {% if kind == "ssh" && !principals.is_empty() %}<tr><th>Connect</th><td><span class="cmd"><code>limen ssh {{ name }}</code><button type="button" class="secondary" data-copy="limen ssh {{ name }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span></td></tr>{% endif %}
+  {% if !principals.is_empty() %}<tr><th>Connect</th><td>{% if let Some(phase) = connect.planned %}<span class="cmd soon"><code>{{ connect.command }}</code></span> <span class="pill">{{ phase }}</span> <span class="hint">Not available yet: you can list it, but nothing serves it until then.</span>{% else %}<span class="cmd"><code>{{ connect.command }}</code><button type="button" class="secondary" data-copy="{{ connect.command }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% endif %}</td></tr>{% endif %}
 </table></div>
 
 {% if chrome.is_admin %}

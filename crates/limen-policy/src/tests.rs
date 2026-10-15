@@ -286,3 +286,145 @@ fn worker_selector_matching() {
     assert!(p.worker_may_serve("orders-prod", &prod));
     assert!(!p.worker_may_serve("no-such-resource", &dev));
 }
+
+mod planned_integrations {
+    use super::*;
+
+    const PLANNED: &str = include_str!("../../../examples/policy/planned.yaml");
+
+    fn with_planned() -> Policy {
+        Policy::parse_yaml([
+            ("roles.yaml", ROLES),
+            ("mappings.yaml", MAPPINGS),
+            ("resources.yaml", RESOURCES),
+            ("planned.yaml", PLANNED),
+        ])
+        .expect("example policy with the planned integrations is valid")
+    }
+
+    #[test]
+    fn every_planned_kind_has_an_example_resource() {
+        let policy = with_planned();
+        let admin = roles(&["sre", "sre-planned"]);
+        let kinds: std::collections::HashSet<_> =
+            policy.accessible(&admin).iter().map(|r| r.kind).collect();
+        for kind in ResourceKind::ALL {
+            assert!(kinds.contains(&kind), "no example resource for {kind:?}");
+        }
+    }
+
+    #[test]
+    fn developers_get_staging_only_and_read_only_principals() {
+        let policy = with_planned();
+        let dev = roles(&["dev-planned"]);
+        let seen = policy.accessible(&dev);
+        let names: Vec<_> = seen.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"catalog-staging") && names.contains(&"grafana"));
+        assert!(!names.contains(&"catalog-atlas"), "prod stays hidden");
+        assert!(
+            !names.contains(&"legacy-ftp"),
+            "tcp is not granted to developers"
+        );
+        let mongo = seen
+            .iter()
+            .find(|r| r.name == "catalog-staging")
+            .expect("seen");
+        assert_eq!(mongo.principals, ["limen-read"]);
+    }
+
+    #[test]
+    fn principals_must_fit_the_kind() {
+        let policy = with_planned();
+        let sre = roles(&["sre-planned"]);
+        let eval = |resource: &str, principal: Principal| {
+            policy.evaluate(&AccessRequest {
+                roles: &sre,
+                resource,
+                principal,
+            })
+        };
+        assert!(
+            eval(
+                "catalog-atlas",
+                Principal::MongoRole {
+                    role: "limen-rw".into(),
+                    database: "shop".into()
+                }
+            )
+            .is_allowed()
+        );
+        assert!(
+            eval(
+                "logs-opensearch",
+                Principal::SearchRole("limen-read".into())
+            )
+            .is_allowed()
+        );
+        assert!(eval("orders-mq", Principal::MqUser("limen-admin".into())).is_allowed());
+        assert!(
+            eval(
+                "payments-msk",
+                Principal::KafkaUser("limen-consumer".into())
+            )
+            .is_allowed()
+        );
+        assert!(eval("grafana", Principal::WebAccess).is_allowed());
+        assert!(eval("legacy-ftp", Principal::TcpAccess).is_allowed());
+        assert!(
+            eval("warehouse-prod", db("limen_rw")).is_allowed(),
+            "redshift uses the db grant"
+        );
+        // The wrong kind of principal for a resource is an invalid request, not a quiet allow.
+        assert_eq!(
+            eval("grafana", Principal::TcpAccess),
+            Decision::Deny {
+                reason: DenyReason::InvalidRequest
+            }
+        );
+        assert_eq!(
+            eval("catalog-atlas", Principal::SearchRole("limen-read".into())),
+            Decision::Deny {
+                reason: DenyReason::InvalidRequest
+            }
+        );
+    }
+
+    #[test]
+    fn a_resource_has_exactly_one_kind_and_valid_addresses() {
+        let two = "kind: resource\nversion: v1\nmetadata: { name: x }\nspec:\n  kafka: { endpoint: \"k:9092\" }\n  tcp: { address: \"t:1\" }\n";
+        assert!(Policy::parse_yaml([("x.yaml", two)]).is_err());
+        let bad = "kind: resource\nversion: v1\nmetadata: { name: x }\nspec:\n  web: { address: \"no-port\", host: \"a.example.com\" }\n";
+        assert!(Policy::parse_yaml([("x.yaml", bad)]).is_err());
+        let unknown = "kind: resource\nversion: v1\nmetadata: { name: x }\nspec:\n  mongodb: { endpoint: \"m:1\", flavour: atlas }\n";
+        assert!(
+            Policy::parse_yaml([("x.yaml", unknown)]).is_err(),
+            "typos are rejected"
+        );
+    }
+
+    #[test]
+    fn web_grants_take_no_fields() {
+        let role = "kind: role\nversion: v1\nmetadata: { name: r }\nspec:\n  allow:\n    - resources: { kind: [web], labels: { \"*\": [\"*\"] } }\n      web: { paths: [\"/\"] }\n";
+        assert!(Policy::parse_yaml([("r.yaml", role)]).is_err());
+    }
+}
+
+#[test]
+fn every_example_resource_has_a_target_to_show() {
+    let policy = Policy::parse_yaml([
+        ("roles.yaml", ROLES),
+        ("mappings.yaml", MAPPINGS),
+        ("resources.yaml", RESOURCES),
+        (
+            "planned.yaml",
+            include_str!("../../../examples/policy/planned.yaml"),
+        ),
+    ])
+    .expect("valid");
+    for (name, resource) in &policy.resources {
+        assert!(
+            resource.spec.target().is_some_and(|t| !t.is_empty()),
+            "{name} has no target text"
+        );
+    }
+}

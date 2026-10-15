@@ -72,6 +72,7 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
         "mysql" => ("k-mysql", "k-mysql"),
         "redis" => ("k-redis", "k-redis"),
         "kubernetes" => ("k-kubernetes", "k-kubernetes"),
+        "redshift" => ("warehouse", "k-redshift"),
         "mongodb" => ("k-mongodb", "k-mongodb"),
         "opensearch" => ("k-opensearch", "k-opensearch"),
         "elasticsearch" => ("k-elasticsearch", "k-elasticsearch"),
@@ -80,6 +81,30 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
         "web" => ("globe", "k-web"),
         "tcp" => ("network", "k-tcp"),
         _ => ("database", "k-other"),
+    }
+}
+
+/// How to open a resource: the command, and the phase that delivers it while
+/// only the data side exists.
+pub struct Connect {
+    pub command: String,
+    /// `Some("Phase 6")` until the kind is served.
+    pub planned: Option<&'static str>,
+}
+
+#[must_use]
+pub fn connect_for(kind: &str, name: &str) -> Connect {
+    let access = limen_core::resource::ResourceKind::parse(kind)
+        .map(limen_core::resource::ResourceKind::access);
+    match access {
+        Some(a) => Connect {
+            command: a.command.replace("{name}", name),
+            planned: a.planned,
+        },
+        None => Connect {
+            command: String::new(),
+            planned: Some("planned"),
+        },
     }
 }
 
@@ -303,6 +328,7 @@ pub struct Stats {
 
 pub struct ResourceView {
     pub name: String,
+    pub connect: Connect,
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
@@ -501,6 +527,7 @@ pub struct ResourcesPage {
 #[template(path = "resource.html")]
 pub struct ResourcePage {
     pub chrome: Chrome,
+    pub connect: Connect,
     pub name: String,
     pub kind: String,
     pub icon: &'static str,

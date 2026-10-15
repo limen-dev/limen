@@ -91,6 +91,13 @@ pub enum Principal {
     DbRole { role: String, database: String },
     KubeGroup(String),
     RedisUser(String),
+    // Planned integrations: modelled so policy can be written and tested now.
+    MongoRole { role: String, database: String },
+    SearchRole(String),
+    MqUser(String),
+    KafkaUser(String),
+    WebAccess,
+    TcpAccess,
 }
 
 #[derive(Debug, Clone)]
@@ -440,10 +447,19 @@ fn principal_fits_kind(principal: &Principal, kind: ResourceKind) -> bool {
         (Principal::SshLogin(_), ResourceKind::Ssh)
             | (
                 Principal::DbRole { .. },
-                ResourceKind::Postgres | ResourceKind::Mysql
+                ResourceKind::Postgres | ResourceKind::Mysql | ResourceKind::Redshift
             )
             | (Principal::KubeGroup(_), ResourceKind::Kubernetes)
             | (Principal::RedisUser(_), ResourceKind::Redis)
+            | (Principal::MongoRole { .. }, ResourceKind::Mongodb)
+            | (
+                Principal::SearchRole(_),
+                ResourceKind::Opensearch | ResourceKind::Elasticsearch
+            )
+            | (Principal::MqUser(_), ResourceKind::Rabbitmq)
+            | (Principal::KafkaUser(_), ResourceKind::Kafka)
+            | (Principal::WebAccess, ResourceKind::Web)
+            | (Principal::TcpAccess, ResourceKind::Tcp)
     )
 }
 
@@ -472,7 +488,16 @@ fn labels_match(selector: &BTreeMap<String, Vec<String>>, labels: &Labels) -> bo
 }
 
 fn rule_has_no_principals(rule: &Rule) -> bool {
-    rule.ssh.is_none() && rule.db.is_none() && rule.kube.is_none() && rule.redis.is_none()
+    rule.ssh.is_none()
+        && rule.db.is_none()
+        && rule.kube.is_none()
+        && rule.redis.is_none()
+        && rule.mongo.is_none()
+        && rule.search.is_none()
+        && rule.mq.is_none()
+        && rule.kafka.is_none()
+        && rule.web.is_none()
+        && rule.tcp.is_none()
 }
 
 fn rule_grants(rule: &Rule, principal: &Principal) -> bool {
@@ -483,17 +508,36 @@ fn rule_grants(rule: &Rule, principal: &Principal) -> bool {
         }),
         Principal::KubeGroup(group) => rule.kube.as_ref().is_some_and(|g| g.groups.contains(group)),
         Principal::RedisUser(user) => rule.redis.as_ref().is_some_and(|g| g.users.contains(user)),
+        Principal::MongoRole { role, database } => rule.mongo.as_ref().is_some_and(|g| {
+            g.roles.contains(role) && g.databases.iter().any(|d| d == "*" || d == database)
+        }),
+        Principal::SearchRole(engine_role) => rule
+            .search
+            .as_ref()
+            .is_some_and(|g| g.roles.contains(engine_role)),
+        Principal::MqUser(user) => rule.mq.as_ref().is_some_and(|g| g.users.contains(user)),
+        Principal::KafkaUser(user) => rule.kafka.as_ref().is_some_and(|g| g.users.contains(user)),
+        Principal::WebAccess => rule.web.is_some(),
+        Principal::TcpAccess => rule.tcp.is_some(),
     }
 }
 
 fn rule_principals(rule: &Rule, kind: ResourceKind) -> Vec<String> {
     match kind {
         ResourceKind::Ssh => rule.ssh.iter().flat_map(|g| g.logins.clone()).collect(),
-        ResourceKind::Postgres | ResourceKind::Mysql => {
+        ResourceKind::Postgres | ResourceKind::Mysql | ResourceKind::Redshift => {
             rule.db.iter().flat_map(|g| g.roles.clone()).collect()
         }
         ResourceKind::Kubernetes => rule.kube.iter().flat_map(|g| g.groups.clone()).collect(),
         ResourceKind::Redis => rule.redis.iter().flat_map(|g| g.users.clone()).collect(),
+        ResourceKind::Mongodb => rule.mongo.iter().flat_map(|g| g.roles.clone()).collect(),
+        ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
+            rule.search.iter().flat_map(|g| g.roles.clone()).collect()
+        }
+        ResourceKind::Rabbitmq => rule.mq.iter().flat_map(|g| g.users.clone()).collect(),
+        ResourceKind::Kafka => rule.kafka.iter().flat_map(|g| g.users.clone()).collect(),
+        ResourceKind::Web => rule.web.iter().map(|_| "access".to_owned()).collect(),
+        ResourceKind::Tcp => rule.tcp.iter().map(|_| "access".to_owned()).collect(),
     }
 }
 
@@ -526,12 +570,17 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
     }
     for rule in role.spec.allow.iter().chain(&role.spec.deny) {
         validate_selector(name, &rule.resources)?;
-        let principal_lists: [(&str, Option<&Vec<String>>); 5] = [
+        let principal_lists: [(&str, Option<&Vec<String>>); 10] = [
             ("ssh.logins", rule.ssh.as_ref().map(|g| &g.logins)),
             ("db.roles", rule.db.as_ref().map(|g| &g.roles)),
             ("db.databases", rule.db.as_ref().map(|g| &g.databases)),
             ("kube.groups", rule.kube.as_ref().map(|g| &g.groups)),
             ("redis.users", rule.redis.as_ref().map(|g| &g.users)),
+            ("mongo.roles", rule.mongo.as_ref().map(|g| &g.roles)),
+            ("mongo.databases", rule.mongo.as_ref().map(|g| &g.databases)),
+            ("search.roles", rule.search.as_ref().map(|g| &g.roles)),
+            ("mq.users", rule.mq.as_ref().map(|g| &g.users)),
+            ("kafka.users", rule.kafka.as_ref().map(|g| &g.users)),
         ];
         for (field, values) in principal_lists {
             let Some(values) = values else { continue };
@@ -539,7 +588,7 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 return Err(invalid("role", name, format!("{field} must not be empty")));
             }
             for v in values {
-                let wildcard_ok = field == "db.databases";
+                let wildcard_ok = field == "db.databases" || field == "mongo.databases";
                 if v.is_empty()
                     || v.len() > MAX_NAME_LEN
                     || v.chars().any(char::is_control)
@@ -568,7 +617,7 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
             return Err(invalid(
                 "role",
                 name,
-                "allow rules must grant at least one principal (ssh, db, kube, or redis)",
+                "allow rules must grant at least one principal (ssh, db, kube, redis, mongo, search, mq, kafka, web, or tcp)",
             ));
         }
     }
@@ -606,7 +655,7 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         return Err(invalid(
             "resource",
             name,
-            "exactly one of ssh, postgres, mysql, redis, kubernetes must be set",
+            "exactly one of ssh, postgres, mysql, redshift, redis, kubernetes, mongodb, opensearch, elasticsearch, rabbitmq, kafka, web, or tcp must be set",
         ));
     }
     let address = match kinds[0] {
@@ -615,6 +664,22 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Mysql => resource.spec.mysql.as_ref().map(|t| t.endpoint.as_str()),
         ResourceKind::Redis => resource.spec.redis.as_ref().map(|t| t.endpoint.as_str()),
         ResourceKind::Kubernetes => None,
+        ResourceKind::Redshift => resource.spec.redshift.as_ref().map(|t| t.endpoint.as_str()),
+        ResourceKind::Mongodb => resource.spec.mongodb.as_ref().map(|t| t.endpoint.as_str()),
+        ResourceKind::Opensearch => resource
+            .spec
+            .opensearch
+            .as_ref()
+            .map(|t| t.endpoint.as_str()),
+        ResourceKind::Elasticsearch => resource
+            .spec
+            .elasticsearch
+            .as_ref()
+            .map(|t| t.endpoint.as_str()),
+        ResourceKind::Rabbitmq => resource.spec.rabbitmq.as_ref().map(|t| t.endpoint.as_str()),
+        ResourceKind::Kafka => resource.spec.kafka.as_ref().map(|t| t.endpoint.as_str()),
+        ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
+        ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
     if let Some(address) = address {
         let valid = address.rsplit_once(':').is_some_and(|(host, port)| {
