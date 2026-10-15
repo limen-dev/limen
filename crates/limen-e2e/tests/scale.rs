@@ -48,23 +48,25 @@ async fn new_replica_receives_connections_within_one_age_period() {
     })
     .await;
 
-    // Scale out: the name now resolves to both replicas, as DNS would once
-    // the new one is registered.
+    // Scale out. For one age period the name resolves to the new replica
+    // alone, so the proxy's next connection must land there: its existing
+    // connection (it calls every second, for the policy refresh) has to end
+    // at its age, and the redial has to resolve the name again. Without a
+    // maximum age the proxy stays on the first replica forever.
     let second = d.start_extra_control_plane("cp-e2e-2").await;
     let (via, accepted) = counting_forwarder(second.addr).await;
-    limen_tunnel::connect::set_test_resolution(&d.cp_dial, vec![d.cp_addr, via]);
-
-    // The proxy holds one connection and calls every second (policy
-    // refresh). Each age period ends it, and each reconnect picks a replica
-    // at random, so a few periods all but guarantee the new one is reached.
-    // Without a maximum age the proxy stays on the first replica forever.
+    limen_tunnel::connect::set_test_resolution(&d.cp_dial, vec![via]);
+    // At most the age (+10 % jitter) plus the grace for a busy connection,
+    // and a little slack for the redial.
     let period = Duration::from_secs(AGE_SECS) * 11 / 10 + Duration::from_secs(GRACE_SECS);
     eventually(
-        period * 10,
-        "a proxy connection to the new replica",
+        period + Duration::from_secs(3),
+        "a proxy connection to the new replica within one age period",
         || async { accepted.load(Ordering::SeqCst) > 0 },
     )
     .await;
+    // Then both, as DNS would once the new one is registered.
+    limen_tunnel::connect::set_test_resolution(&d.cp_dial, vec![d.cp_addr, via]);
 
     // Relayed calls keep working while connections move.
     for _ in 0..3 {
