@@ -44,9 +44,6 @@ jobs:
   # Releases and manual runs (workflow_dispatch) always run everything.
   changes:
     name: what changed
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 10
     outputs:
@@ -113,9 +110,6 @@ jobs:
     name: fmt + clippy
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 30
     steps:
@@ -160,9 +154,6 @@ jobs:
             self-hosted: '["self-hosted","Linux","X64"]'
           - os: ubuntu-24.04-arm
             self-hosted: '["self-hosted","Linux","ARM64"]'
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}-{2}', github.run_id, github.job, matrix.os) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && matrix.os || fromJSON(matrix.self-hosted) }}
     services:
       postgres:
@@ -243,9 +234,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 45
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64"]') }}
     steps:
       # Fetches this run's commit without actions/checkout: GitHub rate limits the
@@ -276,9 +264,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 20
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       # Fetches this run's commit without actions/checkout: GitHub rate limits the
@@ -311,9 +296,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     timeout-minutes: 60
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64"]') }}
     env:
       # The Dockerfile uses BuildKit's --mount. Hosted runners enable it by default.
@@ -351,9 +333,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     timeout-minutes: 10
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       # Fetches this run's commit without actions/checkout: GitHub rate limits the
@@ -383,9 +362,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
-    concurrency:
-      group: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && format('ci-hosted-{0}-{1}', github.run_id, github.job) || 'ci-self-hosted' }}
-      cancel-in-progress: false
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       # Fetches this run's commit without actions/checkout: GitHub rate limits the
