@@ -8,6 +8,12 @@ on:
   # dispatches it for the release pull request (whose commits are pushed with
   # the workflow token, which doesn't start workflows by itself).
   workflow_call:
+    inputs:
+      # The release gate sets this, so releases only use GitHub-hosted runners.
+      hosted:
+        description: Run on GitHub-hosted runners instead of the self-hosted ones
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -28,7 +34,7 @@ env:
 jobs:
   lint:
     name: fmt + clippy
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: ${{ inputs.hosted && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,10 +55,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            runner: [self-hosted, Linux, X64]
+            self-hosted: '["self-hosted","Linux","X64"]'
           - os: ubuntu-24.04-arm
-            runner: [self-hosted, Linux, ARM64]
-    runs-on: ${{ matrix.runner }}
+            self-hosted: '["self-hosted","Linux","ARM64"]'
+    runs-on: ${{ inputs.hosted && matrix.os || fromJSON(matrix.self-hosted) }}
     services:
       postgres:
         image: postgres:18-alpine
@@ -96,6 +102,7 @@ jobs:
       # Service containers can't take a command or mount repo files, so S3 starts here.
       - name: Start SeaweedFS (S3)
         run: >-
+          docker rm -f s3 >/dev/null 2>&1 || true;
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/s3/s3.json:/etc/seaweedfs/s3.json:ro"
           chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
@@ -111,7 +118,7 @@ jobs:
   # there (they print SKIPPED). Unit tests still run.
   test-macos:
     name: test (macos)
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: ${{ inputs.hosted && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -122,7 +129,7 @@ jobs:
 
   supply-chain:
     name: cargo-deny + cargo-audit
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: ${{ inputs.hosted && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,7 +144,10 @@ jobs:
       fail-fast: false
       matrix:
         target: [control-plane, proxy, worker]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ${{ inputs.hosted && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64"]') }}
+    env:
+      # The Dockerfile uses BuildKit's --mount. Hosted runners enable it by default.
+      DOCKER_BUILDKIT: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -148,7 +158,7 @@ jobs:
         run: docker run --rm "limen-${{ matrix.target }}:ci" --version
 
   actionlint:
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: ${{ inputs.hosted && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -158,7 +168,7 @@ jobs:
 
   terraform-and-dashboards:
     name: terraform validate + dashboards
-    runs-on: [self-hosted, Linux, ARM64]
+    runs-on: ${{ inputs.hosted && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
