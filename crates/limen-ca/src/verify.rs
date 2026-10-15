@@ -21,6 +21,10 @@ pub struct UserIdentity {
     pub roles: Vec<String>,
     pub login_id: String,
     pub not_after: OffsetDateTime,
+    /// A bot's certificate. Always agrees with the `bot:` username prefix.
+    pub bot: bool,
+    /// Facts about the CI run behind a bot login. Empty for people.
+    pub ci: std::collections::BTreeMap<String, String>,
 }
 
 impl UserIdentity {
@@ -50,11 +54,17 @@ pub fn verify_user(
     let mut username = None;
     let mut login_id = None;
     let mut roles = Vec::new();
+    let mut bot = false;
+    let mut ci = std::collections::BTreeMap::new();
     for uri in uris {
         match uri {
             IdentityUri::User(u) if username.is_none() => username = Some(u),
             IdentityUri::Login(l) if login_id.is_none() => login_id = Some(l),
             IdentityUri::Role(r) => roles.push(r),
+            IdentityUri::Bot if !bot => bot = true,
+            IdentityUri::Ci { key, value } => {
+                ci.insert(key, value);
+            }
             other => {
                 return Err(VerifyError::Identity(format!(
                     "unexpected SAN in user cert: {other:?}"
@@ -62,11 +72,19 @@ pub fn verify_user(
             }
         }
     }
+    let username = username.ok_or_else(|| VerifyError::Identity("missing user".into()))?;
+    if limen_core::identity::is_bot(&username) != bot || (!bot && !ci.is_empty()) {
+        return Err(VerifyError::Identity(
+            "the bot marker and the bot: username prefix must agree".into(),
+        ));
+    }
     Ok(UserIdentity {
-        username: username.ok_or_else(|| VerifyError::Identity("missing user".into()))?,
+        username,
         login_id: login_id.ok_or_else(|| VerifyError::Identity("missing login id".into()))?,
         roles,
         not_after,
+        bot,
+        ci,
     })
 }
 
@@ -200,6 +218,7 @@ mod tests {
                 roles: vec!["db-readonly".into(), "limen:admin".into()],
                 login_id: login,
                 ttl: Duration::from_secs(600),
+                ci: None,
             })
             .await
             .expect("issue");
@@ -210,6 +229,87 @@ mod tests {
         assert!(id.has_role("limen:admin"));
         let ttl = id.not_after - OffsetDateTime::now_utc();
         assert!(ttl <= time::Duration::minutes(10) && ttl > time::Duration::minutes(9));
+    }
+
+    #[tokio::test]
+    async fn bot_cert_carries_the_marker_and_the_ci_facts() {
+        let user_ca = ca(CaPurpose::UserX509).await;
+        let (_key, csr_der) = csr();
+        let ci: std::collections::BTreeMap<String, String> = [
+            ("provider", "github_actions"),
+            ("repository", "acme/infra"),
+            ("run_id", "42"),
+            ("workflow", "deploy / staging"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let issued = user_ca
+            .issue_user(UserCertRequest {
+                csr_der,
+                username: "bot:deploy-staging".into(),
+                roles: vec!["deployer".into()],
+                login_id: Uuid::now_v7(),
+                ttl: Duration::from_secs(600),
+                ci: Some(ci.clone()),
+            })
+            .await
+            .expect("issue");
+        let id = verify_user(&issued.der, user_ca.cert_der()).expect("verify");
+        assert!(id.bot);
+        assert_eq!(id.username, "bot:deploy-staging");
+        assert_eq!(id.ci, ci, "values with spaces and slashes survive");
+        assert_eq!(id.roles, ["deployer"]);
+    }
+
+    #[tokio::test]
+    async fn people_never_get_the_bot_marker_and_bots_always_do() {
+        let user_ca = ca(CaPurpose::UserX509).await;
+        let request = |username: &str, ci: Option<std::collections::BTreeMap<String, String>>| {
+            let (_k, csr_der) = csr();
+            UserCertRequest {
+                csr_der,
+                username: username.into(),
+                roles: vec![],
+                login_id: Uuid::now_v7(),
+                ttl: Duration::from_secs(60),
+                ci,
+            }
+        };
+        let facts: std::collections::BTreeMap<String, String> =
+            [("repository".to_owned(), "acme/infra".to_owned())].into();
+        // A person whose IdP name starts with `bot:` can't get a bot's identity...
+        assert!(user_ca.issue_user(request("bot:evil", None)).await.is_err());
+        // ...and a bot can't be issued a name that looks like a person's.
+        assert!(
+            user_ca
+                .issue_user(request("alice@example.com", Some(facts.clone())))
+                .await
+                .is_err()
+        );
+        // CI facts stay small.
+        let many = (0..40).map(|i| (format!("k{i}"), "v".to_owned())).collect();
+        assert!(
+            user_ca
+                .issue_user(request("bot:x", Some(many)))
+                .await
+                .is_err()
+        );
+        let long: std::collections::BTreeMap<String, String> =
+            [("k".to_owned(), "x".repeat(300))].into();
+        assert!(
+            user_ca
+                .issue_user(request("bot:x", Some(long)))
+                .await
+                .is_err()
+        );
+        // A person's certificate has no marker and no facts.
+        let issued = user_ca
+            .issue_user(request("alice@example.com", None))
+            .await
+            .expect("issue");
+        let id = verify_user(&issued.der, user_ca.cert_der()).expect("verify");
+        assert!(!id.bot && id.ci.is_empty());
     }
 
     #[tokio::test]
@@ -224,6 +324,7 @@ mod tests {
                 roles: vec![],
                 login_id: Uuid::now_v7(),
                 ttl: Duration::from_secs(60),
+                ci: None,
             })
             .await
             .expect("issue");
@@ -273,6 +374,7 @@ mod tests {
             roles: vec![],
             login_id: Uuid::now_v7(),
             ttl: Duration::from_secs(60),
+            ci: None,
         };
         assert!(
             internal.issue_user(user_req.clone()).await.is_err(),
@@ -280,6 +382,7 @@ mod tests {
         );
         let bad_name = UserCertRequest {
             username: "a\nb".into(),
+            ci: None,
             ..user_req.clone()
         };
         assert!(user_ca.issue_user(bad_name).await.is_err());
@@ -288,6 +391,7 @@ mod tests {
         tampered[last] ^= 0xff;
         let bad_csr = UserCertRequest {
             csr_der: tampered,
+            ci: None,
             ..user_req.clone()
         };
         assert!(
@@ -296,6 +400,7 @@ mod tests {
         );
         let zero_ttl = UserCertRequest {
             ttl: Duration::ZERO,
+            ci: None,
             ..user_req
         };
         assert!(user_ca.issue_user(zero_ttl).await.is_err());

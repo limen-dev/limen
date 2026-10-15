@@ -8,6 +8,8 @@
 //! - `limen://login/<uuid>`: the login session that produced the cert
 //! - `limen://component/<kind>/<id>`: a control plane, proxy, or worker (internal CA only)
 //! - `limen://label/<key>/<value>`: a component label, set at enrollment (internal CA only)
+//! - `limen://actor/bot`: the user certificate belongs to a bot (ADR-0019)
+//! - `limen://ci/<key>/<value>`: a fact about the CI run behind a bot login
 //!
 //! Path segments are percent-encoded, so `admin@example.com` survives intact.
 
@@ -77,8 +79,21 @@ pub enum IdentityUri {
     User(String),
     Role(String),
     Login(String),
-    Component { kind: ComponentKind, id: String },
-    Label { key: String, value: String },
+    Component {
+        kind: ComponentKind,
+        id: String,
+    },
+    Label {
+        key: String,
+        value: String,
+    },
+    /// Marks a certificate as a bot's: the holder is automation, not a person.
+    Bot,
+    /// One fact about the CI run behind a bot login, such as `repository`.
+    Ci {
+        key: String,
+        value: String,
+    },
 }
 
 impl IdentityUri {
@@ -93,6 +108,10 @@ impl IdentityUri {
             }
             IdentityUri::Label { key, value } => {
                 format!("{SCHEME}://label/{}/{}", encode(key), encode(value))
+            }
+            IdentityUri::Bot => format!("{SCHEME}://actor/bot"),
+            IdentityUri::Ci { key, value } => {
+                format!("{SCHEME}://ci/{}/{}", encode(key), encode(value))
             }
         }
     }
@@ -113,6 +132,11 @@ impl IdentityUri {
                 id: decode(id)?,
             }),
             ("label", Some(value), None) => Some(IdentityUri::Label {
+                key: first,
+                value: decode(value)?,
+            }),
+            ("actor", None, _) if first == "bot" => Some(IdentityUri::Bot),
+            ("ci", Some(value), None) => Some(IdentityUri::Ci {
                 key: first,
                 value: decode(value)?,
             }),
@@ -173,6 +197,12 @@ mod tests {
                 key: "pool".into(),
                 value: "payments vpc/1".into(),
             },
+            IdentityUri::Bot,
+            IdentityUri::Ci {
+                key: "repository".into(),
+                value: "acme/infra".into(),
+            },
+            IdentityUri::User(bot_username("deploy-staging")),
         ];
         for case in cases {
             let uri = case.to_uri();
@@ -198,6 +228,9 @@ mod tests {
             "limen://user/a/b",
             "limen://component/nope/x",
             "limen://x/y",
+            "limen://actor/human",
+            "limen://actor/bot/extra",
+            "limen://ci/onlykey",
             "limen://user/%zz",
         ] {
             assert_eq!(IdentityUri::parse(bad), None, "{bad}");

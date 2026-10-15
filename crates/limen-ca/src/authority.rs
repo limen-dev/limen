@@ -40,7 +40,15 @@ pub struct UserCertRequest {
     pub roles: Vec<String>,
     pub login_id: Uuid,
     pub ttl: Duration,
+    /// `Some` makes this a bot certificate: the facts about the CI run behind
+    /// the login. The username must then be `bot:<name>`, and a person's
+    /// certificate can't carry that prefix.
+    pub ci: Option<std::collections::BTreeMap<String, String>>,
 }
+
+/// Most CI facts a bot certificate carries, and how long each may be.
+const MAX_CI_FACTS: usize = 16;
+const MAX_CI_VALUE: usize = 256;
 
 /// A request for a control plane, proxy, or worker certificate.
 #[derive(Debug, Clone)]
@@ -151,6 +159,22 @@ impl CertificateAuthority {
         for role in &req.roles {
             validate_name("role", role)?;
         }
+        if limen_core::identity::is_bot(&req.username) != req.ci.is_some() {
+            return Err(CaError::InvalidRequest(
+                "only bots use the bot: prefix, and bots always do".into(),
+            ));
+        }
+        if let Some(ci) = &req.ci {
+            if ci.len() > MAX_CI_FACTS {
+                return Err(CaError::InvalidRequest("too many CI facts".into()));
+            }
+            for (key, value) in ci {
+                validate_name("CI fact name", key)?;
+                if value.len() > MAX_CI_VALUE || value.chars().any(char::is_control) {
+                    return Err(CaError::InvalidRequest(format!("invalid CI fact {key}")));
+                }
+            }
+        }
         let csr = parse_csr(&req.csr_der)?;
 
         let mut params = leaf_params(req.ttl)?;
@@ -162,6 +186,13 @@ impl CertificateAuthority {
             IdentityUri::Login(req.login_id.to_string()),
         ];
         uris.extend(req.roles.iter().cloned().map(IdentityUri::Role));
+        if let Some(ci) = &req.ci {
+            uris.push(IdentityUri::Bot);
+            uris.extend(ci.iter().map(|(key, value)| IdentityUri::Ci {
+                key: key.clone(),
+                value: value.clone(),
+            }));
+        }
         params.subject_alt_names = uris
             .iter()
             .map(|u| uri_san(&u.to_uri()))

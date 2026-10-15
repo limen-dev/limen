@@ -1004,6 +1004,11 @@ fn summarize(doc: &Document) -> String {
             r.spec.deny.len()
         ),
         Document::RoleMapping(m) => format!("{} group mappings", m.spec.len()),
+        Document::Bot(b) => format!(
+            "{} · roles {}",
+            b.spec.join.method.as_str(),
+            b.spec.roles.join(", ")
+        ),
         Document::Resource(r) => r
             .spec
             .kinds()
@@ -1020,6 +1025,7 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
         ("Roles", "role"),
         ("Role mappings", "role_mapping"),
         ("Resources", "resource"),
+        ("Bots", "bot"),
     ]
     .into_iter()
     .map(|(title, kind)| PolicyGroup {
