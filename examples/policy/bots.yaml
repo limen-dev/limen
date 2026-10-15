@@ -1,0 +1,56 @@
+# Machine identities (ADR-0019): CI jobs that log in with the workload identity
+# token their platform issues, and get short-lived credentials as `bot:<name>`.
+# No secret is stored anywhere. Rules match claims exactly; there are no
+# wildcards, and a repository alone is refused.
+kind: role
+version: v1
+metadata:
+  name: deployer
+  description: What a staging deploy job may do.
+spec:
+  cert_ttl: 10m
+  allow:
+    - resources: { kind: [ssh], labels: { env: [staging] }, names: [web-staging-1] }
+      ssh: { logins: [ubuntu] }
+---
+kind: bot
+version: v1
+metadata:
+  name: deploy-staging
+  description: GitHub Actions deploys of acme/infra from main to the staging environment.
+spec:
+  join:
+    method: github_actions
+    match:
+      repository: acme/infra
+      ref: refs/heads/main
+      environment: staging
+  roles: [deployer]
+  max_ttl: 15m
+---
+kind: bot
+version: v1
+metadata:
+  name: nightly-report
+  description: A GitLab pipeline on a protected branch.
+spec:
+  join:
+    method: gitlab
+    match:
+      project_path: acme/reports
+      ref: main
+      ref_protected: "true"
+  roles: [deployer]
+---
+kind: bot
+version: v1
+metadata:
+  name: argo-sync
+  description: Any OIDC provider. Name the issuer and the exact subject.
+spec:
+  join:
+    method: oidc
+    issuer: https://oidc.argo.example.com
+    match:
+      sub: system:serviceaccount:argocd:argocd-application-controller
+  roles: [deployer]
