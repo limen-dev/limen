@@ -18,7 +18,10 @@ CREATE TABLE IF NOT EXISTS audit.limen.events_raw (
     recording_uri varchar, sha256 varchar, recording_sha256 varchar, bytes bigint,
     login_id varchar, flow varchar, cert_serial varchar, expires_at bigint,
     roles array(varchar), groups array(varchar),
-    version bigint, digest varchar, source_ref varchar, component_id varchar
+    version bigint, digest varchar, source_ref varchar, component_id varchar,
+    actor_type varchar, method varchar, bot varchar,
+    ci row(provider varchar, repository varchar, project_path varchar, ref varchar, environment varchar,
+           workflow varchar, run_id varchar, sha varchar, actor varchar)
   ),
   dt varchar,
   hour varchar

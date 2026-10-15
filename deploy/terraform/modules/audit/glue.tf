@@ -12,6 +12,9 @@ locals {
     "login_id:string", "flow:string", "cert_serial:string", "expires_at:bigint",
     "roles:array<string>", "groups:array<string>",
     "version:bigint", "digest:string", "source_ref:string", "component_id:string",
+    # Machine identities (ADR-0019): who the actor was, and the CI run behind a bot.
+    "actor_type:string", "method:string", "bot:string",
+    "ci:struct<provider:string,repository:string,project_path:string,ref:string,environment:string,workflow:string,run_id:string,sha:string,actor:string>",
   ])
   columns = [
     { name = "schema_version", type = "int" },

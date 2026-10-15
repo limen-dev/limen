@@ -56,6 +56,27 @@ GROUP BY 1, 2 ORDER BY 1""",
 )""",
     },
     {
+        "title": "Sessions by actor",
+        "type": "timeseries",
+        "w": 12, "h": 8,
+        "format": "time_series",
+        "description": "People and bots (ADR-0019). Events without an actor_type are people's.",
+        "sql": """SELECT date_trunc('hour', from_iso8601_timestamp("time")) AS time, coalesce(data.actor_type, 'user') AS metric, count(DISTINCT session_id) AS value
+FROM {T} WHERE {W} AND kind = 'session.start'
+GROUP BY 1, 2 ORDER BY 1""",
+    },
+    {
+        "title": "Bot sessions by repository",
+        "type": "table",
+        "w": 12, "h": 8,
+        "format": "table",
+        "description": "CI jobs, by the repository or project that ran them, with the latest run.",
+        "sql": """SELECT coalesce(data.ci.repository, data.ci.project_path, "user") AS source, "user" AS bot, count(DISTINCT session_id) AS sessions,
+  max(from_iso8601_timestamp("time")) AS last_session, max_by(data.ci.run_id, from_iso8601_timestamp("time")) AS last_run
+FROM {T} WHERE {W} AND kind = 'session.start' AND data.actor_type = 'bot'
+GROUP BY 1, 2 ORDER BY sessions DESC LIMIT 100""",
+    },
+    {
         "title": "Access by resource type",
         "type": "piechart",
         "w": 8, "h": 8,
@@ -69,10 +90,10 @@ GROUP BY 1 ORDER BY 2 DESC""",
         "type": "table",
         "w": 24, "h": 9,
         "format": "table",
-        "sql": """SELECT "user", data.resource AS resource, data.login AS login, count(DISTINCT session_id) AS sessions,
+        "sql": """SELECT "user", coalesce(data.actor_type, 'user') AS actor, data.resource AS resource, data.login AS login, count(DISTINCT session_id) AS sessions,
   max(from_iso8601_timestamp("time")) AS last_access
 FROM {T} WHERE {W} AND kind = 'session.start'
-GROUP BY 1, 2, 3 ORDER BY last_access DESC LIMIT 200""",
+GROUP BY 1, 2, 3, 4 ORDER BY last_access DESC LIMIT 200""",
     },
     {
         "title": "Failed and denied attempts",
@@ -90,7 +111,7 @@ GROUP BY 2, 3, 4, 5, 6 ORDER BY last_seen DESC LIMIT 200""",
         "w": 12, "h": 9,
         "format": "table",
         "sql": """SELECT "user", count(DISTINCT session_id) AS sessions
-FROM {T} WHERE {W} AND kind = 'session.start' AND "user" IS NOT NULL
+FROM {T} WHERE {W} AND kind = 'session.start' AND "user" IS NOT NULL AND coalesce(data.actor_type, 'user') = 'user'
 GROUP BY 1 ORDER BY 2 DESC LIMIT 15""",
     },
     {
