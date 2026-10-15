@@ -164,12 +164,17 @@ where
     }
 }
 
-/// Send `req` to the control plane. If it fails before the transport read
-/// any of the body, the control plane can't have acted on it (a gRPC call
-/// needs its request message), so send it once more: the channel then dials
-/// again, by name, and reaches a live replica. This covers a replica that is
+/// Send `req` to the control plane, resending it once if it failed before
+/// the control plane could have acted on it. The channel then dials again,
+/// by name, and reaches a live replica. This covers a replica that is
 /// shutting down: its GOAWAY can fail a request the channel had already
 /// queued on that connection.
+///
+/// Invariant for the resend: the request carries a body that is not already
+/// at end of stream (every gRPC call: it needs its request message), or it
+/// is a GET or HEAD; and the transport never polled that body. hyper sends
+/// an empty body as HEADERS with `END_STREAM` without polling it, so an empty
+/// POST may have been delivered in full and is never resent.
 async fn forward<S, B>(channel: S, req: Request<B>) -> Result<Response<tonic::body::Body>, S::Error>
 where
     S: Service<Request<tonic::body::Body>, Response = Response<tonic::body::Body>> + Clone,
@@ -178,6 +183,9 @@ where
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let (parts, body) = req.into_parts();
+    let resendable = !body.is_end_stream()
+        || parts.method == http::Method::GET
+        || parts.method == http::Method::HEAD;
     let slot = Arc::new(Mutex::new(Some(body)));
     let mut first_error = None;
     for _ in 0..2 {
@@ -192,7 +200,7 @@ where
         *request.headers_mut() = parts.headers.clone();
         match channel.clone().oneshot(request).await {
             Ok(response) => return Ok(response),
-            Err(e) if first_error.is_none() && !polled.load(Ordering::SeqCst) => {
+            Err(e) if resendable && first_error.is_none() && !polled.load(Ordering::SeqCst) => {
                 tracing::info!(error = %e, path = %parts.uri.path(), "control plane connection went away before the request was sent; sending it again");
                 first_error = Some(e);
             }
@@ -312,6 +320,7 @@ mod tests {
 
     fn request() -> Request<http_body_util::Full<hyper::body::Bytes>> {
         Request::builder()
+            .method(http::Method::POST)
             .uri("/limen.v1.Resources/ListResources")
             .header("x-limen-forwarded", "1")
             .body(http_body_util::Full::new(hyper::body::Bytes::from_static(
@@ -337,6 +346,23 @@ mod tests {
             .to_bytes();
         assert_eq!(&body[..], b"message", "the same body, intact");
         assert_eq!(upstream.calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// hyper sends an empty body as HEADERS with `END_STREAM` and never polls
+    /// it, so "never polled" proves nothing: such a POST is not resent.
+    #[tokio::test]
+    async fn an_empty_body_post_is_not_resent() {
+        let upstream = Upstream {
+            calls: Arc::default(),
+            read_body_then_fail: false,
+        };
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/console/api/kill")
+            .body(http_body_util::Full::new(hyper::body::Bytes::new()))
+            .expect("request");
+        assert!(forward(upstream.clone(), req).await.is_err());
+        assert_eq!(upstream.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
