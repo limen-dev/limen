@@ -23,7 +23,7 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0016](0016-join-methods.md) | How proxies and workers join: single-use, IAM (planned), static tokens | Accepted |
 | [0017](0017-web-console.md) | Web console: read-mostly, server-rendered, built into the control plane | Accepted |
 | [0018](0018-data-store-protocols.md) | Search, document, and messaging protocols (OpenSearch/Elasticsearch, MongoDB/Atlas/DocumentDB, Redshift, RabbitMQ, Kafka) | Proposed |
-| [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Proposed |
+| [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Accepted |
 | [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Proposed |
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
@@ -36,5 +36,6 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0029](0029-access-reviews-and-evidence.md) | Access reviews and compliance evidence packs | Proposed |
 | [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Proposed |
 | [0031](0031-positioning.md) | Positioning: access you can prove (provable, explainable, justified, agent-ready, open) | Proposed |
+| [0032](0032-ai-agents-as-principals.md) | AI agents as principals: a bot flavour with accountable owners and per-action approval | Proposed |
 
-ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0031 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
+ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.

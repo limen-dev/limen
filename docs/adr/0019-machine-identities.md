@@ -1,6 +1,6 @@
 # ADR-0019: Machine identities (bots) for CI and automation
 
-- Status: Proposed (owner requested 2026-10-14)
+- Status: Accepted (owner approved Phase 4 on 2026-10-15; amended below as built)
 - Date: 2026-10-14
 
 ## Context
@@ -40,3 +40,14 @@ Today every actor is a human who logs in through OIDC. CI pipelines, deploy bots
 - Authentication gains a second login path in the control plane and a second identity kind in certificates (`ADR-0006` is extended, not replaced).
 - Every later protocol must take the actor from the certificate rather than assume a person.
 - *Unverified against real GitHub or GitLab tokens until tested with them*; tests use a mock OIDC provider.
+
+## Amendment: as built (Phase 4)
+- **Join methods built:** `github_actions`, `gitlab`, and generic `oidc`. A Kubernetes cluster's projected service account tokens work through `oidc` when the cluster publishes OIDC discovery. **Deferred to Phase 13, with the IAM join for components (ADR-0016): the AWS IAM method** (a presigned `sts:GetCallerIdentity`), because verifying one means the control plane calls an STS endpoint the caller names, which needs its own SSRF design, and Phase 13 is where STS verification is built for components.
+- **Login:** a new unauthenticated `BotLogin` RPC: `{method, token, csr_der, bot?}`. The control plane only contacts issuers that a `bot` document names (chosen from the token's unverified `iss` against that allow-list), verifies signature, `aud` (default `limen`, `--bot-audience`), `exp`, and a required `iat` no older than `--bot-max-token-age` (15 minutes), records the token's `jti` (or its hash) so it works once, then matches claims. `http` issuers need `--bot-allow-insecure-issuers` (development only).
+- **Matching:** exact values, no wildcards. The validator additionally refuses pull request refs and events (GitHub), an unprotected GitLab `ref`, `oidc` rules without an issuer and an exact `sub`, built-in roles, and a lifetime over one hour. A token matching more than one bot is refused (`--bot-name` resolves it).
+- **Identity:** the certificate has `limen://actor/bot` and one `limen://ci/<key>/<value>` per CI fact, next to the usual user, login, and role entries. The `bot:` username prefix is reserved: people with such an IdP name are refused, issuance refuses a mismatch, and verification checks the marker and the prefix agree.
+- **Audit:** `actor_type` (`user` or `bot`) is on `auth.login`, `session.start`, `session.end`, and `ssh.exec`. The **`ci` object is on `auth.login`, `auth.denied` (the refused run), and `session.start`**, not on every event: `session.end` and `ssh.exec` link to it through the session id. This narrows "every event carries `ci`" above. The Glue and Trino tables, and the Grafana dashboards, gained `actor_type`, `method`, `bot`, and the `ci` fields.
+- **State:** `users` rows for bots (`actor_type = 'bot'`, `last_ci`) and `sessions.actor_type` and `sessions.ci` (migration 0005). The console lists bots on their own page and keeps them out of the people list; locks work by the name `bot:<name>`.
+- **CLI:** `limen login --bot <method>`, with `--bot-name`, `--token-env`, `--token-file`, and `--audience`. In GitHub Actions the token is requested for you.
+- **Development stand-in:** `fake-ci-issuer` (a compose service, development only) serves discovery and keys like GitHub's token service and mints GitHub-shaped tokens on request. `deploy/compose/demo-phase4.sh` uses it. Everything is **unverified against real GitHub or GitLab tokens**.
+- **Not built:** the AWS IAM join (above), a GitHub Action wrapping the CLI, per-bot IP restrictions, and the agent flavour ([ADR-0032](0032-ai-agents-as-principals.md)).

@@ -27,6 +27,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | Command | What it does |
 |---|---|
 | `limen login [--device] [--no-browser] [--ca-file PEM]` | Sign in through the identity provider and get short-lived credentials. `--ca-file` pins the proxy's CA for later commands |
+| `limen login --bot <github_actions\|gitlab\|oidc> [--bot-name N] [--token-env VAR] [--token-file FILE] [--audience A]` | Log in as a **bot** with a CI platform's identity token (for CI jobs; see [the bots guide](bots.md)) |
 | `limen logout` | Delete the local credentials |
 | `limen status` | Show your identity, roles, and the time left on your credentials |
 | `limen ls [--json]` | List the resources you can access |

@@ -18,7 +18,7 @@
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers, and the bots that act for them, log in through their identity provider and get short-lived, audited access to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps. There are no static SSH keys, shared database passwords, or hand-made users.
 
-> **Status: Phase 3.5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), and a web console with built-in dashboards work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
+> **Status: Phase 4 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots) work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
 
 <p align="center">
   <picture>
@@ -27,7 +27,7 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
   </picture>
 </p>
 
-Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), or `deploy/compose/demo-phase35.sh` (web console, locks, session kill).
+Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), `deploy/compose/demo-phase35.sh` (web console, locks, session kill), or `deploy/compose/demo-phase4.sh` (bots: a CI job logs in with an identity token).
 
 ## What it connects to
 
@@ -60,12 +60,12 @@ Each target works with the managed AWS service **and** any compatible self-hoste
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/okta" height="48" alt="Okta"><br><br><b>Okta</b><br><sub>OIDC login, groups to roles</sub><br><sub>✅ Tested with Dex<br>⚠️ not yet with Okta</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/openid" height="48" alt="Any OIDC provider"><br><br><b>Any OIDC provider</b><br><sub>Keycloak, Entra ID, Auth0, Dex</sub><br><sub>✅ Working with Dex</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt="Bots and automation"><br><br><b>Bots and automation</b><br><sub>CI jobs as audited principals<br>no long-lived secrets</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/6">Phase 4</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt="GitHub Actions"><br><br><b>GitHub Actions</b><br><sub>OIDC tokens become bot logins</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/6">Phase 4</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt="Bots and automation"><br><br><b>Bots and automation</b><br><sub>CI jobs as audited principals<br>no long-lived secrets</sub><br><sub>✅ Working<br>⚠️ tested with a stand-in issuer</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt="GitHub Actions"><br><br><b>GitHub Actions</b><br><sub>OIDC tokens become bot logins</sub><br><sub>✅ Working with a stand-in<br>⚠️ not yet with real tokens</sub><br><br></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt="GitLab CI"><br><br><b>GitLab CI</b><br><sub>ID tokens become bot logins</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/6">Phase 4</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/key-round.svg" height="48" alt="AWS IAM and Kubernetes"><br><br><b>AWS IAM and Kubernetes</b><br><sub>workload identity for bots</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/6">Phase 4</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt="GitLab CI"><br><br><b>GitLab CI</b><br><sub>ID tokens become bot logins</sub><br><sub>✅ Working with a stand-in<br>⚠️ not yet with real tokens</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/key-round.svg" height="48" alt="AWS IAM and Kubernetes"><br><br><b>AWS IAM and Kubernetes</b><br><sub>workload identity for bots<br>Kubernetes tokens via generic OIDC</sub><br><sub>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 13</a></sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/datadog/white"><img src="https://cdn.simpleicons.org/datadog" height="48" alt="Datadog"></picture><br><br><b>Datadog</b><br><sub>logs and monitors as Terraform</sub><br><sub>✅ Working (fake intake)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/grafana" height="48" alt="Grafana"><br><br><b>Grafana</b><br><sub>optional dashboards over S3 and Athena</sub><br><sub>✅ Working (Trino locally)</sub><br><br></td>
   </tr>
@@ -152,7 +152,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | Phase | What | Status |
 |---|---|---|
 | 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
-| 4 | Machine identities (bots) | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
+| 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
 | 5 | Scale-out: many control planes, proxies, workers | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/9) |
@@ -171,7 +171,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- [Using the console](docs/guides/console.md) and [using the CLI](docs/guides/cli.md)
+- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), and [bots for CI](docs/guides/bots.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
