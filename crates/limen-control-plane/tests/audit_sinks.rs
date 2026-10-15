@@ -109,8 +109,12 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
     let (proxy_id, proxy) = h.enroll_proxy().await;
     let mut ingest =
         limen_proto::v1::audit_ingest_client::AuditIngestClient::new(h.channel(Some(proxy)));
+    // One producer numbers its events once: the second call continues the
+    // sequence (reusing a seq for another event is a verifier conflict).
+    let next_seq = std::cell::Cell::new(0usize);
     let proxy_events = |n: usize| {
-        (0..n)
+        let start = next_seq.replace(next_seq.get() + n);
+        (start..start + n)
             .map(|i| {
                 let producer = limen_audit::Producer {
                     component: "proxy".into(),
@@ -215,7 +219,13 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
     let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
-    assert!(report.ok(), "{:?}", report.problems);
+    assert!(
+        report.ok(),
+        "{:?} {:?} {:?}",
+        report.problems,
+        report.seq_gaps,
+        report.seq_conflicts
+    );
     assert!(report.events >= u64::try_from(all.len()).expect("fits"));
     assert!(report.batches >= 2);
 
