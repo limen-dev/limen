@@ -195,6 +195,7 @@ pub async fn enroll(
         csr_der,
         kind: kind.to_owned(),
         dns_names: dns_names.to_vec(),
+        name: String::new(),
     };
     let resp = retry_if_went_away("enrollment", || {
         let mut client = EnrollmentClient::new(channel.clone());

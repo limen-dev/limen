@@ -84,6 +84,12 @@ pub enum TokenCommand {
         /// DNS names a proxy may put in its certificate. Repeatable.
         #[arg(long = "dns-name")]
         dns_names: Vec<String>,
+        /// Name the enrolled component may have: exact (given to it even if
+        /// it asks for none), or a pattern with one `*` matching zero or more
+        /// of a-z, 0-9 and - (it then picks one with `--name`), such as
+        /// 'prod-a-*'. Names are for display; the ID stays the identity.
+        #[arg(long)]
+        name: Option<String>,
     },
 }
 
@@ -161,6 +167,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     labels,
                     ttl,
                     dns_names,
+                    name,
                 },
         } => {
             let labels = labels
@@ -178,6 +185,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     ttl_seconds: u32::try_from(ttl.as_secs()).unwrap_or(u32::MAX),
                     labels,
                     dns_names,
+                    name: name.unwrap_or_default(),
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?
@@ -197,15 +205,25 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            let rows: Vec<[String; 5]> = resp
+            let rows: Vec<[String; 6]> = resp
                 .components
                 .iter()
                 .map(|c| {
-                    let mut labels: Vec<_> =
-                        c.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                    // The name has its own column.
+                    let mut labels: Vec<_> = c
+                        .labels
+                        .iter()
+                        .filter(|(k, _)| *k != limen_core::names::NAME_LABEL)
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect();
                     labels.sort();
                     [
                         ui::bold(&c.id),
+                        if c.name.is_empty() {
+                            ui::dim("-")
+                        } else {
+                            c.name.clone()
+                        },
                         c.kind.clone(),
                         ui::dim(&labels.join(" ")),
                         format!("{}s ago", now - c.last_seen_at_unix),
@@ -213,7 +231,10 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     ]
                 })
                 .collect();
-            ui::print_table(["id", "kind", "labels", "last seen", "tunnels"], &rows);
+            ui::print_table(
+                ["id", "name", "kind", "labels", "last seen", "tunnels"],
+                &rows,
+            );
         }
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }

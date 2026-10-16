@@ -994,6 +994,9 @@ pub struct TokenForm {
     ttl_minutes: u32,
     #[serde(default)]
     dns_names: String,
+    /// An exact name, or a pattern with one `*`. Empty: no name.
+    #[serde(default)]
+    name: String,
 }
 
 fn lines(text: &str) -> Vec<&str> {
@@ -1042,6 +1045,7 @@ pub async fn create_token(
         &labels,
         Some(ttl),
         &dns_names,
+        Some(form.name.trim()),
     )
     .await
     {

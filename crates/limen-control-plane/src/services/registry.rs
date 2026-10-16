@@ -70,6 +70,8 @@ impl Registry for RegistryService {
                 peer_address: r.peer_address,
                 active_sessions: r.active_sessions,
                 max_sessions: r.max_sessions,
+                worker_name: r.worker_name.unwrap_or_default(),
+                proxy_name: r.proxy_name.unwrap_or_default(),
             })
             .collect();
         Ok(Response::new(ListTunnelsResponse { tunnels }))

@@ -150,6 +150,11 @@ pub struct Config {
     /// Multi-use join tokens as `kind:token` (kind is proxy or worker). Meant
     /// for bootstrapping and autoscaled tasks until the AWS IAM join method
     /// exists (ADR-0016). Prefer single-use tokens from `limen admin token create`.
+    /// Labels follow as `kind:token:key=value;key=value`. The pseudo-label
+    /// `limen.io/name=<pattern>` approves component names instead: a pattern
+    /// with one `*` (such as `worker-*`), since a reusable token can't give
+    /// one exact name to many components. A component then picks its name
+    /// with `--name`; without one it gets none.
     #[arg(long = "static-join-token", env = "LIMEN_STATIC_JOIN_TOKENS", value_delimiter = ',', value_parser = parse_static_token)]
     pub static_join_tokens: Vec<StaticJoinToken>,
 
@@ -284,6 +289,8 @@ pub struct StaticJoinToken {
     pub token: Secret<String>,
     /// Labels for components enrolled with this token.
     pub labels: limen_core::labels::Labels,
+    /// Names components enrolled with this token may ask for. Always a pattern.
+    pub name: Option<limen_core::names::NamePattern>,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -291,7 +298,8 @@ fn parse_secret(s: &str) -> Result<Secret<String>, String> {
     Ok(Secret::new(s.to_owned()))
 }
 
-/// `kind:token` or `kind:token:key=value;key=value`.
+/// `kind:token` or `kind:token:key=value;key=value`, where the key
+/// `limen.io/name` gives the name pattern rather than a label.
 fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
     let mut parts = s.splitn(3, ':');
     let kind = parts.next().unwrap_or_default();
@@ -303,6 +311,7 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
         return Err("static join tokens must be at least 32 characters".into());
     }
     let mut labels = limen_core::labels::Labels::default();
+    let mut name = None;
     for pair in parts
         .next()
         .unwrap_or_default()
@@ -312,12 +321,25 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
         let (k, v) = pair
             .split_once('=')
             .ok_or_else(|| format!("label {pair:?} must be key=value"))?;
+        if k == limen_core::names::NAME_LABEL {
+            let pattern = limen_core::names::NamePattern::parse(v).map_err(|e| e.to_string())?;
+            if pattern.exact().is_some() {
+                return Err(format!(
+                    "{k}={v}: a static token is reusable, so it can only approve a pattern with * (such as {v}-*), not one exact name"
+                ));
+            }
+            if name.replace(pattern).is_some() {
+                return Err(format!("{k} given twice"));
+            }
+            continue;
+        }
         labels.insert(k, v).map_err(|e| e.to_string())?;
     }
     Ok(StaticJoinToken {
         kind: kind.to_owned(),
         token: Secret::new(token.to_owned()),
         labels,
+        name,
     })
 }
 
@@ -393,6 +415,43 @@ mod tests {
         assert!(parse_static_token("worker:short").is_err());
         assert!(parse_static_token("admin:0123456789abcdef0123456789abcdef").is_err());
         assert!(parse_static_token("worker:0123456789abcdef0123456789abcdef:BAD=x").is_err());
+    }
+
+    #[test]
+    fn static_tokens_with_name_patterns() {
+        let t = parse_static_token(
+            "worker:0123456789abcdef0123456789abcdef:pool=dev;limen.io/name=prod-a-*",
+        )
+        .expect("valid");
+        assert_eq!(
+            t.name.as_ref().map(limen_core::names::NamePattern::as_str),
+            Some("prod-a-*")
+        );
+        // The pattern is not a label.
+        assert_eq!(t.labels.get("limen.io/name"), None);
+        assert_eq!(t.labels.get("pool"), Some("dev"));
+        let t = parse_static_token("proxy:0123456789abcdef0123456789abcdef:limen.io/name=*")
+            .expect("any name");
+        assert!(t.name.is_some());
+        assert!(
+            parse_static_token("worker:0123456789abcdef0123456789abcdef")
+                .expect("plain")
+                .name
+                .is_none()
+        );
+        let exact =
+            parse_static_token("worker:0123456789abcdef0123456789abcdef:limen.io/name=worker-1")
+                .expect_err("exact names are refused for reusable tokens");
+        assert!(exact.contains("pattern"), "{exact}");
+        for bad in ["Prod-*", "a*b*", "-*", ""] {
+            assert!(
+                parse_static_token(&format!(
+                    "worker:0123456789abcdef0123456789abcdef:limen.io/name={bad}"
+                ))
+                .is_err(),
+                "{bad:?}"
+            );
+        }
     }
 
     #[derive(clap::Parser)]

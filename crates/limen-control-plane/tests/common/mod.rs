@@ -200,6 +200,7 @@ impl Harness {
                 csr_der: csr(&key),
                 kind: "proxy".into(),
                 dns_names: vec!["localhost".into()],
+                name: String::new(),
             })
             .await
             .expect("enroll proxy")

@@ -170,6 +170,7 @@ impl Admin for AdminService {
             &labels.into(),
             ttl,
             &req.dns_names,
+            Some(req.name.as_str()),
         )
         .await?;
         Ok(Response::new(CreateJoinTokenResponse {
@@ -199,6 +200,7 @@ impl Admin for AdminService {
                             proxy_id: t.proxy_id.clone(),
                             tunnel_id: format!("{}->{}", t.worker_id, t.tunnel_id),
                             lease_expires_at_unix: unix(t.lease_expires_at),
+                            proxy_name: t.proxy_name.clone().unwrap_or_default(),
                         })
                         .collect(),
                     id: c.id,
@@ -207,6 +209,7 @@ impl Admin for AdminService {
                     enrolled_at_unix: unix(c.enrolled_at),
                     last_seen_at_unix: unix(c.last_seen_at),
                     cert_expires_at_unix: c.cert_expires_at.map_or(0, unix),
+                    name: c.name.unwrap_or_default(),
                 }
             })
             .collect();

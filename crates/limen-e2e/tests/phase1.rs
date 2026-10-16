@@ -86,6 +86,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")
@@ -138,6 +139,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             csr_der: vec![],
             kind: "worker".into(),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect_err("reuse");

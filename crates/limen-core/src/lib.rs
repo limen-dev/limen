@@ -5,6 +5,7 @@ pub mod identity;
 pub mod labels;
 pub mod login;
 pub mod metrics;
+pub mod names;
 pub mod registry;
 pub mod resource;
 pub mod secret;

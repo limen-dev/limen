@@ -112,22 +112,27 @@ pub async fn insert_policy(
 
 // ---- Join tokens -----------------------------------------------------------
 
-pub async fn insert_join_token(
-    db: &Db,
-    token_hash: &[u8],
-    kind: &str,
-    labels: &serde_json::Value,
-    dns_names: &[String],
-    created_by: &str,
-    expires_at: OffsetDateTime,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO join_tokens (token_hash, kind, labels, dns_names, created_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6)")
-        .bind(token_hash.to_vec())
-        .bind(kind)
-        .bind(labels)
-        .bind(dns_names.to_vec())
-        .bind(created_by)
-        .bind(expires_at)
+/// A join token to store. `name` is the approved name or pattern, if any.
+#[derive(Debug, Clone)]
+pub struct NewJoinToken<'a> {
+    pub token_hash: &'a [u8],
+    pub kind: &'a str,
+    pub labels: &'a serde_json::Value,
+    pub dns_names: &'a [String],
+    pub name: Option<&'a str>,
+    pub created_by: &'a str,
+    pub expires_at: OffsetDateTime,
+}
+
+pub async fn insert_join_token(db: &Db, t: &NewJoinToken<'_>) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO join_tokens (token_hash, kind, labels, dns_names, name, created_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+        .bind(t.token_hash.to_vec())
+        .bind(t.kind)
+        .bind(t.labels)
+        .bind(t.dns_names.to_vec())
+        .bind(t.name)
+        .bind(t.created_by)
+        .bind(t.expires_at)
         .execute(db)
         .await
         .map(|_| ())
@@ -137,6 +142,8 @@ pub async fn insert_join_token(
 #[derive(Debug, Clone)]
 pub struct PendingToken {
     pub kind: String,
+    /// The approved name or pattern, if any.
+    pub name: Option<String>,
     pub labels: serde_json::Value,
     pub created_by: String,
     pub created_at: OffsetDateTime,
@@ -145,7 +152,7 @@ pub struct PendingToken {
 
 pub async fn list_pending_join_tokens(db: &Db) -> Result<Vec<PendingToken>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT kind, labels, created_by, created_at, expires_at FROM join_tokens
+        "SELECT kind, name, labels, created_by, created_at, expires_at FROM join_tokens
          WHERE used_at IS NULL AND expires_at > now() ORDER BY expires_at",
     )
     .fetch_all(db)
@@ -154,6 +161,7 @@ pub async fn list_pending_join_tokens(db: &Db) -> Result<Vec<PendingToken>, sqlx
         .map(|r| {
             Ok(PendingToken {
                 kind: r.try_get("kind")?,
+                name: r.try_get("name")?,
                 labels: r.try_get("labels")?,
                 created_by: r.try_get("created_by")?,
                 created_at: r.try_get("created_at")?,
@@ -163,27 +171,42 @@ pub async fn list_pending_join_tokens(db: &Db) -> Result<Vec<PendingToken>, sqlx
         .collect()
 }
 
-/// Atomically consume a single-use token. Returns its labels and allowed DNS
-/// names, or `None` if it doesn't exist, has expired, was already used, or
-/// is for another component kind.
+/// What a consumed single-use token grants.
+#[derive(Debug, Clone)]
+pub struct ConsumedToken {
+    pub labels: serde_json::Value,
+    pub dns_names: Vec<String>,
+    /// The approved name or pattern, if any.
+    pub name: Option<String>,
+}
+
+/// Atomically consume a single-use token, inside `tx` (rolled back with it).
+/// `None` if it doesn't exist, has expired, was already used, or is for
+/// another component kind.
 pub async fn consume_join_token(
     tx: &mut Transaction<'_, Postgres>,
     token_hash: &[u8],
     kind: &str,
     used_by: &str,
-) -> Result<Option<(serde_json::Value, Vec<String>)>, sqlx::Error> {
+) -> Result<Option<ConsumedToken>, sqlx::Error> {
     let row = sqlx::query(
         "UPDATE join_tokens SET used_at = now(), used_by = $3
          WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at > now()
-         RETURNING labels, dns_names",
+         RETURNING labels, dns_names, name",
     )
     .bind(token_hash.to_vec())
     .bind(kind)
     .bind(used_by)
     .fetch_optional(&mut **tx)
     .await?;
-    row.map(|r| Ok((r.try_get("labels")?, r.try_get("dns_names")?)))
-        .transpose()
+    row.map(|r| {
+        Ok(ConsumedToken {
+            labels: r.try_get("labels")?,
+            dns_names: r.try_get("dns_names")?,
+            name: r.try_get("name")?,
+        })
+    })
+    .transpose()
 }
 
 // ---- Components and tunnels ------------------------------------------------
@@ -192,6 +215,8 @@ pub async fn consume_join_token(
 pub struct ComponentRow {
     pub id: String,
     pub kind: String,
+    /// Display name, if it was given one at enrollment.
+    pub name: Option<String>,
     pub labels: serde_json::Value,
     pub dns_names: Vec<String>,
     pub enrolled_at: OffsetDateTime,
@@ -204,6 +229,7 @@ fn component_from_row(r: &sqlx::postgres::PgRow) -> Result<ComponentRow, sqlx::E
     Ok(ComponentRow {
         id: r.try_get("id")?,
         kind: r.try_get("kind")?,
+        name: r.try_get("name")?,
         labels: r.try_get("labels")?,
         dns_names: r.try_get("dns_names")?,
         enrolled_at: r.try_get("enrolled_at")?,
@@ -215,21 +241,37 @@ fn component_from_row(r: &sqlx::postgres::PgRow) -> Result<ComponentRow, sqlx::E
 
 macro_rules! component_columns {
     () => {
-        "id, kind, labels, dns_names, enrolled_at, last_seen_at, cert_expires_at, revoked_at"
+        "id, kind, name, labels, dns_names, enrolled_at, last_seen_at, cert_expires_at, revoked_at"
     };
 }
 
+/// Unique index on the names of components that are not revoked (0009).
+const LIVE_NAME_INDEX: &str = "components_live_name_idx";
+
+/// Whether `e` is a second live component trying to take a name. With
+/// concurrent enrollments, the later insert waits for the earlier
+/// transaction and fails like this if it commits.
+#[must_use]
+pub fn is_name_taken(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .is_some_and(|d| d.is_unique_violation() && d.constraint() == Some(LIVE_NAME_INDEX))
+}
+
+/// Store an enrolled component. Fails with [`is_name_taken`] if a live
+/// component already has `name`.
 pub async fn insert_component(
     tx: &mut Transaction<'_, Postgres>,
     id: &str,
     kind: &str,
+    name: Option<&str>,
     labels: &serde_json::Value,
     dns_names: &[String],
     cert_expires_at: OffsetDateTime,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO components (id, kind, labels, dns_names, cert_expires_at) VALUES ($1, $2, $3, $4, $5)")
+    sqlx::query("INSERT INTO components (id, kind, name, labels, dns_names, cert_expires_at) VALUES ($1, $2, $3, $4, $5, $6)")
         .bind(id)
         .bind(kind)
+        .bind(name)
         .bind(labels)
         .bind(dns_names.to_vec())
         .bind(cert_expires_at)
@@ -267,8 +309,10 @@ pub async fn record_renewal(
 #[derive(Debug, Clone)]
 pub struct TunnelRow {
     pub proxy_id: String,
+    pub proxy_name: Option<String>,
     pub tunnel_id: String,
     pub worker_id: String,
+    pub worker_name: Option<String>,
     pub lease_expires_at: OffsetDateTime,
 }
 
@@ -283,15 +327,23 @@ pub async fn list_components(db: &Db) -> Result<(Vec<ComponentRow>, Vec<TunnelRo
     .iter()
     .map(component_from_row)
     .collect::<Result<Vec<_>, _>>()?;
-    let tunnels = sqlx::query("SELECT proxy_id, tunnel_id, worker_id, lease_expires_at FROM tunnels WHERE lease_expires_at > now() ORDER BY worker_id, proxy_id")
+    let tunnels = sqlx::query(
+        "SELECT t.proxy_id, p.name AS proxy_name, t.tunnel_id, t.worker_id, w.name AS worker_name, t.lease_expires_at
+         FROM tunnels t
+         JOIN components p ON p.id = t.proxy_id
+         JOIN components w ON w.id = t.worker_id
+         WHERE t.lease_expires_at > now() ORDER BY t.worker_id, t.proxy_id",
+    )
         .fetch_all(db)
         .await?
         .iter()
         .map(|r| {
             Ok(TunnelRow {
                 proxy_id: r.try_get("proxy_id")?,
+                proxy_name: r.try_get("proxy_name")?,
                 tunnel_id: r.try_get("tunnel_id")?,
                 worker_id: r.try_get("worker_id")?,
+                worker_name: r.try_get("worker_name")?,
                 lease_expires_at: r.try_get("lease_expires_at")?,
             })
         })
@@ -362,8 +414,10 @@ pub async fn replace_tunnels(
 #[derive(Debug, Clone)]
 pub struct PeerTunnelRow {
     pub worker_id: String,
+    pub worker_name: Option<String>,
     pub worker_labels: serde_json::Value,
     pub proxy_id: String,
+    pub proxy_name: Option<String>,
     pub peer_address: String,
     /// The worker's load as that proxy last reported it (0/0: unknown).
     pub active_sessions: u32,
@@ -372,13 +426,13 @@ pub struct PeerTunnelRow {
 
 pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Error> {
     sqlx::query(
-        "SELECT t.worker_id, w.labels AS worker_labels, t.proxy_id, p.peer_address,
+        "SELECT t.worker_id, w.name AS worker_name, w.labels AS worker_labels, t.proxy_id, p.name AS proxy_name, p.peer_address,
                 MAX(t.active_sessions) AS active_sessions, MAX(t.max_sessions) AS max_sessions
          FROM tunnels t
          JOIN components w ON w.id = t.worker_id AND w.revoked_at IS NULL
          JOIN components p ON p.id = t.proxy_id AND p.revoked_at IS NULL AND p.peer_address IS NOT NULL
          WHERE t.lease_expires_at > now()
-         GROUP BY t.worker_id, w.labels, t.proxy_id, p.peer_address
+         GROUP BY t.worker_id, w.name, w.labels, t.proxy_id, p.name, p.peer_address
          ORDER BY t.worker_id, t.proxy_id",
     )
     .fetch_all(db)
@@ -387,8 +441,10 @@ pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Erro
     .map(|r| {
         Ok(PeerTunnelRow {
             worker_id: r.try_get("worker_id")?,
+            worker_name: r.try_get("worker_name")?,
             worker_labels: r.try_get("worker_labels")?,
             proxy_id: r.try_get("proxy_id")?,
+            proxy_name: r.try_get("proxy_name")?,
             peer_address: r.try_get("peer_address")?,
             active_sessions: u32::try_from(r.try_get::<i32, _>("active_sessions")?)
                 .unwrap_or(0),

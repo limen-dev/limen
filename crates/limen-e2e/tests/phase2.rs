@@ -90,6 +90,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")
@@ -379,6 +380,7 @@ async fn ssh_through_a_peer_proxy() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")

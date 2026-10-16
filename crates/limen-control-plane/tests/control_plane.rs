@@ -339,6 +339,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
                 ttl_seconds: 300,
                 labels: [("pool".to_owned(), "dev".to_owned())].into(),
                 dns_names: vec![],
+                name: String::new(),
             },
             Some(&admin_user),
         ))
@@ -356,6 +357,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         csr_der: csr(&key),
         kind: "worker".into(),
         dns_names: vec![],
+        name: String::new(),
     };
     let resp = enroll
         .enroll(forwarded(req(), None))
@@ -478,6 +480,7 @@ async fn only_proxies_may_forward_or_report() {
                 ttl_seconds: 0,
                 labels: std::collections::HashMap::default(),
                 dns_names: vec![],
+                name: String::new(),
             },
             Some(&admin_user),
         ))
@@ -493,6 +496,7 @@ async fn only_proxies_may_forward_or_report() {
                 csr_der: csr(&key),
                 kind: "worker".into(),
                 dns_names: vec![],
+                name: String::new(),
             },
             None,
         ))
@@ -534,6 +538,7 @@ async fn proxy_cannot_request_unapproved_dns_names() {
             csr_der: csr(&new_key()),
             kind: "proxy".into(),
             dns_names: vec!["bank.example.com".into()],
+            name: String::new(),
         })
         .await
         .expect_err("unapproved DNS name");
