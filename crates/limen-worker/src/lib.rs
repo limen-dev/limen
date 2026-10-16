@@ -304,10 +304,19 @@ impl SessionSlots {
 
     /// A slot, or `None` at the cap. Check and increment are one atomic step,
     /// so concurrent sessions can't overshoot.
+    #[cfg(test)]
     pub(crate) fn try_acquire(&self) -> Option<SessionGuard> {
+        let slot = self.acquire();
+        if slot.is_none() {
+            self.count_refusal();
+        }
+        slot
+    }
+
+    /// [`try_acquire`](Self::try_acquire) without counting a refusal.
+    fn acquire(&self) -> Option<SessionGuard> {
         let max = self.max;
-        let slot = self
-            .count
+        self.count
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (max == 0 || n < max).then_some(n + 1)
             })
@@ -315,13 +324,14 @@ impl SessionSlots {
             .map(|_| SessionGuard {
                 count: Arc::clone(&self.count),
                 released: Arc::clone(&self.released),
-            });
-        if slot.is_none() {
-            self.refused.fetch_add(1, Ordering::SeqCst);
-            metrics::counter!("limen_worker_sessions_refused_total", "reason" => "capacity")
-                .increment(1);
-        }
-        slot
+            })
+    }
+
+    /// A session refused at the cap.
+    fn count_refusal(&self) {
+        self.refused.fetch_add(1, Ordering::SeqCst);
+        metrics::counter!("limen_worker_sessions_refused_total", "reason" => "capacity")
+            .increment(1);
     }
 
     pub(crate) fn active(&self) -> usize {
@@ -389,6 +399,40 @@ async fn policy_refresh(worker: Worker, mut shutdown: watch::Receiver<bool>) {
     }
 }
 
+/// Why a new session was refused before anything was read.
+#[derive(Debug, PartialEq, Eq)]
+enum Refused {
+    Draining,
+    Full,
+}
+
+/// A slot for a new session, unless the worker is draining or full.
+///
+/// The slot is taken first and `draining` read after, while the drain in
+/// [`run`] sets `draining` first and reads the count after (all `SeqCst`).
+/// So a SIGTERM that lands in between is caught by one side or the other:
+/// the drain sees this session and waits for it, or this session sees
+/// `draining` and gives its slot back. Never neither, which would let the
+/// worker exit under a session it just admitted.
+///
+/// `between` runs between the two steps (a test seam; `|| {}` otherwise).
+fn take_slot(
+    draining: &AtomicBool,
+    slots: &SessionSlots,
+    between: impl FnOnce(),
+) -> Result<SessionGuard, Refused> {
+    let slot = slots.acquire();
+    between();
+    if draining.load(Ordering::SeqCst) {
+        drop(slot);
+        return Err(Refused::Draining);
+    }
+    slot.ok_or_else(|| {
+        slots.count_refusal();
+        Refused::Full
+    })
+}
+
 /// The gRPC service the proxy calls over a tunnel.
 #[derive(Debug, Clone)]
 struct TunnelService(Worker);
@@ -401,23 +445,26 @@ impl WorkerTunnel for TunnelService {
         &self,
         request: Request<Streaming<TunnelFrame>>,
     ) -> Result<Response<Self::OpenSessionStream>, Status> {
-        if self.0.draining.load(Ordering::SeqCst) {
-            // Before anything is read: the proxy may try another worker.
-            self.0.refused_draining.fetch_add(1, Ordering::SeqCst);
-            metrics::counter!("limen_worker_sessions_refused_total", "reason" => "draining")
-                .increment(1);
-            tracing::info!("session refused: draining");
-            return Err(limen_tunnel::refusal::draining());
-        }
-        let Some(slot) = self.0.sessions.try_acquire() else {
-            tracing::info!(
-                max_sessions = self.0.sessions.max(),
-                "session refused: at the session cap"
-            );
-            return Err(Status::resource_exhausted(format!(
-                "no capacity: this worker is at its limit of {} sessions",
-                self.0.sessions.max()
-            )));
+        let slot = match take_slot(&self.0.draining, &self.0.sessions, || {}) {
+            Ok(slot) => slot,
+            Err(Refused::Draining) => {
+                // Before anything is read: the proxy may try another worker.
+                self.0.refused_draining.fetch_add(1, Ordering::SeqCst);
+                metrics::counter!("limen_worker_sessions_refused_total", "reason" => "draining")
+                    .increment(1);
+                tracing::info!("session refused: draining");
+                return Err(limen_tunnel::refusal::draining());
+            }
+            Err(Refused::Full) => {
+                tracing::info!(
+                    max_sessions = self.0.sessions.max(),
+                    "session refused: at the session cap"
+                );
+                return Err(Status::resource_exhausted(format!(
+                    "no capacity: this worker is at its limit of {} sessions",
+                    self.0.sessions.max()
+                )));
+            }
         };
         session::open(self.0.clone(), slot, request.into_inner()).await
     }
@@ -737,6 +784,49 @@ mod reconnect_tests {
 #[cfg(test)]
 mod cap_tests {
     use super::*;
+
+    /// SIGTERM landing while a session is being admitted, on an idle worker:
+    /// the drain sets `draining` and then looks at the count, as `run` does.
+    /// Either the drain sees the session (and waits for it) or the session
+    /// sees `draining` (and is refused); never neither.
+    #[test]
+    fn a_session_admitted_during_sigterm_is_seen_by_the_drain_or_refused() {
+        let draining = AtomicBool::new(false);
+        let slots = SessionSlots::new(5);
+        let mut drain_saw = None;
+        let result = take_slot(&draining, &slots, || {
+            draining.store(true, Ordering::SeqCst);
+            drain_saw = Some(slots.active());
+        });
+        let drain_saw = drain_saw.expect("the seam ran");
+        match result {
+            Ok(_slot) => assert!(
+                drain_saw > 0,
+                "admitted, but the drain saw an idle worker and would exit under it"
+            ),
+            Err(refused) => {
+                assert_eq!(refused, Refused::Draining);
+                assert_eq!(slots.active(), 0, "the refused session gave its slot back");
+            }
+        }
+    }
+
+    #[test]
+    fn a_draining_worker_refuses_as_draining_even_when_full() {
+        let draining = AtomicBool::new(true);
+        let slots = SessionSlots::new(1);
+        let _held = slots.try_acquire().expect("slot");
+        assert_eq!(
+            take_slot(&draining, &slots, || {}).err(),
+            Some(Refused::Draining)
+        );
+        assert_eq!(
+            slots.refused.load(Ordering::SeqCst),
+            0,
+            "not a capacity refusal"
+        );
+        assert_eq!(slots.active(), 1);
+    }
 
     #[test]
     fn slots_stop_at_the_cap_and_come_back_when_released() {
