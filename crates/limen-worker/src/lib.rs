@@ -428,7 +428,7 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
                 tracing::info!(tunnel = index, "tunnel closed by the proxy; reconnecting");
             }
             Ok(()) => {
-                tracing::warn!(tunnel = index, retry_in = ?delay, "tunnel closed by the proxy right after it opened; reconnecting");
+                tracing::warn!(tunnel = index, retry_in = ?delay, "tunnel closed by the proxy soon after it opened; reconnecting");
             }
             Err(e) => {
                 tracing::warn!(tunnel = index, error = %e, retry_in = ?delay, "tunnel failed; reconnecting");
@@ -446,19 +446,28 @@ const HEALTHY_TUNNEL: Duration = Duration::from_secs(30);
 /// A clean close sooner than this after connecting is treated as a failure,
 /// so a proxy that keeps closing at once does not make us spin.
 const MIN_TUNNEL_UPTIME: Duration = Duration::from_secs(1);
+/// The shortest wait before redialing after a short-lived tunnel closed cleanly.
+const MIN_REDIAL: Duration = Duration::from_secs(2);
 
-/// How long to wait before redialing after a tunnel ended. A clean close
-/// (the proxy ended the connection on purpose: shutdown, rebalancing) is a
-/// normal reconnect: at once, and the name is resolved again. Failures back
-/// off.
+/// How long to wait before redialing after a tunnel ended. A clean close of
+/// a tunnel that was up for a while (the proxy ended the connection on
+/// purpose: shutdown, rebalancing) is a normal reconnect: at once, and the
+/// name is resolved again. Failures back off. So does a clean close of a
+/// short-lived tunnel, with a floor: a proxy that keeps accepting and then
+/// closing must not get a redial every second.
 fn after_tunnel(clean: bool, uptime: Duration, backoff: &mut Backoff) -> Duration {
-    if uptime > HEALTHY_TUNNEL || (clean && uptime >= MIN_TUNNEL_UPTIME) {
+    if uptime > HEALTHY_TUNNEL {
         backoff.reset();
+        if clean {
+            return Duration::ZERO;
+        }
     }
+    let delay = backoff.next_delay(rand::random());
     if clean && uptime >= MIN_TUNNEL_UPTIME {
-        return Duration::ZERO;
+        delay.max(MIN_REDIAL)
+    } else {
+        delay
     }
-    backoff.next_delay(rand::random())
 }
 
 /// Run until `shutdown` flips, then drain.
@@ -548,16 +557,43 @@ mod reconnect_tests {
     }
 
     #[test]
-    fn a_clean_close_reconnects_at_once_and_forgets_earlier_failures() {
+    fn a_clean_close_after_a_healthy_uptime_reconnects_at_once_and_forgets_earlier_failures() {
         let mut b = backoff();
         for _ in 0..5 {
             b.next_delay(0.5);
         }
+        // A GOAWAY after a long uptime (rebalancing, a proxy restart).
         assert_eq!(
-            after_tunnel(true, Duration::from_secs(5), &mut b),
+            after_tunnel(true, Duration::from_mins(5), &mut b),
             Duration::ZERO
         );
         assert_eq!(b.current_ceiling(), Duration::from_secs(1), "backoff reset");
+    }
+
+    #[test]
+    fn clean_closes_of_short_lived_tunnels_back_off() {
+        // A proxy that accepts, then cleanly closes after a few seconds,
+        // again and again, must not get a redial every few seconds forever:
+        // the delays grow, and the backoff is not reset by such a tunnel.
+        let mut b = backoff();
+        let mut total = Duration::ZERO;
+        for _ in 0..8 {
+            let delay = after_tunnel(true, Duration::from_secs(5), &mut b);
+            assert!(
+                !delay.is_zero(),
+                "no immediate redial for a short-lived tunnel"
+            );
+            total += delay;
+        }
+        assert_eq!(
+            b.current_ceiling(),
+            Duration::from_mins(1),
+            "grew to the cap"
+        );
+        assert!(
+            total >= MIN_REDIAL * 8,
+            "never faster than one redial per {MIN_REDIAL:?}: {total:?}"
+        );
     }
 
     #[test]
