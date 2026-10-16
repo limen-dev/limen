@@ -11,6 +11,14 @@ Self-hosted, Rust, identity-aware access (SSH today; databases and more planned)
 - Conventional commits, small and focused. Stage specific files (never `git add -A` over someone else's edits). Don't push or tag without being asked.
 - Don't bypass browser certificate warnings or touch trust stores; dev CA is `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
+## Agent use (cost)
+- Do the work in the main conversation by default.
+- Spawn a subagent only for a broad search across many files where you need the conclusion, not the file contents, or for a task that is independent of the main thread and returns a short result.
+- Never spawn a subagent to summarize or re-read work already in context. Never spawn subagents from a subagent.
+- Run at most one subagent at a time, and only when the tasks share no state.
+- Review each diff once. Don't run several reviewers over the same change.
+- This policy overrides the delegation defaults of the Superpowers skills (`subagent-driven-development`, `dispatching-parallel-agents`). Keep their brainstorming, planning, and testing steps; skip the delegation.
+
 ## Commands
 ```sh
 cargo fmt && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings   # pedantic lints, must be clean
