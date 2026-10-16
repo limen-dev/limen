@@ -1,35 +1,26 @@
 # Limen: instructions for coding agents
 
-Self-hosted, Rust, identity-aware access (SSH today; databases and more planned). Read `docs/design.md` §13 for phases and `docs/adr/` for decisions before changing behavior.
+Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `docs/design.md` §13 (phases) and `docs/adr/` (decisions) before changing behavior.
 
 ## Rules
-- **Always work in a git worktree.** Create one for every task under `.claude/worktrees/` in the repo (e.g. `git worktree add .claude/worktrees/<topic> -b <branch>`) and make all edits, builds, and commits there. Never edit files directly in the main checkout (the repo root), and don't switch its branch.
-- **Work phase by phase.** Roadmap = GitHub milestones. Don't start a phase the owner hasn't approved. Every phase ships tests, docs, and a runnable demo (`deploy/compose/demo-*.sh`).
-- **Never claim something works unless you ran it.** Anything only tested against a local stand-in is "unverified against real service" (label `unverified`).
-- **Secrets never appear in logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
-- New dependency: add a row to ADR-0012 and check maintenance/advisories first. New entry point or data store: update `docs/threat-model.md`.
-- Conventional commits, small and focused. Stage specific files (never `git add -A` over someone else's edits). Don't push or tag without being asked.
-- Don't bypass browser certificate warnings or touch trust stores; dev CA is `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
+- **Work in a git worktree.** `git worktree add .claude/worktrees/<topic> -b <branch>`; make all edits, builds, and commits there. Never edit the main checkout or switch its branch.
+- **Phase by phase.** Roadmap = GitHub milestones. Don't start a phase the owner hasn't approved. Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
+- **Verify before claiming.** Run it before saying it works. Anything tested only against a local stand-in is labelled `unverified`.
+- **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
+- **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
+- **Commits.** Conventional, small, focused. Stage specific files, never `git add -A`. Don't push or tag unless asked.
+- **Certificates.** Don't bypass browser warnings or touch trust stores. Dev CA: `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Agent use (cost)
+Overrides the delegation defaults of Superpowers `subagent-driven-development` and `dispatching-parallel-agents`. Keep their brainstorming, planning, and testing steps; skip the delegation.
 
-When using Superpowers workflows, minimize unnecessary subagent usage. This policy overrides the delegation defaults of `subagent-driven-development` and `dispatching-parallel-agents`; keep their brainstorming, planning, and testing steps, and skip the delegation.
+- Do the work in the main conversation by default. Skip subagents for simple tasks and small changes.
+- Spawn one only for a broad search where the conclusion is all you need, or an independent task with a short result. State in one line why the main conversation can't do it; if you can't, don't spawn.
+- At most one subagent at a time, and only when tasks share no state. Never spawn from a subagent.
+- Never spawn to summarize or re-read work already in context. Don't investigate the same problem twice.
+- Review each diff once, with one reviewer at most.
 
-- Prefer completing tasks directly in the main conversation.
-- Do not spawn subagents for simple tasks, small bug fixes, or small code changes.
-- Spawn a subagent only for a broad search across many files where the conclusion is all you need, or for an independent task that returns a short result.
-- Do not launch multiple agents to investigate the same problem.
-- Avoid parallel agents unless the tasks are genuinely independent and parallel execution gives a clear benefit.
-- Run at most one subagent at a time, and only when the tasks share no state.
-- Never spawn subagents to summarize or re-read work already in context.
-- Never spawn additional subagents from a subagent.
-- For routine implementation, use one main agent and work through the task sequentially.
-- For complex tasks, delegate only when the benefit justifies the extra token cost, and never to more than one subagent.
-- Avoid repeated code reviews or duplicate codebase exploration. Review each diff once; don't run several reviewers over the same change.
-- Before spawning, state in one line why the main conversation can't do the task. If you can't, don't spawn.
-- Preserve essential Superpowers workflows (brainstorming, planning, testing) without unnecessary agent delegation.
-
-Prioritize efficient token usage and correct completion over maximizing the number of agents.
+Efficient token use and correct completion beat maximizing agent count.
 
 ## Commands
 ```sh
@@ -44,10 +35,14 @@ deploy/compose/demo-phase35.sh --keep                   # full-stack check (also
 Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbStack.
 
 ## Layout
-`crates/limen-{control-plane,proxy,worker,cli}` binaries; `limen-{core,ca,policy,session,audit,tunnel,proto,component}` libraries; `limen-testkit` and `limen-e2e` for tests. Console: `crates/limen-control-plane/src/console/` (+ `templates/`, `assets/`). Terraform in `deploy/terraform`. Dashboards are generated: `python3 dashboards/grafana/generate.py`. Dev users live only in `deploy/compose/dev-users.toml` (run `python3 deploy/compose/gen-dev-users.py` after editing); tests use `limen_testkit::users`.
+- Binaries: `crates/limen-{control-plane,proxy,worker,cli}`.
+- Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component}`; tests in `limen-testkit` and `limen-e2e`.
+- Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`). Terraform: `deploy/terraform`.
+- Generated dashboards: `python3 dashboards/grafana/generate.py`.
+- Dev users: only in `deploy/compose/dev-users.toml`; regenerate with `python3 deploy/compose/gen-dev-users.py`. Tests use `limen_testkit::users`.
 
 ## Gotchas
-- sqlx wants literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.
-- Console templates are compiled in (askama): rebuild after editing them. Static assets are fingerprinted; reference them with `?v={{ chrome.assets }}`.
-- Console CSP forbids inline script and third-party origins; use external files and classes. Don't loosen it without an ADR note.
-- Don't use `timeout` or `sleep`-polling in shell on macOS; run long commands in the background.
+- sqlx needs literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.
+- Askama templates are compiled in: rebuild after editing. Static assets are fingerprinted; reference them with `?v={{ chrome.assets }}`.
+- Console CSP forbids inline script and third-party origins. Use external files and classes; don't loosen it without an ADR note.
+- On macOS, don't use `timeout` or `sleep`-polling in shell. Run long commands in the background.
