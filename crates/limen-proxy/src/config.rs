@@ -66,6 +66,19 @@ pub struct Config {
     #[arg(long, env = "LIMEN_POLICY_GRACE_SECS", default_value_t = 300)]
     pub policy_grace_secs: u64,
 
+    /// New connections per second from one client IP, before any
+    /// authentication (an abuse guard; the rest are dropped). Raise it, with
+    /// the burst, for a site where many users share one egress address.
+    /// 1 to 100000.
+    #[arg(long, env = "LIMEN_ACCEPT_RATE_PER_SECOND", default_value_t = 50,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub accept_rate_per_second: u32,
+
+    /// The burst allowed on top of the rate, per client IP. 1 to 100000.
+    #[arg(long, env = "LIMEN_ACCEPT_BURST", default_value_t = 200,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub accept_burst: u32,
+
     /// How often to fetch a fresh policy snapshot.
     #[arg(long, env = "LIMEN_POLICY_REFRESH_SECS", default_value_t = 10)]
     pub policy_refresh_secs: u64,
@@ -138,6 +151,16 @@ mod tests {
         let mut argv = vec!["limen-proxy", "--control-plane-addr=cp:3080"];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn accept_limit_keeps_the_old_defaults_and_is_bounded() {
+        let c = parse_with(&[]).expect("defaults");
+        assert_eq!((c.accept_rate_per_second, c.accept_burst), (50, 200));
+        assert!(parse_with(&["--accept-rate-per-second=0"]).is_err());
+        assert!(parse_with(&["--accept-burst=0"]).is_err());
+        assert!(parse_with(&["--accept-rate-per-second=100001"]).is_err());
+        assert!(parse_with(&["--accept-rate-per-second=1000", "--accept-burst=5000"]).is_ok());
     }
 
     #[test]

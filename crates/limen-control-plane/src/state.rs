@@ -124,11 +124,20 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         // 30 requests a minute per IP, with bursts of 10.
-        let quota = Quota::per_minute(NonZeroU32::new(30).unwrap_or(NonZeroU32::MIN))
-            .allow_burst(NonZeroU32::new(10).unwrap_or(NonZeroU32::MIN));
-        // 60 requests a minute per IP, with bursts of 20.
-        let console = Quota::per_minute(NonZeroU32::new(60).unwrap_or(NonZeroU32::MIN))
-            .allow_burst(NonZeroU32::new(20).unwrap_or(NonZeroU32::MIN));
+        Self::new(30, 10)
+    }
+}
+
+impl Limits {
+    /// `per_minute` and `burst` apply to the unauthenticated entry points;
+    /// browser sign-ins (two requests each) get twice as much, so the
+    /// console and the CLI don't share one budget.
+    #[must_use]
+    pub fn new(per_minute: u32, burst: u32) -> Self {
+        let nz = |n: u32| NonZeroU32::new(n).unwrap_or(NonZeroU32::MIN);
+        let quota = Quota::per_minute(nz(per_minute)).allow_burst(nz(burst));
+        let console = Quota::per_minute(nz(per_minute.saturating_mul(2)))
+            .allow_burst(nz(burst.saturating_mul(2)));
         Self {
             unauthenticated: RateLimiter::keyed(quota),
             console_login: RateLimiter::keyed(console),
@@ -171,3 +180,37 @@ pub fn unix(t: OffsetDateTime) -> i64 {
 }
 
 pub const TUNNEL_LEASE: Duration = Duration::from_secs(limen_core::registry::TUNNEL_LEASE_SECS);
+
+#[cfg(test)]
+mod limit_tests {
+    use std::net::IpAddr;
+
+    use super::Limits;
+
+    fn allowed(limits: &Limits, ip: IpAddr, tries: u32) -> usize {
+        (0..tries)
+            .filter(|_| limits.check_unauthenticated(Some(ip)).is_ok())
+            .count()
+    }
+
+    #[test]
+    fn the_burst_and_the_rate_are_settable_and_the_default_is_unchanged() {
+        let ip = IpAddr::from([10, 0, 0, 1]);
+        assert_eq!(allowed(&Limits::default(), ip, 50), 10, "30/min, burst 10");
+        assert_eq!(allowed(&Limits::new(600, 40), ip, 100), 40);
+        // Limits are per client IP.
+        let limits = Limits::new(30, 3);
+        assert_eq!(allowed(&limits, ip, 10), 3);
+        assert_eq!(allowed(&limits, IpAddr::from([10, 0, 0, 2]), 10), 3);
+    }
+
+    #[test]
+    fn browser_sign_ins_get_twice_the_budget() {
+        let ip = IpAddr::from([10, 0, 0, 1]);
+        let limits = Limits::new(30, 3);
+        let ok = (0..20)
+            .filter(|_| limits.check_console_login(Some(ip)).is_ok())
+            .count();
+        assert_eq!(ok, 6);
+    }
+}

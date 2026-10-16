@@ -268,6 +268,21 @@ pub struct Config {
     #[arg(long, env = "LIMEN_CONNECTION_AGE_GRACE_SECS", default_value_t = 30,
           value_parser = clap::value_parser!(u64).range(1..=3600))]
     pub connection_age_grace_secs: u64,
+
+    /// Requests per minute from one client IP to the unauthenticated entry
+    /// points (logins, enrollment, bot logins). Counted per replica, so the
+    /// limit across a fleet is this times the number of replicas that the
+    /// load balancer spreads one IP over. Raise it for sites where many
+    /// users share one egress IP (browser sign-ins get twice as much).
+    #[arg(long, env = "LIMEN_UNAUTHENTICATED_RATE_PER_MINUTE", default_value_t = 30,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub unauthenticated_rate_per_minute: u32,
+
+    /// The burst allowed on top of the rate, per client IP. Browser sign-ins
+    /// get twice as much.
+    #[arg(long, env = "LIMEN_UNAUTHENTICATED_BURST", default_value_t = 10,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub unauthenticated_burst: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -470,6 +485,23 @@ mod tests {
         ];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn login_rate_limit_flags_keep_the_old_defaults_and_are_bounded() {
+        let ok = parse_with(&[]).expect("defaults");
+        assert_eq!(ok.unauthenticated_rate_per_minute, 30);
+        assert_eq!(ok.unauthenticated_burst, 10);
+        assert!(parse_with(&["--unauthenticated-rate-per-minute=0"]).is_err());
+        assert!(parse_with(&["--unauthenticated-burst=0"]).is_err());
+        assert!(parse_with(&["--unauthenticated-rate-per-minute=100001"]).is_err());
+        assert!(
+            parse_with(&[
+                "--unauthenticated-rate-per-minute=600",
+                "--unauthenticated-burst=100"
+            ])
+            .is_ok()
+        );
     }
 
     #[test]

@@ -80,6 +80,10 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let pipeline = pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await?;
     let sink = Arc::new(SpoolSink(pipeline.spool.clone()));
     let audit = Emitter::new("control-plane", &config.id, sink, config.audit_failure_mode);
+    let limits = Arc::new(Limits::new(
+        config.unauthenticated_rate_per_minute,
+        config.unauthenticated_burst,
+    ));
     Ok(AppState {
         config,
         pipeline,
@@ -90,7 +94,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         bots,
         policy,
         audit,
-        limits: Arc::new(Limits::default()),
+        limits,
         registration,
         draining: Arc::default(),
         snapshot_signer,

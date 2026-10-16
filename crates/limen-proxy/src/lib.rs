@@ -108,8 +108,10 @@ impl Proxy {
             config.audit_failure_mode,
         )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
-        let quota = Quota::per_second(NonZeroU32::new(50).unwrap_or(NonZeroU32::MIN))
-            .allow_burst(NonZeroU32::new(200).unwrap_or(NonZeroU32::MIN));
+        let quota = Quota::per_second(
+            NonZeroU32::new(config.accept_rate_per_second).unwrap_or(NonZeroU32::MIN),
+        )
+        .allow_burst(NonZeroU32::new(config.accept_burst).unwrap_or(NonZeroU32::MIN));
         Ok((
             Self {
                 config: Arc::new(config),
