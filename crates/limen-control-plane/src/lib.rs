@@ -34,9 +34,12 @@ use state::{AppState, Limits, PolicyStore};
 /// Build the shared state: connect and migrate the database, load the CAs,
 /// load the policy, and open the audit sink.
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
-    let db = db::connect(config.database_url.expose())
-        .await
-        .context("connecting to the database")?;
+    let db = db::connect_with(
+        config.database_url.expose(),
+        config.database_max_connections,
+    )
+    .await
+    .context("connecting to the database")?;
     let cas = ca_store::load(&config, &db)
         .await
         .context("loading CA keys")?;

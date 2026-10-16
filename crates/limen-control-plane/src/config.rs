@@ -269,6 +269,14 @@ pub struct Config {
           value_parser = clap::value_parser!(u64).range(1..=3600))]
     pub connection_age_grace_secs: u64,
 
+    /// The most connections this replica's pool opens to PostgreSQL. The
+    /// database sees up to this times the number of replicas: keep the
+    /// total under its `max_connections` (Aurora: by instance class), or
+    /// put RDS Proxy in front. 1 to 500.
+    #[arg(long, env = "LIMEN_DATABASE_MAX_CONNECTIONS", default_value_t = 16,
+          value_parser = clap::value_parser!(u32).range(1..=500))]
+    pub database_max_connections: u32,
+
     /// Requests per minute from one client IP to the unauthenticated entry
     /// points (logins, enrollment, bot logins). Counted per replica, so the
     /// limit across a fleet is this times the number of replicas that the
@@ -494,6 +502,10 @@ mod tests {
         assert_eq!(ok.unauthenticated_burst, 10);
         assert!(parse_with(&["--unauthenticated-rate-per-minute=0"]).is_err());
         assert!(parse_with(&["--unauthenticated-burst=0"]).is_err());
+        assert_eq!(ok.database_max_connections, 16);
+        assert!(parse_with(&["--database-max-connections=0"]).is_err());
+        assert!(parse_with(&["--database-max-connections=501"]).is_err());
+        assert!(parse_with(&["--database-max-connections=40"]).is_ok());
         assert!(parse_with(&["--unauthenticated-rate-per-minute=100001"]).is_err());
         assert!(
             parse_with(&[

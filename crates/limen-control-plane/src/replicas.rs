@@ -165,7 +165,9 @@ mod tests {
     async fn db() -> Option<Db> {
         let url = limen_testkit::database_url()?;
         let _one_at_a_time = CONNECT.lock().await;
-        Some(crate::db::connect(&url).await.expect("connect"))
+        // Small pools: these tests run in parallel with the rest of the crate's,
+        // and every pool of 16 counts against the server's connection limit.
+        Some(crate::db::connect_with(&url, 3).await.expect("connect"))
     }
 
     fn uid(tag: &str) -> String {

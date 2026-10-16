@@ -17,9 +17,18 @@ pub mod locks {
     pub const CLEANUP_JOB: i64 = 0x4c49_4d45_4e00_0002;
 }
 
+/// Connections a replica's pool may hold unless told otherwise.
+pub const DEFAULT_MAX_CONNECTIONS: u32 = 16;
+
 pub async fn connect(url: &str) -> Result<Db, sqlx::Error> {
+    connect_with(url, DEFAULT_MAX_CONNECTIONS).await
+}
+
+/// [`connect`] with a pool of at most `max_connections`. With several
+/// replicas the database sees up to that many times the replica count.
+pub async fn connect_with(url: &str, max_connections: u32) -> Result<Db, sqlx::Error> {
     let pool = PgPoolOptions::new()
-        .max_connections(16)
+        .max_connections(max_connections)
         .acquire_timeout(Duration::from_secs(5))
         .connect(url)
         .await?;

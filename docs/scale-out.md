@@ -61,7 +61,7 @@ The bundled Grafana dashboards read the audit data (Athena or Trino), not these 
 
 ## Sizing
 
-**Database connections.** Each control plane holds a pool of up to 16 connections to PostgreSQL. With *N* replicas the database sees up to 16 × *N*. Check that against your Aurora instance's `max_connections` (it depends on the instance class) and leave room for migrations and the console's queries. A handful of replicas is far below any production instance. If you run dozens, put RDS Proxy in front of the database.
+**Database connections.** Each control plane holds a pool of up to 16 connections to PostgreSQL (`--database-max-connections`, `LIMEN_DATABASE_MAX_CONNECTIONS`, 1 to 500). With *N* replicas the database sees up to 16 × *N*. Check that against your Aurora instance's `max_connections` (it depends on the instance class) and leave room for migrations and the console's queries. A handful of replicas is far below any production instance. If you run dozens, put RDS Proxy in front of the database.
 
 **Rate limits.** The limits on unauthenticated entry points (logins, enrollment, bot logins) are per client IP and counted **in memory per replica**, so a client that a load balancer spreads over *N* replicas can make about *N* times the limit. That is intended: they are abuse guards, not authorization. The defaults are 30 requests a minute with a burst of 10 (browser sign-ins get twice as much). **A site with many users behind one egress IP should raise them**: at the defaults, 500 users behind one address need about 17 minutes to log in. Set `--unauthenticated-rate-per-minute` and `--unauthenticated-burst` (`LIMEN_UNAUTHENTICATED_RATE_PER_MINUTE`, `LIMEN_UNAUTHENTICATED_BURST`) on the control plane.
 
