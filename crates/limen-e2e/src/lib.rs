@@ -68,6 +68,18 @@ pub struct RunningProxy {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
+impl RunningProxy {
+    /// Tell the proxy to stop, as SIGTERM does, without waiting: it drains.
+    pub fn begin_stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Whether the proxy's `run` has returned.
+    pub fn has_stopped(&self) -> bool {
+        self.task.is_finished()
+    }
+}
+
 #[derive(Debug)]
 pub struct RunningWorker {
     pub worker: limen_worker::Worker,

@@ -966,6 +966,38 @@ fn last_start_via(c: &Capped, proxy_id: &str) -> Option<String> {
         .and_then(|e| e["session_id"].as_str().map(str::to_owned))
 }
 
+/// A proxy that shuts down closes its worker tunnels, which ends the sessions
+/// on them: their `session.end` is written after the shutdown signal. The
+/// proxy must still ship it before it exits, because on a scale-in its disk
+/// may go with it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_proxy_ships_the_audit_of_sessions_that_end_as_it_shuts_down() {
+    let Some(c) = Box::pin(capped_deployment(&[2])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let conn = c.ssh(c.d.proxy_addr, "web-1").await.expect("session");
+    let (out, _) = ssh_client::exec(&conn, "whoami").await.expect("exec");
+    assert_eq!(out, "target: login=ubuntu command=whoami\n");
+    let proxy_id = c.d.proxy().id();
+    eventually(Duration::from_secs(20), "session.start", || async {
+        last_start_via(&c, &proxy_id).is_some()
+    })
+    .await;
+    let session_id = last_start_via(&c, &proxy_id).expect("session id");
+
+    let proxy = c.d.proxy.as_ref().expect("proxy");
+    proxy.begin_stop();
+    drop(conn);
+    eventually(Duration::from_secs(15), "the proxy exits", || async {
+        proxy.has_stopped()
+    })
+    .await;
+    // Written after the signal, and still arrived.
+    let end = event_of(&c, "session.end", &session_id).await;
+    assert_eq!(end["session_id"], session_id.as_str());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn names_reach_session_audit_tunnels_and_stay_fixed() {
     let Some(mut c) = Box::pin(capped_deployment_named(

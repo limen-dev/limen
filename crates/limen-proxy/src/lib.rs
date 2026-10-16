@@ -41,6 +41,9 @@ use tunnels::{Tunnel, Tunnels};
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONNECTIONS: usize = 20_000;
+/// After the last connection is gone, how long the proxy may spend shipping
+/// its audit spool to the control plane before it exits.
+const FINAL_FLUSH: Duration = Duration::from_secs(10);
 
 /// State shared by every connection.
 #[derive(Debug, Clone)]
@@ -241,11 +244,18 @@ pub async fn run(
     ));
     background.spawn(report_tunnels(proxy.clone(), shutdown.clone()));
     background.spawn(policy_refresh(proxy.clone(), shutdown.clone()));
+    // Sessions go on writing audit events (their `session.end`) until the
+    // drain is over, so the shipper outlives the shutdown signal: `flush`
+    // (ship what is left, then stop) once the connections are done, and
+    // `deadline` (stop now; the rest stays in the spool) if that takes too long.
+    let (flush_tx, flush) = watch::channel(false);
+    let (deadline_tx, deadline) = watch::channel(false);
     let shipper = proxy.clone();
-    background.spawn(limen_component::audit::ship(
+    let audit = tokio::spawn(limen_component::audit::ship_until(
         proxy.audit_spool.clone(),
         move || Ok(shipper.cp_channel()),
-        shutdown.clone(),
+        flush,
+        deadline,
     ));
     let admin = tokio::spawn(serve_admin(proxy.clone(), shutdown.clone()));
 
@@ -291,6 +301,24 @@ pub async fn run(
     // Whatever is still open after the drain period is cut off.
     connections.abort_all();
     while connections.join_next().await.is_some() {}
+    // No more events can be written: ship what is spooled, within a bound.
+    // What does not make it stays in the spool for the next start (and is
+    // lost if the proxy's disk goes with it, as on an emptyDir).
+    let _ = flush_tx.send(true);
+    let mut audit = audit;
+    if tokio::time::timeout(FINAL_FLUSH, &mut audit).await.is_err() {
+        tracing::warn!(
+            pending = proxy
+                .audit_spool
+                .pending(limen_component::audit::TO_CONTROL_PLANE),
+            "audit events still unshipped after the final flush"
+        );
+        let _ = deadline_tx.send(true);
+        audit.abort();
+        // A completed handle must not be awaited again (it panics): only
+        // here, after the abort, is the second await needed.
+        let _ = audit.await;
+    }
     admin.abort();
     let _ = admin.await;
     background.abort_all();
