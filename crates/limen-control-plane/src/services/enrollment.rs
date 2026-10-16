@@ -201,7 +201,13 @@ impl Enrollment for EnrollmentService {
         .await
         {
             if db::is_name_taken(&e) {
-                tracing::warn!(kind = %req.kind, name = name.as_deref(), "enrollment rejected: name already in use");
+                tracing::warn!(kind = %req.kind, name = name.as_deref(), client = ?caller.addr(), "enrollment rejected: name already in use");
+                // Someone holding a valid token tried to take a live
+                // component's name: record it like the other refusals. The
+                // transaction (and so the token) is released first; the
+                // audit write must not sit inside a failed transaction.
+                drop(tx);
+                self.audit_denial(json!({ "action": "enroll", "kind": req.kind, "reason": "name already in use", "name": name, "token_type": token_type, "client_addr": caller.addr().map(|a| a.to_string()) })).await;
                 return Err(Status::already_exists(format!(
                     "name {:?} is already used by another enrolled proxy or worker; revoke that one first, or choose another name",
                     name.unwrap_or_default()

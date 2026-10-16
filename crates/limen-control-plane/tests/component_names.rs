@@ -147,9 +147,10 @@ async fn exact_name_is_certified_listed_and_audited() {
     );
     assert_eq!(labels.get("pool").map(String::as_str), Some("dev"));
 
-    // The policy engine sees it as a label: a selector on it matches, and
-    // selectors on other labels are unaffected.
-    let policy = limen_policy::Policy::parse_yaml([(
+    // The name is a certified label but never an access decision: policy
+    // refuses a selector on it, and the matcher ignores it even if one gets
+    // through (an older stored policy).
+    let err = limen_policy::Policy::parse_yaml([(
         "p.yaml",
         r#"
 kind: resource
@@ -158,26 +159,23 @@ metadata: { name: by-name }
 spec:
   ssh: { address: "10.0.0.1:22" }
   worker_selector: { limen.io/name: prod-a-worker-1 }
----
+"#,
+    )])
+    .expect_err("policy can't select on a name");
+    assert!(err.to_string().contains("limen.io/name"), "{err}");
+    let policy = limen_policy::Policy::parse_yaml([(
+        "p.yaml",
+        r#"
 kind: resource
 version: v1
 metadata: { name: by-pool }
 spec:
   ssh: { address: "10.0.0.1:22" }
   worker_selector: { pool: dev }
----
-kind: resource
-version: v1
-metadata: { name: other-name }
-spec:
-  ssh: { address: "10.0.0.1:22" }
-  worker_selector: { limen.io/name: prod-a-worker-2 }
 "#,
     )])
     .expect("policy");
-    assert!(policy.worker_may_serve("by-name", &labels));
     assert!(policy.worker_may_serve("by-pool", &labels));
-    assert!(!policy.worker_may_serve("other-name", &labels));
 
     let listed = f.components().await;
     let w = listed
@@ -386,6 +384,14 @@ async fn duplicate_live_name_is_refused_without_using_the_token_and_freed_by_rev
         .await
         .expect_err("a proxy can't take a worker's name");
     assert_eq!(err.code(), Code::AlreadyExists, "{err:?}");
+    // Both attempts on a live name are on the record, like any other
+    // refused enrollment.
+    let denials = f.enroll_denials().await;
+    let in_use = denials
+        .iter()
+        .filter(|d| d["reason"] == "name already in use" && d["name"] == "dup-1")
+        .count();
+    assert_eq!(in_use, 2, "both conflicts are audited: {denials:?}");
 
     // The conflict rolled back: the single-use token still works.
     let other = f
