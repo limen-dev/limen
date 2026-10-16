@@ -56,9 +56,9 @@ pub struct Config {
     /// On SIGTERM, how long open sessions may go on (the worker takes no new
     /// ones meanwhile) before it ends them, each with a `session.end` whose
     /// reason is `worker_drain`. It exits as soon as none is left. Ending
-    /// them and the last recording and audit uploads take up to 15 s more,
+    /// them and the last recording and audit uploads take up to 18 s more,
     /// so give the orchestrator a longer grace period before it kills the
-    /// worker: at least this plus 15 s (Kubernetes
+    /// worker: at least this plus 18 s (Kubernetes
     /// `terminationGracePeriodSeconds`, ECS `stopTimeout`, Compose
     /// `stop_grace_period`).
     #[arg(long, env = "LIMEN_DRAIN_TIMEOUT_SECS", default_value_t = 20)]
@@ -560,15 +560,26 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
 
 /// On shutdown, how long a tunnel waits for its open streams to finish.
 const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(5);
-/// Once the drain timeout is up, how long the ended sessions get to finish
-/// their recordings and send their closing frames.
-const SESSION_END_GRACE: Duration = Duration::from_secs(5);
-/// Once no session is left, how long closing the tunnels and the last
-/// recording and audit uploads may take. What isn't uploaded by then stays
-/// on disk and goes on the next start. Together with
-/// [`SESSION_END_GRACE`] this is the 15 s that `--drain-timeout-secs` asks
-/// the orchestrator to allow on top of the drain timeout.
+/// Once the drain timeout is up, how long the ended sessions get to close:
+/// each waits up to [`ssh::END_WITHIN`] for SSH to close, then up to
+/// [`session::PUMP_WAIT`] for its output, then finishes its recording and
+/// sends its closing frame.
+const SESSION_END_GRACE: Duration =
+    Duration::from_secs(ssh::END_WITHIN.as_secs() + session::PUMP_WAIT.as_secs());
+/// Once no session is left, how long closing the tunnels (at most
+/// [`TUNNEL_CLOSE_GRACE`]) and the last recording and audit uploads may
+/// take. What isn't uploaded by then stays on disk and goes on the next
+/// start.
 const FINAL_FLUSH: Duration = Duration::from_secs(10);
+/// The most a drain takes past `--drain-timeout-secs`: what the
+/// orchestrator's grace period must allow on top of it.
+const DRAIN_OVERHEAD: Duration =
+    Duration::from_secs(SESSION_END_GRACE.as_secs() + FINAL_FLUSH.as_secs());
+const _: () = assert!(
+    SESSION_END_GRACE.as_secs() >= ssh::END_WITHIN.as_secs() + session::PUMP_WAIT.as_secs()
+        && TUNNEL_CLOSE_GRACE.as_secs() <= FINAL_FLUSH.as_secs(),
+    "the drain's waits must nest"
+);
 
 /// A tunnel that stayed up this long was healthy.
 const HEALTHY_TUNNEL: Duration = Duration::from_secs(30);
@@ -650,7 +661,7 @@ pub async fn run(
     // sessions are refused.
     worker.draining.store(true, Ordering::SeqCst);
     let drain = Duration::from_secs(worker.config.drain_timeout_secs);
-    tracing::info!(sessions = worker.sessions.active(), timeout = ?drain, "draining");
+    tracing::info!(sessions = worker.sessions.active(), timeout = ?drain, then_at_most = ?DRAIN_OVERHEAD, "draining");
     let now = tokio::time::Instant::now();
     if !worker.sessions.wait_idle(now + drain).await {
         tracing::warn!(
@@ -715,6 +726,21 @@ async fn serve_admin(worker: Worker) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(worker.config.admin_listen).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod drain_timing_tests {
+    use super::*;
+
+    #[test]
+    fn ended_sessions_get_long_enough_to_close() {
+        // An ended session waits up to END_WITHIN for SSH to close, then up
+        // to PUMP_WAIT for its output; only then does it send its closing
+        // frame and give its slot back.
+        assert!(SESSION_END_GRACE >= ssh::END_WITHIN + session::PUMP_WAIT);
+        // The docs and the flag's help quote this figure.
+        assert_eq!(DRAIN_OVERHEAD, Duration::from_secs(18));
+    }
 }
 
 #[cfg(test)]

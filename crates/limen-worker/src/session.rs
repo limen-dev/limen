@@ -29,6 +29,9 @@ type FrameStream =
 
 const FRAME_CHUNK: usize = 32 * 1024;
 
+/// How long a session cut short (drain, TTL) waits for its output pump.
+pub(crate) const PUMP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Why a session ended when the worker ended it at its drain timeout.
 pub(crate) const WORKER_DRAIN: &str = "worker_drain";
 
@@ -131,10 +134,7 @@ pub(crate) async fn open(
             let _ = pump.await;
         } else {
             let stop_pump = pump.abort_handle();
-            if tokio::time::timeout(std::time::Duration::from_secs(5), pump)
-                .await
-                .is_err()
-            {
+            if tokio::time::timeout(PUMP_WAIT, pump).await.is_err() {
                 stop_pump.abort();
             }
         }

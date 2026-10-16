@@ -81,7 +81,7 @@ x-worker: &worker
   build: { <<: *limen-build, target: worker }
   image: limen-worker:scale
   restart: unless-stopped
-  # At least LIMEN_DRAIN_TIMEOUT_SECS (default 20) plus 15 s, so a stop
+  # At least LIMEN_DRAIN_TIMEOUT_SECS (default 20) plus 18 s, so a stop
   # (SIGTERM) lets open sessions finish, ends the rest, and uploads their
   # recordings before Docker's SIGKILL.
   stop_grace_period: 40s

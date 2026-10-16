@@ -53,7 +53,7 @@ pub struct SessionOutcome {
 }
 
 /// How long an ended session gets to close before it is dropped.
-const END_WITHIN: Duration = Duration::from_secs(3);
+pub(crate) const END_WITHIN: Duration = Duration::from_secs(3);
 
 type SharedRecorder = Arc<Mutex<Option<Recorder>>>;
 
