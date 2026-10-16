@@ -96,6 +96,8 @@ impl AuditHandoff for HandoffService {
                 let result = match batch {
                     Ok(batch) => service.accept(&batch).await.map(|()| {
                         received += batch.events.len();
+                        metrics::counter!("limen_audit_handoff_records_total", "direction" => "received")
+                            .increment(batch.events.len() as u64);
                         HandoffAck {
                             durable_upto: batch.last_index,
                         }

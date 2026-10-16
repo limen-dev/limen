@@ -51,7 +51,12 @@ pub async fn replica_heartbeat(
             _ = done.changed() => return,
         }
         match crate::replicas::heartbeat(&state.db, &state.registration).await {
-            Ok(()) => {}
+            Ok(()) => match crate::replicas::live_count(&state.db).await {
+                // Scale signal: how many control planes are serving.
+                #[allow(clippy::cast_precision_loss)]
+                Ok(n) => metrics::gauge!("limen_control_plane_replicas").set(n as f64),
+                Err(e) => tracing::warn!(error = %e, "counting live replicas failed"),
+            },
             Err(crate::replicas::HeartbeatError::Lost) => {
                 tracing::error!(id = %state.registration.id, "another process took over this replica id; shutting down");
                 let _ = stop.send(true);

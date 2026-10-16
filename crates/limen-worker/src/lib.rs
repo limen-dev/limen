@@ -382,9 +382,12 @@ impl SessionSlots {
                 (max == 0 || n < max).then_some(n + 1)
             })
             .ok()
-            .map(|_| SessionGuard {
-                count: Arc::clone(&self.count),
-                released: Arc::clone(&self.released),
+            .map(|_| {
+                metrics::gauge!("limen_worker_sessions_active").increment(1.0);
+                SessionGuard {
+                    count: Arc::clone(&self.count),
+                    released: Arc::clone(&self.released),
+                }
             })
     }
 
@@ -414,6 +417,7 @@ pub(crate) struct SessionGuard {
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         self.count.fetch_sub(1, Ordering::SeqCst);
+        metrics::gauge!("limen_worker_sessions_active").decrement(1.0);
         self.released.notify_waiters();
     }
 }
@@ -715,12 +719,18 @@ pub async fn run(
     ));
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
     let admin = tokio::spawn(serve_admin(worker.clone()));
+    // Scale signals: sessions against the cap, and whether we are draining.
+    metrics::gauge!("limen_worker_sessions_max").set(f64::from(
+        u32::try_from(worker.sessions.max()).unwrap_or(u32::MAX),
+    ));
+    metrics::gauge!("limen_worker_draining").set(0.0);
     tracing::info!(id = %worker.id(), name = worker.name().as_deref(), tunnels = worker.config.tunnels, "worker running");
 
     let _ = shutdown.wait_for(|stop| *stop).await;
     // From here pings say `draining` (proxies stop choosing us) and new
     // sessions are refused.
     worker.draining.store(true, Ordering::SeqCst);
+    metrics::gauge!("limen_worker_draining").set(1.0);
     let (drain, _) = worker.config.drain_timeout();
     tracing::info!(sessions = worker.sessions.active(), timeout = ?drain, then_at_most = ?DRAIN_OVERHEAD, "draining");
     let now = tokio::time::Instant::now();
@@ -975,6 +985,18 @@ mod reconnect_tests {
 #[cfg(test)]
 mod cap_tests {
     use super::*;
+
+    #[test]
+    fn the_session_gauge_is_exported() {
+        let _ = limen_core::metrics::install();
+        let slots = SessionSlots::new(5);
+        let slot = slots.acquire().expect("room");
+        assert!(
+            limen_core::metrics::render().contains("limen_worker_sessions_active"),
+            "a taken slot shows up as a metric"
+        );
+        drop(slot);
+    }
 
     /// SIGTERM landing while a session is being admitted, on an idle worker:
     /// the drain sets `draining` and then looks at the count, as `run` does.

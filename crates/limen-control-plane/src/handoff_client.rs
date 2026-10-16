@@ -321,6 +321,8 @@ async fn send_to(
             .commit_all(last + 1)
             .map_err(|e| format!("committing the spool: {e}"))?;
         *sent += count;
+        metrics::counter!("limen_audit_handoff_records_total", "direction" => "sent")
+            .increment(count);
         let Some(next) = batch(spool, last + 1)? else {
             return Ok(());
         };

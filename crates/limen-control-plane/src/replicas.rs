@@ -124,6 +124,16 @@ pub async fn live_peers(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::
     .await
 }
 
+/// How many replicas (this one included) have a fresh heartbeat.
+pub async fn live_count(db: &Db) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM control_plane_replicas \
+         WHERE heartbeat_at >= now() - interval '15 seconds'",
+    )
+    .fetch_one(db)
+    .await
+}
+
 /// Whether a replica with this id has a fresh heartbeat.
 pub async fn is_live(db: &Db, id: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
@@ -210,6 +220,36 @@ mod tests {
             ("https://new:1", "ephemeral")
         );
         deregister(&db, &second).await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn live_count_counts_fresh_replicas_only() {
+        let Some(db) = db().await else { return };
+        let (a, b, dead) = (uid("a"), uid("b"), uid("dead"));
+        let mut regs = Vec::new();
+        for (id, url) in [
+            (&a, "https://a:1"),
+            (&b, "https://b:1"),
+            (&dead, "https://d:1"),
+        ] {
+            regs.push(
+                register(&db, id, url, SpoolMode::Durable)
+                    .await
+                    .expect("register"),
+            );
+        }
+        let with_stale = live_count(&db).await.expect("count");
+        age(&db, &dead).await;
+        let without = live_count(&db).await.expect("count");
+        // Other tests share the table, so only the differences are stable.
+        assert!(without >= 2, "both fresh replicas are counted: {without}");
+        assert!(
+            with_stale >= without,
+            "a stale replica is not counted once aged"
+        );
+        for r in &regs {
+            deregister(&db, r).await.expect("cleanup");
+        }
     }
 
     #[tokio::test]

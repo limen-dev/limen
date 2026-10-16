@@ -81,6 +81,30 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 /// GOAWAY (idle ones close at once), and in-flight calls have until
 /// `started + crate::ship_budget(drain_timeout)` before they are cut off.
 /// `started` is when shutdown began; the first caller to touch it sets it.
+/// The `method` label for the latency histogram: a gRPC method path
+/// (`/limen.v1.Auth/Login`, a bounded set), or `console` for browser
+/// requests so paths never become label values.
+fn method_label(path: &str) -> &str {
+    if path.starts_with("/limen.") {
+        path
+    } else {
+        "console"
+    }
+}
+
+/// Scale signal: API latency per method, for target-tracking policies.
+async fn record_latency(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = method_label(request.uri().path()).to_owned();
+    let started = std::time::Instant::now();
+    let response = next.run(request).await;
+    metrics::histogram!("limen_api_request_seconds", "method" => method)
+        .record(started.elapsed().as_secs_f64());
+    response
+}
+
 pub async fn serve_api(
     state: AppState,
     listener: TcpListener,
@@ -131,7 +155,8 @@ pub async fn serve_api(
             .into_axum_router()
             .merge(crate::console::router(state.clone())),
         None => routes.into_axum_router(),
-    };
+    }
+    .layer(axum::middleware::from_fn(record_latency));
 
     let active = Arc::new(AtomicUsize::new(0));
     let mut connections = tokio::task::JoinSet::new();
@@ -334,5 +359,41 @@ mod tests {
     #[test]
     fn zero_disables_the_connection_age() {
         assert_eq!(connection_age(Duration::ZERO, 0.5), None);
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use axum::Router;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    use super::{method_label, record_latency};
+
+    #[test]
+    fn grpc_methods_keep_their_path_and_everything_else_is_console() {
+        assert_eq!(method_label("/limen.v1.Auth/Login"), "/limen.v1.Auth/Login");
+        assert_eq!(method_label("/console/sessions/123"), "console");
+        assert_eq!(method_label("/"), "console");
+    }
+
+    #[tokio::test]
+    async fn requests_are_timed_per_method() {
+        let _ = limen_core::metrics::install();
+        let app = Router::new()
+            .route("/limen.v1.Test/Ping", get(|| async { "ok" }))
+            .route("/console/home", get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(record_latency));
+        for path in ["/limen.v1.Test/Ping", "/console/home"] {
+            let request = axum::http::Request::get(path)
+                .body(axum::body::Body::empty())
+                .expect("request");
+            app.clone().oneshot(request).await.expect("response");
+        }
+        let text = limen_core::metrics::render();
+        assert!(text.contains("limen_api_request_seconds"), "{text}");
+        assert!(text.contains(r#"method="/limen.v1.Test/Ping""#), "{text}");
+        assert!(text.contains(r#"method="console""#), "{text}");
+        assert!(!text.contains("/console/home"), "paths must not be labels");
     }
 }
