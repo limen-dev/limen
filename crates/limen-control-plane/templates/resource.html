@@ -30,7 +30,7 @@
 {% if workers.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plug"/></svg><div>No enrolled worker matches the selector, so sessions to this resource will fail.</div></div>{% else %}
 <div class="table-wrap"><table>
   <thead><tr><th>Worker</th><th>Last seen</th><th class="num">Tunnels</th></tr></thead>
-  <tbody>{% for w in workers %}<tr><td class="mono">{{ w.id }}</td><td class="nowrap">{{ w.last_seen }}</td><td class="num">{{ w.tunnels }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for w in workers %}<tr><td class="mono">{{ w.id }}{% if let Some(name) = w.name %} <span class="cell-sub">{{ name }}</span>{% endif %}</td><td class="nowrap">{{ w.last_seen }}</td><td class="num">{{ w.tunnels }}</td></tr>{% endfor %}</tbody>
 </table></div>{% endif %}
 {% endif %}
 

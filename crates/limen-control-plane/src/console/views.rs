@@ -522,6 +522,10 @@ pub struct UserPage {
 
 pub struct ComponentView {
     pub id: String,
+    /// Display name approved at enrollment, if any.
+    pub name: Option<String>,
+    /// For a worker: the proxies holding its tunnels (names, else ids).
+    pub tunnel_peers: String,
     pub path: String,
     pub kind: String,
     pub label_list: Vec<String>,
@@ -535,6 +539,8 @@ pub struct ComponentView {
 
 pub struct PendingTokenView {
     pub kind: String,
+    /// The name or pattern it approves, if any.
+    pub name: Option<String>,
     pub kclass: &'static str,
     pub icon: &'static str,
     pub label_list: Vec<String>,
@@ -621,6 +627,7 @@ pub struct RoleAccess {
 
 pub struct WorkerMatch {
     pub id: String,
+    pub name: Option<String>,
     pub tunnels: usize,
     pub last_seen: String,
 }

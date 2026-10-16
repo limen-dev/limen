@@ -292,17 +292,20 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 12] = [
+const SUMMARY_KEYS: [&str; 15] = [
     "action",
     "target_user",
     "component_id",
+    "component_name",
     "kind",
+    "name",
     "resource",
     "login",
     "reason",
     "by",
     "via",
     "worker_id",
+    "worker_name",
     "bot",
     "method",
 ];

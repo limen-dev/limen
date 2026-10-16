@@ -247,13 +247,15 @@ async fn console_end_to_end() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
-            name: String::new(),
+            // An exact name: the worker gets it without asking.
+            name: "console-worker-1".into(),
         })
         .await
         .expect("token")
         .into_inner()
         .token;
     let worker = d.start_worker(&token, "worker").await;
+    assert_eq!(worker.worker.name().as_deref(), Some("console-worker-1"));
     eventually(Duration::from_secs(15), "worker tunnel", || async {
         d.proxy().tunnels.summaries().len() == 2
     })
@@ -375,6 +377,10 @@ async fn console_end_to_end() {
         .to_owned();
     let detail = admin_user.get(&format!("/console/sessions/{id}")).await;
     assert_eq!(detail.status, 200);
+    assert!(
+        detail.body.contains("console-worker-1") && detail.body.contains(&worker.worker.id()),
+        "the worker's name is shown beside its id"
+    );
     assert!(detail.body.contains("asciinema-player.min.js"));
     assert!(
         detail
@@ -762,6 +768,14 @@ async fn console_end_to_end() {
     let workers = admin_user.get("/console/workers").await;
     assert_eq!(workers.status, 200);
     assert!(workers.body.contains("pool=dev") && workers.body.contains("enrolled"));
+    assert!(
+        workers.body.contains("console-worker-1") && workers.body.contains(&worker.worker.id()),
+        "name beside the id"
+    );
+    assert!(
+        !workers.body.contains("limen.io/name="),
+        "the name is not repeated as a label chip"
+    );
     let csrf = Browser::csrf(&workers);
     let page = admin_user
         .post(
@@ -772,6 +786,7 @@ async fn console_end_to_end() {
                 ("labels", "pool=prod\nteam=db"),
                 ("ttl_minutes", "5"),
                 ("dns_names", ""),
+                ("name", "prod-db-*"),
             ],
         )
         .await;
@@ -782,6 +797,24 @@ async fn console_end_to_end() {
         after.body.contains("Outstanding join tokens") && after.body.contains("team=db"),
         "the unused token is listed (without its value)"
     );
+    assert!(
+        after.body.contains("prod-db-*"),
+        "with the names it approves"
+    );
+    let page = admin_user
+        .post(
+            "/console/workers/tokens",
+            &[
+                ("csrf", &csrf),
+                ("kind", "worker"),
+                ("labels", ""),
+                ("ttl_minutes", "5"),
+                ("dns_names", ""),
+                ("name", "Prod-*"),
+            ],
+        )
+        .await;
+    assert_eq!(page.status, 400, "an invalid name pattern is refused");
     assert!(!after.body.contains("lmn_join_"));
     let page = admin_user
         .post(
@@ -796,13 +829,7 @@ async fn console_end_to_end() {
         )
         .await;
     assert_eq!(page.status, 400);
-    let worker_id = workers
-        .body
-        .split("<div class=\"mono\">")
-        .map(|s| s.split('<').next().unwrap_or_default())
-        .find(|s| s.starts_with("worker-"))
-        .expect("a worker id")
-        .to_owned();
+    let worker_id = worker.worker.id();
     let page = admin_user
         .post(
             &format!("/console/workers/{worker_id}/revoke"),
