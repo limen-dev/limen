@@ -147,7 +147,10 @@ impl AuditIngest for IngestService {
             user: None,
             session_id: uuid::Uuid::parse_str(&session_id).ok(),
         };
-        let data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        let mut data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        if let Some(name) = limen_core::names::from_labels(&worker.labels) {
+            data["worker_name"] = json!(name);
+        }
         self.0
             .audit
             .emit(EventKind::SessionRecording, ctx, data)

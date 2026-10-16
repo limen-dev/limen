@@ -155,7 +155,21 @@ async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
 
 /// [`capped_deployment`] with `extra` flags for every worker.
 async fn capped_deployment_with(caps: &[u32], extra: &[&str]) -> Option<Capped> {
-    let d = Deployment::start_with_proxy_args(&NO_PERIODIC_PINGS).await?;
+    Box::pin(capped_deployment_named(caps, extra, &[], None)).await
+}
+
+/// [`capped_deployment_with`], plus `proxy_args` for the first proxy and,
+/// with `worker_names`, join tokens approving that name pattern and
+/// workers started with `--name=<prefix><i>` (the pattern without its `*`).
+async fn capped_deployment_named(
+    caps: &[u32],
+    extra: &[&str],
+    proxy_args: &[&str],
+    worker_names: Option<&str>,
+) -> Option<Capped> {
+    let mut all_proxy_args = NO_PERIODIC_PINGS.to_vec();
+    all_proxy_args.extend_from_slice(proxy_args);
+    let d = Deployment::start_with_proxy_args(&all_proxy_args).await?;
     let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
     let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
@@ -169,7 +183,7 @@ async fn capped_deployment_with(caps: &[u32], extra: &[&str]) -> Option<Capped> 
         .expect("apply")
         .into_inner();
     let mut workers = Vec::new();
-    for cap in caps {
+    for (i, cap) in caps.iter().enumerate() {
         // Worker join tokens are single-use.
         let token = admin
             .create_join_token(CreateJoinTokenRequest {
@@ -177,7 +191,7 @@ async fn capped_deployment_with(caps: &[u32], extra: &[&str]) -> Option<Capped> 
                 ttl_seconds: 600,
                 labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
                 dns_names: vec![],
-                name: String::new(),
+                name: worker_names.unwrap_or_default().to_owned(),
             })
             .await
             .expect("token")
@@ -185,7 +199,9 @@ async fn capped_deployment_with(caps: &[u32], extra: &[&str]) -> Option<Capped> 
             .token;
         let name = format!("worker-{}", uuid::Uuid::now_v7().simple());
         let cap = format!("--max-sessions={cap}");
+        let own_name = worker_names.map(|p| format!("--name={}{i}", p.trim_end_matches('*')));
         let mut args = vec![cap.as_str()];
+        args.extend(own_name.as_deref());
         args.extend_from_slice(extra);
         workers.push(d.start_worker_with(&token, &name, &args).await);
     }
@@ -812,6 +828,8 @@ async fn open_session_finishes_during_drain() {
     .await;
     let end = &c.ends_on(&id)[0];
     assert_eq!(end["data"]["reason"], "ended", "{end}");
+    // Without names, the data is as before names existed.
+    assert!(end["data"].get("worker_name").is_none(), "{end}");
     assert_eq!(
         end["data"]["recording_sha256"].as_str().map(str::len),
         Some(64)
@@ -897,4 +915,128 @@ async fn an_idle_worker_exits_promptly_on_sigterm() {
         c.d.proxy().tunnels.channel_for(&w.worker.id()).is_none()
     })
     .await;
+}
+
+// ---- Names ------------------------------------------------------------------
+
+/// The event of `kind` for `session_id`, once the control plane has it.
+async fn event_of(c: &Capped, kind: &str, session_id: &str) -> serde_json::Value {
+    let find = || {
+        c.audit()
+            .into_iter()
+            .find(|e| e["kind"] == kind && e["session_id"] == session_id)
+    };
+    eventually(Duration::from_secs(20), kind, || async { find().is_some() }).await;
+    find().expect("event")
+}
+
+/// The session ID of the latest `session.start` through `proxy_id`.
+fn last_start_via(c: &Capped, proxy_id: &str) -> Option<String> {
+    c.audit()
+        .into_iter()
+        .rev()
+        .find(|e| e["kind"] == "session.start" && e["data"]["proxy_id"] == proxy_id)
+        .and_then(|e| e["session_id"].as_str().map(str::to_owned))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn names_reach_session_audit_tunnels_and_stay_fixed() {
+    let Some(mut c) = Box::pin(capped_deployment_named(
+        &[2],
+        &[],
+        &["--name=proxy-a"],
+        Some("e2e-worker-*"),
+    ))
+    .await
+    else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let a = c.d.proxy();
+    assert_eq!(a.name().as_deref(), Some("proxy-a"));
+    let worker = &c.workers[0].worker;
+    assert_eq!(worker.name().as_deref(), Some("e2e-worker-0"));
+    // The proxy's /tunnels view names the worker (from its certificate).
+    let summaries = a.tunnels.summaries();
+    assert!(!summaries.is_empty());
+    assert!(
+        summaries
+            .iter()
+            .all(|t| t.worker_name.as_deref() == Some("e2e-worker-0")),
+        "{summaries:?}"
+    );
+    let json = serde_json::to_value(&summaries).expect("json");
+    assert_eq!(json[0]["worker_name"], "e2e-worker-0");
+
+    // A session through the proxy holding the tunnel.
+    let conn = c.ssh(c.d.proxy_addr, "web-1").await.expect("session");
+    let (_, status) = ssh_client::exec(&conn, "whoami").await.expect("exec");
+    assert_eq!(status, Some(0));
+    drop(conn);
+    let a_id = a.id();
+    eventually(Duration::from_secs(10), "session.start", || async {
+        last_start_via(&c, &a_id).is_some()
+    })
+    .await;
+    let session = last_start_via(&c, &a_id).expect("start");
+    let start = event_of(&c, "session.start", &session).await;
+    assert_eq!(start["data"]["worker_name"], "e2e-worker-0", "{start}");
+    assert_eq!(start["data"]["proxy_name"], "proxy-a", "{start}");
+    assert_eq!(start["data"]["worker_id"], worker.id().as_str());
+    let end = event_of(&c, "session.end", &session).await;
+    assert_eq!(end["data"]["worker_name"], "e2e-worker-0", "{end}");
+    let stored = event_of(&c, "session.recording", &session).await;
+    assert_eq!(stored["data"]["worker_name"], "e2e-worker-0", "{stored}");
+
+    // A session peered through a second named proxy.
+    let (proxy_b, addr_b) =
+        c.d.start_extra_proxy_with("proxy-b", &["--name=proxy-b"])
+            .await;
+    assert_eq!(proxy_b.proxy.name().as_deref(), Some("proxy-b"));
+    eventually(
+        Duration::from_secs(15),
+        "proxy B has the policy",
+        || async { proxy_b.proxy.policy_version().is_some() },
+    )
+    .await;
+    let mut peered = None;
+    let mut last = String::new();
+    for _ in 0..40 {
+        match c.ssh(addr_b, "web-1").await {
+            Ok(conn) => {
+                peered = Some(conn);
+                break;
+            }
+            Err(e) => last = e,
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    drop(peered.unwrap_or_else(|| panic!("no peered session: {last}")));
+    let b_id = proxy_b.proxy.id();
+    eventually(Duration::from_secs(10), "peered session.start", || async {
+        last_start_via(&c, &b_id).is_some()
+    })
+    .await;
+    let start = event_of(
+        &c,
+        "session.start",
+        &last_start_via(&c, &b_id).expect("start"),
+    )
+    .await;
+    assert_eq!(start["data"]["worker_name"], "e2e-worker-0", "{start}");
+    assert_eq!(start["data"]["proxy_name"], "proxy-b", "{start}");
+
+    // The name is fixed at enrollment: a restart asking for another keeps it.
+    let w = c.workers.remove(0);
+    let dir = w.data_dir.clone();
+    w.stop().await;
+    let restarted =
+        c.d.start_worker_with(
+            "unused-after-enrollment",
+            &dir.display().to_string(),
+            &["--name=e2e-worker-renamed"],
+        )
+        .await;
+    assert_eq!(restarted.worker.name().as_deref(), Some("e2e-worker-0"));
+    restarted.stop().await;
 }

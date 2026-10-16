@@ -33,6 +33,13 @@ pub struct Config {
     #[arg(long, env = "LIMEN_JOIN_TOKEN", value_parser = parse_secret)]
     pub join_token: Option<Secret<String>>,
 
+    /// Display name, such as `prod-a-proxy-1`: 1 to 63 characters of a-z,
+    /// 0-9 and -. Sent only at first enrollment, and must be approved by the
+    /// join token; fixed after that (a different value is ignored with a
+    /// warning). Shown next to the ID in the console, audit data, and logs.
+    #[arg(long, env = "LIMEN_NAME")]
+    pub name: Option<String>,
+
     /// DNS names for the public certificate. Must be allowed by the join token.
     #[arg(
         long = "dns-name",

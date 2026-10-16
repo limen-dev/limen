@@ -141,6 +141,8 @@ pub(crate) struct PeerState {
 /// proxy holding the tunnel, while the session lasts.
 pub(crate) struct Remote {
     pub worker_id: String,
+    /// From the registry (the worker's certified name), if it has one.
+    pub worker_name: Option<String>,
     pub proxy_id: String,
     pub channel: Channel,
 }
@@ -175,8 +177,18 @@ pub(crate) async fn find(
     };
     let channel = peer_channel(proxy, &pick.proxy_id, &pick.peer_address)
         .map_err(|e| Status::internal(e.to_string()))?;
+    // Control planes before names send none; the certified label has it too.
+    let worker_name = Some(pick.worker_name.as_str())
+        .filter(|n| !n.is_empty())
+        .or_else(|| {
+            pick.worker_labels
+                .get(limen_core::names::NAME_LABEL)
+                .map(String::as_str)
+        })
+        .map(str::to_owned);
     Ok(Ok(Remote {
         worker_id: pick.worker_id.clone(),
+        worker_name,
         proxy_id: pick.proxy_id.clone(),
         channel,
     }))

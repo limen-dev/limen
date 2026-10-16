@@ -49,6 +49,13 @@ pub struct Config {
     #[arg(long, env = "LIMEN_JOIN_TOKEN", value_parser = parse_secret)]
     pub join_token: Option<Secret<String>>,
 
+    /// Display name, such as `prod-a-worker-1`: 1 to 63 characters of a-z,
+    /// 0-9 and -. Sent only at first enrollment, and must be approved by the
+    /// join token; fixed after that (a different value is ignored with a
+    /// warning). Shown next to the ID in the console, audit data, and logs.
+    #[arg(long, env = "LIMEN_NAME")]
+    pub name: Option<String>,
+
     /// Number of tunnels to keep open (ADR-0003).
     #[arg(long, env = "LIMEN_TUNNELS", default_value_t = 2)]
     pub tunnels: usize,
@@ -191,12 +198,14 @@ impl Worker {
             None => None,
         };
         let (addr, name) = (config.proxy_addr.clone(), config.proxy_name.clone());
+        let own_name = limen_component::parse_name(config.name.as_deref())?;
         // Enrollment goes through the proxy, which relays it to the control plane.
         let creds = limen_component::load_or_enroll(
             &config.data_dir,
             "worker",
             config.join_token.as_ref(),
             &[],
+            own_name.as_deref(),
             || {
                 let ca = bootstrap_ca
                     .as_deref()
@@ -294,6 +303,12 @@ impl Worker {
     #[must_use]
     pub fn policy_version(&self) -> Option<i64> {
         self.policy.latest().map(|s| s.version)
+    }
+
+    /// The name given at enrollment, if any.
+    #[must_use]
+    pub fn name(&self) -> Option<String> {
+        self.creds.borrow().name.clone()
     }
 
     #[must_use]
@@ -700,7 +715,7 @@ pub async fn run(
     ));
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
     let admin = tokio::spawn(serve_admin(worker.clone()));
-    tracing::info!(id = %worker.id(), tunnels = worker.config.tunnels, "worker running");
+    tracing::info!(id = %worker.id(), name = worker.name().as_deref(), tunnels = worker.config.tunnels, "worker running");
 
     let _ = shutdown.wait_for(|stop| *stop).await;
     // From here pings say `draining` (proxies stop choosing us) and new

@@ -41,6 +41,9 @@ pub struct Tunnel {
 #[derive(Debug, Clone, Serialize)]
 pub struct TunnelSummary {
     pub worker_id: String,
+    /// The worker's name, from its certificate. Left out when it has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_name: Option<String>,
     pub tunnel_id: String,
     #[serde(with = "time::serde::rfc3339")]
     pub connected_at: OffsetDateTime,
@@ -128,6 +131,8 @@ impl Drop for SessionSlot {
 #[derive(Debug)]
 pub struct Picked {
     pub worker_id: String,
+    /// The worker's name, from its certificate, if it has one.
+    pub worker_name: Option<String>,
     pub channel: TunnelChannel,
     pub slot: SessionSlot,
 }
@@ -265,6 +270,7 @@ impl Tunnels {
                     .unwrap_or_default();
                 TunnelSummary {
                     worker_id: t.worker_id.clone(),
+                    worker_name: limen_core::names::from_labels(&t.labels).map(str::to_owned),
                     tunnel_id: t.tunnel_id.clone(),
                     connected_at: t.connected_at,
                     active_sessions: load.active,
@@ -339,8 +345,15 @@ impl Tunnels {
         // Spread a worker's sessions over its tunnels.
         let channel = channels[rand::RngExt::random_range(&mut rng, 0..channels.len())];
         let slot = state.workers.get(*worker_id).ok_or(NoWorker::None)?.slot();
+        let worker_name = state
+            .tunnels
+            .values()
+            .find(|t| t.worker_id == *worker_id)
+            .and_then(|t| limen_core::names::from_labels(&t.labels))
+            .map(str::to_owned);
         Ok(Picked {
             worker_id: (*worker_id).to_owned(),
+            worker_name,
             channel: channel.clone(),
             slot,
         })

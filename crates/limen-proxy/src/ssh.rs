@@ -49,7 +49,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
     match establish(proxy, &user, user_cert_der, &request).await {
-        Ok((session_id, worker_id, inbound, outbound, _slot)) => {
+        Ok((session_id, worker, inbound, outbound, _slot)) => {
             // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
                 return;
@@ -60,7 +60,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
                 &user,
                 &request,
                 session_id,
-                &worker_id,
+                &worker,
                 client_addr,
                 inbound,
                 outbound,
@@ -126,6 +126,7 @@ async fn respond(
 enum Route {
     Local {
         worker_id: String,
+        worker_name: Option<String>,
         channel: limen_tunnel::tunnel::TunnelChannel,
     },
     Peer(crate::peer::Remote),
@@ -138,6 +139,31 @@ impl Route {
             Route::Peer(remote) => &remote.worker_id,
         }
     }
+
+    fn worker_name(&self) -> Option<&str> {
+        match self {
+            Route::Local { worker_name, .. } => worker_name.as_deref(),
+            Route::Peer(remote) => remote.worker_name.as_deref(),
+        }
+    }
+}
+
+/// Add `worker_name` and `proxy_name` to session event data, only for
+/// components that have a name: unnamed ones are audited as before names.
+fn add_names(data: &mut serde_json::Value, worker: &SessionWorker, proxy_name: Option<String>) {
+    if let Some(name) = &worker.name {
+        data["worker_name"] = json!(name);
+    }
+    if let Some(name) = proxy_name {
+        data["proxy_name"] = json!(name);
+    }
+}
+
+/// The worker serving a session. The name, if any, comes from its
+/// certificate (directly or through the registry), for display only.
+struct SessionWorker {
+    id: String,
+    name: Option<String>,
 }
 
 struct Denial {
@@ -206,7 +232,7 @@ async fn establish(
     user: &UserIdentity,
     user_cert_der: Vec<u8>,
     request: &SessionRequest,
-) -> Result<(Uuid, String, Inbound, Outbound, Slot), Denial> {
+) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
         .policy
@@ -247,6 +273,7 @@ async fn establish(
         )
         .await?;
         let worker_id = route.worker_id().to_owned();
+        let worker_name = route.worker_name().map(str::to_owned);
         let grant = SessionGrant {
             session_id: session_id.to_string(),
             username: user.username.clone(),
@@ -266,7 +293,13 @@ async fn establish(
         let signed = limen_session::grant::sign(&proxy.signer(), &grant)
             .map_err(|e| failed(format!("signing grant: {e}")))?;
         match open_on(route, signed).await {
-            Ok((inbound, outbound)) => return Ok((session_id, worker_id, inbound, outbound, slot)),
+            Ok((inbound, outbound)) => {
+                let worker = SessionWorker {
+                    id: worker_id,
+                    name: worker_name,
+                };
+                return Ok((session_id, worker, inbound, outbound, slot));
+            }
             Err(Opening::Full(why)) => {
                 tracing::info!(worker = %worker_id, reason = %why, "worker is full; trying another");
                 // Our figure was stale: count it as full until the next ping
@@ -327,6 +360,7 @@ async fn choose_route(
             return Ok((
                 Route::Local {
                     worker_id: picked.worker_id,
+                    worker_name: picked.worker_name,
                     channel: picked.channel,
                 },
                 Some(picked.slot),
@@ -429,7 +463,7 @@ async fn relay(
     user: &UserIdentity,
     request: &SessionRequest,
     session_id: Uuid,
-    worker_id: &str,
+    worker: &SessionWorker,
     client_addr: Option<String>,
     mut inbound: Inbound,
     outbound: Outbound,
@@ -438,7 +472,9 @@ async fn relay(
         user: Some(user.username.clone()),
         session_id: Some(session_id),
     };
+    let worker_id = worker.id.as_str();
     let mut start = json!({ "kind": "ssh", "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
+    add_names(&mut start, worker, proxy.name());
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
         start["ci"] = json!(user.ci);
@@ -451,7 +487,7 @@ async fn relay(
         tracing::error!(error = %e, "audit unavailable; closing the session");
         return;
     }
-    tracing::info!(session = %session_id, user = %user.username, resource = %request.resource, login = %request.principal, worker = %worker_id, "session started");
+    tracing::info!(session = %session_id, user = %user.username, resource = %request.resource, login = %request.principal, worker = %worker_id, worker_name = worker.name.as_deref(), "session started");
 
     let started = Instant::now();
     metrics::gauge!("limen_sessions_active", "kind" => "ssh").increment(1.0);
@@ -564,7 +600,7 @@ async fn relay(
     };
     let close = close.unwrap_or_default();
     let ctx_user = ctx.user.clone().unwrap_or_default();
-    let end = json!({
+    let mut end = json!({
         "kind": "ssh",
         "actor_type": limen_core::identity::actor_type(&ctx_user),
         "resource": request.resource,
@@ -581,6 +617,7 @@ async fn relay(
         "recording_uri": close.recording_uri,
         "recording_sha256": close.recording_sha256,
     });
+    add_names(&mut end, worker, None);
     metrics::gauge!("limen_sessions_active", "kind" => "ssh").decrement(1.0);
     metrics::counter!("limen_sessions_total", "kind" => "ssh").increment(1);
     if let Err(e) = proxy.audit.emit(EventKind::SessionEnd, ctx, end).await {

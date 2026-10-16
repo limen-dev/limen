@@ -75,11 +75,13 @@ impl Proxy {
         };
         let cp_addr = config.control_plane_addr.clone();
         let cp_name = config.control_plane_name.clone();
+        let own_name = limen_component::parse_name(config.name.as_deref())?;
         let creds = limen_component::load_or_enroll(
             &config.data_dir,
             "proxy",
             config.join_token.as_ref(),
             &config.dns_names,
+            own_name.as_deref(),
             || {
                 let ca = bootstrap_ca
                     .as_deref()
@@ -146,6 +148,12 @@ impl Proxy {
     #[must_use]
     pub fn id(&self) -> String {
         self.creds.borrow().id.clone()
+    }
+
+    /// The name given at enrollment, if any.
+    #[must_use]
+    pub fn name(&self) -> Option<String> {
+        self.creds.borrow().name.clone()
     }
 
     /// Current channel to the control plane, presenting this proxy's cert.
@@ -239,7 +247,7 @@ pub async fn run(
     ));
     let admin = tokio::spawn(serve_admin(proxy.clone(), shutdown.clone()));
 
-    tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), "proxy listening");
+    tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), name = proxy.name().as_deref(), "proxy listening");
     let mut connections = tokio::task::JoinSet::new();
     loop {
         let (tcp, remote) = tokio::select! {
@@ -403,7 +411,7 @@ async fn accept_tunnel(
     proxy
         .tunnels
         .record_ping(&worker.id, first.active_sessions, first.max_sessions);
-    tracing::info!(worker = %worker.id, tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
+    tracing::info!(worker = %worker.id, worker_name = limen_core::names::from_labels(&worker.labels), tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
 
     let mut tick = tokio::time::interval(Duration::from_secs(proxy.config.ping_interval_secs));
     tick.tick().await;

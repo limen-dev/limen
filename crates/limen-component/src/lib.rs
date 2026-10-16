@@ -26,6 +26,9 @@ use tonic::transport::Channel;
 pub struct ComponentCredentials {
     pub id: String,
     pub kind: String,
+    /// Display name given at enrollment, if any. Fixed for the identity's
+    /// life (it is also the certificate label `limen.io/name`).
+    pub name: Option<String>,
     pub labels: std::collections::BTreeMap<String, String>,
     pub key_pem: Secret<String>,
     pub cert_pem: String,
@@ -39,6 +42,8 @@ pub struct ComponentCredentials {
 struct Meta {
     id: String,
     kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     #[serde(default)]
     labels: std::collections::BTreeMap<String, String>,
 }
@@ -66,6 +71,7 @@ impl ComponentCredentials {
         Ok(Some(Self {
             id: meta.id,
             kind: meta.kind,
+            name: meta.name,
             labels: meta.labels,
             key_pem: Secret::new(read(KEY_FILE)?),
             cert_pem,
@@ -83,6 +89,7 @@ impl ComponentCredentials {
         let meta = serde_json::to_string_pretty(&Meta {
             id: self.id.clone(),
             kind: self.kind.clone(),
+            name: self.name.clone(),
             labels: self.labels.clone(),
         })?;
         for (name, contents, private) in [
@@ -168,6 +175,7 @@ fn classify(context: &str, status: &tonic::Status) -> CallError {
     let msg = format!("{context}: {} ({:?})", status.message(), status.code());
     match status.code() {
         Code::PermissionDenied
+        | Code::AlreadyExists
         | Code::InvalidArgument
         | Code::Unauthenticated
         | Code::FailedPrecondition => CallError::Rejected(msg),
@@ -181,13 +189,46 @@ fn new_key_and_csr() -> anyhow::Result<(KeyPair, Vec<u8>)> {
     Ok((key, csr.der().to_vec()))
 }
 
+/// The `--name` / `LIMEN_NAME` setting: trimmed, empty means none, and
+/// otherwise a valid name (checked here so a typo fails before enrolling;
+/// the control plane checks again).
+pub fn parse_name(flag: Option<&str>) -> anyhow::Result<Option<String>> {
+    match flag.map(str::trim).filter(|n| !n.is_empty()) {
+        None => Ok(None),
+        Some(name) => {
+            limen_core::names::validate_name(name).map_err(|e| anyhow::anyhow!("--name: {e}"))?;
+            Ok(Some(name.to_owned()))
+        }
+    }
+}
+
+/// What to warn when `--name` asks for something other than the name the
+/// identity was enrolled with: the name is fixed at enrollment.
+#[must_use]
+pub fn fixed_name_warning(enrolled: Option<&str>, flag: Option<&str>) -> Option<String> {
+    let flag = flag?;
+    if enrolled == Some(flag) {
+        return None;
+    }
+    Some(match enrolled {
+        Some(enrolled) => format!(
+            "--name {flag:?} is ignored: the name is fixed at enrollment, and this identity is {enrolled:?}; enroll again with a new join token to change it"
+        ),
+        None => format!(
+            "--name {flag:?} is ignored: the name is fixed at enrollment, and this identity was enrolled with no name; enroll again with a new join token to name it"
+        ),
+    })
+}
+
 /// Exchange a join token for credentials. The private key is generated here
-/// and never leaves the process (only its CSR is sent).
+/// and never leaves the process (only its CSR is sent). `name` must be
+/// approved by the token.
 pub async fn enroll(
     channel: Channel,
     join_token: &Secret<String>,
     kind: &str,
     dns_names: &[String],
+    name: Option<&str>,
 ) -> anyhow::Result<ComponentCredentials> {
     let (key, csr_der) = new_key_and_csr()?;
     let request = EnrollRequest {
@@ -195,7 +236,7 @@ pub async fn enroll(
         csr_der,
         kind: kind.to_owned(),
         dns_names: dns_names.to_vec(),
-        name: String::new(),
+        name: name.unwrap_or_default().to_owned(),
     };
     let resp = retry_if_went_away("enrollment", || {
         let mut client = EnrollmentClient::new(channel.clone());
@@ -209,6 +250,7 @@ pub async fn enroll(
     Ok(ComponentCredentials {
         id: resp.component_id,
         kind: kind.to_owned(),
+        name: (!resp.name.is_empty()).then_some(resp.name),
         labels: resp.labels.into_iter().collect(),
         key_pem: Secret::new(key.serialize_pem()),
         cert_pem: resp.cert_pem,
@@ -250,11 +292,14 @@ pub async fn renew(
 
 /// Load credentials from `dir`, or enroll with `join_token` if there are none.
 /// Enrollment is retried with backoff (the control plane may still be starting).
+/// `name` is asked for only at enrollment; once enrolled, a different one
+/// is ignored with a warning.
 pub async fn load_or_enroll<F>(
     dir: &Path,
     kind: &str,
     join_token: Option<&Secret<String>>,
     dns_names: &[String],
+    name: Option<&str>,
     channel: F,
 ) -> anyhow::Result<ComponentCredentials>
 where
@@ -275,16 +320,19 @@ where
                 creds.not_after
             );
         }
-        tracing::info!(id = %creds.id, expires = %creds.not_after, "loaded identity");
+        if let Some(warning) = fixed_name_warning(creds.name.as_deref(), name) {
+            tracing::warn!("{warning}");
+        }
+        tracing::info!(id = %creds.id, name = creds.name.as_deref(), expires = %creds.not_after, "loaded identity");
         return Ok(creds);
     }
     let token = join_token.context("not enrolled yet and no join token given (--join-token)")?;
     let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
     loop {
-        match enroll(channel()?, token, kind, dns_names).await {
+        match enroll(channel()?, token, kind, dns_names, name).await {
             Ok(creds) => {
                 creds.save(dir)?;
-                tracing::info!(id = %creds.id, expires = %creds.not_after, "enrolled");
+                tracing::info!(id = %creds.id, name = creds.name.as_deref(), expires = %creds.not_after, "enrolled");
                 return Ok(creds);
             }
             Err(e) if matches!(e.downcast_ref::<CallError>(), Some(CallError::Rejected(_))) => {
@@ -342,6 +390,7 @@ mod tests {
         let creds = ComponentCredentials {
             id: "worker-1".into(),
             kind: "worker".into(),
+            name: None,
             labels: [("pool".to_owned(), "dev".to_owned())].into(),
             key_pem: Secret::new(key.serialize_pem()),
             cert_pem: cert.pem(),
@@ -373,5 +422,88 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         loaded.tls_identity().expect("identity parses");
+        assert_eq!(loaded.name, None);
+    }
+
+    fn sample(dir: &Path, name: Option<&str>) -> ComponentCredentials {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let cert = CertificateParams::new(vec!["localhost".into()])
+            .expect("params")
+            .self_signed(&key)
+            .expect("cert");
+        let (not_before, not_after) = validity(&cert.pem()).expect("validity");
+        let creds = ComponentCredentials {
+            id: "worker-1".into(),
+            kind: "worker".into(),
+            name: name.map(str::to_owned),
+            labels: std::collections::BTreeMap::new(),
+            key_pem: Secret::new(key.serialize_pem()),
+            cert_pem: cert.pem(),
+            internal_ca_pem: cert.pem(),
+            user_ca_pem: cert.pem(),
+            not_before,
+            not_after,
+        };
+        creds.save(dir).expect("save");
+        creds
+    }
+
+    #[test]
+    fn name_is_saved_with_the_identity_and_old_identities_have_none() {
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        sample(dir.path(), Some("prod-a-worker-1"));
+        let loaded = ComponentCredentials::load(dir.path())
+            .expect("load")
+            .expect("present");
+        assert_eq!(loaded.name.as_deref(), Some("prod-a-worker-1"));
+
+        // An identity saved before names existed has no "name" key.
+        std::fs::write(
+            dir.path().join(META_FILE),
+            r#"{"id":"worker-1","kind":"worker","labels":{}}"#,
+        )
+        .expect("write old meta");
+        let old = ComponentCredentials::load(dir.path())
+            .expect("load old")
+            .expect("present");
+        assert_eq!(old.name, None);
+        // And a nameless identity is saved without one.
+        sample(dir.path(), None);
+        let meta = std::fs::read_to_string(dir.path().join(META_FILE)).expect("meta");
+        assert!(!meta.contains("name"), "{meta}");
+    }
+
+    #[test]
+    fn name_flag_is_trimmed_and_validated() {
+        assert_eq!(parse_name(None).expect("none"), None);
+        assert_eq!(parse_name(Some("")).expect("empty"), None);
+        assert_eq!(parse_name(Some("  ")).expect("blank"), None);
+        assert_eq!(
+            parse_name(Some(" edge-1\n")).expect("trimmed").as_deref(),
+            Some("edge-1")
+        );
+        for bad in ["Edge-1", "-a", "a_b", "w\u{f6}rker"] {
+            assert!(parse_name(Some(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_changed_name_after_enrollment_is_ignored_with_a_warning() {
+        assert_eq!(fixed_name_warning(Some("a-1"), None), None);
+        assert_eq!(fixed_name_warning(Some("a-1"), Some("a-1")), None);
+        assert_eq!(fixed_name_warning(None, None), None);
+        let w = fixed_name_warning(Some("a-1"), Some("a-2")).expect("warning");
+        assert!(
+            w.contains("a-1") && w.contains("a-2") && w.contains("fixed at enrollment"),
+            "{w}"
+        );
+        let w = fixed_name_warning(None, Some("a-2")).expect("warning");
+        assert!(w.contains("no name"), "{w}");
+    }
+
+    #[test]
+    fn a_name_conflict_is_not_retried() {
+        let e = classify("enrollment", &tonic::Status::already_exists("name taken"));
+        assert!(matches!(e, CallError::Rejected(_)));
     }
 }

@@ -179,7 +179,8 @@ impl Deployment {
             format!("--oidc-issuer={}", idp.issuer),
             format!("--oidc-client-id={CLIENT_ID}"),
             "--bootstrap-admin-group=admins".into(),
-            format!("--static-join-token=proxy:{PROXY_TOKEN}"),
+            // Proxies may pick any name with --name (none by default).
+            format!("--static-join-token=proxy:{PROXY_TOKEN}:limen.io/name=*"),
             "--proxy-dns-name=localhost".into(),
             format!(
                 "--recordings-dir={}",
@@ -272,24 +273,36 @@ impl Deployment {
     }
 
     async fn start_proxy(&self, listener: tokio::net::TcpListener) -> RunningProxy {
-        self.start_named_proxy(listener, "proxy").await
+        self.start_named_proxy(listener, "proxy", &[]).await
     }
 
     /// Another proxy, with its own identity and data directory. Returns it
     /// and the address it listens on.
     pub async fn start_extra_proxy(&self, name: &str) -> (RunningProxy, SocketAddr) {
+        self.start_extra_proxy_with(name, &[]).await
+    }
+
+    /// [`start_extra_proxy`](Self::start_extra_proxy) with extra flags for
+    /// this proxy only, such as `--name=proxy-b`. They replace the
+    /// deployment's proxy flags they repeat.
+    pub async fn start_extra_proxy_with(
+        &self,
+        name: &str,
+        extra: &[&str],
+    ) -> (RunningProxy, SocketAddr) {
         self.check_registry_lease();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
-        (self.start_named_proxy(listener, name).await, addr)
+        (self.start_named_proxy(listener, name, extra).await, addr)
     }
 
     async fn start_named_proxy(
         &self,
         listener: tokio::net::TcpListener,
         name: &str,
+        extra: &[&str],
     ) -> RunningProxy {
         let addr = listener.local_addr().expect("addr");
         let mut args = vec![
@@ -303,7 +316,16 @@ impl Deployment {
             "--policy-refresh-secs=1".into(),
             "--policy-grace-secs=3".into(),
         ];
-        args.extend_from_slice(&self.proxy_args);
+        // This proxy's own flags replace the deployment's that they repeat.
+        let flag = |a: &str| a.split('=').next().unwrap_or_default().to_owned();
+        let own: Vec<String> = extra.iter().map(|a| flag(a)).collect();
+        args.extend(
+            self.proxy_args
+                .iter()
+                .filter(|a| !own.contains(&flag(a)))
+                .cloned(),
+        );
+        args.extend(extra.iter().map(|&a| a.to_owned()));
         let config: limen_proxy::Config = parse(&args);
         let (proxy, creds_tx) = limen_proxy::Proxy::start(config)
             .await
