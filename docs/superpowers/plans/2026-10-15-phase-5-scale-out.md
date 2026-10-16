@@ -144,6 +144,22 @@
 - [ ] **Step 1: Failing tests:** `draining_worker_gets_no_new_sessions`, `open_session_finishes_during_drain`, `session_over_deadline_is_ended_and_audited`.
 - [ ] **Step 2–4:** run (FAIL), implement, run (PASS). Commit `feat(worker): drain open sessions on scale-in`.
 
+### Task 8b: Optional names for proxies and workers
+
+**Why:** autoscaled and multi-VPC deployments need readable names in the console, audit events, logs, and metrics. Added at the owner's request during the phase; ids stay the identity.
+
+**Files:** Modify `proto/limen/v1/control.proto` (additive), `crates/limen-control-plane/src/services/enrollment.rs`, join-token creation (`db.rs`, CLI/console token forms), new migration `0009_component_names.sql`, `crates/limen-component/src/lib.rs`, `crates/limen-proxy/src/config.rs`, `crates/limen-worker/src/main.rs`, console templates for components and tunnels; tests in the control plane and `crates/limen-e2e/tests/scale.rs`.
+
+**Interfaces:**
+- `EnrollRequest.name` (string, optional); `EnrollResponse` and component listings return `name`. Proxy and worker flag `--name` / `LIMEN_NAME`, sent only at first enrollment.
+- A join token may carry an approved name or a pattern with `*` (like `dns_names`): `limen admin create-join-token --name 'prod-a-*'`; static tokens get a `name` field. A name the token does not approve is refused (`permission_denied`), so a component cannot impersonate another.
+- Validation: `[a-z0-9-]`, 1 to 63 characters, no leading or trailing `-`, unique among non-revoked components (partial unique index). The id stays the identity (certificate CN, policy, revocation); the name is display only and untrusted for authorization, and is also recorded in the certificate as the label `limen.io/name` so it cannot be changed later by the component.
+- Shown next to the id in the console (components, tunnels), audit data (`worker_name`, `proxy_name`), logs, and `/tunnels`. Omitted name keeps today's behavior exactly.
+
+- [ ] **Step 1: Failing tests:** enroll with an approved name; refused without approval; refused on a duplicate live name; pattern match rules (`prod-a-*` accepts `prod-a-1`, refuses `prod-b-1`); name freed after revoke; e2e that a session's audit data carries `worker_name`; no-name enrollment unchanged.
+- [ ] **Step 2–4:** run (FAIL), implement, run (PASS). Threat model note (name untrusted for authorization) goes in Task 10.
+- [ ] **Step 5: Commit** `feat: optional names for proxies and workers`.
+
 ### Task 9: Scale metrics
 
 **Files:** Modify `crates/limen-proxy/src/{lib.rs,tunnels.rs}`, `crates/limen-worker/src/lib.rs`, `crates/limen-control-plane/src/{replicas.rs,server.rs}`, `dashboards/grafana/generate.py` (then regenerate).
