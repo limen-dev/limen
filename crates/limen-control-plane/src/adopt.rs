@@ -139,7 +139,11 @@ pub async fn run(args: AdoptArgs) -> Result<Adopted, AdoptError> {
     let cas = crate::ca_store::load(config, &db)
         .await
         .map_err(AdoptError::Setup)?;
-    let me = format!("spool-adopt-{:016x}", rand::random::<u64>());
+    let me = format!(
+        "{}{:016x}",
+        replicas::ADOPT_ID_PREFIX,
+        rand::random::<u64>()
+    );
     let registration =
         replicas::register(&db, &me, &config.ingest_url(), SpoolMode::Ephemeral).await?;
     let heartbeat = {
@@ -163,7 +167,7 @@ pub async fn run(args: AdoptArgs) -> Result<Adopted, AdoptError> {
     };
 
     let outcome = async {
-        let mut peers = replicas::live_peers(&db, &me).await?;
+        let mut peers = replicas::handoff_targets(&db, &me).await?;
         handoff_client::shuffle(&mut peers);
         let tls = HandoffTls::issue(&cas, &me, &config.dns_names).await?;
         Ok::<_, AdoptError>(

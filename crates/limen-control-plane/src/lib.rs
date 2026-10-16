@@ -73,6 +73,15 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let console = build_console(&config, &http)?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
+    if config.spool_mode == replicas::SpoolMode::Ephemeral && config.advertise_url.is_none() {
+        // Peers hand their unshipped audit events to this URL at shutdown; the
+        // default (the first --dns-name and the listen port) is often a shared
+        // service name that doesn't reach this replica.
+        tracing::warn!(
+            url = %config.ingest_url(),
+            "ephemeral spool mode without --advertise-url: peers will try this URL for audit handoff; set --advertise-url to an address that reaches this replica"
+        );
+    }
     // Claim the id before the pipeline opens the spool, so a duplicate
     // replica never touches it.
     let registration = replicas::register(&db, &config.id, &config.ingest_url(), config.spool_mode)
@@ -80,7 +89,17 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         .context("registering this replica")?;
     let config = Arc::new(config);
     let snapshot_signer: sinks::SignerSlot = Arc::default();
-    let pipeline = pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await?;
+    // If the start fails from here on, give the id back: a restart (say, of a
+    // crash-looping StatefulSet pod) must not wait out the row's 15 seconds.
+    let pipeline = match pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            if let Err(release) = replicas::deregister(&db, &registration).await {
+                tracing::warn!(error = %release, "couldn't release the replica id after a failed start");
+            }
+            return Err(e);
+        }
+    };
     let sink = Arc::new(SpoolSink(pipeline.spool.clone()));
     let audit = Emitter::new("control-plane", &config.id, sink, config.audit_failure_mode);
     let limits = Arc::new(Limits::new(
@@ -104,7 +123,6 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     })
 }
 
-/// The web console is off unless `--console-public-url` is set.
 /// Replace `dir/name` with `contents` atomically: readers see the old file
 /// or the new one, never a partial one.
 async fn export(dir: &std::path::Path, name: &str, contents: &str) -> std::io::Result<()> {
@@ -117,6 +135,7 @@ async fn export(dir: &std::path::Path, name: &str, contents: &str) -> std::io::R
     renamed
 }
 
+/// The web console is off unless `--console-public-url` is set.
 fn build_console(
     config: &Config,
     http: &http_client::HttpClient,

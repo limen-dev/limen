@@ -11,6 +11,15 @@ use crate::db::Db;
 
 /// Heartbeat interval.
 pub const HEARTBEAT_SECS: u64 = 5;
+/// How long a row stays live after its last heartbeat. This is the `15
+/// seconds` in this file's SQL, which has to be a literal.
+pub const LIVE_SECS: u64 = 15;
+/// A replica that has not managed a heartbeat for this long stops shipping to
+/// S3 (see `Pipeline::set_fenced`). Checked on every heartbeat tick, so the
+/// fence is in place at most `FENCE_AFTER_SECS + HEARTBEAT_SECS` after the last
+/// success: before any other process can take the id over.
+pub const FENCE_AFTER_SECS: u64 = 8;
+const _: () = assert!(FENCE_AFTER_SECS + HEARTBEAT_SECS < LIVE_SECS);
 /// Rows older than this are stale. Keep in sync with the SQL below.
 pub const STALE_AFTER_SECS: u64 = 15;
 
@@ -112,7 +121,27 @@ pub async fn heartbeat(db: &Db, me: &Registration) -> Result<(), HeartbeatError>
     Ok(())
 }
 
-/// Live replicas other than `except_id`, oldest first.
+/// Prefix of the ids the adopt tool registers under (the SQL below has it as
+/// a literal).
+pub const ADOPT_ID_PREFIX: &str = "spool-adopt-";
+
+/// Live replicas that can *receive* a handoff: those other than `except_id`,
+/// without the short-lived rows the adopt tool registers to be allowed to
+/// *send* one. Oldest first.
+pub async fn handoff_targets(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, ingest_url FROM control_plane_replicas \
+         WHERE id <> $1 AND heartbeat_at >= now() - interval '15 seconds' \
+         AND id NOT LIKE 'spool-adopt-%' \
+         ORDER BY started_at, id",
+    )
+    .bind(except_id)
+    .fetch_all(db)
+    .await
+}
+
+/// Live replicas other than `except_id`, oldest first, the adopt tool's rows
+/// included: who may *send* a handoff.
 pub async fn live_peers(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, ingest_url FROM control_plane_replicas \
@@ -128,7 +157,8 @@ pub async fn live_peers(db: &Db, except_id: &str) -> Result<Vec<Replica>, sqlx::
 pub async fn live_count(db: &Db) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT count(*) FROM control_plane_replicas \
-         WHERE heartbeat_at >= now() - interval '15 seconds'",
+         WHERE heartbeat_at >= now() - interval '15 seconds' \
+         AND id NOT LIKE 'spool-adopt-%'",
     )
     .fetch_one(db)
     .await
@@ -249,6 +279,29 @@ mod tests {
             with_stale >= without,
             "a stale replica is not counted once aged"
         );
+        for r in &regs {
+            deregister(&db, r).await.expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_adopt_tools_row_may_send_but_is_never_a_target() {
+        let Some(db) = db().await else { return };
+        let (cp, adopt) = (uid("cp"), format!("{ADOPT_ID_PREFIX}{}", uid("t")));
+        let mut regs = Vec::new();
+        for (id, url) in [(&cp, "https://cp:1"), (&adopt, "https://adopt:1")] {
+            regs.push(
+                register(&db, id, url, SpoolMode::Durable)
+                    .await
+                    .expect("register"),
+            );
+        }
+        let ids = |peers: Vec<Replica>| peers.into_iter().map(|r| r.id).collect::<Vec<_>>();
+        let may_send = ids(live_peers(&db, "nobody").await.expect("peers"));
+        assert!(may_send.contains(&adopt) && may_send.contains(&cp));
+        let targets = ids(handoff_targets(&db, "nobody").await.expect("targets"));
+        assert!(targets.contains(&cp), "a real replica is a target");
+        assert!(!targets.contains(&adopt), "the adopt tool is not");
         for r in &regs {
             deregister(&db, r).await.expect("cleanup");
         }

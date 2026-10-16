@@ -6,7 +6,8 @@
 //! its sinks process it. Each batch is committed for every consumer only once
 //! the peer acks it as durable. A peer that fails mid-stream is dropped and
 //! the next one gets everything not yet acked, so a record can arrive twice
-//! (sinks deduplicate by `event_id`) but is never dropped.
+//! (the console and the verifier count each `event_id` once; the other sinks
+//! keep both lines) but is never dropped.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -123,13 +124,15 @@ fn left(spool: &Spool) -> u64 {
 pub async fn send_remaining(state: &AppState, deadline: Duration) -> Result<u64, HandoffError> {
     let until = Instant::now() + deadline;
     let spool = &state.pipeline.spool;
-    let mut peers =
-        tokio::time::timeout_at(until, replicas::live_peers(&state.db, &state.config.id))
-            .await
-            .map_err(|_| HandoffError::Deadline {
-                sent: 0,
-                left: left(spool),
-            })??;
+    let mut peers = tokio::time::timeout_at(
+        until,
+        replicas::handoff_targets(&state.db, &state.config.id),
+    )
+    .await
+    .map_err(|_| HandoffError::Deadline {
+        sent: 0,
+        left: left(spool),
+    })??;
     shuffle(&mut peers);
     let tls = tokio::time::timeout_at(
         until,

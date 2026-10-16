@@ -133,6 +133,19 @@ pub struct Pipeline {
     /// Consumers give up immediately when this flips.
     deadline: Arc<watch::Sender<bool>>,
     tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// While set, this replica writes nothing to S3: it cannot confirm that it
+    /// still owns its id (and so its manifest chain).
+    fenced: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Why S3 shipping is paused while the replica is fenced.
+fn check_fence(fenced: &std::sync::atomic::AtomicBool) -> Result<(), ShipError> {
+    if fenced.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(ShipError::Retry(
+            "S3 shipping is paused: this replica can't confirm it still owns its id".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The spool consumers a replica with this configuration runs.
@@ -227,6 +240,7 @@ impl Pipeline {
             stop: Arc::new(watch::channel(false).0),
             deadline: Arc::new(watch::channel(false).0),
             tasks: Arc::default(),
+            fenced: Arc::default(),
         })
     }
 
@@ -246,6 +260,20 @@ impl Pipeline {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(task);
+    }
+
+    /// Pause (or resume) shipping to S3. Set when this replica can no longer
+    /// confirm that it owns its id: another process may be about to write the
+    /// same manifest chain.
+    pub fn set_fenced(&self, fenced: bool) {
+        self.fenced
+            .store(fenced, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether S3 shipping is paused.
+    #[must_use]
+    pub fn is_fenced(&self) -> bool {
+        self.fenced.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Start every configured sink. They run until [`Pipeline::drain`].
@@ -273,9 +301,15 @@ impl Pipeline {
                 batch_max: 10_000,
                 linger: self.config.audit_s3_flush,
             };
+            let fenced = Arc::clone(&self.fenced);
             self.spawn_consumer(consumer, move |batch| {
-                let sink = sink.clone();
-                async move { sink.ship(batch).await }
+                let (sink, fenced) = (sink.clone(), Arc::clone(&fenced));
+                async move {
+                    // Events stay in the spool while fenced: nothing is lost,
+                    // and the S3 chain is not written by two processes.
+                    check_fence(&fenced)?;
+                    sink.ship(batch).await
+                }
             });
         }
         if let Some(sink) = self.datadog.clone() {
@@ -365,4 +399,21 @@ async fn write_jsonl(path: PathBuf, batch: Vec<(u64, Vec<u8>)>) -> Result<(), Sh
     }
     file.write_all(&buf).await.map_err(fail)?;
     file.sync_data().await.map_err(fail)
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use std::sync::atomic::AtomicBool;
+
+    use super::check_fence;
+
+    #[test]
+    fn a_fenced_replica_ships_nothing_to_s3_and_resumes_when_unfenced() {
+        let fenced = AtomicBool::new(false);
+        assert!(check_fence(&fenced).is_ok());
+        fenced.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(check_fence(&fenced).is_err(), "retry, never drop");
+        fenced.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(check_fence(&fenced).is_ok());
+    }
 }
