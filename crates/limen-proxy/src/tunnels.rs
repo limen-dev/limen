@@ -167,6 +167,8 @@ struct State {
 pub struct Tunnels {
     inner: Arc<Mutex<State>>,
     pub changed: Arc<Notify>,
+    /// Sessions [`reserve`](Self::reserve) refused because the worker was full.
+    refused: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Tunnels {
@@ -220,6 +222,13 @@ impl Tunnels {
         }
     }
 
+    /// Sessions forwarded by peers that this proxy refused because the
+    /// worker was full, since it started.
+    #[must_use]
+    pub fn refused_at_cap(&self) -> u64 {
+        self.refused.load(Ordering::SeqCst)
+    }
+
     /// This proxy's view of a worker's load, if it holds a tunnel to it.
     #[must_use]
     pub fn load(&self, worker_id: &str) -> Option<Load> {
@@ -271,6 +280,9 @@ impl Tunnels {
             .ok_or(NoWorker::None)?;
         let worker = state.workers.get(worker_id).ok_or(NoWorker::None)?;
         if worker.load().is_full() {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            metrics::counter!("limen_proxy_sessions_refused_total", "reason" => "capacity")
+                .increment(1);
             return Err(NoWorker::Full);
         }
         Ok((channel, worker.slot()))
@@ -376,7 +388,7 @@ mod tests {
                 .or_insert(0) += 1;
         }
         let light = counts["light"];
-        assert!((430..=570).contains(&light), "light got {light} of 1000");
+        assert!((465..=535).contains(&light), "light got {light} of 1000");
         for heavy in ["a", "b", "c"] {
             assert!(counts[heavy] > 100, "{heavy} got {} of 1000", counts[heavy]);
         }
@@ -573,11 +585,19 @@ mod tests {
         assert_eq!(tunnels.pick(|_| false, &[]).err(), Some(NoWorker::None));
         tunnels.record_ping("w", 5, 5);
         assert_eq!(tunnels.pick(|_| true, &[]).err(), Some(NoWorker::Full));
-        // Reserving a named worker (a peer's forwarded session) honors the cap.
+        // Reserving a named worker (a peer's forwarded session) honors the
+        // cap, and each refusal is counted.
+        assert_eq!(tunnels.refused_at_cap(), 0);
         assert!(tunnels.reserve("w").is_err());
+        assert_eq!(tunnels.refused_at_cap(), 1);
         tunnels.record_ping("w", 4, 5);
         assert!(tunnels.reserve("w").is_ok());
         assert!(tunnels.reserve("missing").is_err());
+        assert_eq!(
+            tunnels.refused_at_cap(),
+            1,
+            "only refusals at the cap count"
+        );
     }
 
     #[tokio::test]

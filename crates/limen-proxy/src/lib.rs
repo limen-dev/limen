@@ -39,9 +39,7 @@ pub use config::Config;
 use tunnels::{Tunnel, Tunnels};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const PING_INTERVAL: Duration = Duration::from_secs(15);
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
-const REPORT_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_CONNECTIONS: usize = 20_000;
 
 /// State shared by every connection.
@@ -407,7 +405,7 @@ async fn accept_tunnel(
         .record_ping(&worker.id, first.active_sessions, first.max_sessions);
     tracing::info!(worker = %worker.id, tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
 
-    let mut tick = tokio::time::interval(PING_INTERVAL);
+    let mut tick = tokio::time::interval(Duration::from_secs(proxy.config.ping_interval_secs));
     tick.tick().await;
     // Revocation arrives with the policy snapshot; check the cached copy.
     let mut revocation = tokio::time::interval(Duration::from_secs(1));
@@ -517,7 +515,7 @@ async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
 
 /// Tell the control plane which tunnels this proxy holds (ADR-0004).
 async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
-    let mut tick = tokio::time::interval(REPORT_INTERVAL);
+    let mut tick = tokio::time::interval(Duration::from_secs(proxy.config.report_interval_secs));
     loop {
         tokio::select! {
             _ = tick.tick() => {}

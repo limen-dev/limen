@@ -176,11 +176,10 @@ fn no_capacity(resource: &str) -> Denial {
     }
 }
 
-/// A refusal from the worker, or from the peer proxy holding its tunnel.
-/// `resource_exhausted` means it is full.
-fn refused(resource: &str, s: &tonic::Status) -> Denial {
+/// A refusal from the worker, or from the peer proxy holding its tunnel,
+/// other than "full" (which [`open_on`] reports as [`Opening::Full`]).
+fn refused(s: &tonic::Status) -> Denial {
     match s.code() {
-        tonic::Code::ResourceExhausted => no_capacity(resource),
         tonic::Code::PermissionDenied => {
             denied(format!("worker refused the session: {}", s.message()))
         }
@@ -266,7 +265,7 @@ async fn establish(
                     return Err(no_capacity(&request.resource));
                 }
             }
-            Err(Opening::Denied(s)) => return Err(refused(&request.resource, &s)),
+            Err(Opening::Denied(s)) => return Err(refused(&s)),
             Err(Opening::Failed(denial)) => return Err(denial),
         }
     }

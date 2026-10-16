@@ -63,6 +63,19 @@ pub struct Config {
     #[arg(long, env = "LIMEN_POLICY_REFRESH_SECS", default_value_t = 10)]
     pub policy_refresh_secs: u64,
 
+    /// How often to ping each worker tunnel. The answer also carries the
+    /// worker's load (sessions and cap) used to choose workers. 1 to 3600.
+    #[arg(long, env = "LIMEN_PING_INTERVAL_SECS", default_value_t = 15,
+          value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub ping_interval_secs: u64,
+
+    /// How often to report this proxy's tunnels, with each worker's load,
+    /// to the control plane's registry (also on every tunnel change), where
+    /// peer proxies read them. 1 to 3600.
+    #[arg(long, env = "LIMEN_REPORT_INTERVAL_SECS", default_value_t = 15,
+          value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub report_interval_secs: u64,
+
     /// Refuse new audit events (and, by default, the actions they audit)
     /// once the local spool holds this many bytes, e.g. during a long
     /// control plane outage.
@@ -76,4 +89,39 @@ pub struct Config {
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
 fn parse_secret(s: &str) -> Result<Secret<String>, String> {
     Ok(Secret::new(s.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(clap::Parser)]
+    struct Cli {
+        #[command(flatten)]
+        config: Config,
+    }
+
+    fn parse_with(extra: &[&str]) -> Result<Config, clap::Error> {
+        use clap::Parser as _;
+        let mut argv = vec!["limen-proxy", "--control-plane-addr=cp:3080"];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn ping_and_report_intervals_are_bounded() {
+        let c = parse_with(&[]).expect("defaults");
+        assert_eq!((c.ping_interval_secs, c.report_interval_secs), (15, 15));
+        let c = parse_with(&["--ping-interval-secs=3600", "--report-interval-secs=1"])
+            .expect("in range");
+        assert_eq!((c.ping_interval_secs, c.report_interval_secs), (3600, 1));
+        for bad in [
+            "--ping-interval-secs=0",
+            "--ping-interval-secs=3601",
+            "--report-interval-secs=0",
+            "--report-interval-secs=3601",
+        ] {
+            assert!(parse_with(&[bad]).is_err(), "{bad}");
+        }
+    }
 }
