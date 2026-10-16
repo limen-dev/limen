@@ -17,11 +17,16 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::Notify;
 
-/// The load of a worker that reports no cap: workers before Phase 5 (which
-/// report 0/0) and workers started with `--max-sessions 0`. Neutral, so they
-/// are neither preferred nor avoided against workers reporting a real ratio,
-/// and never full.
-pub const UNKNOWN_LOAD: f64 = 0.5;
+/// How a worker that reports no cap is weighed: workers before Phase 5 (they
+/// report 0/0, and so count only the sessions this proxy opened) and workers
+/// started with `--max-sessions 0`. With `x = active / K`, their load is `x`
+/// up to 0.5 and `1 - 0.25 / x` beyond (continuous and smooth at 0.5,
+/// always below 1). So they never fill; among themselves the less busy
+/// wins; up to half of K they weigh exactly like a worker with the default
+/// cap (200) and the same count; past that they take a growing share of the
+/// overflow, as capped workers near their limit. In a mixed fleet, during a
+/// rolling upgrade say, neither kind is starved or flooded.
+pub const UNCAPPED_K: u32 = 200;
 
 #[derive(Debug, Clone)]
 pub struct Tunnel {
@@ -58,11 +63,12 @@ impl Load {
     }
 
     /// `active / max`, which is at least 1.0 exactly when the worker is full;
-    /// [`UNKNOWN_LOAD`] without a cap.
+    /// below 1.0 always without a cap (see [`UNCAPPED_K`]).
     #[must_use]
     pub fn ratio(self) -> f64 {
         if self.max == 0 {
-            UNKNOWN_LOAD
+            let x = f64::from(self.active) / f64::from(UNCAPPED_K);
+            if x <= 0.5 { x } else { 1.0 - 0.25 / x }
         } else {
             f64::from(self.active) / f64::from(self.max)
         }
@@ -191,10 +197,26 @@ impl Tunnels {
 
     /// Record what a worker's ping said. Ignored once the worker has no
     /// tunnel here.
+    ///
+    /// `ours` is read when the answer arrives, not when the worker counted:
+    /// a session we opened that hadn't reached the worker yet (or one that
+    /// ended there but not yet here) makes `others` read low for a moment.
+    /// The next ping corrects it, and the worker enforces its cap anyway.
     pub fn record_ping(&self, worker_id: &str, active: u32, max: u32) {
         if let Some(w) = self.lock().workers.get_mut(worker_id) {
             w.others = active.saturating_sub(w.ours.load(Ordering::SeqCst));
             w.max = max;
+        }
+    }
+
+    /// The worker refused a session as full although our figure said it had
+    /// room (it was stale): count it as full until its next ping. No effect
+    /// on a worker without a cap.
+    pub fn mark_full(&self, worker_id: &str) {
+        if let Some(w) = self.lock().workers.get_mut(worker_id)
+            && w.max > 0
+        {
+            w.others = w.max.saturating_sub(w.ours.load(Ordering::SeqCst));
         }
     }
 
@@ -254,18 +276,20 @@ impl Tunnels {
         Ok((channel, worker.slot()))
     }
 
-    /// A worker whose labels satisfy `accept`, chosen by [`p2c`] on load,
-    /// with a live tunnel to it and a slot that counts the new session.
+    /// A worker whose labels satisfy `accept` and that is not in `exclude`,
+    /// chosen by [`p2c`] on load, with a live tunnel to it and a slot that
+    /// counts the new session.
     pub fn pick(
         &self,
         accept: impl Fn(&std::collections::BTreeMap<String, String>) -> bool,
+        exclude: &[String],
     ) -> Result<Picked, NoWorker> {
         let state = self.lock();
         // One candidate per eligible worker, whatever its tunnel count.
         let mut candidates: Vec<(&str, Vec<&TunnelChannel>, f64)> = Vec::new();
         let mut index: HashMap<&str, usize> = HashMap::new();
         for t in state.tunnels.values() {
-            if t.channel.is_closed() || !accept(&t.labels) {
+            if t.channel.is_closed() || exclude.contains(&t.worker_id) || !accept(&t.labels) {
                 continue;
             }
             if let Some(&i) = index.get(t.worker_id.as_str()) {
@@ -275,7 +299,7 @@ impl Tunnels {
             let load = state
                 .workers
                 .get(&t.worker_id)
-                .map_or(UNKNOWN_LOAD, |w| w.load().ratio());
+                .map_or(0.0, |w| w.load().ratio());
             index.insert(&t.worker_id, candidates.len());
             candidates.push((&t.worker_id, vec![&t.channel], load));
         }
@@ -303,7 +327,7 @@ impl Tunnels {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use rand::SeedableRng;
     use rand::rngs::StdRng;
@@ -339,12 +363,61 @@ mod tests {
     }
 
     #[test]
-    fn load_ratio_and_unknown_load() {
+    fn p2c_draws_two_of_many() {
+        // One light worker among three heavy ones is in the drawn pair half
+        // the time (1 - C(3,2)/C(4,2)), and then always wins: about 50 % of
+        // the picks, twice its 25 % share under a uniform pick.
+        let workers = [("light", 0.1), ("a", 0.9), ("b", 0.9), ("c", 0.9)];
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut counts = HashMap::new();
+        for _ in 0..1000 {
+            *counts
+                .entry(p2c(&workers, |w| w.1, &mut rng).expect("a pick").0)
+                .or_insert(0) += 1;
+        }
+        let light = counts["light"];
+        assert!((430..=570).contains(&light), "light got {light} of 1000");
+        for heavy in ["a", "b", "c"] {
+            assert!(counts[heavy] > 100, "{heavy} got {} of 1000", counts[heavy]);
+        }
+    }
+
+    #[test]
+    fn uncapped_workers_compare_by_count() {
         // Workers before Phase 5 (and workers without a cap) report 0/0:
-        // neutral load, never full.
+        // never full, and among themselves the less busy is less loaded.
         let old = Load { active: 0, max: 0 };
         assert!(!old.is_full());
-        assert!((old.ratio() - UNKNOWN_LOAD).abs() < f64::EPSILON);
+        assert!(old.ratio().abs() < f64::EPSILON);
+        assert!(Load { active: 10, max: 0 }.ratio() < Load { active: 50, max: 0 }.ratio());
+        // Against a worker with the default cap, an uncapped one with the same
+        // count weighs the same up to half of it, and less beyond.
+        let capped = |active| Load { active, max: 200 }.ratio();
+        let uncapped = |active| Load { active, max: 0 }.ratio();
+        assert!((uncapped(50) - capped(50)).abs() < f64::EPSILON);
+        assert!(uncapped(150) < capped(150));
+        assert!(uncapped(1_000_000) < 1.0);
+        assert!(uncapped(999) < uncapped(1000));
+        assert!(
+            Load { active: 0, max: 0 }.ratio()
+                < Load {
+                    active: 150,
+                    max: 200
+                }
+                .ratio()
+        );
+        assert!(
+            Load {
+                active: 10,
+                max: 200
+            }
+            .ratio()
+                < Load {
+                    active: 100,
+                    max: 0
+                }
+                .ratio()
+        );
         let busy_unlimited = Load {
             active: 10_000,
             max: 0,
@@ -354,6 +427,70 @@ mod tests {
         assert!(Load { active: 2, max: 2 }.is_full());
         assert!(Load { active: 3, max: 2 }.ratio() >= 1.0);
         assert!((Load { active: 1, max: 4 }.ratio() - 0.25).abs() < f64::EPSILON);
+    }
+
+    /// Sessions placed one after another on two capped and two uncapped
+    /// workers: everybody gets a fair share, nobody is starved or flooded.
+    fn shares(loads: &mut [Load], picks: usize, seed: u64) -> Vec<usize> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut got = vec![0; loads.len()];
+        let ids: Vec<usize> = (0..loads.len()).collect();
+        for _ in 0..picks {
+            let i = *p2c(&ids, |&i| loads[i].ratio(), &mut rng).expect("room");
+            loads[i].active += 1;
+            got[i] += 1;
+        }
+        got
+    }
+
+    #[test]
+    fn mixed_and_uncapped_fleets_share_the_sessions() {
+        let mut mixed = [
+            Load {
+                active: 0,
+                max: 200,
+            },
+            Load {
+                active: 0,
+                max: 200,
+            },
+            Load { active: 0, max: 0 },
+            Load { active: 0, max: 0 },
+        ];
+        for (i, n) in shares(&mut mixed, 400, 5).into_iter().enumerate() {
+            assert!((70..=130).contains(&n), "worker {i} got {n} of 400");
+        }
+        // Past half of the default cap the uncapped ones take more of the
+        // overflow, but the capped ones keep filling: the loads meet at
+        // capped 150/200 = uncapped 1 - 0.25 / (200/200), i.e. 150 and 200
+        // each of 700. (Simulated means: a fixed 0.5 for uncapped gives
+        // 138 / 211, and active / (active + 200) gives 111 / 239.)
+        let mut busy = [
+            Load {
+                active: 0,
+                max: 200,
+            },
+            Load {
+                active: 0,
+                max: 200,
+            },
+            Load { active: 0, max: 0 },
+            Load { active: 0, max: 0 },
+        ];
+        let got = shares(&mut busy, 700, 9);
+        for (i, n) in got.iter().enumerate().take(2) {
+            assert!((144..=158).contains(n), "capped worker {i} got {n} of 700");
+        }
+        for (i, n) in got.iter().enumerate().skip(2) {
+            assert!(
+                (192..=206).contains(n),
+                "uncapped worker {i} got {n} of 700"
+            );
+        }
+        let mut uncapped = [Load::default(); 4];
+        for (i, n) in shares(&mut uncapped, 400, 6).into_iter().enumerate() {
+            assert!((70..=130).contains(&n), "worker {i} got {n} of 400");
+        }
     }
 
     /// A tunnel channel over an in-memory pipe; nothing answers on it, but
@@ -387,7 +524,9 @@ mod tests {
         tunnels.record_ping("old", 0, 0);
         let mut held = Vec::new();
         for _ in 0..50 {
-            let picked = tunnels.pick(|_| true).expect("an old worker has no cap");
+            let picked = tunnels
+                .pick(|_| true, &[])
+                .expect("an old worker has no cap");
             assert_eq!(picked.worker_id, "old");
             held.push(picked);
         }
@@ -403,11 +542,11 @@ mod tests {
         assert_eq!(tunnels.load("w"), Some(Load { active: 1, max: 3 }));
 
         // Both tunnels share one load: two picks fill the worker before any ping.
-        let first = tunnels.pick(|_| true).expect("room");
-        let second = tunnels.pick(|_| true).expect("room");
+        let first = tunnels.pick(|_| true, &[]).expect("room");
+        let second = tunnels.pick(|_| true, &[]).expect("room");
         assert_eq!(tunnels.load("w"), Some(Load { active: 3, max: 3 }));
         assert_eq!(
-            tunnels.pick(|_| true).err(),
+            tunnels.pick(|_| true, &[]).err(),
             Some(NoWorker::Full),
             "full between pings"
         );
@@ -419,7 +558,9 @@ mod tests {
         // One of ours ends: room again at once, without waiting for a ping.
         drop(first);
         assert_eq!(tunnels.load("w"), Some(Load { active: 2, max: 3 }));
-        let third = tunnels.pick(|_| true).expect("room after a session ended");
+        let third = tunnels
+            .pick(|_| true, &[])
+            .expect("room after a session ended");
         drop((second, third));
         assert_eq!(tunnels.load("w"), Some(Load { active: 1, max: 3 }));
     }
@@ -427,16 +568,48 @@ mod tests {
     #[tokio::test]
     async fn no_eligible_worker_is_not_a_capacity_problem() {
         let tunnels = Tunnels::default();
-        assert_eq!(tunnels.pick(|_| true).err(), Some(NoWorker::None));
+        assert_eq!(tunnels.pick(|_| true, &[]).err(), Some(NoWorker::None));
         let _end = add(&tunnels, "w", "t1").await;
-        assert_eq!(tunnels.pick(|_| false).err(), Some(NoWorker::None));
+        assert_eq!(tunnels.pick(|_| false, &[]).err(), Some(NoWorker::None));
         tunnels.record_ping("w", 5, 5);
-        assert_eq!(tunnels.pick(|_| true).err(), Some(NoWorker::Full));
+        assert_eq!(tunnels.pick(|_| true, &[]).err(), Some(NoWorker::Full));
         // Reserving a named worker (a peer's forwarded session) honors the cap.
         assert!(tunnels.reserve("w").is_err());
         tunnels.record_ping("w", 4, 5);
         assert!(tunnels.reserve("w").is_ok());
         assert!(tunnels.reserve("missing").is_err());
+    }
+
+    #[tokio::test]
+    async fn refused_workers_are_excluded_and_counted_full_until_the_next_ping() {
+        let tunnels = Tunnels::default();
+        let _a = add(&tunnels, "a", "t1").await;
+        let _b = add(&tunnels, "b", "t2").await;
+        tunnels.record_ping("a", 0, 2);
+        tunnels.record_ping("b", 0, 2);
+        for _ in 0..50 {
+            let picked = tunnels.pick(|_| true, &["a".to_owned()]).expect("b");
+            assert_eq!(picked.worker_id, "b");
+        }
+        assert_eq!(
+            tunnels
+                .pick(|_| true, &["a".to_owned(), "b".to_owned()])
+                .err(),
+            Some(NoWorker::None),
+            "nothing left to try"
+        );
+        // A worker that refused as full while our figure said it had room.
+        let held = tunnels.pick(|_| true, &["b".to_owned()]).expect("a");
+        tunnels.mark_full("a");
+        assert_eq!(tunnels.load("a"), Some(Load { active: 2, max: 2 }));
+        drop(held);
+        assert_eq!(tunnels.load("a"), Some(Load { active: 1, max: 2 }));
+        tunnels.record_ping("a", 0, 2);
+        assert_eq!(tunnels.load("a"), Some(Load { active: 0, max: 2 }));
+        // Uncapped workers can't be marked full.
+        tunnels.record_ping("b", 0, 0);
+        tunnels.mark_full("b");
+        assert_eq!(tunnels.load("b"), Some(Load { active: 0, max: 0 }));
     }
 
     #[tokio::test]

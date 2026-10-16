@@ -220,71 +220,116 @@ async fn establish(
             request.principal, request.resource
         )));
     }
-    // A worker tunnelled to this proxy if possible, otherwise one held by a
-    // peer proxy (ADR-0004). Among eligible workers, the less loaded of two;
-    // full ones never.
-    let mut slot = None;
-    let route = match proxy
-        .tunnels
-        .pick(|labels| policy.worker_may_serve(&request.resource, labels))
-    {
-        Ok(picked) => {
-            slot = Some(picked.slot);
-            Route::Local {
-                worker_id: picked.worker_id,
-                channel: picked.channel,
-            }
-        }
-        Err(local) => match crate::peer::find(proxy, |labels| {
-            policy.worker_may_serve(&request.resource, labels)
-        })
-        .await
-        {
-            Ok(Ok(remote)) => Route::Peer(remote),
-            Ok(Err(NoWorker::Full)) => return Err(no_capacity(&request.resource)),
-            Ok(Err(NoWorker::None)) if local == NoWorker::Full => {
-                return Err(no_capacity(&request.resource));
-            }
-            Ok(Err(NoWorker::None)) => {
-                return Err(failed(format!(
-                    "no worker is connected that can reach {}",
-                    request.resource
-                )));
-            }
-            Err(_) if local == NoWorker::Full => return Err(no_capacity(&request.resource)),
-            Err(e) => {
-                return Err(failed(format!(
-                    "no local worker for {}, and peer lookup failed: {}",
-                    request.resource,
-                    e.message()
-                )));
-            }
-        },
-    };
-    let worker_id = route.worker_id().to_owned();
-
     let session_id = Uuid::now_v7();
     let ttl = policy.max_session_ttl(&user.roles);
     let creds = proxy.credentials();
-    let grant = SessionGrant {
-        session_id: session_id.to_string(),
-        username: user.username.clone(),
-        roles: user.roles.clone(),
-        login_id: user.login_id.clone(),
-        resource: request.resource.clone(),
-        kind: "ssh".into(),
-        principal: request.principal.clone(),
-        issued_at_unix: now.unix_timestamp(),
-        establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
-        session_expires_at_unix: (now + ttl).unix_timestamp(),
-        nonce: rand::random::<[u8; 32]>().to_vec(),
-        user_cert_der,
-        proxy_id: creds.id.clone(),
-        worker_id: worker_id.clone(),
-    };
-    let signed = limen_session::grant::sign(&proxy.signer(), &grant)
-        .map_err(|e| failed(format!("signing grant: {e}")))?;
+    // Load figures are a little stale, so the chosen worker (or the peer
+    // proxy holding it) may turn out to be full. It says so before reading
+    // anything, so another eligible worker is tried, with a grant of its
+    // own: at most MAX_ATTEMPTS workers in all. Only the final outcome is
+    // audited.
+    let mut refused_full: Vec<String> = Vec::new();
+    loop {
+        let (route, slot) = choose_route(proxy, policy, &request.resource, &refused_full).await?;
+        let worker_id = route.worker_id().to_owned();
+        let grant = SessionGrant {
+            session_id: session_id.to_string(),
+            username: user.username.clone(),
+            roles: user.roles.clone(),
+            login_id: user.login_id.clone(),
+            resource: request.resource.clone(),
+            kind: "ssh".into(),
+            principal: request.principal.clone(),
+            issued_at_unix: now.unix_timestamp(),
+            establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
+            session_expires_at_unix: (now + ttl).unix_timestamp(),
+            nonce: rand::random::<[u8; 32]>().to_vec(),
+            user_cert_der: user_cert_der.clone(),
+            proxy_id: creds.id.clone(),
+            worker_id: worker_id.clone(),
+        };
+        let signed = limen_session::grant::sign(&proxy.signer(), &grant)
+            .map_err(|e| failed(format!("signing grant: {e}")))?;
+        match open_on(route, signed).await {
+            Ok((inbound, outbound)) => return Ok((session_id, worker_id, inbound, outbound, slot)),
+            Err(Opening::Full(why)) => {
+                tracing::info!(worker = %worker_id, reason = %why, "worker is full; trying another");
+                // Our figure was stale: count it as full until the next ping
+                // (after giving back this attempt's slot, so it isn't counted).
+                let local = slot.is_some();
+                drop(slot);
+                if local {
+                    proxy.tunnels.mark_full(&worker_id);
+                }
+                refused_full.push(worker_id);
+                if refused_full.len() >= MAX_ATTEMPTS {
+                    return Err(no_capacity(&request.resource));
+                }
+            }
+            Err(Opening::Denied(s)) => return Err(refused(&request.resource, &s)),
+            Err(Opening::Failed(denial)) => return Err(denial),
+        }
+    }
+}
 
+/// Workers tried for one session before giving up with "no capacity".
+const MAX_ATTEMPTS: usize = 3;
+
+/// A worker tunnelled to this proxy if possible, otherwise one held by a
+/// peer proxy (ADR-0004). Among eligible workers not in `exclude`, the less
+/// loaded of two; full ones never. `exclude` holds workers that just
+/// refused as full, so running out of candidates then is "no capacity".
+async fn choose_route(
+    proxy: &Proxy,
+    policy: &limen_policy::Policy,
+    resource: &str,
+    exclude: &[String],
+) -> Result<(Route, Slot), Denial> {
+    let accept = |labels: &std::collections::BTreeMap<String, String>| {
+        policy.worker_may_serve(resource, labels)
+    };
+    let local = match proxy.tunnels.pick(accept, exclude) {
+        Ok(picked) => {
+            return Ok((
+                Route::Local {
+                    worker_id: picked.worker_id,
+                    channel: picked.channel,
+                },
+                Some(picked.slot),
+            ));
+        }
+        Err(local) => local,
+    };
+    let full = local == NoWorker::Full || !exclude.is_empty();
+    match crate::peer::find(proxy, accept, exclude).await {
+        Ok(Ok(remote)) => Ok((Route::Peer(remote), None)),
+        Ok(Err(NoWorker::Full)) => Err(no_capacity(resource)),
+        Ok(Err(NoWorker::None)) | Err(_) if full => Err(no_capacity(resource)),
+        Ok(Err(NoWorker::None)) => Err(failed(format!(
+            "no worker is connected that can reach {resource}"
+        ))),
+        Err(e) => Err(failed(format!(
+            "no local worker for {resource}, and peer lookup failed: {}",
+            e.message()
+        ))),
+    }
+}
+
+/// Why opening on one worker didn't work.
+enum Opening {
+    /// The worker, or the peer proxy holding it, is full; nothing was read.
+    Full(String),
+    /// Any other refusal from the worker.
+    Denied(tonic::Status),
+    Failed(Denial),
+}
+
+/// Open the session on `route` with `signed` (a grant for that worker), and
+/// wait until the worker accepts it.
+async fn open_on(
+    route: Route,
+    signed: limen_proto::v1::Signed,
+) -> Result<(Inbound, Outbound), Opening> {
     let (tx, rx) = tokio::sync::mpsc::channel::<TunnelFrame>(64);
     tx.send(TunnelFrame {
         frame: Some(Frame::Open(SessionOpen {
@@ -292,7 +337,7 @@ async fn establish(
         })),
     })
     .await
-    .map_err(|_| failed("tunnel closed"))?;
+    .map_err(|_| Opening::Failed(failed("tunnel closed")))?;
     let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
     let opened = match route {
         Route::Local { channel, .. } => {
@@ -311,19 +356,29 @@ async fn establish(
                 .await
         }
     };
-    let mut inbound = opened
-        .map_err(|s| refused(&request.resource, &s))?
-        .into_inner();
+    let classify = |s: tonic::Status| {
+        if s.code() == tonic::Code::ResourceExhausted {
+            Opening::Full(s.message().to_owned())
+        } else {
+            Opening::Denied(s)
+        }
+    };
+    let mut inbound = opened.map_err(classify)?.into_inner();
     match tokio::time::timeout(Duration::from_secs(30), inbound.message()).await {
         Ok(Ok(Some(TunnelFrame {
             frame: Some(Frame::Opened(_)),
-        }))) => Ok((session_id, worker_id, inbound, tx, slot)),
+        }))) => Ok((inbound, tx)),
         Ok(Ok(Some(TunnelFrame {
             frame: Some(Frame::Close(c)),
-        }))) => Err(failed(format!("worker closed the session: {}", c.reason))),
-        Ok(Err(s)) => Err(refused(&request.resource, &s)),
-        Ok(_) => Err(failed("worker ended the session before it started")),
-        Err(_) => Err(failed("worker didn't answer in time")),
+        }))) => Err(Opening::Failed(failed(format!(
+            "worker closed the session: {}",
+            c.reason
+        )))),
+        Ok(Err(s)) => Err(classify(s)),
+        Ok(_) => Err(Opening::Failed(failed(
+            "worker ended the session before it started",
+        ))),
+        Err(_) => Err(Opening::Failed(failed("worker didn't answer in time"))),
     }
 }
 

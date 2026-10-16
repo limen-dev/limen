@@ -98,9 +98,18 @@ impl WorkerTunnel for Forwarder {
             })?;
         // The worker verifies the grant inside the stream; this proxy only relays.
         let inbound = request.into_inner().map_while(Result::ok);
-        let response = WorkerTunnelClient::new(channel)
-            .open_session(inbound)
-            .await?;
+        let response = match WorkerTunnelClient::new(channel).open_session(inbound).await {
+            Ok(response) => response,
+            Err(s) => {
+                if s.code() == tonic::Code::ResourceExhausted {
+                    // Our figure was stale; the peer tries another worker.
+                    // Give back this slot first so it isn't counted.
+                    drop(slot);
+                    self.proxy.tunnels.mark_full(&worker_id);
+                }
+                return Err(s);
+            }
+        };
         tracing::info!(worker = %worker_id, "relaying a peered session");
         // The slot lives as long as the stream back to the peer.
         let outbound = response.into_inner().map(move |frame| {
@@ -131,17 +140,20 @@ pub(crate) struct Remote {
     pub channel: Channel,
 }
 
-/// Find a worker whose labels satisfy `accept`, held by another proxy,
-/// chosen by [`p2c`] on the load the holding proxies last reported.
+/// Find a worker whose labels satisfy `accept` and that is not in
+/// `exclude`, held by another proxy, chosen by [`p2c`] on the load the
+/// holding proxies last reported.
 pub(crate) async fn find(
     proxy: &Proxy,
     accept: impl Fn(&std::collections::BTreeMap<String, String>) -> bool,
+    exclude: &[String],
 ) -> Result<Result<Remote, NoWorker>, Status> {
     let tunnels = registry(proxy).await?;
     let candidates: Vec<&PeerTunnel> = tunnels
         .iter()
         .filter(|t| {
             !t.peer_address.is_empty()
+                && !exclude.contains(&t.worker_id)
                 && accept(
                     &t.worker_labels
                         .iter()

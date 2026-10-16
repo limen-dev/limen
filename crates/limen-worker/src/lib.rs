@@ -209,6 +209,12 @@ impl Worker {
         self.sessions.active()
     }
 
+    /// Sessions refused because this worker was at its cap, since it started.
+    #[must_use]
+    pub fn sessions_refused_at_cap(&self) -> u64 {
+        self.sessions.refused.load(Ordering::SeqCst)
+    }
+
     #[must_use]
     pub fn policy_version(&self) -> Option<i64> {
         self.policy.latest().map(|s| s.version)
@@ -232,6 +238,8 @@ impl Worker {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionSlots {
     count: Arc<AtomicUsize>,
+    /// Sessions refused at the cap, since start.
+    refused: Arc<std::sync::atomic::AtomicU64>,
     /// 0: no cap.
     max: usize,
 }
@@ -240,6 +248,7 @@ impl SessionSlots {
     pub(crate) fn new(max: u32) -> Self {
         Self {
             count: Arc::default(),
+            refused: Arc::default(),
             max: usize::try_from(max).unwrap_or(usize::MAX),
         }
     }
@@ -248,12 +257,19 @@ impl SessionSlots {
     /// so concurrent sessions can't overshoot.
     pub(crate) fn try_acquire(&self) -> Option<SessionGuard> {
         let max = self.max;
-        self.count
+        let slot = self
+            .count
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (max == 0 || n < max).then_some(n + 1)
             })
             .ok()
-            .map(|_| SessionGuard(Arc::clone(&self.count)))
+            .map(|_| SessionGuard(Arc::clone(&self.count)));
+        if slot.is_none() {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            metrics::counter!("limen_worker_sessions_refused_total", "reason" => "capacity")
+                .increment(1);
+        }
+        slot
     }
 
     pub(crate) fn active(&self) -> usize {
@@ -570,6 +586,7 @@ mod cap_tests {
         let a = slots.try_acquire().expect("first");
         let b = slots.try_acquire().expect("second");
         assert!(slots.try_acquire().is_none(), "over the cap");
+        assert_eq!(slots.refused.load(Ordering::SeqCst), 1);
         assert_eq!(slots.active(), 2);
         drop(a);
         assert_eq!(slots.active(), 1);
