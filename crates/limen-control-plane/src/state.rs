@@ -170,4 +170,4 @@ pub fn unix(t: OffsetDateTime) -> i64 {
     t.unix_timestamp()
 }
 
-pub const TUNNEL_LEASE: Duration = Duration::from_secs(45);
+pub const TUNNEL_LEASE: Duration = Duration::from_secs(limen_core::registry::TUNNEL_LEASE_SECS);

@@ -51,5 +51,9 @@ uuid.workspace = true
 http-body-util.workspace = true
 limen-testkit.workspace = true
 
+[features]
+# Test builds only (limen-e2e): report intervals past the release cap.
+test-hooks = []
+
 [lints]
 workspace = true

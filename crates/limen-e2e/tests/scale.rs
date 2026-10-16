@@ -142,6 +142,9 @@ struct Capped {
 /// Proxies ping workers and report to the registry once, when a tunnel
 /// comes up, and not again during a test: the figures the tests make stale
 /// stay stale, so which worker gets tried first is decided by the test.
+/// (Needs the `test-hooks` build of the proxy.) Registry leases are then
+/// renewed only on tunnel changes, so these tests stay far below the 45 s
+/// lease; the harness fails a test that runs past 30 s.
 const NO_PERIODIC_PINGS: [&str; 2] = ["--ping-interval-secs=3600", "--report-interval-secs=3600"];
 
 async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
@@ -208,6 +211,7 @@ impl Capped {
         proxy_addr: SocketAddr,
         resource: &str,
     ) -> Result<russh::client::Handle<ssh_client::HostCheck>, String> {
+        self.d.check_registry_lease();
         let user = self.user.clone();
         // Refusals are immediate: a full pool must never hang.
         tokio::time::timeout(

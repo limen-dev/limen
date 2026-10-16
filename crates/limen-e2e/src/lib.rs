@@ -52,6 +52,9 @@ pub struct Deployment {
     cp_args: Vec<String>,
     /// Extra flags for every proxy this deployment starts.
     proxy_args: Vec<String>,
+    /// When the deployment started, if its proxies report to the registry
+    /// less often than release builds allow (see [`Self::check_registry_lease`]).
+    rare_reports_since: Option<std::time::Instant>,
     pub proxy_addr: SocketAddr,
     pub proxy: Option<RunningProxy>,
     cp_shutdown: watch::Sender<bool>,
@@ -193,6 +196,7 @@ impl Deployment {
             cp_dial,
             cp_args,
             proxy_args: proxy_args.to_vec(),
+            rare_reports_since: rare_reports(proxy_args).then(std::time::Instant::now),
             proxy_addr,
             proxy: None,
             cp_shutdown: cp_tx,
@@ -200,6 +204,23 @@ impl Deployment {
         };
         deployment.proxy = Some(deployment.start_proxy(proxy_listener).await);
         Some(deployment)
+    }
+
+    /// With a report interval past the release cap, proxies renew their
+    /// registry leases only when a tunnel changes, so a test must finish
+    /// well within the lease or peers lose the tunnels. Fails fast, with a
+    /// clear message, once such a deployment is 30 s old.
+    pub fn check_registry_lease(&self) {
+        if let Some(since) = self.rare_reports_since {
+            let age = since.elapsed();
+            assert!(
+                age < RARE_REPORTS_MAX_AGE,
+                "this test runs its proxies with a long --report-interval-secs and is {age:?} old: \
+                 past {RARE_REPORTS_MAX_AGE:?}, the {}s registry leases may expire mid-test; \
+                 make the test shorter",
+                limen_core::registry::TUNNEL_LEASE_SECS
+            );
+        }
     }
 
     pub fn ca_file(&self) -> PathBuf {
@@ -245,6 +266,7 @@ impl Deployment {
     /// Another proxy, with its own identity and data directory. Returns it
     /// and the address it listens on.
     pub async fn start_extra_proxy(&self, name: &str) -> (RunningProxy, SocketAddr) {
+        self.check_registry_lease();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -396,6 +418,19 @@ impl Deployment {
             .into_inner();
         Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
     }
+}
+
+/// How long a deployment whose proxies report rarely may run (see
+/// [`Deployment::check_registry_lease`]): well within the registry lease.
+const RARE_REPORTS_MAX_AGE: Duration = Duration::from_secs(30);
+
+/// Whether `proxy_args` set a report interval past the release cap.
+fn rare_reports(proxy_args: &[String]) -> bool {
+    proxy_args.iter().any(|a| {
+        a.strip_prefix("--report-interval-secs=")
+            .and_then(|v| v.parse::<u64>().ok())
+            .is_some_and(|v| v > limen_core::registry::MAX_REPORT_INTERVAL_SECS)
+    })
 }
 
 /// Start a control plane replica with `args` plus its own id, audit file,
@@ -570,5 +605,21 @@ pub mod ssh_client {
             }
         }
         Ok((String::from_utf8_lossy(&out).into_owned(), status))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_report_intervals_past_the_release_cap_count_as_rare() {
+        let args = |a: &[&str]| a.iter().map(|&s| s.to_owned()).collect::<Vec<_>>();
+        assert!(super::rare_reports(&args(&["--report-interval-secs=3600"])));
+        assert!(super::rare_reports(&args(&[
+            "--x",
+            "--report-interval-secs=16"
+        ])));
+        assert!(!super::rare_reports(&args(&["--report-interval-secs=15"])));
+        assert!(!super::rare_reports(&args(&["--ping-interval-secs=3600"])));
+        assert!(!super::rare_reports(&[]));
     }
 }

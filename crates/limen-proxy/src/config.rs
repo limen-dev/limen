@@ -71,9 +71,11 @@ pub struct Config {
 
     /// How often to report this proxy's tunnels, with each worker's load,
     /// to the control plane's registry (also on every tunnel change), where
-    /// peer proxies read them. 1 to 3600.
+    /// peer proxies read them. 1 to 15: at most a third of the registry's
+    /// 45 s tunnel lease, so peers never lose this proxy's tunnels between
+    /// reports.
     #[arg(long, env = "LIMEN_REPORT_INTERVAL_SECS", default_value_t = 15,
-          value_parser = clap::value_parser!(u64).range(1..=3600))]
+          value_parser = parse_report_interval)]
     pub report_interval_secs: u64,
 
     /// Refuse new audit events (and, by default, the actions they audit)
@@ -84,6 +86,29 @@ pub struct Config {
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,
+}
+
+/// 1 to [`MAX_REPORT_INTERVAL_SECS`](limen_core::registry::MAX_REPORT_INTERVAL_SECS).
+/// Builds with the `test-hooks` feature (tests only) accept up to 3600, for
+/// tests that need load figures to stay stale; such tests must finish well
+/// within the lease.
+fn parse_report_interval(s: &str) -> Result<u64, String> {
+    use limen_core::registry::{MAX_REPORT_INTERVAL_SECS, TUNNEL_LEASE_SECS};
+    let secs: u64 = s
+        .parse()
+        .map_err(|_| format!("not a number of seconds: {s}"))?;
+    let max = if cfg!(feature = "test-hooks") {
+        3600
+    } else {
+        MAX_REPORT_INTERVAL_SECS
+    };
+    if (1..=max).contains(&secs) {
+        Ok(secs)
+    } else {
+        Err(format!(
+            "must be 1 to {max} seconds: at most a third of the {TUNNEL_LEASE_SECS} s registry lease, so peers keep seeing this proxy's tunnels"
+        ))
+    }
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -123,5 +148,36 @@ mod tests {
         ] {
             assert!(parse_with(&[bad]).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn reports_come_well_within_the_registry_lease() {
+        // limen_core::registry also checks cap * 3 <= lease at compile time.
+        assert_eq!(limen_core::registry::MAX_REPORT_INTERVAL_SECS, 15);
+        assert_eq!(limen_core::registry::TUNNEL_LEASE_SECS, 45);
+    }
+
+    /// Release builds: a report interval past a third of the lease would
+    /// let peers lose this proxy's tunnels between reports.
+    #[cfg(not(feature = "test-hooks"))]
+    #[test]
+    fn release_builds_cap_the_report_interval_at_a_third_of_the_lease() {
+        for ok in 1..=15 {
+            let c = parse_with(&[&format!("--report-interval-secs={ok}")]).expect("in range");
+            assert_eq!(c.report_interval_secs, ok);
+        }
+        for bad in ["16", "60", "3600"] {
+            let err =
+                parse_with(&[&format!("--report-interval-secs={bad}")]).expect_err("past the cap");
+            assert!(err.to_string().contains("lease"), "{err}");
+        }
+    }
+
+    /// Test builds may report rarely, for tests that keep figures stale.
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn test_hooks_builds_allow_long_report_intervals() {
+        let c = parse_with(&["--report-interval-secs=3600"]).expect("test-hooks");
+        assert_eq!(c.report_interval_secs, 3600);
     }
 }
