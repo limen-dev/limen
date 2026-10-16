@@ -27,6 +27,7 @@ use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
+use tonic::server::NamedService;
 
 use crate::services::admin::AdminService;
 use crate::services::auth::AuthService;
@@ -77,34 +78,50 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
     )?)
 }
 
-/// Serve the gRPC API until `shutdown` flips, then drain: connections get a
-/// GOAWAY (idle ones close at once), and in-flight calls have until
-/// `started + crate::ship_budget(drain_timeout)` before they are cut off.
-/// `started` is when shutdown began; the first caller to touch it sets it.
-/// The `method` label for the latency histogram: a gRPC method path
-/// (`/limen.v1.Auth/Login`, a bounded set), or `console` for browser
-/// requests so paths never become label values.
-fn method_label(path: &str) -> &str {
-    if path.starts_with("/limen.") {
-        path
-    } else {
-        "console"
-    }
+/// The gRPC services the API serves (the names clients put in the path).
+fn grpc_services() -> [&'static str; 9] {
+    [
+        AuthServer::<AuthService>::NAME,
+        ResourcesServer::<ResourcesService>::NAME,
+        AdminServer::<AdminService>::NAME,
+        EnrollmentServer::<EnrollmentService>::NAME,
+        RegistryServer::<RegistryService>::NAME,
+        AuditIngestServer::<IngestService>::NAME,
+        AuditHandoffServer::<HandoffService>::NAME,
+        PolicySyncServer::<PolicySyncService>::NAME,
+        SshCertificatesServer::<SshCertificatesService>::NAME,
+    ]
 }
 
-/// Scale signal: API latency per method, for target-tracking policies.
+/// The `service` label of the latency histogram: one of the gRPC services
+/// above, or `http` for everything else (browser requests, probes, and any
+/// path a client invents). A fixed set, so no client can add series: the
+/// API accepts connections without a certificate.
+fn service_label(path: &str) -> &'static str {
+    let name = path.strip_prefix('/').and_then(|p| p.split('/').next());
+    grpc_services()
+        .into_iter()
+        .find(|service| Some(*service) == name)
+        .unwrap_or("http")
+}
+
+/// Scale signal: API latency per service, for target-tracking policies.
 async fn record_latency(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let method = method_label(request.uri().path()).to_owned();
+    let service = service_label(request.uri().path());
     let started = std::time::Instant::now();
     let response = next.run(request).await;
-    metrics::histogram!("limen_api_request_seconds", "method" => method)
+    metrics::histogram!("limen_api_request_seconds", "service" => service)
         .record(started.elapsed().as_secs_f64());
     response
 }
 
+/// Serve the gRPC API until `shutdown` flips, then drain: connections get a
+/// GOAWAY (idle ones close at once), and in-flight calls have until
+/// `started + crate::ship_budget(drain_timeout)` before they are cut off.
+/// `started` is when shutdown began; the first caller to touch it sets it.
 pub async fn serve_api(
     state: AppState,
     listener: TcpListener,
@@ -368,23 +385,32 @@ mod latency_tests {
     use axum::routing::get;
     use tower::ServiceExt;
 
-    use super::{method_label, record_latency};
+    use super::{record_latency, service_label};
 
     #[test]
-    fn grpc_methods_keep_their_path_and_everything_else_is_console() {
-        assert_eq!(method_label("/limen.v1.Auth/Login"), "/limen.v1.Auth/Login");
-        assert_eq!(method_label("/console/sessions/123"), "console");
-        assert_eq!(method_label("/"), "console");
+    fn only_known_grpc_services_become_labels() {
+        assert_eq!(service_label("/limen.v1.Auth/Login"), "limen.v1.Auth");
+        assert_eq!(
+            service_label("/limen.v1.Admin/ApplyPolicy"),
+            "limen.v1.Admin"
+        );
+        // Paths a client invents never become label values.
+        assert_eq!(service_label("/limen.v1.Auth"), "limen.v1.Auth");
+        assert_eq!(service_label("/limen.v1.Nope/x1"), "http");
+        assert_eq!(service_label("/limen.x/y"), "http");
+        assert_eq!(service_label("/console/sessions/123"), "http");
+        assert_eq!(service_label("/"), "http");
+        assert_eq!(service_label(""), "http");
     }
 
     #[tokio::test]
     async fn requests_are_timed_per_method() {
         let _ = limen_core::metrics::install();
         let app = Router::new()
-            .route("/limen.v1.Test/Ping", get(|| async { "ok" }))
+            .route("/limen.v1.Auth/Ping", get(|| async { "ok" }))
             .route("/console/home", get(|| async { "ok" }))
             .layer(axum::middleware::from_fn(record_latency));
-        for path in ["/limen.v1.Test/Ping", "/console/home"] {
+        for path in ["/limen.v1.Auth/Ping", "/console/home", "/limen.v1.Nope/x1"] {
             let request = axum::http::Request::get(path)
                 .body(axum::body::Body::empty())
                 .expect("request");
@@ -392,8 +418,12 @@ mod latency_tests {
         }
         let text = limen_core::metrics::render();
         assert!(text.contains("limen_api_request_seconds"), "{text}");
-        assert!(text.contains(r#"method="/limen.v1.Test/Ping""#), "{text}");
-        assert!(text.contains(r#"method="console""#), "{text}");
+        assert!(text.contains(r#"service="limen.v1.Auth""#), "{text}");
+        assert!(text.contains(r#"service="http""#), "{text}");
         assert!(!text.contains("/console/home"), "paths must not be labels");
+        assert!(
+            !text.contains("Nope"),
+            "invented services must not be labels"
+        );
     }
 }
