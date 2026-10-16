@@ -81,9 +81,9 @@ x-worker: &worker
   build: { <<: *limen-build, target: worker }
   image: limen-worker:scale
   restart: unless-stopped
-  # At least LIMEN_DRAIN_TIMEOUT_SECS (default 20) plus 18 s, so a stop
-  # (SIGTERM) lets open sessions finish, ends the rest, and uploads their
-  # recordings before Docker's SIGKILL.
+  # Longer than the workers' LIMEN_DRAIN_TIMEOUT_SECS (20 here) plus 18 s,
+  # so a stop (SIGTERM) lets open sessions finish, ends the rest, and
+  # uploads their recordings before Docker's SIGKILL.
   stop_grace_period: 40s
   depends_on: [proxy-0, proxy-1, proxy-2]
 
@@ -95,6 +95,8 @@ x-worker-env: &worker-env
   LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
   LIMEN_JOIN_TOKEN: dev-only-worker-join-token-2c8e6a4b0d1f3e5a
   LIMEN_DATA_DIR: /var/lib/limen/worker
+  # Short for a demo stack (the default is 600 s); fits stop_grace_period.
+  LIMEN_DRAIN_TIMEOUT_SECS: "20"
 
 services:
   postgres:

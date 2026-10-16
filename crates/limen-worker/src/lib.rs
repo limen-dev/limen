@@ -54,15 +54,28 @@ pub struct Config {
     pub tunnels: usize,
 
     /// On SIGTERM, how long open sessions may go on (the worker takes no new
-    /// ones meanwhile) before it ends them, each with a `session.end` whose
-    /// reason is `worker_drain`. It exits as soon as none is left. Ending
-    /// them and the last recording and audit uploads take up to 18 s more,
-    /// so give the orchestrator a longer grace period before it kills the
-    /// worker: at least this plus 18 s (Kubernetes
-    /// `terminationGracePeriodSeconds`, ECS `stopTimeout`, Compose
-    /// `stop_grace_period`).
-    #[arg(long, env = "LIMEN_DRAIN_TIMEOUT_SECS", default_value_t = 20)]
-    pub drain_timeout_secs: u64,
+    /// ones meanwhile). Default 600 (10 minutes). The worker exits as soon as
+    /// none is left; at the timeout it ends the rest, each with a
+    /// `session.end` whose reason is `worker_drain`. Ending them and the last
+    /// recording and audit uploads take up to 18 s more, so the
+    /// orchestrator's grace period must be longer than this plus 18 s
+    /// (Kubernetes `terminationGracePeriodSeconds`, ECS `stopTimeout`, an
+    /// Auto Scaling lifecycle hook's timeout, Compose `stop_grace_period`).
+    /// If you can't wait that long, lower it, and accept that sessions still
+    /// open at the timeout are ended. Replaces `--drain-timeout` /
+    /// `LIMEN_DRAIN_TIMEOUT` (a duration such as `10m`), still read, with a
+    /// warning, when this is not set.
+    #[arg(long, env = "LIMEN_DRAIN_TIMEOUT_SECS")]
+    pub drain_timeout_secs: Option<u64>,
+
+    /// Deprecated: use `--drain-timeout-secs`.
+    #[arg(
+        long = "drain-timeout",
+        env = "LIMEN_DRAIN_TIMEOUT",
+        value_parser = parse_duration,
+        hide = true
+    )]
+    pub legacy_drain_timeout: Option<Duration>,
 
     #[arg(long, env = "LIMEN_ADMIN_LISTEN", default_value = "0.0.0.0:3090")]
     pub admin_listen: SocketAddr,
@@ -93,6 +106,36 @@ pub struct Config {
     /// until it has room. 0: no cap.
     #[arg(long, env = "LIMEN_MAX_SESSIONS", default_value_t = 200)]
     pub max_sessions: u32,
+}
+
+/// `--drain-timeout-secs` when unset (and so is the legacy setting).
+const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_mins(10);
+
+impl Config {
+    /// The drain timeout, and a warning to log if the deprecated
+    /// `--drain-timeout` / `LIMEN_DRAIN_TIMEOUT` is set.
+    #[must_use]
+    pub fn drain_timeout(&self) -> (Duration, Option<String>) {
+        match (self.drain_timeout_secs, self.legacy_drain_timeout) {
+            (Some(secs), None) => (Duration::from_secs(secs), None),
+            (Some(secs), Some(_)) => (
+                Duration::from_secs(secs),
+                Some(format!(
+                    "--drain-timeout / LIMEN_DRAIN_TIMEOUT is deprecated and ignored: \
+                     --drain-timeout-secs / LIMEN_DRAIN_TIMEOUT_SECS ({secs}) is set; remove the old setting"
+                )),
+            ),
+            (None, Some(legacy)) => (
+                legacy,
+                Some(format!(
+                    "--drain-timeout / LIMEN_DRAIN_TIMEOUT is deprecated; using it ({}s) because \
+                     --drain-timeout-secs / LIMEN_DRAIN_TIMEOUT_SECS is not set; switch to that",
+                    legacy.as_secs()
+                )),
+            ),
+            (None, None) => (DEFAULT_DRAIN_TIMEOUT, None),
+        }
+    }
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -136,6 +179,9 @@ impl Worker {
     pub async fn start(
         config: Config,
     ) -> anyhow::Result<(Self, watch::Sender<Arc<ComponentCredentials>>)> {
+        if let (_, Some(warning)) = config.drain_timeout() {
+            tracing::warn!("{warning}");
+        }
         let bootstrap_ca = match &config.ca_file {
             Some(path) => Some(
                 tokio::fs::read_to_string(path)
@@ -660,7 +706,7 @@ pub async fn run(
     // From here pings say `draining` (proxies stop choosing us) and new
     // sessions are refused.
     worker.draining.store(true, Ordering::SeqCst);
-    let drain = Duration::from_secs(worker.config.drain_timeout_secs);
+    let (drain, _) = worker.config.drain_timeout();
     tracing::info!(sessions = worker.sessions.active(), timeout = ?drain, then_at_most = ?DRAIN_OVERHEAD, "draining");
     let now = tokio::time::Instant::now();
     if !worker.sessions.wait_idle(now + drain).await {
@@ -726,6 +772,110 @@ async fn serve_admin(worker: Worker) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(worker.config.admin_listen).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod drain_flag_tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+
+    #[derive(Debug, Parser)]
+    struct Cli {
+        #[command(flatten)]
+        config: Config,
+    }
+
+    fn parse(extra: &[&str]) -> Result<Config, clap::Error> {
+        let mut argv = vec!["limen-worker", "--proxy-addr=proxy:3443"];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn the_default_is_ten_minutes() {
+        let config = parse(&[]).expect("valid");
+        assert_eq!(config.drain_timeout(), (Duration::from_mins(10), None));
+    }
+
+    #[test]
+    fn the_seconds_flag_sets_it() {
+        let config = parse(&["--drain-timeout-secs=20"]).expect("valid");
+        assert_eq!(config.drain_timeout(), (Duration::from_secs(20), None));
+    }
+
+    #[test]
+    fn the_legacy_duration_is_a_deprecated_fallback() {
+        let config = parse(&["--drain-timeout=2m"]).expect("valid");
+        let (timeout, warning) = config.drain_timeout();
+        assert_eq!(timeout, Duration::from_mins(2));
+        let warning = warning.expect("a deprecation warning");
+        assert!(
+            warning.contains("LIMEN_DRAIN_TIMEOUT")
+                && warning.contains("deprecated")
+                && warning.contains("LIMEN_DRAIN_TIMEOUT_SECS"),
+            "{warning}"
+        );
+    }
+
+    #[test]
+    fn the_seconds_flag_wins_over_the_legacy_one() {
+        let config = parse(&["--drain-timeout=2m", "--drain-timeout-secs=30"]).expect("valid");
+        let (timeout, warning) = config.drain_timeout();
+        assert_eq!(timeout, Duration::from_secs(30));
+        let warning = warning.expect("still told the legacy setting is ignored");
+        assert!(warning.contains("ignored"), "{warning}");
+    }
+
+    #[test]
+    fn invalid_values_are_refused_clearly() {
+        for (args, expect) in [
+            (
+                &["--drain-timeout-secs=ten"][..],
+                "invalid value 'ten' for '--drain-timeout-secs",
+            ),
+            (
+                &["--drain-timeout-secs=-5"][..],
+                "invalid value '-5' for '--drain-timeout-secs",
+            ),
+            (&["--drain-timeout=10"][..], "missing unit"),
+            (&["--drain-timeout=10d"][..], "use s, m, or h"),
+        ] {
+            let err = parse(args).expect_err("refused").to_string();
+            assert!(err.contains(expect), "{args:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_legacy_setting_is_read_from_its_old_env_var_and_hidden() {
+        let command = Cli::command();
+        let arg = |id: &str| {
+            command
+                .get_arguments()
+                .find(|a| a.get_id() == id)
+                .unwrap_or_else(|| panic!("no {id}"))
+                .clone()
+        };
+        let legacy = arg("legacy_drain_timeout");
+        assert_eq!(legacy.get_long(), Some("drain-timeout"));
+        assert_eq!(
+            legacy.get_env().and_then(|e| e.to_str()),
+            Some("LIMEN_DRAIN_TIMEOUT")
+        );
+        assert!(legacy.is_hide_set());
+        let current = arg("drain_timeout_secs");
+        assert_eq!(
+            current.get_env().and_then(|e| e.to_str()),
+            Some("LIMEN_DRAIN_TIMEOUT_SECS")
+        );
+        let help = current
+            .get_help()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        assert!(
+            help.contains("600") && help.contains(&format!("{} s", DRAIN_OVERHEAD.as_secs())),
+            "{help}"
+        );
+    }
 }
 
 #[cfg(test)]
