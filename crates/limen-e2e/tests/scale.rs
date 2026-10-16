@@ -12,7 +12,9 @@ use std::time::Duration;
 use limen_e2e::{Deployment, RunningWorker, eventually, ssh_client};
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
-use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource, TunnelFrame};
+use limen_proto::v1::{
+    ApplyPolicyRequest, CreateJoinTokenRequest, PingRequest, PolicySource, TunnelFrame,
+};
 use limen_proxy::tunnels::Load;
 use limen_testkit::ssh_target::SshTarget;
 use limen_testkit::users::{ADMIN, DEVELOPER};
@@ -148,6 +150,11 @@ struct Capped {
 const NO_PERIODIC_PINGS: [&str; 2] = ["--ping-interval-secs=3600", "--report-interval-secs=3600"];
 
 async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
+    Box::pin(capped_deployment_with(caps, &[])).await
+}
+
+/// [`capped_deployment`] with `extra` flags for every worker.
+async fn capped_deployment_with(caps: &[u32], extra: &[&str]) -> Option<Capped> {
     let d = Deployment::start_with_proxy_args(&NO_PERIODIC_PINGS).await?;
     let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
     let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
@@ -177,7 +184,9 @@ async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
             .token;
         let name = format!("worker-{}", uuid::Uuid::now_v7().simple());
         let cap = format!("--max-sessions={cap}");
-        workers.push(d.start_worker_with(&token, &name, &[&cap]).await);
+        let mut args = vec![cap.as_str()];
+        args.extend_from_slice(extra);
+        workers.push(d.start_worker_with(&token, &name, &args).await);
     }
     eventually(Duration::from_secs(15), "worker tunnels", || async {
         d.proxy().tunnels.summaries().len() == 2 * caps.len()
@@ -552,4 +561,333 @@ async fn a_refusal_through_a_peer_is_retried_and_the_holder_frees_the_slot() {
         "a peered session went to the full worker first and was retried"
     );
     filler.abort();
+}
+
+// ---- Worker drain on scale-in -----------------------------------------------
+
+/// Workers that drain for longer than any of these tests runs.
+const LONG_DRAIN: &str = "--drain-timeout-secs=20";
+
+/// A shell on `conn`, open until the session ends. A shell makes the worker
+/// record the session.
+async fn open_shell(
+    conn: &russh::client::Handle<ssh_client::HostCheck>,
+) -> russh::Channel<russh::client::Msg> {
+    let mut shell = conn.channel_open_session().await.expect("channel");
+    shell.request_shell(true).await.expect("shell");
+    read_until(&mut shell, "welcome").await;
+    shell
+}
+
+/// Read from `channel` until its output contains `text`.
+async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, text: &str) {
+    let mut seen = Vec::new();
+    while !String::from_utf8_lossy(&seen).contains(text) {
+        match tokio::time::timeout(Duration::from_secs(10), channel.wait()).await {
+            Ok(Some(russh::ChannelMsg::Data { data })) => seen.extend_from_slice(&data),
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("the channel closed before {text:?}"),
+            Err(tokio::time::error::Elapsed { .. }) => panic!("no {text:?} within 10 s"),
+        }
+    }
+}
+
+impl Capped {
+    /// The `session.end` events of sessions on `worker_id`.
+    fn ends_on(&self, worker_id: &str) -> Vec<serde_json::Value> {
+        self.audit()
+            .into_iter()
+            .filter(|e| e["kind"] == "session.end" && e["data"]["worker_id"] == worker_id)
+            .collect()
+    }
+
+    /// Whether the control plane stored the recording of `end`'s session,
+    /// and it is the one the session produced.
+    fn recording_stored(&self, end: &serde_json::Value) -> bool {
+        self.audit().iter().any(|e| {
+            e["kind"] == "session.recording"
+                && e["session_id"] == end["session_id"]
+                && e["data"]["sha256"] == end["data"]["recording_sha256"]
+        })
+    }
+}
+
+async fn draining(tunnel: limen_tunnel::tunnel::TunnelChannel) -> bool {
+    WorkerTunnelClient::new(tunnel)
+        .ping(PingRequest {})
+        .await
+        .is_ok_and(|r| r.get_ref().draining)
+}
+
+/// Recordings still waiting on the worker's disk for upload.
+fn recordings_left(w: &RunningWorker) -> usize {
+    std::fs::read_dir(w.data_dir.join("recordings")).map_or(0, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "cast"))
+            .count()
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn draining_worker_gets_no_new_sessions() {
+    let Some(c) = Box::pin(capped_deployment_with(&[3], &[LONG_DRAIN])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let w = &c.workers[0];
+    // Open sessions keep the worker draining (not exited) for this test:
+    // one direct, one through a peer proxy B, which holds no tunnel.
+    let held = c.ssh(c.d.proxy_addr, "web-1").await.expect("session");
+    let (proxy_b, addr_b) = c.d.start_extra_proxy("proxy-b").await;
+    eventually(
+        Duration::from_secs(15),
+        "proxy B has the policy",
+        || async { proxy_b.proxy.policy_version().is_some() },
+    )
+    .await;
+    let mut peered = None;
+    let mut last = String::new();
+    for _ in 0..40 {
+        // Until proxy A's report reaches the registry, B finds no worker.
+        match c.ssh(addr_b, "web-1").await {
+            Ok(conn) => {
+                peered = Some(conn);
+                break;
+            }
+            Err(e) => last = e,
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let _peered = peered.unwrap_or_else(|| panic!("no peered session: {last}"));
+
+    w.begin_stop();
+    let tunnel =
+        c.d.proxy()
+            .tunnels
+            .channel_for(&w.worker.id())
+            .expect("tunnel");
+    eventually(Duration::from_secs(5), "pings report draining", || {
+        draining(tunnel.clone())
+    })
+    .await;
+
+    // Refused before anything is read, and marked as a drain refusal.
+    let refused = WorkerTunnelClient::new(tunnel.clone())
+        .open_session(tonic::codegen::tokio_stream::iter(Vec::<TunnelFrame>::new()))
+        .await
+        .expect_err("a draining worker refuses new sessions");
+    assert_eq!(refused.code(), tonic::Code::Unavailable, "{refused:?}");
+    assert!(refused.message().contains("draining"), "{refused:?}");
+    assert!(limen_tunnel::refusal::is_draining(&refused), "{refused:?}");
+    assert_eq!(w.worker.sessions_refused_draining(), 1);
+
+    // Through proxy B (which pings nobody, and whose registry view still has
+    // the worker): A relays the worker's refusal with its marker, B looks
+    // for another worker, finds none, and says so.
+    let err = c
+        .ssh(addr_b, "web-1")
+        .await
+        .err()
+        .expect("no new session on a draining worker");
+    assert!(err.contains("no worker is connected"), "{err}");
+    assert_eq!(w.worker.sessions_refused_draining(), 2);
+
+    // Proxy A stopped choosing the worker when it relayed the refusal.
+    let err = c
+        .ssh(c.d.proxy_addr, "web-1")
+        .await
+        .err()
+        .expect("no new session on a draining worker");
+    assert!(err.contains("no worker is connected"), "{err}");
+    assert_eq!(w.worker.sessions_refused_draining(), 2);
+    assert_eq!(w.worker.active_sessions(), 2);
+
+    // The open sessions go on.
+    let (out, status) = ssh_client::exec(&held, "whoami").await.expect("exec");
+    assert_eq!(out, "target: login=ubuntu command=whoami\n");
+    assert_eq!(status, Some(0));
+    assert!(!w.has_stopped());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_refused_by_a_draining_worker_is_retried_on_another() {
+    let Some(c) = Box::pin(capped_deployment_with(&[3, 2], &[LONG_DRAIN])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let (w0, w1) = (&c.workers[0], &c.workers[1]);
+    // One session each, whichever goes first: then worker 0 (1 of 3) looks
+    // emptier than worker 1 (1 of 2).
+    let _one = c.ssh(c.d.proxy_addr, "web-1").await.expect("first");
+    let _two = c.ssh(c.d.proxy_addr, "web-1").await.expect("second");
+    assert_eq!(
+        (w0.worker.active_sessions(), w1.worker.active_sessions()),
+        (1, 1)
+    );
+
+    // Worker 0 drains. The proxy has not pinged it since, so it tries it
+    // first; the refusal comes before the worker reads the grant, so the
+    // proxy tries worker 1 with a new grant.
+    w0.begin_stop();
+    eventually(Duration::from_secs(5), "worker 0 is draining", || async {
+        w0.worker.is_draining()
+    })
+    .await;
+    let three = c.ssh(c.d.proxy_addr, "web-1").await.expect("third session");
+    assert_eq!(
+        w0.worker.sessions_refused_draining(),
+        1,
+        "worker 0 was tried"
+    );
+    assert_eq!(
+        (w0.worker.active_sessions(), w1.worker.active_sessions()),
+        (1, 2)
+    );
+    let (out, status) = ssh_client::exec(&three, "whoami").await.expect("exec");
+    assert_eq!(out, "target: login=ubuntu command=whoami\n");
+    assert_eq!(status, Some(0));
+    assert!(
+        !c.audit().iter().any(|e| e["kind"] == "auth.denied"),
+        "a retried session is not a denial"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn open_session_finishes_during_drain() {
+    let Some(c) = Box::pin(capped_deployment_with(&[2], &[LONG_DRAIN])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let w = &c.workers[0];
+    let conn = c.ssh(c.d.proxy_addr, "web-1").await.expect("session");
+    let mut shell = open_shell(&conn).await;
+    w.begin_stop();
+    eventually(Duration::from_secs(5), "the worker is draining", || async {
+        w.worker.is_draining()
+    })
+    .await;
+
+    // The session works normally while the worker drains.
+    shell.data(&b"still here\n"[..]).await.expect("send");
+    read_until(&mut shell, "still here").await;
+    let (out, status) = ssh_client::exec(&conn, "whoami").await.expect("exec");
+    assert_eq!(out, "target: login=ubuntu command=whoami\n");
+    assert_eq!(status, Some(0));
+    assert!(!w.has_stopped(), "the worker waits for the open session");
+
+    // The user ends it: the worker exits right after, well before its
+    // 20 s drain timeout, with the recording uploaded.
+    drop(shell);
+    drop(conn);
+    let ended = std::time::Instant::now();
+    eventually(Duration::from_secs(10), "the worker exits", || async {
+        w.has_stopped()
+    })
+    .await;
+    assert!(ended.elapsed() < Duration::from_secs(10));
+    assert_eq!(
+        recordings_left(w),
+        0,
+        "the recording was uploaded before exit"
+    );
+
+    let id = w.worker.id();
+    eventually(
+        Duration::from_secs(20),
+        "session.end and the stored recording",
+        || async {
+            c.ends_on(&id)
+                .first()
+                .is_some_and(|end| c.recording_stored(end))
+        },
+    )
+    .await;
+    let end = &c.ends_on(&id)[0];
+    assert_eq!(end["data"]["reason"], "ended", "{end}");
+    assert_eq!(
+        end["data"]["recording_sha256"].as_str().map(str::len),
+        Some(64)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_over_deadline_is_ended_and_audited() {
+    let Some(c) = Box::pin(capped_deployment_with(&[2], &["--drain-timeout-secs=1"])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let w = &c.workers[0];
+    let conn = c.ssh(c.d.proxy_addr, "web-1").await.expect("session");
+    let mut shell = open_shell(&conn).await;
+    w.begin_stop();
+
+    // After the drain timeout the worker ends the session: the shell closes.
+    let closed = tokio::time::timeout(Duration::from_secs(15), async {
+        while shell.wait().await.is_some() {}
+    })
+    .await;
+    assert!(
+        closed.is_ok(),
+        "the session was ended after the drain timeout"
+    );
+    eventually(Duration::from_secs(15), "the worker exits", || async {
+        w.has_stopped()
+    })
+    .await;
+    assert_eq!(
+        recordings_left(w),
+        0,
+        "the recording was uploaded before exit"
+    );
+
+    // Audited as ended by the drain, with its recording.
+    let id = w.worker.id();
+    eventually(
+        Duration::from_secs(20),
+        "session.end and the stored recording",
+        || async {
+            c.ends_on(&id)
+                .first()
+                .is_some_and(|end| c.recording_stored(end))
+        },
+    )
+    .await;
+    let ends = c.ends_on(&id);
+    assert_eq!(ends.len(), 1);
+    let end = &ends[0];
+    assert_eq!(end["data"]["reason"], "worker_drain", "{end}");
+    assert_eq!(end["schema_version"], 1, "{end}");
+    assert_eq!(end["producer"]["component"], "proxy");
+    assert_eq!(end["user"], DEVELOPER);
+    assert_eq!(end["data"]["resource"], "web-1");
+    assert_eq!(
+        end["data"]["recording_sha256"].as_str().map(str::len),
+        Some(64)
+    );
+    drop(conn);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idle_worker_exits_promptly_on_sigterm() {
+    let Some(c) = Box::pin(capped_deployment_with(&[1], &[LONG_DRAIN])).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let w = &c.workers[0];
+    let stopping = std::time::Instant::now();
+    w.begin_stop();
+    eventually(Duration::from_secs(5), "the idle worker exits", || async {
+        w.has_stopped()
+    })
+    .await;
+    assert!(
+        stopping.elapsed() < Duration::from_secs(3),
+        "no wait for the 20 s drain timeout: {:?}",
+        stopping.elapsed()
+    );
+    eventually(Duration::from_secs(5), "its tunnels are gone", || async {
+        c.d.proxy().tunnels.channel_for(&w.worker.id()).is_none()
+    })
+    .await;
 }

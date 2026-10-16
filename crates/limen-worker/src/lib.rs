@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
@@ -25,10 +25,10 @@ use limen_core::secret::Secret;
 use limen_proto::v1::worker_tunnel_server::{WorkerTunnel, WorkerTunnelServer};
 use limen_proto::v1::{PingRequest, PingResponse, TunnelFrame};
 use limen_tunnel::connect::{SharedClientConfig, channel, dial, retry_if_went_away};
-use limen_tunnel::serve::{H2Settings, serve_h2};
+use limen_tunnel::serve::{H2Settings, serve_h2_until};
 use limen_tunnel::tls::client_config;
 use limen_tunnel::{PeerInfo, alpn};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use tonic::{Request, Response, Status, Streaming};
 
 #[derive(Debug, Clone, Args)]
@@ -53,9 +53,16 @@ pub struct Config {
     #[arg(long, env = "LIMEN_TUNNELS", default_value_t = 2)]
     pub tunnels: usize,
 
-    /// How long to wait for in-flight sessions on shutdown.
-    #[arg(long, env = "LIMEN_DRAIN_TIMEOUT", value_parser = parse_duration, default_value = "10m")]
-    pub drain_timeout: Duration,
+    /// On SIGTERM, how long open sessions may go on (the worker takes no new
+    /// ones meanwhile) before it ends them, each with a `session.end` whose
+    /// reason is `worker_drain`. It exits as soon as none is left. Ending
+    /// them and the last recording and audit uploads take up to 15 s more,
+    /// so give the orchestrator a longer grace period before it kills the
+    /// worker: at least this plus 15 s (Kubernetes
+    /// `terminationGracePeriodSeconds`, ECS `stopTimeout`, Compose
+    /// `stop_grace_period`).
+    #[arg(long, env = "LIMEN_DRAIN_TIMEOUT_SECS", default_value_t = 20)]
+    pub drain_timeout_secs: u64,
 
     #[arg(long, env = "LIMEN_ADMIN_LISTEN", default_value = "0.0.0.0:3090")]
     pub admin_listen: SocketAddr,
@@ -113,6 +120,10 @@ pub struct Worker {
     config: Arc<Config>,
     creds: watch::Receiver<Arc<ComponentCredentials>>,
     draining: Arc<AtomicBool>,
+    /// Sessions refused because the worker was draining, since start.
+    refused_draining: Arc<AtomicU64>,
+    /// Flipped when the drain timeout is up: open sessions end.
+    end_sessions: Arc<watch::Sender<bool>>,
     tunnels_up: Arc<AtomicUsize>,
     sessions: SessionSlots,
     pub(crate) policy: limen_session::snapshot::PolicyCache,
@@ -169,6 +180,8 @@ impl Worker {
                 config: Arc::new(config),
                 creds: rx,
                 draining: Arc::new(AtomicBool::new(false)),
+                refused_draining: Arc::default(),
+                end_sessions: Arc::new(watch::channel(false).0),
                 tunnels_up: Arc::new(AtomicUsize::new(0)),
                 sessions,
                 policy,
@@ -215,6 +228,23 @@ impl Worker {
         self.sessions.refused.load(Ordering::SeqCst)
     }
 
+    /// Sessions refused because this worker was draining.
+    #[must_use]
+    pub fn sessions_refused_draining(&self) -> u64 {
+        self.refused_draining.load(Ordering::SeqCst)
+    }
+
+    /// Flips when the drain timeout is up and open sessions must end.
+    pub(crate) fn end_sessions(&self) -> watch::Receiver<bool> {
+        self.end_sessions.subscribe()
+    }
+
+    /// Whether the worker is shutting down (it takes no new sessions).
+    #[must_use]
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
+    }
+
     #[must_use]
     pub fn policy_version(&self) -> Option<i64> {
         self.policy.latest().map(|s| s.version)
@@ -238,8 +268,10 @@ impl Worker {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionSlots {
     count: Arc<AtomicUsize>,
+    /// Told whenever a slot is given back.
+    released: Arc<Notify>,
     /// Sessions refused at the cap, since start.
-    refused: Arc<std::sync::atomic::AtomicU64>,
+    refused: Arc<AtomicU64>,
     /// 0: no cap.
     max: usize,
 }
@@ -248,8 +280,25 @@ impl SessionSlots {
     pub(crate) fn new(max: u32) -> Self {
         Self {
             count: Arc::default(),
+            released: Arc::default(),
             refused: Arc::default(),
             max: usize::try_from(max).unwrap_or(usize::MAX),
+        }
+    }
+
+    /// Wait until no slot is held, or `until`. Whether none is held.
+    pub(crate) async fn wait_idle(&self, until: tokio::time::Instant) -> bool {
+        loop {
+            // Registered before the check, so a release in between is seen.
+            let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            if self.active() == 0 {
+                return true;
+            }
+            if tokio::time::timeout_at(until, released).await.is_err() {
+                return self.active() == 0;
+            }
         }
     }
 
@@ -263,7 +312,10 @@ impl SessionSlots {
                 (max == 0 || n < max).then_some(n + 1)
             })
             .ok()
-            .map(|_| SessionGuard(Arc::clone(&self.count)));
+            .map(|_| SessionGuard {
+                count: Arc::clone(&self.count),
+                released: Arc::clone(&self.released),
+            });
         if slot.is_none() {
             self.refused.fetch_add(1, Ordering::SeqCst);
             metrics::counter!("limen_worker_sessions_refused_total", "reason" => "capacity")
@@ -283,11 +335,15 @@ impl SessionSlots {
 
 /// Gives a session slot back when dropped.
 #[derive(Debug)]
-pub(crate) struct SessionGuard(Arc<AtomicUsize>);
+pub(crate) struct SessionGuard {
+    count: Arc<AtomicUsize>,
+    released: Arc<Notify>,
+}
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        self.count.fetch_sub(1, Ordering::SeqCst);
+        self.released.notify_waiters();
     }
 }
 
@@ -346,7 +402,12 @@ impl WorkerTunnel for TunnelService {
         request: Request<Streaming<TunnelFrame>>,
     ) -> Result<Response<Self::OpenSessionStream>, Status> {
         if self.0.draining.load(Ordering::SeqCst) {
-            return Err(Status::unavailable("worker is draining"));
+            // Before anything is read: the proxy may try another worker.
+            self.0.refused_draining.fetch_add(1, Ordering::SeqCst);
+            metrics::counter!("limen_worker_sessions_refused_total", "reason" => "draining")
+                .increment(1);
+            tracing::info!("session refused: draining");
+            return Err(limen_tunnel::refusal::draining());
         }
         let Some(slot) = self.0.sessions.try_acquire() else {
             tracing::info!(
@@ -407,9 +468,18 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
                         remote_addr: None,
                         client_certs: Vec::new(),
                     };
+                    // On shutdown, close gracefully (GOAWAY) so the closing
+                    // frames of sessions that just ended still go out, but
+                    // don't wait for a stuck stream for long.
+                    let (mut stop, mut cut) = (shutdown.clone(), shutdown.clone());
                     let served = tokio::select! {
-                        r = serve_h2(tls, peer, routes.clone(), H2Settings::default()) => r.map_err(anyhow::Error::from),
-                        _ = shutdown.changed() => Ok(()),
+                        r = serve_h2_until(tls, peer, routes.clone(), H2Settings::default(), async move {
+                            let _ = stop.wait_for(|s| *s).await;
+                        }) => r.map_err(anyhow::Error::from),
+                        () = async move {
+                            let _ = cut.wait_for(|s| *s).await;
+                            tokio::time::sleep(TUNNEL_CLOSE_GRACE).await;
+                        } => Ok(()),
                     };
                     worker.tunnels_up.fetch_sub(1, Ordering::SeqCst);
                     metrics::gauge!("limen_worker_tunnels_up").decrement(1.0);
@@ -441,6 +511,18 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
     }
 }
 
+/// On shutdown, how long a tunnel waits for its open streams to finish.
+const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(5);
+/// Once the drain timeout is up, how long the ended sessions get to finish
+/// their recordings and send their closing frames.
+const SESSION_END_GRACE: Duration = Duration::from_secs(5);
+/// Once no session is left, how long closing the tunnels and the last
+/// recording and audit uploads may take. What isn't uploaded by then stays
+/// on disk and goes on the next start. Together with
+/// [`SESSION_END_GRACE`] this is the 15 s that `--drain-timeout-secs` asks
+/// the orchestrator to allow on top of the drain timeout.
+const FINAL_FLUSH: Duration = Duration::from_secs(10);
+
 /// A tunnel that stayed up this long was healthy.
 const HEALTHY_TUNNEL: Duration = Duration::from_secs(30);
 /// A clean close sooner than this after connecting is treated as a failure,
@@ -470,7 +552,9 @@ fn after_tunnel(clean: bool, uptime: Duration, backoff: &mut Backoff) -> Duratio
     }
 }
 
-/// Run until `shutdown` flips, then drain.
+/// Run until `shutdown` flips, then drain: take no new sessions, let open
+/// ones finish until the drain timeout, end the rest (`worker_drain`), close
+/// the tunnels, upload what is left, and return.
 pub async fn run(
     worker: Worker,
     creds_tx: watch::Sender<Arc<ComponentCredentials>>,
@@ -494,30 +578,65 @@ pub async fn run(
         },
     ));
 
-    // Tunnels stop only after draining, so they get their own shutdown signal.
-    let (stop_tunnels, tunnels_rx) = watch::channel(false);
-    for index in 0..worker.config.tunnels.max(1) {
-        tokio::spawn(tunnel_loop(worker.clone(), index, tunnels_rx.clone()));
-    }
-    tokio::spawn(policy_refresh(worker.clone(), tunnels_rx.clone()));
+    // Tunnels and uploads stop only once the sessions are over, so they get
+    // their own signals: `flush` (finish up, then stop) and `deadline` (stop
+    // now; what is left stays on disk for the next start).
+    let (flush_tx, flush) = watch::channel(false);
+    let (deadline_tx, deadline) = watch::channel(false);
+    let tunnels: Vec<_> = (0..worker.config.tunnels.max(1))
+        .map(|index| tokio::spawn(tunnel_loop(worker.clone(), index, flush.clone())))
+        .collect();
+    tokio::spawn(policy_refresh(worker.clone(), flush.clone()));
     let shipper = worker.clone();
-    tokio::spawn(limen_component::audit::ship(
+    let audit = tokio::spawn(limen_component::audit::ship_until(
         worker.audit_spool.clone(),
         move || shipper.control_plane(),
-        tunnels_rx.clone(),
+        flush.clone(),
+        deadline,
     ));
-    tokio::spawn(recordings::upload_loop(worker.clone(), tunnels_rx.clone()));
+    let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
     let admin = tokio::spawn(serve_admin(worker.clone()));
     tracing::info!(id = %worker.id(), tunnels = worker.config.tunnels, "worker running");
 
-    let _ = shutdown.changed().await;
+    let _ = shutdown.wait_for(|stop| *stop).await;
+    // From here pings say `draining` (proxies stop choosing us) and new
+    // sessions are refused.
     worker.draining.store(true, Ordering::SeqCst);
-    let deadline = Instant::now() + worker.config.drain_timeout;
-    tracing::info!(sessions = worker.sessions.active(), "draining");
-    while worker.sessions.active() > 0 && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    let drain = Duration::from_secs(worker.config.drain_timeout_secs);
+    tracing::info!(sessions = worker.sessions.active(), timeout = ?drain, "draining");
+    let now = tokio::time::Instant::now();
+    if !worker.sessions.wait_idle(now + drain).await {
+        tracing::warn!(
+            sessions = worker.sessions.active(),
+            "drain timeout reached; ending the open sessions"
+        );
+        let _ = worker.end_sessions.send(true);
+        if !worker
+            .sessions
+            .wait_idle(tokio::time::Instant::now() + SESSION_END_GRACE)
+            .await
+        {
+            tracing::warn!(
+                sessions = worker.sessions.active(),
+                "sessions still open after being ended; closing the tunnels anyway"
+            );
+        }
     }
-    let _ = stop_tunnels.send(true);
+
+    tracing::info!("sessions over; closing the tunnels and uploading what is left");
+    let _ = flush_tx.send(true);
+    let finished = tokio::time::timeout(FINAL_FLUSH, async {
+        futures::future::join_all(tunnels).await;
+        let _ = uploads.await;
+        let _ = audit.await;
+    })
+    .await;
+    if finished.is_err() {
+        tracing::warn!(
+            "not everything was uploaded in time; recordings and audit events left on disk go on the next start"
+        );
+    }
+    let _ = deadline_tx.send(true);
     admin.abort();
     Ok(())
 }
@@ -531,8 +650,11 @@ async fn serve_admin(worker: Worker) -> anyhow::Result<()> {
             "/readyz",
             get(move || {
                 let up = ready.tunnels_up();
+                let draining = ready.is_draining();
                 async move {
-                    if up > 0 {
+                    if draining {
+                        (StatusCode::SERVICE_UNAVAILABLE, "draining".to_owned())
+                    } else if up > 0 {
                         (StatusCode::OK, format!("ready: {up} tunnel(s) up"))
                     } else {
                         (

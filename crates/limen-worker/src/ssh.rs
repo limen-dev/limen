@@ -48,15 +48,23 @@ pub struct SessionOutcome {
     pub recording_uri: String,
     pub recording_sha256: String,
     pub output_bytes: u64,
+    /// The worker ended the session because its drain timeout was up.
+    pub ended_by_drain: bool,
 }
+
+/// How long an ended session gets to close before it is dropped.
+const END_WITHIN: Duration = Duration::from_secs(3);
 
 type SharedRecorder = Arc<Mutex<Option<Recorder>>>;
 
-/// Run the SSH server side on `stream` until the user disconnects.
+/// Run the SSH server side on `stream` until the user disconnects, or `end`
+/// flips (the worker's drain timeout is up): then the user is disconnected
+/// and the recording is finished as usual.
 pub async fn serve<S>(
     stream: S,
     config: SshSessionConfig,
     audit: Emitter,
+    mut end: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<SessionOutcome>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -81,14 +89,39 @@ where
         recorder: Arc::clone(&recorder),
     };
     let running = russh::server::run_stream(server_config, stream, handler).await?;
-    if let Err(e) = running.await {
+    let handle = running.handle();
+    let mut running = std::pin::pin!(running);
+    let ending = async {
+        if end.wait_for(|end| *end).await.is_err() {
+            // The worker is gone without asking: nothing to do here.
+            std::future::pending::<()>().await;
+        }
+    };
+    let (result, ended_by_drain) = tokio::select! {
+        r = &mut running => (Some(r), false),
+        () = ending => {
+            tracing::info!(session = %config.session_id, "ending the session: the worker is shutting down");
+            let _ = handle
+                .disconnect(
+                    russh::Disconnect::ByApplication,
+                    "the Limen worker serving this session is shutting down; connect again".into(),
+                    "en".into(),
+                )
+                .await;
+            (tokio::time::timeout(END_WITHIN, &mut running).await.ok(), true)
+        }
+    };
+    if let Some(Err(e)) = result {
         tracing::debug!(session = %config.session_id, error = %e, "SSH session ended with error");
     }
     let taken = recorder
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
-    let mut outcome = SessionOutcome::default();
+    let mut outcome = SessionOutcome {
+        ended_by_drain,
+        ..SessionOutcome::default()
+    };
     if let Some(rec) = taken {
         let (_path, bytes, sha) = rec.finish()?;
         // The uploader sends it to the control plane, which stores it and
@@ -98,6 +131,7 @@ where
             recording_uri: format!("recording:{}", config.session_id),
             recording_sha256: sha,
             output_bytes: bytes,
+            ended_by_drain,
         };
     }
     Ok(outcome)

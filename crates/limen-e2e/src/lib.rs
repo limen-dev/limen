@@ -71,6 +71,8 @@ pub struct RunningProxy {
 #[derive(Debug)]
 pub struct RunningWorker {
     pub worker: limen_worker::Worker,
+    /// Its `--data-dir`.
+    pub data_dir: PathBuf,
     shutdown: watch::Sender<bool>,
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
@@ -94,6 +96,16 @@ impl RunningWorker {
     pub async fn stop(self) {
         let _ = self.shutdown.send(true);
         let _ = self.task.await;
+    }
+
+    /// Tell the worker to stop, as SIGTERM does, without waiting: it drains.
+    pub fn begin_stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Whether the worker's `run` has returned.
+    pub fn has_stopped(&self) -> bool {
+        self.task.is_finished()
     }
 }
 
@@ -325,23 +337,27 @@ impl Deployment {
         self.start_worker_with(join_token, name, &[]).await
     }
 
-    /// [`start_worker`](Self::start_worker) with extra flags, such as `--max-sessions=1`.
+    /// [`start_worker`](Self::start_worker) with extra flags, such as
+    /// `--max-sessions=1` or `--drain-timeout-secs=20` (default here: 1).
     pub async fn start_worker_with(
         &self,
         join_token: &str,
         name: &str,
         extra: &[&str],
     ) -> RunningWorker {
+        let data_dir = self.dir.path().join(name);
         let mut args = vec![
             format!("--proxy-addr={}", self.proxy_addr),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={join_token}"),
-            format!("--data-dir={}", self.dir.path().join(name).display()),
+            format!("--data-dir={}", data_dir.display()),
             "--admin-listen=127.0.0.1:0".into(),
-            "--drain-timeout=1s".into(),
             "--policy-refresh=1s".into(),
             "--policy-grace=3s".into(),
         ];
+        if !extra.iter().any(|a| a.starts_with("--drain-timeout-secs")) {
+            args.push("--drain-timeout-secs=1".into());
+        }
         args.extend(extra.iter().map(|&a| a.to_owned()));
         let config: limen_worker::Config = parse(&args);
         let (worker, creds_tx) = limen_worker::Worker::start(config)
@@ -351,6 +367,7 @@ impl Deployment {
         let task = tokio::spawn(limen_worker::run(worker.clone(), creds_tx, rx));
         RunningWorker {
             worker,
+            data_dir,
             shutdown: tx,
             task,
         }

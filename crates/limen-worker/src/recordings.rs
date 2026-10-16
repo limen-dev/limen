@@ -16,30 +16,46 @@ use crate::recording::sha256_file;
 const CHUNK: usize = 256 * 1024;
 const SCAN_EVERY: Duration = Duration::from_secs(5);
 
+/// Upload finished recordings every few seconds. When `shutdown` flips, one
+/// last pass (sessions are over by then), then return.
 pub(crate) async fn upload_loop(worker: Worker, mut shutdown: watch::Receiver<bool>) {
     loop {
-        tokio::select! {
-            () = tokio::time::sleep(SCAN_EVERY) => {}
-            _ = shutdown.changed() => return,
+        let last = tokio::select! {
+            () = tokio::time::sleep(SCAN_EVERY) => false,
+            _ = shutdown.wait_for(|stop| *stop) => true,
+        };
+        upload_finished(&worker).await;
+        if last {
+            let left = finished(&worker.recordings_dir()).len();
+            if left > 0 {
+                tracing::warn!(
+                    recordings = left,
+                    "recordings not uploaded; they go on the next start"
+                );
+            }
+            return;
         }
-        for path in finished(&worker.recordings_dir()) {
-            match upload(&worker, &path).await {
-                Ok(uri) => {
-                    tracing::info!(recording = %path.display(), %uri, "recording uploaded");
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        tracing::warn!(error = %e, "couldn't delete an uploaded recording");
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(recording = %path.display(), error = %e, "recording upload failed; will retry");
-                    break;
+    }
+}
+
+async fn upload_finished(worker: &Worker) {
+    for path in finished(&worker.recordings_dir()) {
+        match upload(worker, &path).await {
+            Ok(uri) => {
+                tracing::info!(recording = %path.display(), %uri, "recording uploaded");
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::warn!(error = %e, "couldn't delete an uploaded recording");
                 }
             }
+            Err(e) => {
+                tracing::warn!(recording = %path.display(), error = %e, "recording upload failed; will retry");
+                break;
+            }
         }
-        metrics::gauge!("limen_recordings_pending").set(f64::from(
-            u32::try_from(finished(&worker.recordings_dir()).len()).unwrap_or(u32::MAX),
-        ));
     }
+    metrics::gauge!("limen_recordings_pending").set(f64::from(
+        u32::try_from(finished(&worker.recordings_dir()).len()).unwrap_or(u32::MAX),
+    ));
 }
 
 /// Complete recordings (`.cast`; in-progress ones are `.cast.part`).

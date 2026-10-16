@@ -39,6 +39,21 @@ pub async fn ship<F>(spool: Spool, channel: F, shutdown: watch::Receiver<bool>)
 where
     F: Fn() -> anyhow::Result<Channel> + Send + Sync + 'static,
 {
+    // Proxies stop at once; the deadline is the shutdown.
+    ship_until(spool, channel, shutdown.clone(), shutdown).await;
+}
+
+/// Like [`ship`], but when `drain` flips it goes on until the spool is
+/// empty, and stops at once only when `deadline` flips (what is left stays
+/// in the spool, for the next start).
+pub async fn ship_until<F>(
+    spool: Spool,
+    channel: F,
+    drain: watch::Receiver<bool>,
+    deadline: watch::Receiver<bool>,
+) where
+    F: Fn() -> anyhow::Result<Channel> + Send + Sync + 'static,
+{
     let channel = Arc::new(channel);
     let consumer = ConsumerConfig {
         name: TO_CONTROL_PLANE.into(),
@@ -65,9 +80,8 @@ where
                 .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
             }
         },
-        // Proxies and workers stop at once; the deadline is the shutdown.
-        shutdown.clone(),
-        shutdown,
+        drain,
+        deadline,
     )
     .await;
 }
