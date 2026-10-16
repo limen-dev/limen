@@ -24,7 +24,7 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0017](0017-web-console.md) | Web console: read-mostly, server-rendered, built into the control plane | Accepted |
 | [0018](0018-data-store-protocols.md) | Search, document, and messaging protocols (OpenSearch/Elasticsearch, MongoDB/Atlas/DocumentDB, Redshift, RabbitMQ, Kafka) | Proposed |
 | [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Accepted |
-| [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Proposed |
+| [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Accepted |
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |

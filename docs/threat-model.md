@@ -130,6 +130,22 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | D: login flooding | The same per-IP limit as people's logins (30 a minute, bursts of 10) |
 | Limit | The CI platform is trusted for what its tokens claim. Everything here is verified against a stand-in issuer, not real GitHub or GitLab tokens |
 
+### TB9: Control plane replicas (scale-out, ADR-0020)
+| Threat | Mitigation |
+|---|---|
+| S: something other than a live control plane calls `AuditHandoff/Handoff` and plants audit events | The caller must present a control plane certificate directly (not forwarded by a proxy) **and** have a row in `control_plane_replicas` with a fresh heartbeat; proxies, workers, users, and unregistered certificates get `permission_denied`. The sender, in turn, checks the receiver's certificate is a control plane with the id the registry lists. Integration-tested |
+| T: a registered replica injects events for any producer | **Accepted.** A holder of a CA-issued control plane certificate and a registry row already holds the CA key and the database, which are higher trust than the audit trail's writers. Handed-off events keep their original producer and `seq`, so the verifier shows any conflict (one `seq` used by two events) |
+| D: a peer fills another replica's spool through handoff | The spool has a size limit and refuses when full (fail closed); the call is bounded by the sender's deadline. No per-stream size cap or idle timeout (the caller is trusted). Known |
+| T: tampering with `control_plane_replicas` (a new table in the A11 store) | Rows hold ids, advertised URLs, and heartbeats only, no secrets. Whoever can write the table can already change policy. Heartbeats carry an ownership token, so a stalled replica cannot refresh or delete the row of the replica that took its id |
+| S: a second replica reuses an id and corrupts a replica's audit chain | Registration refuses an id with a fresh heartbeat; a replica that loses its id shuts down |
+| S/E: the spool-adopt tool as a way to read or inject audit events | `limen-spool-adopt` needs the control plane's environment (database URL, CA access), registers a short-lived `spool-adopt-<random>` row (live for as long as the tool runs, and up to 15 seconds after a crash), and sends only through the same handoff call. It opens the spool under a file lock |
+| R/D: audit events lost when a replica dies | `durable` mode (volume per replica): none. `ephemeral` mode killed without warning: events acknowledged and not yet shipped are lost, up to the sink flush interval; **residual risk**, visible as sequence gaps in the verifier. Graceful stops lose nothing (drain, then handoff) |
+| T: a proxy retries a call that was already processed | A relayed call is resent only when the request provably was not processed (a graceful close before the body was read; HTTP/2 refused stream), never for a request whose body was already sent. A worker's refusal for capacity or drain is returned before the session's first byte, so another worker can be tried |
+| S: a token holder names a component to confuse operators or audit (impersonation by name) | Names are display only: certificates, policy, revocation, and audit attribution use the id. A name must be approved by the join token (exact or a pattern), is unique among live proxies and workers, and is certified as a label so it cannot change; policy refuses a `worker_selector` on it and the matcher ignores it. A refused enrollment (not approved, or already in use) is audited as `auth.denied` |
+| D: a token holder squats names (takes `prod-a-1` first) | Limited to the token's approved pattern; an admin revokes the squatter and the name is free again. A component whose enrollment reply was lost cannot re-enroll under its name until the orphan is revoked |
+| D: login and connection limits multiplied by replicas, or too low behind one egress IP | The control plane's login limit and the proxy's pre-authentication accept limit are per client IP and per replica (abuse guards, not authorization); rates and bursts are settings (defaults 30 a minute, burst 10; 50 a second, burst 200). A site behind one address should raise them |
+| T: test-only settings reach a release build | The long report interval and similar overrides sit behind the `test-hooks` Cargo feature, enabled only by `limen-e2e`; release images are built with `--bin` for named binaries that do not depend on it |
+
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|

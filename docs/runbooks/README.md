@@ -11,6 +11,7 @@ Runbooks are added as each component ships. Planned:
 | [CI on self-hosted runners](ci-runners.md) | CI ✅ |
 | [SSH target onboarding (`TrustedUserCAKeys`)](ssh-target-onboarding.md) | 2 ✅ |
 | [Audit pipeline backlog / spool full](audit-spool-full.md) | 3 ✅ |
+| [Scaling out, replacing, and upgrading copies](scale-out.md) | 5 ✅ |
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
 | Database role bootstrap drift | 4 |
 | Control plane outage | 7 |
