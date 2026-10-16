@@ -223,13 +223,21 @@ async fn establish(
     let ttl = policy.max_session_ttl(&user.roles);
     let creds = proxy.credentials();
     // Load figures are a little stale, so the chosen worker (or the peer
-    // proxy holding it) may turn out to be full. It says so before reading
-    // anything, so another eligible worker is tried, with a grant of its
-    // own: at most MAX_ATTEMPTS workers in all. Only the final outcome is
-    // audited.
+    // proxy holding it) may turn out to be full, or to have started
+    // draining since its last ping. It says so before reading anything, so
+    // another eligible worker is tried, with a grant of its own: at most
+    // MAX_ATTEMPTS workers in all. Only the final outcome is audited.
     let mut refused_full: Vec<String> = Vec::new();
+    let mut tried: Vec<String> = Vec::new();
     loop {
-        let (route, slot) = choose_route(proxy, policy, &request.resource, &refused_full).await?;
+        let (route, slot) = choose_route(
+            proxy,
+            policy,
+            &request.resource,
+            &tried,
+            !refused_full.is_empty(),
+        )
+        .await?;
         let worker_id = route.worker_id().to_owned();
         let grant = SessionGrant {
             session_id: session_id.to_string(),
@@ -260,9 +268,29 @@ async fn establish(
                 if local {
                     proxy.tunnels.mark_full(&worker_id);
                 }
-                refused_full.push(worker_id);
-                if refused_full.len() >= MAX_ATTEMPTS {
+                refused_full.push(worker_id.clone());
+                tried.push(worker_id);
+                if tried.len() >= MAX_ATTEMPTS {
                     return Err(no_capacity(&request.resource));
+                }
+            }
+            Err(Opening::Draining(why)) => {
+                tracing::info!(worker = %worker_id, reason = %why, "worker is draining; trying another");
+                // Stop choosing it now rather than at its next ping.
+                if slot.is_some() {
+                    drop(slot);
+                    proxy.tunnels.remove_worker(&worker_id);
+                }
+                tried.push(worker_id);
+                if tried.len() >= MAX_ATTEMPTS {
+                    return Err(if refused_full.is_empty() {
+                        failed(format!(
+                            "no worker that can reach {} could take the session: they are shutting down; try again shortly",
+                            request.resource
+                        ))
+                    } else {
+                        no_capacity(&request.resource)
+                    });
                 }
             }
             Err(Opening::Denied(s)) => return Err(refused(&s)),
@@ -277,12 +305,14 @@ const MAX_ATTEMPTS: usize = 3;
 /// A worker tunnelled to this proxy if possible, otherwise one held by a
 /// peer proxy (ADR-0004). Among eligible workers not in `exclude`, the less
 /// loaded of two; full ones never. `exclude` holds workers that just
-/// refused as full, so running out of candidates then is "no capacity".
+/// refused (as full or draining); if one was full (`any_full`), running out
+/// of candidates is "no capacity".
 async fn choose_route(
     proxy: &Proxy,
     policy: &limen_policy::Policy,
     resource: &str,
     exclude: &[String],
+    any_full: bool,
 ) -> Result<(Route, Slot), Denial> {
     let accept = |labels: &std::collections::BTreeMap<String, String>| {
         policy.worker_may_serve(resource, labels)
@@ -299,7 +329,7 @@ async fn choose_route(
         }
         Err(local) => local,
     };
-    let full = local == NoWorker::Full || !exclude.is_empty();
+    let full = local == NoWorker::Full || any_full;
     match crate::peer::find(proxy, accept, exclude).await {
         Ok(Ok(remote)) => Ok((Route::Peer(remote), None)),
         Ok(Err(NoWorker::Full)) => Err(no_capacity(resource)),
@@ -318,6 +348,8 @@ async fn choose_route(
 enum Opening {
     /// The worker, or the peer proxy holding it, is full; nothing was read.
     Full(String),
+    /// The worker is draining (shutting down); nothing was read.
+    Draining(String),
     /// Any other refusal from the worker.
     Denied(tonic::Status),
     Failed(Denial),
@@ -358,6 +390,8 @@ async fn open_on(
     let classify = |s: tonic::Status| {
         if s.code() == tonic::Code::ResourceExhausted {
             Opening::Full(s.message().to_owned())
+        } else if limen_tunnel::refusal::is_draining(&s) {
+            Opening::Draining(s.message().to_owned())
         } else {
             Opening::Denied(s)
         }

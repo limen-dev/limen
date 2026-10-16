@@ -106,6 +106,11 @@ impl WorkerTunnel for Forwarder {
                     // Give back this slot first so it isn't counted.
                     drop(slot);
                     self.proxy.tunnels.mark_full(&worker_id);
+                } else if limen_tunnel::refusal::is_draining(&s) {
+                    // The peer tries another worker (the status, with its
+                    // marker, goes back as is); stop choosing this one here.
+                    drop(slot);
+                    self.proxy.tunnels.remove_worker(&worker_id);
                 }
                 return Err(s);
             }

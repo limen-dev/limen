@@ -197,6 +197,22 @@ impl Tunnels {
         }
     }
 
+    /// Stop choosing and advertising every tunnel of `worker_id`, which said
+    /// it is draining. The tunnels stay up for the sessions already on them,
+    /// and close when the worker exits.
+    pub fn remove_worker(&self, worker_id: &str) {
+        let removed = {
+            let mut state = self.lock();
+            let before = state.tunnels.len();
+            state.tunnels.retain(|_, t| t.worker_id != worker_id);
+            state.workers.remove(worker_id);
+            state.tunnels.len() != before
+        };
+        if removed {
+            self.changed.notify_one();
+        }
+    }
+
     /// Record what a worker's ping said. Ignored once the worker has no
     /// tunnel here.
     ///
@@ -630,6 +646,28 @@ mod tests {
         tunnels.record_ping("b", 0, 0);
         tunnels.mark_full("b");
         assert_eq!(tunnels.load("b"), Some(Load { active: 0, max: 0 }));
+    }
+
+    #[tokio::test]
+    async fn a_draining_worker_is_no_longer_picked_or_advertised() {
+        let tunnels = Tunnels::default();
+        let _a = add(&tunnels, "draining", "t1").await;
+        let _b = add(&tunnels, "draining", "t2").await;
+        let _c = add(&tunnels, "other", "t3").await;
+        let held = tunnels.pick(|_| true, &["other".to_owned()]).expect("slot");
+        tunnels.remove_worker("draining");
+        assert_eq!(tunnels.load("draining"), None);
+        assert!(tunnels.summaries().iter().all(|s| s.worker_id == "other"));
+        for _ in 0..20 {
+            assert_eq!(
+                tunnels.pick(|_| true, &[]).expect("other").worker_id,
+                "other"
+            );
+        }
+        assert_eq!(tunnels.reserve("draining").err(), Some(NoWorker::None));
+        // A session still open on it gives its slot back harmlessly.
+        drop(held);
+        tunnels.remove("t1");
     }
 
     #[tokio::test]
