@@ -50,6 +50,8 @@ pub struct Deployment {
     pub cp_dial: String,
     /// Control plane flags shared by every replica (not `--id` or paths).
     cp_args: Vec<String>,
+    /// Extra flags for every proxy this deployment starts.
+    proxy_args: Vec<String>,
     pub proxy_addr: SocketAddr,
     pub proxy: Option<RunningProxy>,
     cp_shutdown: watch::Sender<bool>,
@@ -95,7 +97,14 @@ impl RunningWorker {
 impl Deployment {
     /// Start a control plane and one proxy. `None` without a test database.
     pub async fn start() -> Option<Self> {
-        Self::start_inner(false, &[], false).await
+        Self::start_inner(false, &[], false, &[]).await
+    }
+
+    /// Like [`start`](Self::start), with extra flags for every proxy, such
+    /// as `--ping-interval-secs=3600`.
+    pub async fn start_with_proxy_args(proxy_args: &[&str]) -> Option<Self> {
+        let extra: Vec<String> = proxy_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &[], false, &extra).await
     }
 
     /// For tests with several control plane replicas: proxies dial a name
@@ -103,17 +112,22 @@ impl Deployment {
     /// test says otherwise. `cp_args` go to every replica.
     pub async fn start_scaled(cp_args: &[&str]) -> Option<Self> {
         let extra: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
-        Self::start_inner(false, &extra, true).await
+        Self::start_inner(false, &extra, true, &[]).await
     }
 
     /// Like [`start`](Self::start), with the web console enabled. Its public
     /// URL is `https://localhost:<proxy port>`, and the mock IdP knows the
     /// console's OIDC client ([`CONSOLE_CLIENT_ID`], [`CONSOLE_SECRET`]).
     pub async fn start_with_console() -> Option<Self> {
-        Self::start_inner(true, &[], false).await
+        Self::start_inner(true, &[], false, &[]).await
     }
 
-    async fn start_inner(console: bool, extra_cp_args: &[String], named: bool) -> Option<Self> {
+    async fn start_inner(
+        console: bool,
+        extra_cp_args: &[String],
+        named: bool,
+        proxy_args: &[String],
+    ) -> Option<Self> {
         if std::env::var_os("LIMEN_TEST_LOG").is_some() {
             limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
         }
@@ -178,6 +192,7 @@ impl Deployment {
             cp_addr,
             cp_dial,
             cp_args,
+            proxy_args: proxy_args.to_vec(),
             proxy_addr,
             proxy: None,
             cp_shutdown: cp_tx,
@@ -243,7 +258,7 @@ impl Deployment {
         name: &str,
     ) -> RunningProxy {
         let addr = listener.local_addr().expect("addr");
-        let config: limen_proxy::Config = parse(&[
+        let mut args = vec![
             format!("--control-plane-addr={}", self.cp_dial),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={PROXY_TOKEN}"),
@@ -253,7 +268,9 @@ impl Deployment {
             "--drain-timeout-secs=1".into(),
             "--policy-refresh-secs=1".into(),
             "--policy-grace-secs=3".into(),
-        ]);
+        ];
+        args.extend_from_slice(&self.proxy_args);
+        let config: limen_proxy::Config = parse(&args);
         let (proxy, creds_tx) = limen_proxy::Proxy::start(config)
             .await
             .expect("proxy start");

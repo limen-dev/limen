@@ -139,8 +139,13 @@ struct Capped {
     ca_pem: String,
 }
 
+/// Proxies ping workers and report to the registry once, when a tunnel
+/// comes up, and not again during a test: the figures the tests make stale
+/// stay stale, so which worker gets tried first is decided by the test.
+const NO_PERIODIC_PINGS: [&str; 2] = ["--ping-interval-secs=3600", "--report-interval-secs=3600"];
+
 async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
-    let d = Deployment::start().await?;
+    let d = Deployment::start_with_proxy_args(&NO_PERIODIC_PINGS).await?;
     let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
     let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
@@ -506,13 +511,16 @@ async fn a_refusal_through_a_peer_is_retried_and_the_holder_frees_the_slot() {
     .await;
 
     // Now the first worker is full behind everyone's back. B's figures (from
-    // the registry) and A's say it's idle, so B picks it about half the
-    // time; A forwards, the worker refuses, and B tries the other one. Go
-    // on until that has happened at least once (and at least 4 sessions):
-    // 12 sessions all missing it has a chance of 1 in 4096.
+    // the registry: with no periodic reports they never change) tie the two
+    // workers, so each session goes to the full one first with chance 1/2.
+    // The first time A forwards and the worker refuses; after that A's own
+    // figure says full and A refuses. Either way B tries the other worker.
+    // Go on until a refusal has happened (and at least 4 sessions): 12
+    // sessions without one has a chance of 1 in 4096.
+    let refusals = || full.sessions_refused_at_cap() + a.tunnels.refused_at_cap();
     let filler = c.fill_behind_the_proxys_back(0).await;
     for i in 0..12 {
-        if i >= 4 && full.sessions_refused_at_cap() > 0 {
+        if i >= 4 && refusals() > 0 {
             break;
         }
         let conn = c
@@ -536,7 +544,7 @@ async fn a_refusal_through_a_peer_is_retried_and_the_holder_frees_the_slot() {
         .await;
     }
     assert!(
-        full.sessions_refused_at_cap() > 0,
+        refusals() > 0,
         "a peered session went to the full worker first and was retried"
     );
     filler.abort();
