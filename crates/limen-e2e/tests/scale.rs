@@ -619,12 +619,17 @@ async fn draining(tunnel: limen_tunnel::tunnel::TunnelChannel) -> bool {
         .is_ok_and(|r| r.get_ref().draining)
 }
 
-/// Recordings still waiting on the worker's disk for upload.
+/// Recordings still on the worker's disk: finished ones waiting for upload
+/// (`.cast`) and unfinished ones (`.cast.part`).
 fn recordings_left(w: &RunningWorker) -> usize {
     std::fs::read_dir(w.data_dir.join("recordings")).map_or(0, |entries| {
         entries
             .filter_map(Result::ok)
-            .filter(|e| e.path().extension().is_some_and(|x| x == "cast"))
+            .filter(|e| {
+                let path = e.path();
+                let ext = |p: &std::path::Path, x: &str| p.extension().is_some_and(|e| e == x);
+                ext(&path, "cast") || (ext(&path, "part") && ext(&path.with_extension(""), "cast"))
+            })
             .count()
     })
 }
@@ -684,16 +689,17 @@ async fn draining_worker_gets_no_new_sessions() {
 
     // Through proxy B (which pings nobody, and whose registry view still has
     // the worker): A relays the worker's refusal with its marker, B looks
-    // for another worker, finds none, and says so.
+    // for another worker, finds none, and says the workers are shutting down.
     let err = c
         .ssh(addr_b, "web-1")
         .await
         .err()
         .expect("no new session on a draining worker");
-    assert!(err.contains("no worker is connected"), "{err}");
+    assert!(err.contains("shutting down; try again shortly"), "{err}");
     assert_eq!(w.worker.sessions_refused_draining(), 2);
 
-    // Proxy A stopped choosing the worker when it relayed the refusal.
+    // Proxy A stopped choosing the worker when it relayed the refusal, so
+    // it does not try it at all: no worker is known.
     let err = c
         .ssh(c.d.proxy_addr, "web-1")
         .await

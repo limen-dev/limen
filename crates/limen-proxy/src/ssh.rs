@@ -176,6 +176,14 @@ fn no_capacity(resource: &str) -> Denial {
     }
 }
 
+/// Every worker tried for the session refused because it is draining.
+/// Not audited: an infrastructure state, like a missing worker.
+fn shutting_down(resource: &str) -> Denial {
+    failed(format!(
+        "no worker that can reach {resource} could take the session: they are shutting down; try again shortly"
+    ))
+}
+
 /// A refusal from the worker, or from the peer proxy holding its tunnel,
 /// other than "full" (which [`open_on`] reports as [`Opening::Full`]).
 fn refused(s: &tonic::Status) -> Denial {
@@ -284,10 +292,7 @@ async fn establish(
                 tried.push(worker_id);
                 if tried.len() >= MAX_ATTEMPTS {
                     return Err(if refused_full.is_empty() {
-                        failed(format!(
-                            "no worker that can reach {} could take the session: they are shutting down; try again shortly",
-                            request.resource
-                        ))
+                        shutting_down(&request.resource)
                     } else {
                         no_capacity(&request.resource)
                     });
@@ -306,7 +311,7 @@ const MAX_ATTEMPTS: usize = 3;
 /// peer proxy (ADR-0004). Among eligible workers not in `exclude`, the less
 /// loaded of two; full ones never. `exclude` holds workers that just
 /// refused (as full or draining); if one was full (`any_full`), running out
-/// of candidates is "no capacity".
+/// of candidates is "no capacity", and if all were draining, "shutting down".
 async fn choose_route(
     proxy: &Proxy,
     policy: &limen_policy::Policy,
@@ -334,6 +339,8 @@ async fn choose_route(
         Ok(Ok(remote)) => Ok((Route::Peer(remote), None)),
         Ok(Err(NoWorker::Full)) => Err(no_capacity(resource)),
         Ok(Err(NoWorker::None)) | Err(_) if full => Err(no_capacity(resource)),
+        // Only draining workers refused: there were workers, just not now.
+        Ok(Err(NoWorker::None)) if !exclude.is_empty() => Err(shutting_down(resource)),
         Ok(Err(NoWorker::None)) => Err(failed(format!(
             "no worker is connected that can reach {resource}"
         ))),
