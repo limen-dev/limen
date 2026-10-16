@@ -4,7 +4,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 
 ## Rules
 - **Work in a git worktree.** `git worktree add .claude/worktrees/<topic> -b <branch>`; make all edits, builds, and commits there. Never edit the main checkout or switch its branch.
-- **Phase by phase.** Roadmap = GitHub milestones. Don't start a phase the owner hasn't approved. Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
+- **Phase by phase.** Status is in `docs/design.md` §13 (✅ = done). Several phases are already implemented, so check there before any change. Only work on a phase the owner has approved; don't build ahead, even partially (planned integrations are data-only stubs). Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
 - **Verify before claiming.** Run it before saying it works. Anything tested only against a local stand-in is labelled `unverified`.
 - **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
 - **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
