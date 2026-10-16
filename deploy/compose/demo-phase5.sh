@@ -114,7 +114,7 @@ sleep 11 # proxies and workers refresh policy every 10s
 "${compose[@]}" exec -T postgres psql -U limen -d limen -At \
   -c "SELECT id || ' ' || spool_mode FROM control_plane_replicas ORDER BY id" | sed 's/^/  replica /'
 for p in "${proxy_health[@]}"; do
-  note "proxy :$p has tunnels from: $(curl -sf "http://localhost:$p/tunnels" | grep -o '"worker_id":"[^"]*"' | sort -u | cut -d'"' -f4 | tr '\n' ' ')"
+  note "proxy :$p has tunnels from: $(curl -sf "http://localhost:$p/tunnels" | grep -o '"worker_name":"[^"]*"' | sort -u | cut -d'"' -f4 | tr '\n' ' ')"
 done
 pass "stack up, policy applied, 3 replicas registered"
 
@@ -316,17 +316,21 @@ execs = [e for e in events.values() if e["kind"] == "ssh.exec" and run in e["dat
 sids = {e["session_id"] for e in execs}
 starts = [e for e in events.values() if e["kind"] == "session.start" and e.get("session_id") in sids]
 ends = [e for e in events.values() if e["kind"] == "session.end" and e.get("session_id") in sids]
-print(len(execs), len(sids), len(starts), len(ends))
+# Every component here has a name (LIMEN_NAME): session.start carries both.
+named = [e for e in starts
+         if re.fullmatch(r"worker-[0-2]", e["data"].get("worker_name", ""))
+         and re.fullmatch(r"proxy-[0-2]", e["data"].get("proxy_name", ""))]
+print(len(execs), len(sids), len(starts), len(ends), len(named))
 PY
 }
 counts=""
 for _ in $(seq 1 40); do
   counts="$(s3_events 2>/dev/null || true)"
-  read -r execs sids starts ends <<<"${counts:-0 0 0 0}"
+  read -r execs sids starts ends named <<<"${counts:-0 0 0 0 0}"
   [ "$execs" -ge "$sessions_ran" ] && [ "$starts" -ge "$sessions_ran" ] && [ "$ends" -ge "$sessions_ran" ] && break
   sleep 3
 done
-read -r execs sids starts ends <<<"${counts:-0 0 0 0}"
+read -r execs sids starts ends named <<<"${counts:-0 0 0 0 0}"
 
 # 3. S3 holds exactly the sessions this run produced: one ssh.exec, one
 #    session.start, and one session.end per session (distinct event ids).
@@ -335,6 +339,13 @@ if [ "$execs" -eq "$sessions_ran" ] && [ "$sids" -eq "$sessions_ran" ] \
   pass "S3 event count: $sessions_ran sessions -> $execs ssh.exec, $starts session.start, $ends session.end"
 else
   fail "S3 event count: $sessions_ran sessions, but $execs ssh.exec ($sids sessions), $starts session.start, $ends session.end"
+fi
+
+# Names: every session.start names the worker and proxy (Task 8b).
+if [ "$starts" -gt 0 ] && [ "$named" -eq "$starts" ]; then
+  pass "names: all $starts session.start events carry worker_name (worker-0..2) and proxy_name (proxy-0..2)"
+else
+  fail "names: $named of $starts session.start events carry worker_name and proxy_name"
 fi
 
 # 4. The audit trail verifies: every writer's chain, and no producer seq gap.

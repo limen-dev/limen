@@ -44,7 +44,9 @@ x-control-plane-env: &control-plane-env
   LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
   # The same multi-use dev tokens as the dev stack: three proxies and three
   # workers enroll with them. (Single-use tokens are refused on second use.)
-  LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+  # Here they also approve names (patterns only, as the tokens are reusable):
+  # each proxy and worker asks for its own with LIMEN_NAME.
+  LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60:limen.io/name=proxy-*,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev;limen.io/name=worker-*"
   LIMEN_PROXY_DNS_NAMES: localhost,proxy,proxy-0,proxy-1,proxy-2
   LIMEN_AUDIT_S3_BUCKET: limen-audit
   LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
@@ -183,6 +185,7 @@ services:
     <<: *proxy
     environment:
       <<: *proxy-env
+      LIMEN_NAME: proxy-0
       LIMEN_DNS_NAMES: localhost,proxy,proxy-0
       LIMEN_PEER_ADDRESS: proxy-0:3443
     networks: { default: { aliases: [proxy] } }
@@ -195,6 +198,7 @@ services:
     <<: *proxy
     environment:
       <<: *proxy-env
+      LIMEN_NAME: proxy-1
       LIMEN_DNS_NAMES: localhost,proxy,proxy-1
       LIMEN_PEER_ADDRESS: proxy-1:3443
     networks: { default: { aliases: [proxy] } }
@@ -207,6 +211,7 @@ services:
     <<: *proxy
     environment:
       <<: *proxy-env
+      LIMEN_NAME: proxy-2
       LIMEN_DNS_NAMES: localhost,proxy,proxy-2
       LIMEN_PEER_ADDRESS: proxy-2:3443
     networks: { default: { aliases: [proxy] } }
@@ -217,21 +222,21 @@ services:
 
   worker-0:
     <<: *worker
-    environment: { <<: *worker-env }
+    environment: { <<: *worker-env, LIMEN_NAME: worker-0 }
     volumes:
       - worker-0-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
 
   worker-1:
     <<: *worker
-    environment: { <<: *worker-env }
+    environment: { <<: *worker-env, LIMEN_NAME: worker-1 }
     volumes:
       - worker-1-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
 
   worker-2:
     <<: *worker
-    environment: { <<: *worker-env }
+    environment: { <<: *worker-env, LIMEN_NAME: worker-2 }
     volumes:
       - worker-2-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
