@@ -122,6 +122,14 @@ impl Deployment {
         Self::start_inner(false, &[], false, &extra).await
     }
 
+    /// Like [`start`](Self::start), with extra flags for every control plane
+    /// (`cp_args`) and every proxy (`proxy_args`).
+    pub async fn start_with_args(cp_args: &[&str], proxy_args: &[&str]) -> Option<Self> {
+        let cp: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
+        let proxy: Vec<String> = proxy_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &cp, false, &proxy).await
+    }
+
     /// For tests with several control plane replicas: proxies dial a name
     /// that resolves (through the test hook) to the first replica until the
     /// test says otherwise. `cp_args` go to every replica.

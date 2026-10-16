@@ -167,9 +167,36 @@ async fn capped_deployment_named(
     proxy_args: &[&str],
     worker_names: Option<&str>,
 ) -> Option<Capped> {
-    let mut all_proxy_args = NO_PERIODIC_PINGS.to_vec();
+    Box::pin(capped_deployment_full(
+        caps,
+        extra,
+        proxy_args,
+        worker_names,
+        &[],
+        false,
+    ))
+    .await
+}
+
+/// [`capped_deployment_named`], plus `cp_args` for the control plane and,
+/// with `periodic`, proxies that ping and report on their normal schedule
+/// (for tests that run longer than the registry lease allows the
+/// no-periodic-pings setup).
+async fn capped_deployment_full(
+    caps: &[u32],
+    extra: &[&str],
+    proxy_args: &[&str],
+    worker_names: Option<&str>,
+    cp_args: &[&str],
+    periodic: bool,
+) -> Option<Capped> {
+    let mut all_proxy_args = if periodic {
+        Vec::new()
+    } else {
+        NO_PERIODIC_PINGS.to_vec()
+    };
     all_proxy_args.extend_from_slice(proxy_args);
-    let d = Deployment::start_with_proxy_args(&all_proxy_args).await?;
+    let d = Deployment::start_with_args(cp_args, &all_proxy_args).await?;
     let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
     let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
@@ -1039,4 +1066,150 @@ async fn names_reach_session_audit_tunnels_and_stay_fixed() {
         .await;
     assert_eq!(restarted.worker.name().as_deref(), Some("e2e-worker-0"));
     restarted.stop().await;
+}
+
+// Load at the design scale (about 500 users), in a CI-sized form. It runs the
+// real binaries' code in one process, so it measures this code, not the
+// network or a database over a wire; a larger run is described in
+// docs/scale-out.md. Off unless LIMEN_LOAD_TEST=1.
+//   LIMEN_LOAD_USERS (500)   users that log in, 50 at a time
+//   LIMEN_LOAD_SESSIONS (100) of those that hold an SSH session at once
+//   LIMEN_LOAD_HOLD_SECS (10) how long each session stays open
+
+fn env_number(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn percentile(sorted: &[Duration], p: usize) -> Duration {
+    sorted
+        .get(sorted.len().saturating_sub(1) * p / 100)
+        .copied()
+        .unwrap_or_default()
+}
+
+fn report(what: &str, mut latencies: Vec<Duration>, errors: usize) {
+    latencies.sort();
+    eprintln!(
+        "LOAD {what}: ok={} errors={errors} p50={:?} p95={:?} p99={:?} max={:?}",
+        latencies.len(),
+        percentile(&latencies, 50),
+        percentile(&latencies, 95),
+        percentile(&latencies, 99),
+        latencies.last().copied().unwrap_or_default(),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn load_users_log_in_and_hold_sessions() {
+    if std::env::var_os("LIMEN_LOAD_TEST").is_none() {
+        eprintln!("SKIPPED: set LIMEN_LOAD_TEST=1 to run the load test");
+        return;
+    }
+    let users = usize::try_from(env_number("LIMEN_LOAD_USERS", 500)).expect("users");
+    let sessions = usize::try_from(env_number("LIMEN_LOAD_SESSIONS", 100)).expect("sessions");
+    let hold = Duration::from_secs(env_number("LIMEN_LOAD_HOLD_SECS", 10));
+    // Everyone comes from one IP here, so lift the per-IP limits (the proxy's
+    // accept rate and the control plane's login rate), as a site with many
+    // users behind one egress address would.
+    let Some(c) = Box::pin(capped_deployment_full(
+        &[200, 200],
+        &[],
+        &["--accept-rate-per-second=100000", "--accept-burst=100000"],
+        None,
+        &[
+            "--unauthenticated-rate-per-minute=100000",
+            "--unauthenticated-burst=100000",
+        ],
+        true,
+    ))
+    .await
+    else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL to run end-to-end tests");
+        return;
+    };
+    let c = Arc::new(c);
+
+    // Phase 1: everyone logs in, 50 at a time.
+    let gate = Arc::new(tokio::sync::Semaphore::new(50));
+    let mut logins = tokio::task::JoinSet::new();
+    for i in 0..users {
+        let (c, gate) = (Arc::clone(&c), Arc::clone(&gate));
+        logins.spawn(async move {
+            let _permit = gate.acquire().await.expect("gate");
+            let started = std::time::Instant::now();
+            let identity =
+                c.d.login(&format!("load-user-{i}@example.com"), &["ops"])
+                    .await;
+            (started.elapsed(), identity)
+        });
+    }
+    let (mut login_times, mut identities, mut login_errors) = (Vec::new(), Vec::new(), 0);
+    while let Some(done) = logins.join_next().await {
+        let (took, identity) = done.expect("login task");
+        match identity {
+            Ok(id) => {
+                login_times.push(took);
+                identities.push(id);
+            }
+            Err(e) => {
+                if login_errors < 5 {
+                    eprintln!("LOAD login error: {e}");
+                }
+                login_errors += 1;
+            }
+        }
+    }
+    report("login", login_times, login_errors);
+
+    // Phase 2: `sessions` of them open an SSH session at once and hold it.
+    let mut open_sessions = tokio::task::JoinSet::new();
+    for identity in identities.into_iter().take(sessions) {
+        let c = Arc::clone(&c);
+        open_sessions.spawn(async move {
+            let started = std::time::Instant::now();
+            let handle = ssh_client::connect(
+                &c.d.proxy_addr.to_string(),
+                &c.ca_pem,
+                identity,
+                &c.host_ca,
+                "web-1",
+                "ubuntu",
+            )
+            .await?;
+            let (out, _) = ssh_client::exec(&handle, "echo load-ok").await?;
+            if !out.contains("load-ok") {
+                return Err(format!("unexpected output {out:?}"));
+            }
+            let took = started.elapsed();
+            tokio::time::sleep(hold).await;
+            Ok::<_, String>(took)
+        });
+    }
+    let (mut session_times, mut session_errors) = (Vec::new(), 0);
+    while let Some(done) = open_sessions.join_next().await {
+        match done.expect("session task") {
+            Ok(took) => session_times.push(took),
+            Err(e) => {
+                eprintln!("LOAD session error: {e}");
+                session_errors += 1;
+            }
+        }
+    }
+    report(
+        "session (connect + first command)",
+        session_times,
+        session_errors,
+    );
+
+    assert!(
+        login_errors * 100 <= users,
+        "more than 1 % of logins failed: {login_errors} of {users}"
+    );
+    assert!(
+        session_errors * 100 <= sessions,
+        "more than 1 % of sessions failed: {session_errors} of {sessions}"
+    );
 }
