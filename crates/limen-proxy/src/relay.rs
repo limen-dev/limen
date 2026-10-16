@@ -107,7 +107,11 @@ async fn relay_console(
         Err(_) => return plain(http::StatusCode::BAD_REQUEST, "bad request"),
     };
     parts.extensions = http::Extensions::new();
-    match forward(channel, Request::from_parts(parts, body)).await {
+    match forward(channel, Request::from_parts(parts, body), |e| {
+        limen_tunnel::connect::went_away_error(e)
+    })
+    .await
+    {
         Ok(response) => response,
         Err(e) => {
             tracing::warn!(error = %e, "control plane unreachable for the console");
@@ -170,12 +174,25 @@ where
 /// shutting down: its GOAWAY can fail a request the channel had already
 /// queued on that connection.
 ///
-/// Invariant for the resend: the request carries a body that is not already
-/// at end of stream (every gRPC call: it needs its request message), or it
-/// is a GET or HEAD; and the transport never polled that body. hyper sends
-/// an empty body as HEADERS with `END_STREAM` without polling it, so an empty
-/// POST may have been delivered in full and is never resent.
-async fn forward<S, B>(channel: S, req: Request<B>) -> Result<Response<tonic::body::Body>, S::Error>
+/// Invariant for the resend: the transport never polled the request's body,
+/// and one of these holds.
+/// - The body is not already at end of stream (every gRPC call: it needs its
+///   request message). Unpolled then means nothing was sent, whatever the
+///   error.
+/// - It is a GET or HEAD, whose empty body is never polled even when the
+///   request was delivered in full (hyper sends it as HEADERS with
+///   `END_STREAM`). So the error itself must show the connection went away
+///   before the control plane could act (`went_away`: GOAWAY, refused
+///   stream, closed before sending). Any other error might come after the
+///   control plane acted, and a GET such as the console's sign-in callback
+///   has effects.
+///
+/// An empty POST may have been delivered in full too, and is never resent.
+async fn forward<S, B>(
+    channel: S,
+    req: Request<B>,
+    went_away: impl Fn(&S::Error) -> bool,
+) -> Result<Response<tonic::body::Body>, S::Error>
 where
     S: Service<Request<tonic::body::Body>, Response = Response<tonic::body::Body>> + Clone,
     S::Error: std::fmt::Display,
@@ -183,9 +200,9 @@ where
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let (parts, body) = req.into_parts();
-    let resendable = !body.is_end_stream()
-        || parts.method == http::Method::GET
-        || parts.method == http::Method::HEAD;
+    let has_body = !body.is_end_stream();
+    let resendable =
+        has_body || parts.method == http::Method::GET || parts.method == http::Method::HEAD;
     let slot = Arc::new(Mutex::new(Some(body)));
     let mut first_error = None;
     for _ in 0..2 {
@@ -200,7 +217,12 @@ where
         *request.headers_mut() = parts.headers.clone();
         match channel.clone().oneshot(request).await {
             Ok(response) => return Ok(response),
-            Err(e) if resendable && first_error.is_none() && !polled.load(Ordering::SeqCst) => {
+            Err(e)
+                if resendable
+                    && first_error.is_none()
+                    && !polled.load(Ordering::SeqCst)
+                    && (has_body || went_away(&e)) =>
+            {
                 tracing::info!(error = %e, path = %parts.uri.path(), "control plane connection went away before the request was sent; sending it again");
                 first_error = Some(e);
             }
@@ -262,7 +284,11 @@ async fn relay(
         Err(_) => return tonic::Status::invalid_argument("bad path").into_http(),
     };
     parts.extensions = http::Extensions::new();
-    match forward(channel, Request::from_parts(parts, body)).await {
+    match forward(channel, Request::from_parts(parts, body), |e| {
+        limen_tunnel::connect::went_away_error(e)
+    })
+    .await
+    {
         Ok(response) => response,
         Err(e) => {
             tracing::warn!(error = %e, %path, "control plane unreachable");
@@ -335,7 +361,7 @@ mod tests {
             calls: Arc::default(),
             read_body_then_fail: false,
         };
-        let response = forward(upstream.clone(), request())
+        let response = forward(upstream.clone(), request(), |_| false)
             .await
             .expect("retried on a fresh connection");
         let body = response
@@ -361,8 +387,44 @@ mod tests {
             .uri("/console/api/kill")
             .body(http_body_util::Full::new(hyper::body::Bytes::new()))
             .expect("request");
-        assert!(forward(upstream.clone(), req).await.is_err());
+        assert!(forward(upstream.clone(), req, |_| true).await.is_err());
         assert_eq!(upstream.calls.load(Ordering::SeqCst), 1);
+    }
+
+    fn get(path: &'static str) -> Request<http_body_util::Full<hyper::body::Bytes>> {
+        Request::builder()
+            .method(http::Method::GET)
+            .uri(path)
+            .body(http_body_util::Full::new(hyper::body::Bytes::new()))
+            .expect("request")
+    }
+
+    /// A GET's empty body is never polled, delivered or not, so only an error
+    /// that shows the connection went away before the control plane acted
+    /// allows a resend. Otherwise a GET with effects (the sign-in callback,
+    /// which spends a one-time code) could be replayed.
+    #[tokio::test]
+    async fn a_get_is_resent_only_after_an_error_showing_the_connection_went_away() {
+        let upstream = Upstream {
+            calls: Arc::default(),
+            read_body_then_fail: false,
+        };
+        assert!(
+            forward(upstream.clone(), get("/console/callback"), |_| false)
+                .await
+                .is_err(),
+            "an unexplained transport error may have come after the control plane acted"
+        );
+        assert_eq!(upstream.calls.load(Ordering::SeqCst), 1);
+
+        let upstream = Upstream {
+            calls: Arc::default(),
+            read_body_then_fail: false,
+        };
+        forward(upstream.clone(), get("/console/sessions"), |_| true)
+            .await
+            .expect("the connection went away before the request: sent again");
+        assert_eq!(upstream.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -371,7 +433,11 @@ mod tests {
             calls: Arc::default(),
             read_body_then_fail: true,
         };
-        assert!(forward(upstream.clone(), request()).await.is_err());
+        assert!(
+            forward(upstream.clone(), request(), |_| true)
+                .await
+                .is_err()
+        );
         assert_eq!(upstream.calls.load(Ordering::SeqCst), 1);
     }
 }

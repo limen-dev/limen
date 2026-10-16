@@ -142,14 +142,22 @@ fn test_resolution(addr: &str) -> Option<Vec<SocketAddr>> {
 /// shutdown), so this is a reason to reconnect, not an error.
 #[must_use]
 pub fn went_away(status: &tonic::Status) -> bool {
-    let mut source = std::error::Error::source(status);
-    while let Some(e) = source {
+    std::error::Error::source(status).is_some_and(went_away_error)
+}
+
+/// [`went_away`] for an error that is not (yet) a `tonic::Status`: true when
+/// it, or something it wraps, is a connection the server closed or a stream
+/// it refused before acting on it.
+#[must_use]
+pub fn went_away_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(e) = current {
         if let Some(e) = e.downcast_ref::<hyper::Error>() {
             return e.is_canceled()
                 || e.is_closed()
                 || std::error::Error::source(e).is_some_and(graceful_h2);
         }
-        source = e.source();
+        current = e.source();
     }
     false
 }
