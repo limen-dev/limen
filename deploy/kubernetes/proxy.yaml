@@ -73,8 +73,10 @@ spec:
         - name: ca
           configMap: { name: limen-internal-ca }
         # The proxy keeps its identity (certificate and audit spool) here.
-        # emptyDir means a replaced pod enrolls again, with a new join token;
-        # use a StatefulSet and a volume if you want a stable identity.
+        # On SIGTERM it ships its spool to the control plane (up to 10 s
+        # after its connections are gone); whatever is left is lost with an
+        # emptyDir, and a replaced pod enrolls again with a new join token.
+        # Use a StatefulSet and a volume for a stable identity and no loss.
         - name: data
           emptyDir: {}
 ---

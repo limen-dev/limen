@@ -35,7 +35,7 @@ A durable replica that is never coming back leaves unshipped events on its volum
 limen-spool-adopt --dir /path/to/spool --expect-id control-plane-3
 ```
 
-It refuses if another process holds the spool or if `control-plane-3` still has a fresh heartbeat. It registers briefly as `spool-adopt-<random>`, sends every unshipped record to a live replica (acknowledged before it forgets them), and exits 0 only when nothing is left. Pass `--consumers` to name any sink the replica ran that the environment does not imply. Verify with the [chain verification](audit-verify.md) afterwards.
+It refuses if another process holds the spool or if `control-plane-3` still has a fresh heartbeat. It registers briefly as `spool-adopt-<random>`, sends every unshipped record to a live replica (acknowledged before it forgets them), and exits 0 only when nothing is left. Pass `--consumers` to name any sink the replica ran that the environment does not imply. A sink the spool has no record of is treated as having shipped nothing, so its records are sent again: duplicates are possible (the console and the verifier count each event once; the S3, JSONL, and Datadog sinks keep both lines), loss is not. Verify with the [chain verification](audit-verify.md) afterwards.
 
 **Rolling upgrades.** Replicas on older code do not hold the spool lock, so `--expect-id` is the only guard against adopting a spool that is still in use.
 

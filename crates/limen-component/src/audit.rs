@@ -68,7 +68,8 @@ pub async fn ship_until<F>(
             async move {
                 let ch = channel().map_err(|e| ShipError::Retry(e.to_string()))?;
                 let events: Vec<_> = batch.into_iter().map(|(_, e)| e).collect();
-                // Ingest is idempotent (events keep their ids), so a call that
+                // Delivery is at least once (events keep their ids, and the console and
+                // the verifier count each once), so a call that
                 // crossed a graceful close is simply sent again.
                 limen_tunnel::connect::retry_if_went_away("audit ingest", || {
                     let mut client = AuditIngestClient::new(ch.clone());
