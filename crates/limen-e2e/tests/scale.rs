@@ -133,6 +133,8 @@ struct Capped {
     d: Deployment,
     _target: SshTarget,
     workers: Vec<RunningWorker>,
+    /// The developer's identity, logged in once (logins are rate limited).
+    user: limen_tunnel::tls::Identity,
     host_ca: String,
     ca_pem: String,
 }
@@ -151,19 +153,20 @@ async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
         .await
         .expect("apply")
         .into_inner();
-    let token = admin
-        .create_join_token(CreateJoinTokenRequest {
-            kind: "worker".into(),
-            ttl_seconds: 600,
-            labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
-            dns_names: vec![],
-        })
-        .await
-        .expect("token")
-        .into_inner()
-        .token;
     let mut workers = Vec::new();
     for cap in caps {
+        // Worker join tokens are single-use.
+        let token = admin
+            .create_join_token(CreateJoinTokenRequest {
+                kind: "worker".into(),
+                ttl_seconds: 600,
+                labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
+                dns_names: vec![],
+            })
+            .await
+            .expect("token")
+            .into_inner()
+            .token;
         let name = format!("worker-{}", uuid::Uuid::now_v7().simple());
         let cap = format!("--max-sessions={cap}");
         workers.push(d.start_worker_with(&token, &name, &[&cap]).await);
@@ -183,7 +186,9 @@ async fn capped_deployment(caps: &[u32]) -> Option<Capped> {
         },
     )
     .await;
+    let user = d.login(DEVELOPER, &["ops"]).await.expect("developer");
     Some(Capped {
+        user,
         host_ca: d.public_ca("ssh-host-ca.pub"),
         ca_pem: std::fs::read_to_string(d.ca_file()).expect("ca"),
         d,
@@ -198,7 +203,7 @@ impl Capped {
         proxy_addr: SocketAddr,
         resource: &str,
     ) -> Result<russh::client::Handle<ssh_client::HostCheck>, String> {
-        let user = self.d.login(DEVELOPER, &["ops"]).await.expect("developer");
+        let user = self.user.clone();
         // Refusals are immediate: a full pool must never hang.
         tokio::time::timeout(
             Duration::from_secs(20),
@@ -502,9 +507,14 @@ async fn a_refusal_through_a_peer_is_retried_and_the_holder_frees_the_slot() {
 
     // Now the first worker is full behind everyone's back. B's figures (from
     // the registry) and A's say it's idle, so B picks it about half the
-    // time; A forwards, the worker refuses, and B tries the other one.
+    // time; A forwards, the worker refuses, and B tries the other one. Go
+    // on until that has happened at least once (and at least 4 sessions):
+    // 12 sessions all missing it has a chance of 1 in 4096.
     let filler = c.fill_behind_the_proxys_back(0).await;
-    for i in 0..6 {
+    for i in 0..12 {
+        if i >= 4 && full.sessions_refused_at_cap() > 0 {
+            break;
+        }
         let conn = c
             .ssh(addr_b, "web-1")
             .await
@@ -525,9 +535,9 @@ async fn a_refusal_through_a_peer_is_retried_and_the_holder_frees_the_slot() {
         )
         .await;
     }
-    eprintln!(
-        "refusals by the full worker: {}",
-        full.sessions_refused_at_cap()
+    assert!(
+        full.sessions_refused_at_cap() > 0,
+        "a peered session went to the full worker first and was retried"
     );
     filler.abort();
 }
