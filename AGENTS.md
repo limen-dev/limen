@@ -12,12 +12,24 @@ Self-hosted, Rust, identity-aware access (SSH today; databases and more planned)
 - Don't bypass browser certificate warnings or touch trust stores; dev CA is `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Agent use (cost)
-- Do the work in the main conversation by default.
-- Spawn a subagent only for a broad search across many files where you need the conclusion, not the file contents, or for a task that is independent of the main thread and returns a short result.
-- Never spawn a subagent to summarize or re-read work already in context. Never spawn subagents from a subagent.
+
+When using Superpowers workflows, minimize unnecessary subagent usage. This policy overrides the delegation defaults of `subagent-driven-development` and `dispatching-parallel-agents`; keep their brainstorming, planning, and testing steps, and skip the delegation.
+
+- Prefer completing tasks directly in the main conversation.
+- Do not spawn subagents for simple tasks, small bug fixes, or small code changes.
+- Spawn a subagent only for a broad search across many files where the conclusion is all you need, or for an independent task that returns a short result.
+- Do not launch multiple agents to investigate the same problem.
+- Avoid parallel agents unless the tasks are genuinely independent and parallel execution gives a clear benefit.
 - Run at most one subagent at a time, and only when the tasks share no state.
-- Review each diff once. Don't run several reviewers over the same change.
-- This policy overrides the delegation defaults of the Superpowers skills (`subagent-driven-development`, `dispatching-parallel-agents`). Keep their brainstorming, planning, and testing steps; skip the delegation.
+- Never spawn subagents to summarize or re-read work already in context.
+- Never spawn additional subagents from a subagent.
+- For routine implementation, use one main agent and work through the task sequentially.
+- For complex tasks, delegate only when the benefit justifies the extra token cost, and never to more than one subagent.
+- Avoid repeated code reviews or duplicate codebase exploration. Review each diff once; don't run several reviewers over the same change.
+- Before spawning, state in one line why the main conversation can't do the task. If you can't, don't spawn.
+- Preserve essential Superpowers workflows (brainstorming, planning, testing) without unnecessary agent delegation.
+
+Prioritize efficient token usage and correct completion over maximizing the number of agents.
 
 ## Commands
 ```sh
