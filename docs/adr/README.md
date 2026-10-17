@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 The format is [MADR](https://adr.github.io/madr/). Each record has a status: `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, or `Deprecated`.
-ADR-0001 to ADR-0015 were approved by the owner on 2026-10-13, at the end of Phase 0. Later ADRs carry their own approval date in their status line.
+Each ADR's status line gives its approval date.
 
 | # | Title | Status |
 |---|---|---|
