@@ -37,5 +37,6 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Proposed |
 | [0031](0031-positioning.md) | Positioning: access you can prove (provable, explainable, justified, agent-ready, open) | Proposed |
 | [0032](0032-ai-agents-as-principals.md) | AI agents as principals: a bot flavour with accountable owners and per-action approval | Proposed |
+| [0033](0033-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec | Proposed |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
