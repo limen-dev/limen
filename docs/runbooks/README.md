@@ -14,6 +14,6 @@ Runbooks are added as each component ships. Planned:
 | [Releasing](releasing.md) | ADR-0024; first release pending |
 | [Scaling out, replacing, and upgrading copies](scale-out.md) | 5 ✅ |
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
-| Database role bootstrap drift | 6 |
+| [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |
 | Control plane outage | not scheduled |
 | Okta setup | 13 |

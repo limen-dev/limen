@@ -14,6 +14,8 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
 | `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
 
+Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
+
 ## Quick start
 
 You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`.
@@ -80,6 +82,31 @@ asciinema play recordings/<session-id>.cast   # if you have asciinema 3.x
 ```
 
 Audit events are in `proxy:/var/lib/limen/proxy/audit/proxy.jsonl` (`session.start`, `session.end`, `auth.denied`) and `worker:/var/lib/limen/worker/audit/worker.jsonl` (`ssh.exec`). Phase 3 ships them to S3 and Datadog.
+
+## Databases (Phase 6)
+
+PostgreSQL 18 and MySQL 8.4 targets with TLS, a `limen_admin` login, and a seeded `orders` database are in `docker-compose.db-targets.yml` (profile `db`; the dev stack includes it):
+
+```sh
+deploy/compose/demo-phase6.sh          # psql and mysql through `limen db connect`, bootstrap, audit, cancel, lock
+docker compose -f deploy/compose/docker-compose.yml --profile db up -d postgres-target mysql-target db-secrets-init
+docker compose -f deploy/compose/docker-compose.yml --profile db run --rm db-bootstrap --db-bootstrap-once   # create the limen_* roles
+```
+
+The demo runs its own project (`limen-dbdemo`, `docker-compose.db.yml`) on other host ports, so it can run next to the dev stack. The roles and resources come from `examples/policy`; the worker reads role passwords from the `db-secrets` volume and verifies the databases against the `db-tls` CA. Guide: [`docs/guides/databases.md`](../../docs/guides/databases.md). Runbook: [`docs/runbooks/database-onboarding.md`](../../docs/runbooks/database-onboarding.md).
+
+For the integration tests of the database relay (they print SKIPPED without these), get the CA out of the `db-tls` volume and point the tests at the targets:
+
+```sh
+docker run --rm -v limen-db_db-tls:/tls alpine cat /tls/ca.pem > /tmp/limen-db-ca.pem   # volume name: <project>_db-tls
+export LIMEN_TEST_PG_CA_FILE=/tmp/limen-db-ca.pem
+export LIMEN_TEST_PG_TARGET=localhost:5433        # host:port of postgres-target, as your machine reaches it
+export LIMEN_TEST_MYSQL_TARGET=localhost:3307     # host:port of mysql-target
+cargo test -p limen-worker --test db_pg --test db_bootstrap --test db_mysql
+cargo test -p limen-e2e --test phase6             # also needs LIMEN_TEST_DATABASE_URL
+```
+
+The targets publish no host ports; on OrbStack use their container hostnames (`<project>-postgres-target-1.orb.local:5432`), or add `ports:` in an override file.
 
 ## Things to try
 

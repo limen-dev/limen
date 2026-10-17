@@ -5,7 +5,7 @@
 pub mod config;
 mod peer;
 pub mod relay;
-mod ssh;
+mod sessions;
 pub mod tunnels;
 
 use std::net::{IpAddr, SocketAddr};
@@ -194,7 +194,14 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
         identity,
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
-        &[alpn::TUNNEL, alpn::PEER, alpn::SSH, alpn::H2, alpn::HTTP1],
+        &[
+            alpn::TUNNEL,
+            alpn::PEER,
+            alpn::SSH,
+            alpn::DB,
+            alpn::H2,
+            alpn::HTTP1,
+        ],
     )?)
 }
 
@@ -347,7 +354,12 @@ async fn handle_connection(
     let protocol = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
     match protocol.as_deref() {
         Some(p) if p == alpn::TUNNEL => accept_tunnel(proxy, tls, peer, shutdown).await,
-        Some(p) if p == alpn::SSH => ssh::handle(proxy, tls, peer).await,
+        Some(p) if p == alpn::SSH => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Ssh).await;
+        }
+        Some(p) if p == alpn::DB => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Db).await;
+        }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {
             let mut shutdown = shutdown;

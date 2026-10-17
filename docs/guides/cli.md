@@ -40,7 +40,8 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin lock <user> --reason …` / `unlock <user>` / `locks` | Lock or unlock a user; list locks |
 | `limen admin kill-session <id> --reason …` | End one live session |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
-| `limen db connect`, `redis connect`, `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
+| `redis connect`, `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>

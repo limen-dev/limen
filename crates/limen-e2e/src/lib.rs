@@ -604,6 +604,7 @@ pub mod ssh_client {
             &SessionRequest {
                 resource: resource.into(),
                 principal: login.into(),
+                database: String::new(),
             },
         )
         .await
@@ -680,5 +681,75 @@ mod tests {
         assert!(!super::rare_reports(&args(&["--report-interval-secs=15"])));
         assert!(!super::rare_reports(&args(&["--ping-interval-secs=3600"])));
         assert!(!super::rare_reports(&[]));
+    }
+}
+
+/// What a database client of `limen db connect` does, for tests: a loopback
+/// listener whose every connection becomes one session through the proxy.
+pub mod db_client {
+    use std::sync::Arc;
+
+    use limen_proto::v1::{SessionRequest, SessionResponse};
+    use limen_tunnel::framing::{read_message, write_message};
+    use limen_tunnel::tls::{Identity, certs_from_pem, client_config};
+
+    /// Listen on a free loopback port. Connections the proxy refuses are
+    /// closed after the refusal is stored in `errors`.
+    pub async fn listen(
+        proxy_addr: &str,
+        ca_pem: &str,
+        identity: Identity,
+        resource: &str,
+        role: &str,
+        database: &str,
+    ) -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
+        let tls = Arc::new(
+            client_config(
+                &certs_from_pem(ca_pem).expect("ca"),
+                Some(identity),
+                &[limen_tunnel::alpn::DB],
+            )
+            .expect("tls"),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let errors = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (proxy_addr, resource, role, database) = (
+            proxy_addr.to_owned(),
+            resource.to_owned(),
+            role.to_owned(),
+            database.to_owned(),
+        );
+        let seen = Arc::clone(&errors);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut local, _)) = listener.accept().await else {
+                    return;
+                };
+                let (tls, proxy_addr, seen) =
+                    (Arc::clone(&tls), proxy_addr.clone(), Arc::clone(&seen));
+                let request = SessionRequest {
+                    resource: resource.clone(),
+                    principal: role.clone(),
+                    database: database.clone(),
+                };
+                tokio::spawn(async move {
+                    let mut remote = limen_tunnel::connect::dial(&proxy_addr, "localhost", tls)
+                        .await
+                        .expect("dial the proxy");
+                    write_message(&mut remote, &request).await.expect("request");
+                    let response: SessionResponse =
+                        read_message(&mut remote).await.expect("answer");
+                    if !response.ok {
+                        seen.lock().expect("lock").push(response.error);
+                        return;
+                    }
+                    let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
+                });
+            }
+        });
+        (addr, errors)
     }
 }

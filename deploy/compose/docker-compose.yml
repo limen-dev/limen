@@ -6,6 +6,10 @@
 # development only: static tokens, Dex static passwords, file-backed CA keys.
 name: limen
 
+# PostgreSQL and MySQL targets for Phase 6 (profile `db`).
+include:
+  - docker-compose.db-targets.yml
+
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
@@ -152,6 +156,45 @@ services:
     volumes:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
+      # Phase 6: the database CA, and one password file per database role.
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
+
+  # Phase 6: the admin login the role bootstrap uses (ADR-0033). Dev only.
+  db-secrets-init:
+    profiles: ["db"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        printf 'limen-admin-dev-only' > /s/.admin && mkdir -p /s/postgres /s/mysql &&
+        chown -R 65532:65532 /s && chmod 700 /s /s/postgres /s/mysql && chmod 600 /s/.admin
+    volumes: [db-secrets:/s]
+
+  # Phase 6: create and repair the limen_* database roles, then exit.
+  #   docker compose --profile db run --rm db-bootstrap [--db-bootstrap-check]
+  db-bootstrap:
+    profiles: ["tools"]
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:dev
+    command: ["--db-bootstrap-once"]
+    depends_on:
+      proxy: { condition: service_started }
+      db-secrets-init: { condition: service_completed_successfully }
+      postgres-target: { condition: service_healthy }
+      mysql-target: { condition: service_healthy }
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+    volumes:
+      - bootstrap-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
 
   # An SSH target that trusts only Limen per-session certificates.
   sshd-target:
@@ -194,6 +237,8 @@ services:
       - ../../dashboards/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro
 
 volumes:
+  db-secrets: {}
+  bootstrap-data: {}
   postgres: {}
   cp-ca: {}
   ca-public: {}

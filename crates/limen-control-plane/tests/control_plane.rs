@@ -220,7 +220,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("dry run")
         .into_inner();
     assert!(!dry.applied);
-    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 8);
+    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 9);
     assert_eq!(dry.version, 0);
 
     let applied = admin
@@ -273,7 +273,10 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("ls")
         .into_inner();
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["orders-staging", "web-staging-1"]);
+    assert_eq!(
+        names,
+        ["orders-mysql-staging", "orders-staging", "web-staging-1"]
+    );
 
     // The developer is not an admin.
     let err = admin

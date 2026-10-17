@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod bot;
+pub mod db;
 pub mod login;
 pub mod ssh;
 

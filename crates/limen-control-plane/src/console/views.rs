@@ -88,7 +88,7 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
 /// only the data side exists.
 pub struct Connect {
     pub command: String,
-    /// `Some("Phase 6")` until the kind is served.
+    /// `Some("Phase 7")` and so on until the kind is served.
     pub planned: Option<&'static str>,
 }
 

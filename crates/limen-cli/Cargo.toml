@@ -24,6 +24,7 @@ http.workspace = true
 openidconnect.workspace = true
 rand.workspace = true
 rcgen.workspace = true
+rustls.workspace = true
 reqwest.workspace = true
 rustls-pki-types.workspace = true
 serde.workspace = true

@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 limen-control-plane.workspace = true
 limen-core.workspace = true
+limen-policy.workspace = true
 limen-proxy = { workspace = true, features = ["test-hooks"] }
 limen-worker.workspace = true
 limen-proto.workspace = true

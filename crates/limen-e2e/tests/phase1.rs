@@ -70,7 +70,10 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
         .expect("ls")
         .into_inner();
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["orders-staging", "web-staging-1"]);
+    assert_eq!(
+        names,
+        ["orders-mysql-staging", "orders-staging", "web-staging-1"]
+    );
 
     // A user with no mapped roles can't log in.
     let err = d

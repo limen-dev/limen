@@ -72,6 +72,7 @@ base64 = "0.23.1"
 
 # AWS
 aws-config = { version = "1.12", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client", "credentials-process", "sso"] }
+aws-credential-types = "1.2"
 aws-sdk-kms = { version = "1.123", default-features = false, features = ["rt-tokio", "default-https-client"] }
 
 # State
@@ -98,6 +99,12 @@ clap = { version = "4.6", features = ["derive", "env"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 webbrowser = "1.2.4"
+
+# MD5 password login, for Redshift only (ADR-0033). Not used for anything else.
+md-5 = { version = "0.11", default-features = false }
+
+# SQL targets (ADR-0033). The sqlparser tokenizer only; never for allow or deny.
+sqlparser = { version = "0.63", default-features = false }
 
 # Audit pipeline
 crc32fast = "1.5.2"

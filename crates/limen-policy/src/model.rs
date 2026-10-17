@@ -337,6 +337,73 @@ pub struct DbTarget {
     /// Secrets Manager ARN holding the admin credentials used for role bootstrap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_secret_arn: Option<String>,
+    /// Redshift (provisioned): the cluster to ask for temporary credentials
+    /// (`GetClusterCredentials`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_identifier: Option<String>,
+    /// Redshift Serverless: the workgroup to ask for credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workgroup: Option<String>,
+    /// The database to use when the user doesn't name one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_database: Option<String>,
+    /// Secret mode (ADR-0033): a directory on the worker with one file per DB
+    /// role, named for the role, holding its password. Used when `iam_auth` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_dir: Option<String>,
+    /// PEM bundle on the worker that signs the target's certificate (for
+    /// example the RDS bundle). Without it the system roots are used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<String>,
+    /// The name the target's certificate must carry, when it differs from the
+    /// host in `endpoint` (an IP address, a `PrivateLink` name, a tunnel).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
+    /// Talk to the target without TLS. Refused unless the worker was started
+    /// with `--allow-insecure-db-targets` (the local compose profile).
+    #[serde(default)]
+    pub insecure_dev: bool,
+    /// Replace literals in logged statement text with `?` (`audit.normalize_literals`).
+    #[serde(default)]
+    pub normalize_literals: bool,
+    /// Role bootstrap (ADR-0015, ADR-0033): a dedicated admin login and the
+    /// file on the worker that holds its password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_password_file: Option<String>,
+    /// Roles to create and the grants they get (bootstrap).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bootstrap: Vec<DbRoleSpec>,
+}
+
+/// A database login role Limen creates and maintains (ADR-0015).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbRoleSpec {
+    /// Must start with `limen_`.
+    pub role: String,
+    /// Each entry is a database and the privileges the role gets in it.
+    #[serde(default)]
+    pub grants: Vec<DbGrantSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbGrantSpec {
+    pub database: String,
+    /// `read` (SELECT) or `write` (SELECT, INSERT, UPDATE, DELETE), on every
+    /// table in the listed schemas (default `public` for PostgreSQL).
+    pub access: DbAccess,
+    #[serde(default)]
+    pub schemas: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DbAccess {
+    Read,
+    Write,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

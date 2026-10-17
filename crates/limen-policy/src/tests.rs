@@ -143,6 +143,7 @@ fn accessible_lists_resources_and_principals() {
     assert_eq!(
         summary,
         [
+            ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
             ("web-staging-1", vec!["ubuntu"])
         ]
@@ -155,6 +156,7 @@ fn accessible_lists_resources_and_principals() {
         [
             "bastion-staging",
             "cache-staging",
+            "orders-mysql-staging",
             "orders-prod",
             "orders-staging",
             "web-staging-1"
@@ -202,7 +204,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 5);
+    assert_eq!(diff.removed.len(), 6);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
