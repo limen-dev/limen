@@ -4,7 +4,7 @@
 - Date: 2026-10-13
 
 ## Decision
-- **Envelope v1** (`limen_audit::Event`). Kind-specific `data` has a JSON Schema in `docs/audit-schema/`. Any breaking change bumps `schema_version`, and the Glue table supports both versions.
+- **Envelope v1** (`limen_audit::Event`). The envelope and kind-specific `data` are defined in `crates/limen-audit/src/lib.rs` (`SCHEMA_VERSION`). A standalone JSON Schema file is not published yet. Any breaking change bumps `schema_version`, and the Glue table supports both versions.
 - **Producers**: proxy, worker, and control plane. Each writes to its own **local segmented spool**: append-only files, `u32 len | u32 crc32c | payload` framing, group-commit fsync every 50 ms or 256 events, a durable consumer offset, and 64 MiB segments deleted after ack. The spool's max size and high-water mark are configurable.
 - **Transport**: producers stream batches to control plane ingest (gRPC, through the proxy for workers). The control plane acks only after its own spool has fsynced. Producers retry until ack, so delivery is **at-least-once**. Consumers deduplicate on `event_id`.
 - **Sinks** (control plane, leader per shard):
