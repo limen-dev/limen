@@ -5,6 +5,8 @@
 /.limen/
 *.pem
 *.key
+# SSH host keys are generated at image build time, never committed.
+ssh_host_*
 !deploy/compose/**/*.pub
 .env
 # Terraform
