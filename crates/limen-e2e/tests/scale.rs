@@ -1137,7 +1137,7 @@ fn report(what: &str, mut latencies: Vec<Duration>, errors: usize) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn load_users_log_in_and_hold_sessions() {
     if std::env::var_os("LIMEN_LOAD_TEST").is_none() {
-        eprintln!("SKIPPED: set LIMEN_LOAD_TEST=1 to run the load test");
+        eprintln!("opt-in test not run: set LIMEN_LOAD_TEST=1 to run the load test");
         return;
     }
     let users = usize::try_from(env_number("LIMEN_LOAD_USERS", 500)).expect("users");
