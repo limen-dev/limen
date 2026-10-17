@@ -21,6 +21,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
+use crate::redis;
 use crate::ssh::{SshSessionConfig, serve};
 use crate::{SessionGuard, Worker};
 
@@ -132,6 +133,16 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Redis(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = redis::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
             }
         };
         let (reason, outcome) = match tokio::time::timeout(until, serving).await {
@@ -181,6 +192,7 @@ fn config_expiry(signed: &Signed) -> OffsetDateTime {
 enum Admitted {
     Ssh(Box<SshSessionConfig>),
     Db(Box<crate::db::DbSessionConfig>),
+    Redis(Box<redis::Prepared>),
 }
 
 impl Admitted {
@@ -188,6 +200,7 @@ impl Admitted {
         match self {
             Admitted::Ssh(c) => c.session_id.clone(),
             Admitted::Db(c) => c.session_id.to_string(),
+            Admitted::Redis(p) => p.session_id().to_owned(),
         }
     }
 }
@@ -235,6 +248,9 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "postgres" | "redshift" | "mysql" => admit_db(worker, &checked)
             .await
             .map(|c| Admitted::Db(Box::new(c))),
+        "redis" => admit_redis(worker, &checked)
+            .await
+            .map(|c| Admitted::Redis(Box::new(c))),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -272,6 +288,52 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
         ));
     }
     Ok(())
+}
+
+/// The longest a Redis session may take to open its connection to the target.
+const REDIS_PREPARE: std::time::Duration = std::time::Duration::from_secs(25);
+
+async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::RedisUser(grant.principal.clone()),
+    )?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.redis.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a Redis resource"))?;
+    let grants = checked.snapshot.policy.redis_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = redis::SessionConfig::new(
+        grant.session_id.clone(),
+        grant.username.clone(),
+        grant.principal.clone(),
+        grant.resource.clone(),
+        target,
+    );
+    // Connect, TLS, login, and the command table each have their own limit;
+    // this one bounds them together so the proxy isn't kept waiting.
+    tokio::time::timeout(
+        REDIS_PREPARE,
+        redis::prepare(&worker.redis, grants, config),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out"))
+    .and_then(|r| r)
+    .map_err(|e| {
+        // The detail names the server and the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't open the Redis connection");
+        Status::unavailable(
+            "couldn't connect to the Redis server; ask an admin to check the worker's log",
+        )
+    })
 }
 
 async fn admit_db(

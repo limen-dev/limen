@@ -40,6 +40,7 @@ const CHUNK: usize = 32 * 1024;
 pub(crate) enum Protocol {
     Ssh,
     Db,
+    Redis,
 }
 
 impl Protocol {
@@ -47,6 +48,15 @@ impl Protocol {
         match self {
             Protocol::Ssh => "ssh",
             Protocol::Db => "db",
+            Protocol::Redis => "redis",
+        }
+    }
+
+    /// The audit field that names the identity used upstream.
+    fn principal_field(self) -> &'static str {
+        match self {
+            Protocol::Ssh | Protocol::Db => "login",
+            Protocol::Redis => "redis_user",
         }
     }
 }
@@ -100,7 +110,7 @@ pub(crate) async fn handle(
         }
         Err(denial) => {
             if denial.audit {
-                let mut data = json!({ "action": protocol.action(), "resource": request.resource, "login": request.principal, "reason": denial.reason, "client_addr": client_addr });
+                let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
                 if protocol == Protocol::Db {
                     data["database"] = json!(request.database);
                 }
@@ -271,6 +281,11 @@ fn resolve_principal(
         Protocol::Ssh => (
             Principal::SshLogin(request.principal.clone()),
             "ssh".to_owned(),
+            String::new(),
+        ),
+        Protocol::Redis => (
+            Principal::RedisUser(request.principal.clone()),
+            "redis".to_owned(),
             String::new(),
         ),
         Protocol::Db => {
@@ -567,12 +582,18 @@ async fn relay(
 ) {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
+    // Redis sessions name the upstream identity `redis_user`, not `login`.
+    let principal_field = if kind == "redis" {
+        "redis_user"
+    } else {
+        "login"
+    };
     let ctx = Context {
         user: Some(user.username.clone()),
         session_id: Some(session_id),
     };
     let worker_id = worker.id.as_str();
-    let mut start = json!({ "kind": kind, "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
+    let mut start = json!({ "kind": kind, "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, principal_field: request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
     add_names(&mut start, worker, proxy.name());
     if !database.is_empty() {
         start["database"] = json!(database);
@@ -706,7 +727,7 @@ async fn relay(
         "kind": kind,
         "actor_type": limen_core::identity::actor_type(&ctx_user),
         "resource": request.resource,
-        "login": request.principal,
+        principal_field: request.principal,
         "worker_id": worker_id,
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "bytes_in": bytes_in,

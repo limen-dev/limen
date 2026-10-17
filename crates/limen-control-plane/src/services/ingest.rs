@@ -57,11 +57,16 @@ impl AuditIngest for IngestService {
                 )));
             }
         }
-        for raw in &events {
-            self.0.pipeline.spool.append(raw).await.map_err(|e| {
-                tracing::error!(error = %e, "audit spool append failed; refusing the batch");
-                Status::unavailable(format!("audit spool: {e}"))
-            })?;
+        // Appended together, in order: each append writes at once and then
+        // waits for the spool's group fsync, so a batch costs one fsync
+        // instead of one per event (a busy Redis session ships thousands).
+        // A failure refuses the batch; events already appended are
+        // idempotent by id when the sender retries.
+        let spool = &self.0.pipeline.spool;
+        let appended = futures::future::join_all(events.iter().map(|raw| spool.append(raw))).await;
+        if let Some(e) = appended.into_iter().find_map(Result::err) {
+            tracing::error!(error = %e, "audit spool append failed; refusing the batch");
+            return Err(Status::unavailable(format!("audit spool: {e}")));
         }
         Ok(Response::new(IngestResponse {
             accepted: u32::try_from(events.len()).unwrap_or(u32::MAX),

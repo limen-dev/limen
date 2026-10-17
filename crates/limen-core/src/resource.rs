@@ -73,9 +73,9 @@ impl ResourceKind {
         Self::ALL.into_iter().find(|k| k.as_str() == name)
     }
 
-    /// The command that opens this kind, and the phase that delivers it. SSH
-    /// and the SQL databases are served; the other kinds can be written in
-    /// policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
+    /// The command that opens this kind, and the phase that delivers it. SSH,
+    /// the SQL databases, and Redis are served; the other kinds can be written
+    /// in policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
     #[must_use]
     pub fn access(self) -> Access {
         let (command, planned) = match self {
@@ -83,7 +83,7 @@ impl ResourceKind {
             ResourceKind::Postgres | ResourceKind::Mysql | ResourceKind::Redshift => {
                 ("limen db connect {name}", None)
             }
-            ResourceKind::Redis => ("limen redis connect {name}", Some("Phase 7")),
+            ResourceKind::Redis => ("limen redis connect {name}", None),
             ResourceKind::Kubernetes => ("limen kube login {name}", Some("Phase 8")),
             ResourceKind::Mongodb => ("limen mongo connect {name}", Some("Phase 9")),
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_and_the_sql_databases_are_available_today() {
+    fn ssh_the_sql_databases_and_redis_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
@@ -130,7 +130,8 @@ mod tests {
                 ResourceKind::Ssh,
                 ResourceKind::Postgres,
                 ResourceKind::Mysql,
-                ResourceKind::Redshift
+                ResourceKind::Redshift,
+                ResourceKind::Redis
             ]
         );
     }

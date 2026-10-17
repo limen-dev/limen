@@ -151,9 +151,15 @@ pub async fn ssh(proxy: Option<&str>, target: &str, command: &[String]) -> anyho
     }
 }
 
-/// `limen ssh-proxy <login> <resource>`: OpenSSH's ProxyCommand. Opens the
-/// session through the proxy, then pipes stdin and stdout.
-pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::Result<()> {
+/// Open a session stream to the proxy on `alpn` for `principal` on `resource`
+/// (`limen-ssh/1` or `limen-redis/1`). On success the stream carries the
+/// protocol's own bytes. A refusal is returned as an error with the proxy's reason.
+pub(crate) async fn open_session(
+    proxy: Option<&str>,
+    alpn: &[u8],
+    resource: &str,
+    principal: &str,
+) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
@@ -162,7 +168,7 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
     let tls_config = client_config(
         &limen_tunnel::tls::certs_from_pem(&ca)?,
         Some(profile.identity()?),
-        &[limen_tunnel::alpn::SSH],
+        &[alpn],
     )?;
     let mut tls = limen_tunnel::connect::dial(
         &proxy_addr,
@@ -171,13 +177,11 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
     )
     .await
     .with_context(|| format!("connecting to {proxy_addr}"))?;
-    // `limen config ssh` sends hosts as <resource>.limen.
-    let resource = host.strip_suffix(".limen").unwrap_or(host);
     write_message(
         &mut tls,
         &SessionRequest {
             resource: resource.to_owned(),
-            principal: login.to_owned(),
+            principal: principal.to_owned(),
             database: String::new(),
         },
     )
@@ -188,6 +192,15 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
     if !response.ok {
         bail!("{}", response.error);
     }
+    Ok(tls)
+}
+
+/// `limen ssh-proxy <login> <resource>`: OpenSSH's ProxyCommand. Opens the
+/// session through the proxy, then pipes stdin and stdout.
+pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::Result<()> {
+    // `limen config ssh` sends hosts as <resource>.limen.
+    let resource = host.strip_suffix(".limen").unwrap_or(host);
+    let tls = open_session(proxy, limen_tunnel::alpn::SSH, resource, login).await?;
     let (mut from_proxy, mut to_proxy) = tokio::io::split(tls);
     let upload = async {
         let _ = tokio::io::copy(&mut tokio::io::stdin(), &mut to_proxy).await;

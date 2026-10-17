@@ -292,7 +292,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 15] = [
+const SUMMARY_KEYS: [&str; 16] = [
     "action",
     "target_user",
     "component_id",
@@ -301,6 +301,7 @@ const SUMMARY_KEYS: [&str; 15] = [
     "name",
     "resource",
     "login",
+    "redis_user",
     "reason",
     "by",
     "via",
@@ -456,7 +457,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login"))
+                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(text(&e.data, "proxy_id"))
                 .bind(text(&e.data, "client_addr"))
@@ -483,7 +484,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login"))
+                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(e.time)
                 .bind(text(&e.data, "reason"))

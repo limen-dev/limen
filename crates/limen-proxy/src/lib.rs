@@ -199,6 +199,7 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
             alpn::PEER,
             alpn::SSH,
             alpn::DB,
+            alpn::REDIS,
             alpn::H2,
             alpn::HTTP1,
         ],
@@ -359,6 +360,9 @@ async fn handle_connection(
         }
         Some(p) if p == alpn::DB => {
             sessions::handle(proxy, tls, peer, sessions::Protocol::Db).await;
+        }
+        Some(p) if p == alpn::REDIS => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Redis).await;
         }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {

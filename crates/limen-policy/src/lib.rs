@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
+pub use model::{RedisAudit, RedisGrant, RedisTarget};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
@@ -461,6 +462,25 @@ impl Policy {
         }
     }
 
+    /// The Redis grants that let `roles` act as `user` on `resource`. A session
+    /// may do whatever any one of them permits (ADR-0034). Call it only after
+    /// [`Policy::evaluate`] allowed the request, since deny rules aren't checked here.
+    #[must_use]
+    pub fn redis_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<RedisGrant> {
+        let Some(resource) = self.resources.get(resource) else {
+            return Vec::new();
+        };
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(|rule| selector_matches(&rule.resources, resource))
+            .filter_map(|rule| rule.redis.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
+    }
+
     /// Resources the roles grant at least one principal on, with those
     /// principals (minus any explicitly denied). Sorted by name.
     #[must_use]
@@ -667,6 +687,33 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                         format!("invalid value {v:?} in {field}"),
                     ));
                 }
+            }
+        }
+        if let Some(redis) = &rule.redis {
+            for (field, values) in [
+                ("redis.deny_commands", &redis.deny_commands),
+                ("redis.allow_commands", &redis.allow_commands),
+            ] {
+                if let Some(v) = values.iter().find(|v| {
+                    v.trim().is_empty() || v.len() > MAX_NAME_LEN || v.chars().any(char::is_control)
+                }) {
+                    return Err(invalid(
+                        "role",
+                        name,
+                        format!("invalid value {v:?} in {field}"),
+                    ));
+                }
+            }
+            if let Some(k) = redis
+                .keys
+                .iter()
+                .find(|k| k.is_empty() || k.len() > MAX_NAME_LEN || k.chars().any(char::is_control))
+            {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!("invalid value {k:?} in redis.keys"),
+                ));
             }
         }
         if let Some(db) = &rule.db {
