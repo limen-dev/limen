@@ -406,6 +406,11 @@ impl Policy {
         })
     }
 
+    /// Every resource, in name order.
+    pub fn resources(&self) -> impl Iterator<Item = &ResourceDoc> {
+        self.resources.values()
+    }
+
     #[must_use]
     pub fn resource_count(&self) -> usize {
         self.resources.len()
@@ -664,6 +669,19 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 }
             }
         }
+        if let Some(db) = &rule.db {
+            // The prefix is reserved: bootstrap never touches other roles, and
+            // the name goes into SQL (ADR-0015, ADR-0033).
+            if let Some(bad) = db.roles.iter().find(|r| !valid_db_role(r)) {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!(
+                        "db.roles entry {bad:?} must be limen_ followed by lowercase letters, digits, or underscores"
+                    ),
+                ));
+            }
+        }
         if let Some(kube) = &rule.kube
             && kube.groups.iter().any(|g| g.starts_with("system:"))
         {
@@ -684,6 +702,17 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
         }
     }
     Ok(())
+}
+
+/// `limen_` plus 1 to 40 of `[a-z0-9_]`.
+#[must_use]
+pub fn valid_db_role(role: &str) -> bool {
+    role.strip_prefix("limen_").is_some_and(|rest| {
+        (1..=40).contains(&rest.len())
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    })
 }
 
 fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError> {
@@ -758,6 +787,32 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
         ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
+    let db_target = resource
+        .spec
+        .postgres
+        .as_ref()
+        .or(resource.spec.mysql.as_ref())
+        .or(resource.spec.redshift.as_ref());
+    if let Some(target) = db_target {
+        for spec in &target.bootstrap {
+            if !valid_db_role(&spec.role) {
+                return Err(invalid(
+                    "resource",
+                    name,
+                    format!(
+                        "bootstrap role {:?} must be limen_ followed by lowercase letters, digits, or underscores",
+                        spec.role
+                    ),
+                ));
+            }
+        }
+        if !target.iam_auth
+            && let Some(dir) = &target.password_dir
+            && dir.is_empty()
+        {
+            return Err(invalid("resource", name, "password_dir must not be empty"));
+        }
+    }
     if let Some(address) = address {
         let valid = address.rsplit_once(':').is_some_and(|(host, port)| {
             !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0)

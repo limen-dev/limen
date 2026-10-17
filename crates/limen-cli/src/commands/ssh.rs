@@ -178,6 +178,7 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
         &SessionRequest {
             resource: resource.to_owned(),
             principal: login.to_owned(),
+            database: String::new(),
         },
     )
     .await?;

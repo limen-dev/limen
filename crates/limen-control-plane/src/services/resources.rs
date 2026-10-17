@@ -23,11 +23,26 @@ impl Resources for ResourcesService {
             .policy
             .accessible(&user.roles)
             .into_iter()
-            .map(|r| Resource {
-                name: r.name,
-                kind: r.kind.as_str().to_owned(),
-                labels: r.labels.into_iter().collect(),
-                principals: r.principals,
+            .map(|r| {
+                let default_database = loaded
+                    .policy
+                    .resource(&r.name)
+                    .and_then(|doc| {
+                        let s = &doc.spec;
+                        s.postgres
+                            .as_ref()
+                            .or(s.mysql.as_ref())
+                            .or(s.redshift.as_ref())
+                    })
+                    .and_then(|t| t.default_database.clone())
+                    .unwrap_or_default();
+                Resource {
+                    name: r.name,
+                    kind: r.kind.as_str().to_owned(),
+                    labels: r.labels.into_iter().collect(),
+                    principals: r.principals,
+                    default_database,
+                }
             })
             .collect();
         Ok(Response::new(ListResourcesResponse {

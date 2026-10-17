@@ -2,6 +2,7 @@
 //! serves sessions over reverse tunnels (ADR-0003). Protocol handlers
 //! (SSH, PostgreSQL, MySQL, Redis, Kubernetes) arrive in Phases 2 to 6.
 
+pub mod db;
 pub mod recording;
 mod recordings;
 mod session;
@@ -113,6 +114,25 @@ pub struct Config {
     /// until it has room. 0: no cap.
     #[arg(long, env = "LIMEN_MAX_SESSIONS", default_value_t = 200)]
     pub max_sessions: u32,
+
+    /// Reconcile the database roles declared in policy once, then exit
+    /// (ADR-0033). Run it as a separate task with its own admin credentials.
+    #[arg(long, env = "LIMEN_DB_BOOTSTRAP_ONCE")]
+    pub db_bootstrap_once: bool,
+
+    /// With `--db-bootstrap-once`: report differences without changing anything.
+    #[arg(long, env = "LIMEN_DB_BOOTSTRAP_CHECK", requires = "db_bootstrap_once")]
+    pub db_bootstrap_check: bool,
+
+    /// Also reconcile database roles inside the running worker, this often.
+    /// Off by default, so the admin credential stays out of the data path.
+    #[arg(long, env = "LIMEN_DB_BOOTSTRAP_INTERVAL", value_parser = parse_duration)]
+    pub db_bootstrap_interval: Option<Duration>,
+
+    /// Let resources set `insecure_dev` and reach their database without TLS.
+    /// For the local compose profile only (ADR-0033).
+    #[arg(long, env = "LIMEN_ALLOW_INSECURE_DB_TARGETS")]
+    pub allow_insecure_db_targets: bool,
 }
 
 /// `--drain-timeout-secs` when unset (and so is the legacy setting).
@@ -179,6 +199,8 @@ pub struct Worker {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
+    pub(crate) db_registry: Arc<db::Registry>,
+    aws: Arc<tokio::sync::OnceCell<Result<db::iam::CredentialSource, String>>>,
     audit_spool: limen_audit::spool::Spool,
 }
 
@@ -242,10 +264,114 @@ impl Worker {
                 policy,
                 nonces: Arc::default(),
                 audit,
+                db_registry: Arc::default(),
+                aws: Arc::default(),
                 audit_spool,
             },
             tx,
         ))
+    }
+
+    /// Reconcile every database resource this worker serves. Returns the
+    /// number of differences found (check) or changes made (apply), and the
+    /// number that failed.
+    pub async fn bootstrap_databases(&self, apply: bool) -> (usize, usize) {
+        let Ok(snapshot) = self.policy.fresh(time::OffsetDateTime::now_utc()) else {
+            tracing::error!("no policy yet; can't bootstrap database roles");
+            return (0, 1);
+        };
+        let labels = self.credentials().labels.clone();
+        let plans =
+            db::bootstrap_plans(&snapshot.policy, &labels, self.allow_insecure_db_targets()).await;
+        let (mut changes, mut failures) = (0, 0);
+        for (name, plan) in plans {
+            let result = match plan {
+                Ok(plan) => db::bootstrap::reconcile(&plan, Some(&self.audit), apply).await,
+                Err(e) => Err(e),
+            };
+            match result {
+                Ok(report) => {
+                    for a in &report.actions {
+                        let state = match (&a.error, a.applied) {
+                            (Some(e), _) => format!("FAILED: {e}"),
+                            (None, true) => "done".to_owned(),
+                            (None, false) => "needed".to_owned(),
+                        };
+                        tracing::info!(resource = %name, role = %a.role, database = %a.database, action = a.kind, "{} [{state}]", a.detail);
+                    }
+                    failures += report.failed().len();
+                    changes += report.actions.len();
+                    if report.actions.is_empty() {
+                        tracing::info!(resource = %name, "database roles match policy; nothing to change");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(resource = %name, error = %e, "database role bootstrap failed");
+                    failures += 1;
+                }
+            }
+        }
+        (changes, failures)
+    }
+
+    /// Ship the audit spool to the control plane and wait (up to `timeout`)
+    /// until nothing is pending. For one-shot runs, which exit right after
+    /// their last event. Returns whether the spool drained.
+    pub async fn drain_audit(&self, timeout: Duration) -> bool {
+        let (stop, rx) = watch::channel(false);
+        let shipper = self.clone();
+        let task = tokio::spawn(limen_component::audit::ship(
+            self.audit_spool.clone(),
+            move || shipper.control_plane(),
+            rx,
+        ));
+        let deadline = Instant::now() + timeout;
+        let drained = loop {
+            if self
+                .audit_spool
+                .pending(limen_component::audit::TO_CONTROL_PLANE)
+                == 0
+            {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        let _ = stop.send(true);
+        let _ = task.await;
+        drained
+    }
+
+    /// Fetch the policy from the control plane once.
+    pub async fn fetch_policy_once(&self) -> anyhow::Result<i64> {
+        let mut client =
+            limen_proto::v1::policy_sync_client::PolicySyncClient::new(self.control_plane()?);
+        let signed = client
+            .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+            .await?
+            .into_inner();
+        let snapshot = self
+            .policy
+            .update(&signed, &self.credentials().internal_ca()?)?;
+        Ok(snapshot.version)
+    }
+
+    /// AWS credentials from the default chain, loaded on first use.
+    pub(crate) async fn aws_credentials(&self) -> Result<db::sigv4::Credentials, String> {
+        let source = self
+            .aws
+            .get_or_init(db::iam::CredentialSource::from_environment)
+            .await;
+        match source {
+            Ok(s) => s.get().await,
+            Err(e) => Err(e.clone()),
+        }
+    }
+
+    pub(crate) fn allow_insecure_db_targets(&self) -> bool {
+        self.config.allow_insecure_db_targets
     }
 
     pub(crate) fn credentials(&self) -> Arc<ComponentCredentials> {
@@ -718,6 +844,9 @@ pub async fn run(
         deadline,
     ));
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
+    if let Some(every) = worker.config.db_bootstrap_interval {
+        tokio::spawn(bootstrap_loop(worker.clone(), every, flush.clone()));
+    }
     let admin = tokio::spawn(serve_admin(worker.clone()));
     // Scale signals: sessions against the cap, and whether we are draining.
     metrics::gauge!("limen_worker_sessions_max").set(f64::from(
@@ -768,6 +897,25 @@ pub async fn run(
     let _ = deadline_tx.send(true);
     admin.abort();
     Ok(())
+}
+
+/// Opt-in periodic reconcile of database roles (ADR-0033 section 6).
+async fn bootstrap_loop(worker: Worker, every: Duration, mut stop: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(every.max(Duration::from_secs(10)));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = stop.changed() => return,
+        }
+        let (changes, failures) = worker.bootstrap_databases(true).await;
+        if changes + failures > 0 {
+            tracing::warn!(
+                changes,
+                failures,
+                "database roles were out of line with policy"
+            );
+        }
+    }
 }
 
 async fn serve_admin(worker: Worker) -> anyhow::Result<()> {

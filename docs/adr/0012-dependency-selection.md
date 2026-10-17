@@ -31,11 +31,13 @@ A dependency is adopted only if all of these hold:
 | Metrics | metrics 0.24.6 + metrics-exporter-prometheus 0.18.3, cadence 1.8.0 | | 2026-04/05 | Adopt |
 | SSH | russh 0.64.1 | | 2026-10-05 | Adopt, at ≥ 0.60.3 (RUSTSEC-2026-0154 fixed). Fuzz our usage |
 | SSH certs | ssh-key 0.6.7 (RustCrypto) | | 2026-06 | Adopt |
-| PG wire | pgwire 0.41.1 | | 2026-09-29 | Adopt. Very active (805★) |
+| PG wire | pgwire 0.41.1 | | 2026-09-29 | Assessed and **not used** (Phase 6): the relay only needs frame lengths and a few message bodies, so the frame layer is ~100 lines of our own (`db/pg.rs`). Still a sound choice if a full server-side implementation is ever needed |
 | MySQL wire | opensrv-mysql 0.7.0 | | **2024-02** | **Reject**: no release in 2.5 years, low use |
-| MySQL wire | mysql_common 0.38.2 | | 2026-07 | **Adopt for packet and type definitions.** We write our own server-side handshake and command loop on top (the protocol subset is small: HandshakeV10, AuthSwitch, COM_QUERY, COM_STMT_*, COM_QUIT, result passthrough) |
+| MySQL wire | mysql_common 0.38.2 | | 2026-07 | Assessed and **not used** (Phase 6): the packet layer, handshake, and command loop are our own (`db/mysql.rs`), because the subset is small (HandshakeV10, AuthSwitch, COM_QUERY, COM_STMT_*, COM_QUIT, result passthrough) and is covered by tests against a real MySQL. The bootstrap and the tests use a small client of our own on the same packet layer (`db/mysqlclient.rs`) instead of adding a MySQL driver dependency |
 | Redis wire | redis-protocol 6.0.0 | | **2024-11** (repo pushed 2025-02) | **Reject as a core dependency.** RESP2/3 is small. We write our own codec, fuzzed and tested against redis-protocol and the `redis` crate (1.7.1, active) in dev-dependencies |
-| SQL parsing | sqlparser 0.63.0 | | 2026-09 | Adopt, for statement type classification and literal normalization only. Never for allow/deny decisions |
+| SQL parsing | sqlparser 0.63.0 | | 2026-09 | **Adopted (Phase 6)**, `default-features = false`, and only its **tokenizer**: statement splitting, the first keyword, literal normalization. Never for allow/deny decisions. No advisories on 2026-10-17 |
+| MD5 | md-5 0.11.0 (RustCrypto) | | 2026 | **Adopt (Phase 6)**, for the legacy PostgreSQL MD5 password exchange Redshift uses. Used for nothing else |
+| AWS credentials | aws-credential-types 1.2 (with aws-config 1.12) | | 2026-10 | **Adopt (Phase 6)**: the default credential chain for IAM database authentication. SigV4 itself is hand-written on aws-lc-rs and checked against AWS's published examples |
 | YAML | serde_yaml | 0.9.34+deprecated | 2024-03 | **Reject**: deprecated |
 | YAML | serde_yml | 0.0.13 | | **Reject**: RUSTSEC-2025-0068 (unsound, unmaintained) |
 | YAML | serde-saphyr | 2.0.0 | 2026-10-13 | **Adopt** (pure Rust, active) |
@@ -56,5 +58,5 @@ A dependency is adopted only if all of these hold:
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
 
 ## Consequences
-- We own two small protocol codecs: MySQL server-side and RESP. Both are fuzzed with `cargo-fuzz` in their phases.
+- We own two small protocol codecs: MySQL (server side toward clients, client side toward targets) and RESP, plus the PostgreSQL frame layer. All are to be fuzzed with `cargo-fuzz`; that is still open for the Phase 6 codecs (design §14).
 - To add a dependency, a PR adds a row here.

@@ -148,7 +148,7 @@ enum Command {
     // The commands below are planned integrations (ADR-0018, ADR-0022). Their
     // arguments are settled so scripts and docs can be written now; each one
     // says plainly that it isn't available yet.
-    /// PostgreSQL, MySQL, Aurora, and Redshift (planned, Phase 6).
+    /// PostgreSQL, MySQL, Aurora, and Redshift.
     Db {
         #[command(subcommand)]
         command: DbCommand,
@@ -218,8 +218,11 @@ enum DbCommand {
         #[arg(long)]
         database: Option<String>,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.
-        #[arg(long, value_name = "ADDR")]
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a Unix socket (mode 0600) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<String>,
     },
 }
 
@@ -356,7 +359,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Ssh,
         } => commands::ssh::config(proxy),
-        Command::Db { .. } => not_yet("limen db connect", "database access", "Phase 6"),
+        Command::Db {
+            command:
+                DbCommand::Connect {
+                    resource,
+                    db_role,
+                    database,
+                    listen,
+                    socket,
+                },
+        } => {
+            commands::db::connect(
+                proxy,
+                &resource,
+                db_role.as_deref(),
+                database.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+            )
+            .await
+        }
         Command::Redis { .. } => not_yet("limen redis connect", "Redis access", "Phase 7"),
         Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
         Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),

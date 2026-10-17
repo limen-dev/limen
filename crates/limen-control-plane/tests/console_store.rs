@@ -185,3 +185,106 @@ async fn login_state_is_single_use_and_expires() {
         None
     );
 }
+
+/// A database session has no recording; the console lists its statements and
+/// how each ended, from the audit events, in any order of arrival.
+#[tokio::test(flavor = "multi_thread")]
+async fn database_sessions_list_their_statements() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let query = |text: &str| {
+        event(
+            EventKind::DbQuery,
+            s,
+            DEVELOPER,
+            json!({ "protocol": "mysql", "phase": "simple", "statement_type": "select", "statement": text, "db_role": "limen_rw", "database": "orders" }),
+        )
+    };
+    let end_of = |q: &Event, status: &str, rows: i64| {
+        let mut data = json!({ "protocol": "mysql", "status": status, "rows": rows, "duration_ms": 7, "query_id": q.event_id });
+        if status == "error" {
+            data["error_code"] = json!("42S02");
+            data["error"] = json!("Table 'orders.nope' doesn't exist");
+        }
+        event(EventKind::DbQueryEnd, s, DEVELOPER, data)
+    };
+    let (q1, q2, q3) = (
+        query("select 1"),
+        query("select * from nope"),
+        query("select 2"),
+    );
+    // The second statement's end arrives before the statement itself.
+    store::project_events(
+        &db,
+        &[q1.clone(), end_of(&q1, "ok", 1), end_of(&q2, "error", 0)],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[q2.clone(), q3.clone(), end_of(&q3, "ok", 1)])
+        .await
+        .expect("second batch");
+    // Redelivery changes nothing.
+    store::project_events(&db, &[q1, end_of(&q2, "error", 0)])
+        .await
+        .expect("redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("statements");
+    let texts: Vec<_> = list
+        .iter()
+        .map(|r| r.statement.as_deref().unwrap_or_default())
+        .collect();
+    assert_eq!(texts, ["select 1", "select * from nope", "select 2"]);
+    assert_eq!(list[1].status.as_deref(), Some("error"));
+    assert_eq!(list[1].error_code.as_deref(), Some("42S02"));
+    assert_eq!(list[0].rows, Some(1));
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 1)
+    );
+
+    // The audit trail table keeps no statement text.
+    let leaked: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE summary LIKE '%select%'")
+            .fetch_one(&db)
+            .await
+            .expect("scan");
+    assert_eq!(leaked, 0);
+    // Statement text expires with the audit events: after 30 days it is deleted.
+    let old = Uuid::now_v7();
+    let mut stale = event(
+        EventKind::DbQuery,
+        old,
+        DEVELOPER,
+        json!({ "phase": "simple", "statement_type": "select", "statement": "select 'old'" }),
+    );
+    stale.time = time::OffsetDateTime::now_utc() - time::Duration::days(31);
+    store::project_events(&db, &[stale]).await.expect("old");
+    assert_eq!(
+        store::db_statements(&db, old, 10).await.expect("old").len(),
+        1
+    );
+    limen_control_plane::db::cleanup(&db)
+        .await
+        .expect("cleanup");
+    assert!(
+        store::db_statements(&db, old, 10)
+            .await
+            .expect("gone")
+            .is_empty()
+    );
+    assert_eq!(
+        store::db_statements(&db, s, 10)
+            .await
+            .expect("recent")
+            .len(),
+        3
+    );
+    // A session that never ran anything has nothing.
+    let none = Uuid::now_v7();
+    assert!(
+        store::db_statements(&db, none, 10)
+            .await
+            .expect("none")
+            .is_empty()
+    );
+}

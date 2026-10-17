@@ -1,4 +1,4 @@
-//! Client sessions on `limen-ssh/1` (design §5, §5.1).
+//! Client sessions on `limen-ssh/1` and `limen-db/1` (design §5, §5.1, §5.2).
 //!
 //! 1. The client presents its user certificate (mTLS) and sends a `SessionRequest`.
 //! 2. The proxy decides from its signed policy snapshot. A denial is audited.
@@ -6,12 +6,14 @@
 //!    a grant, and opens a tunnel stream. The worker checks everything again.
 //! 4. Once the worker accepts, the proxy answers `ok` and relays bytes. The
 //!    proxy sees only ciphertext: SSH runs end to end between the user's
-//!    client and the worker.
+//!    client and the worker. Database sessions are terminated at the worker
+//!    (ADR-0002, ADR-0033); the proxy relays them the same way.
 
 use std::time::{Duration, Instant};
 
 use limen_audit::{Context, EventKind};
 use limen_ca::verify::{UserIdentity, verify_user};
+use limen_core::resource::ResourceKind;
 use limen_policy::{AccessRequest, Principal};
 use limen_proto::v1::tunnel_frame::Frame;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
@@ -33,7 +35,35 @@ use crate::tunnels::{NoWorker, SessionSlot};
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const CHUNK: usize = 32 * 1024;
 
-pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: PeerInfo) {
+/// Which client protocol a session carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Protocol {
+    Ssh,
+    Db,
+}
+
+impl Protocol {
+    fn action(self) -> &'static str {
+        match self {
+            Protocol::Ssh => "ssh",
+            Protocol::Db => "db",
+        }
+    }
+}
+
+/// What the request resolved to: the resource kind (`ssh`, `postgres`, ...)
+/// and, for databases, the database the session is limited to.
+struct Resolved {
+    kind: String,
+    database: String,
+}
+
+pub(crate) async fn handle(
+    proxy: &Proxy,
+    mut tls: TlsStream<TcpStream>,
+    peer: PeerInfo,
+    protocol: Protocol,
+) {
     let user = match identify(proxy, &peer) {
         Ok(user) => user,
         Err(reason) => {
@@ -48,8 +78,8 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
         };
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
-    match establish(proxy, &user, user_cert_der, &request).await {
-        Ok((session_id, worker, inbound, outbound, _slot)) => {
+    match establish(proxy, &user, user_cert_der, &request, protocol).await {
+        Ok((session_id, worker, inbound, outbound, _slot, resolved)) => {
             // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
                 return;
@@ -64,12 +94,16 @@ pub(crate) async fn handle(proxy: &Proxy, mut tls: TlsStream<TcpStream>, peer: P
                 client_addr,
                 inbound,
                 outbound,
+                &resolved,
             )
             .await;
         }
         Err(denial) => {
             if denial.audit {
-                let mut data = json!({ "action": "ssh", "resource": request.resource, "login": request.principal, "reason": denial.reason, "client_addr": client_addr });
+                let mut data = json!({ "action": protocol.action(), "resource": request.resource, "login": request.principal, "reason": denial.reason, "client_addr": client_addr });
+                if protocol == Protocol::Db {
+                    data["database"] = json!(request.database);
+                }
                 if let Some(code) = denial.code {
                     // A machine-readable reason; the message stays for people.
                     data["reason"] = json!(code);
@@ -227,12 +261,65 @@ type Inbound = tonic::Streaming<TunnelFrame>;
 /// the proxy holding the tunnel).
 type Slot = Option<SessionSlot>;
 
+/// The principal, resource kind, and database a request names.
+fn resolve_principal(
+    policy: &limen_policy::Policy,
+    request: &SessionRequest,
+    protocol: Protocol,
+) -> Result<(Principal, String, String), Denial> {
+    Ok(match protocol {
+        Protocol::Ssh => (
+            Principal::SshLogin(request.principal.clone()),
+            "ssh".to_owned(),
+            String::new(),
+        ),
+        Protocol::Db => {
+            let refused = || {
+                denied(format!(
+                    "access denied to {}@{}",
+                    request.principal, request.resource
+                ))
+            };
+            let resource = policy.resource(&request.resource).ok_or_else(refused)?;
+            let kind = resource.spec.kinds()[0];
+            let target = match kind {
+                ResourceKind::Postgres => resource.spec.postgres.as_ref(),
+                ResourceKind::Mysql => resource.spec.mysql.as_ref(),
+                ResourceKind::Redshift => resource.spec.redshift.as_ref(),
+                _ => None,
+            }
+            .ok_or_else(refused)?;
+            let database = if request.database.is_empty() {
+                match &target.default_database {
+                    Some(d) => d.clone(),
+                    None => {
+                        return Err(failed(
+                            "name a database: this resource has no default (--database)",
+                        ));
+                    }
+                }
+            } else {
+                request.database.clone()
+            };
+            (
+                Principal::DbRole {
+                    role: request.principal.clone(),
+                    database: database.clone(),
+                },
+                kind.as_str().to_owned(),
+                database,
+            )
+        }
+    })
+}
+
 async fn establish(
     proxy: &Proxy,
     user: &UserIdentity,
     user_cert_der: Vec<u8>,
     request: &SessionRequest,
-) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
+    protocol: Protocol,
+) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot, Resolved), Denial> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
         .policy
@@ -242,10 +329,11 @@ async fn establish(
     if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
         return Err(denied(why));
     }
+    let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
     let decision = policy.evaluate(&AccessRequest {
         roles: &user.roles,
         resource: &request.resource,
-        principal: Principal::SshLogin(request.principal.clone()),
+        principal,
     });
     if !decision.is_allowed() {
         return Err(denied(format!(
@@ -280,7 +368,7 @@ async fn establish(
             roles: user.roles.clone(),
             login_id: user.login_id.clone(),
             resource: request.resource.clone(),
-            kind: "ssh".into(),
+            kind: kind.clone(),
             principal: request.principal.clone(),
             issued_at_unix: now.unix_timestamp(),
             establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
@@ -289,6 +377,7 @@ async fn establish(
             user_cert_der: user_cert_der.clone(),
             proxy_id: creds.id.clone(),
             worker_id: worker_id.clone(),
+            database: database.clone(),
         };
         let signed = limen_session::grant::sign(&proxy.signer(), &grant)
             .map_err(|e| failed(format!("signing grant: {e}")))?;
@@ -298,7 +387,14 @@ async fn establish(
                     id: worker_id,
                     name: worker_name,
                 };
-                return Ok((session_id, worker, inbound, outbound, slot));
+                return Ok((
+                    session_id,
+                    worker,
+                    inbound,
+                    outbound,
+                    slot,
+                    Resolved { kind, database },
+                ));
             }
             Err(Opening::Full(why)) => {
                 tracing::info!(worker = %worker_id, reason = %why, "worker is full; trying another");
@@ -456,7 +552,7 @@ async fn open_on(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn relay(
     proxy: &Proxy,
     tls: TlsStream<TcpStream>,
@@ -467,14 +563,20 @@ async fn relay(
     client_addr: Option<String>,
     mut inbound: Inbound,
     outbound: Outbound,
+    resolved: &Resolved,
 ) {
+    let kind = resolved.kind.as_str();
+    let database = resolved.database.as_str();
     let ctx = Context {
         user: Some(user.username.clone()),
         session_id: Some(session_id),
     };
     let worker_id = worker.id.as_str();
-    let mut start = json!({ "kind": "ssh", "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
+    let mut start = json!({ "kind": kind, "actor_type": limen_core::identity::actor_type(&user.username), "resource": request.resource, "login": request.principal, "worker_id": worker_id, "proxy_id": proxy.id(), "client_addr": client_addr });
     add_names(&mut start, worker, proxy.name());
+    if !database.is_empty() {
+        start["database"] = json!(database);
+    }
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
         start["ci"] = json!(user.ci);
@@ -490,7 +592,7 @@ async fn relay(
     tracing::info!(session = %session_id, user = %user.username, resource = %request.resource, login = %request.principal, worker = %worker_id, worker_name = worker.name.as_deref(), "session started");
 
     let started = Instant::now();
-    metrics::gauge!("limen_sessions_active", "kind" => "ssh").increment(1.0);
+    metrics::gauge!("limen_sessions_active", "kind" => kind.to_owned()).increment(1.0);
     let (mut reader, mut writer) = tokio::io::split(tls);
     let upload = async {
         let mut bytes = 0u64;
@@ -601,7 +703,7 @@ async fn relay(
     let close = close.unwrap_or_default();
     let ctx_user = ctx.user.clone().unwrap_or_default();
     let mut end = json!({
-        "kind": "ssh",
+        "kind": kind,
         "actor_type": limen_core::identity::actor_type(&ctx_user),
         "resource": request.resource,
         "login": request.principal,
@@ -618,8 +720,11 @@ async fn relay(
         "recording_sha256": close.recording_sha256,
     });
     add_names(&mut end, worker, None);
-    metrics::gauge!("limen_sessions_active", "kind" => "ssh").decrement(1.0);
-    metrics::counter!("limen_sessions_total", "kind" => "ssh").increment(1);
+    if !database.is_empty() {
+        end["database"] = json!(database);
+    }
+    metrics::gauge!("limen_sessions_active", "kind" => kind.to_owned()).decrement(1.0);
+    metrics::counter!("limen_sessions_total", "kind" => kind.to_owned()).increment(1);
     if let Err(e) = proxy.audit.emit(EventKind::SessionEnd, ctx, end).await {
         tracing::error!(error = %e, "failed to audit session end");
     }

@@ -56,7 +56,7 @@ pub(crate) async fn open(
     let signed = open
         .grant
         .ok_or_else(|| Status::invalid_argument("missing grant"))?;
-    let config = admit(&worker, &signed).await.map_err(|e| {
+    let admitted = admit(&worker, &signed).await.map_err(|e| {
         tracing::warn!(error = %e, "session refused");
         e
     })?;
@@ -87,7 +87,7 @@ pub(crate) async fn open(
     });
 
     // SSH server → proxy, then the closing frame with the recording.
-    let session_id = config.session_id.clone();
+    let session_id = admitted.session_id();
     let expires = config_expiry(&signed);
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
@@ -116,17 +116,34 @@ pub(crate) async fn open(
         let until = (expires - OffsetDateTime::now_utc())
             .max(time::Duration::ZERO)
             .unsigned_abs();
-        let (reason, outcome) =
-            match tokio::time::timeout(until, serve(ours, config, audit, end)).await {
-                // The proxy's session.end carries this reason (`data.reason`).
-                Ok(Ok(outcome)) if outcome.ended_by_drain => (WORKER_DRAIN.to_owned(), outcome),
-                Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
-                Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
-                Err(_) => (
-                    "max_session_ttl reached".to_owned(),
-                    crate::ssh::SessionOutcome::default(),
-                ),
-            };
+        let serving = async {
+            match admitted {
+                Admitted::Ssh(config) => serve(ours, *config, audit, end).await,
+                Admitted::Db(config) => {
+                    // A drain that reaches its timeout ends database sessions too.
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::db::serve(ours, *config, audit) => {
+                            r.map(|()| crate::ssh::SessionOutcome::default())
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+            }
+        };
+        let (reason, outcome) = match tokio::time::timeout(until, serving).await {
+            // The proxy's session.end carries this reason (`data.reason`).
+            Ok(Ok(outcome)) if outcome.ended_by_drain => (WORKER_DRAIN.to_owned(), outcome),
+            Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
+            Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
+            Err(_) => (
+                "max_session_ttl reached".to_owned(),
+                crate::ssh::SessionOutcome::default(),
+            ),
+        };
         // The pump ends when the SSH server lets go of its stream. A session
         // that was cut short (drain, TTL) may not have let go: don't wait
         // for it forever.
@@ -160,8 +177,29 @@ fn config_expiry(signed: &Signed) -> OffsetDateTime {
         .unwrap_or_else(OffsetDateTime::now_utc)
 }
 
+/// A session the worker agreed to serve.
+enum Admitted {
+    Ssh(Box<SshSessionConfig>),
+    Db(Box<crate::db::DbSessionConfig>),
+}
+
+impl Admitted {
+    fn session_id(&self) -> String {
+        match self {
+            Admitted::Ssh(c) => c.session_id.clone(),
+            Admitted::Db(c) => c.session_id.to_string(),
+        }
+    }
+}
+
+/// What the grant check established, shared by every protocol.
+struct Checked {
+    verified: limen_session::grant::VerifiedGrant,
+    snapshot: limen_session::snapshot::Snapshot,
+}
+
 /// Every check a session must pass before the worker touches the target.
-async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Status> {
+async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
     let creds = worker.credentials();
     let internal_ca = creds
         .internal_ca()
@@ -183,28 +221,42 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Sta
     {
         return Err(Status::permission_denied("grant already used"));
     }
-    if grant.kind != "ssh" {
-        return Err(Status::unimplemented(format!(
-            "{} sessions arrive in a later phase",
-            grant.kind
-        )));
-    }
-
+    let kind = grant.kind.clone();
     // Our own policy decision, from our own snapshot.
     let snapshot = worker
         .policy
         .fresh(now)
         .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
+    let checked = Checked { verified, snapshot };
+    match kind.as_str() {
+        "ssh" => admit_ssh(worker, signed, &checked)
+            .await
+            .map(|c| Admitted::Ssh(Box::new(c))),
+        "postgres" | "redshift" | "mysql" => admit_db(worker, &checked)
+            .await
+            .map(|c| Admitted::Db(Box::new(c))),
+        other => Err(Status::unimplemented(format!(
+            "{other} sessions arrive in a later phase"
+        ))),
+    }
+}
+
+/// The policy checks every kind shares: locks, the principal, and whether
+/// this worker's labels may serve the resource.
+fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Result<(), Status> {
+    let creds = worker.credentials();
+    let grant = &checked.verified.grant;
+    let snapshot = &checked.snapshot;
     if let Some(why) = snapshot
         .restrictions
-        .blocks(&verified.user.username, &grant.session_id)
+        .blocks(&checked.verified.user.username, &grant.session_id)
     {
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {
-        roles: &verified.user.roles,
+        roles: &checked.verified.user.roles,
         resource: &grant.resource,
-        principal: Principal::SshLogin(grant.principal.clone()),
+        principal,
     });
     if !decision.is_allowed() {
         return Err(Status::permission_denied(format!(
@@ -219,6 +271,136 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Sta
             "this worker may not serve the resource",
         ));
     }
+    Ok(())
+}
+
+async fn admit_db(
+    worker: &Worker,
+    checked: &Checked,
+) -> Result<crate::db::DbSessionConfig, Status> {
+    use crate::db::{DbSessionConfig, Engine, Target, secret};
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::DbRole {
+            role: grant.principal.clone(),
+            database: grant.database.clone(),
+        },
+    )?;
+    let resource = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .ok_or_else(|| Status::failed_precondition("unknown resource"))?;
+    let (engine, spec) = match grant.kind.as_str() {
+        "postgres" => (Engine::Postgres, resource.spec.postgres.as_ref()),
+        "redshift" => (Engine::Redshift, resource.spec.redshift.as_ref()),
+        _ => (Engine::Mysql, resource.spec.mysql.as_ref()),
+    };
+    let spec = spec.ok_or_else(|| Status::failed_precondition("resource is not a database"))?;
+    if !limen_policy::valid_db_role(&grant.principal) {
+        return Err(Status::permission_denied("not a limen_* role"));
+    }
+    let target = Target::from_spec(spec, worker.allow_insecure_db_targets())
+        .await
+        .map_err(Status::failed_precondition)?;
+    let (login_user, password) = if spec.iam_auth {
+        iam_login(worker, engine, spec, grant).await?
+    } else {
+        let dir = spec.password_dir.as_deref().ok_or_else(|| {
+            Status::failed_precondition("the resource has no password_dir (secret mode)")
+        })?;
+        let password = secret::role_password(dir, &grant.principal)
+            .await
+            .map_err(|e| {
+                tracing::error!(resource = %grant.resource, error = %e, "can't load the database role's password");
+                Status::failed_precondition("the worker has no credential for this database role")
+            })?;
+        (grant.principal.clone(), password)
+    };
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    Ok(DbSessionConfig {
+        session_id,
+        username: checked.verified.user.username.clone(),
+        resource: grant.resource.clone(),
+        engine,
+        role: grant.principal.clone(),
+        login_user,
+        database: grant.database.clone(),
+        target,
+        password,
+        normalize_literals: spec.normalize_literals,
+        registry: Arc::clone(&worker.db_registry),
+    })
+}
+
+/// The login for an IAM-authenticated database: `(user, password)`.
+/// Unverified against the real AWS services (ADR-0033).
+async fn iam_login(
+    worker: &Worker,
+    engine: crate::db::Engine,
+    spec: &limen_policy::model::DbTarget,
+    grant: &limen_proto::v1::SessionGrant,
+) -> Result<(String, limen_core::secret::Secret<String>), Status> {
+    use crate::db::iam;
+    let region = spec.region.as_deref().ok_or_else(|| {
+        Status::failed_precondition("IAM authentication needs the resource's region")
+    })?;
+    let unavailable = |e: String| {
+        tracing::error!(resource = %grant.resource, error = %e, "IAM database authentication failed");
+        Status::unavailable("couldn't get AWS credentials for the database")
+    };
+    let creds = worker.aws_credentials().await.map_err(unavailable)?;
+    let now = OffsetDateTime::now_utc();
+    match engine {
+        crate::db::Engine::Postgres | crate::db::Engine::Mysql => Ok((
+            grant.principal.clone(),
+            iam::rds_auth_token(&creds, region, &spec.endpoint, &grant.principal, now),
+        )),
+        crate::db::Engine::Redshift => {
+            let kind = match (&spec.workgroup, &spec.cluster_identifier) {
+                (Some(workgroup), _) => iam::RedshiftKind::Serverless { workgroup },
+                (None, Some(cluster_identifier)) => {
+                    iam::RedshiftKind::Provisioned { cluster_identifier }
+                }
+                (None, None) => {
+                    return Err(Status::failed_precondition(
+                        "a Redshift resource with IAM needs cluster_identifier or workgroup",
+                    ));
+                }
+            };
+            let login = iam::redshift_login(
+                &iam::Endpoints::from_env(),
+                &creds,
+                region,
+                kind,
+                &grant.principal,
+                &grant.database,
+                now,
+            )
+            .await
+            .map_err(unavailable)?;
+            Ok((login.user, login.password))
+        }
+    }
+}
+
+async fn admit_ssh(
+    worker: &Worker,
+    signed: &Signed,
+    checked: &Checked,
+) -> Result<SshSessionConfig, Status> {
+    let grant = &checked.verified.grant;
+    let snapshot = &checked.snapshot;
+    check_policy(
+        worker,
+        checked,
+        Principal::SshLogin(grant.principal.clone()),
+    )?;
     let target = snapshot
         .policy
         .resource(&grant.resource)

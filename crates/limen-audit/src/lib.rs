@@ -33,8 +33,16 @@ pub enum EventKind {
     SessionEnd,
     #[serde(rename = "ssh.exec")]
     SshExec,
+    /// A statement (or prepared-statement execution) sent to a SQL database.
+    /// Written before the statement is forwarded (ADR-0033).
     #[serde(rename = "db.query")]
     DbQuery,
+    /// How a `db.query` ended: duration, rows affected, error. `data.query_id` is its event id.
+    #[serde(rename = "db.query.end")]
+    DbQueryEnd,
+    /// The worker created, changed, or found drift in a `limen_*` database role.
+    #[serde(rename = "db.bootstrap")]
+    DbBootstrap,
     #[serde(rename = "redis.command")]
     RedisCommand,
     #[serde(rename = "kube.request")]

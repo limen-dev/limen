@@ -192,6 +192,7 @@ mod tests {
             user_cert_der,
             proxy_id: proxy_id.into(),
             worker_id: "w1".into(),
+            database: String::new(),
         }
     }
 

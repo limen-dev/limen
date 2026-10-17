@@ -49,6 +49,8 @@ spec:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }   # no principals: denies the resource entirely
 ```
 
+`db.roles` names the database roles people may use. **They must start with `limen_`** (followed by lowercase letters, digits, or underscores): the prefix is reserved for roles Limen creates and manages, and policy validation rejects any other. `db.databases` lists the databases (`"*"` for any).
+
 ## `role_mapping`
 
 ```yaml
@@ -75,15 +77,14 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `region`, `iam_auth`, `admin_secret_arn`), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
 
 ### Planned integrations
 
-These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. **Nothing serves them yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
+These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH and the SQL databases (`postgres`, `mysql`, `redshift`) are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
 
 | Kind | Resource fields | Grant section | Command (planned) |
 |---|---|---|---|
-| `redshift` | `endpoint`, `region`, `iam_auth`, `admin_secret_arn` (as `postgres`) | `db: { roles, databases }` | `limen db connect` (Phase 6) |
 | `mongodb` | `endpoint`, `flavor: standard \| atlas \| documentdb` | `mongo: { roles, databases }` | `limen mongo connect` (Phase 9) |
 | `opensearch`, `elasticsearch` | `endpoint`, `region`, `aws` | `search: { roles }` | `limen search connect` (Phase 10) |
 | `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ) | `mq: { users }` | `limen mq connect` (Phase 11) |
@@ -91,7 +92,7 @@ These kinds are accepted by policy, listed by `limen ls` and the console, and te
 | `web` | `address`, `host`, `health_path` | `web: {}` | `limen web open` (Phase 12) |
 | `tcp` | `address` | `tcp: {}` | `limen tcp` (Phase 12) |
 
-Aurora, DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. `web` and `tcp` have no upstream identity to choose, so their grant is access itself (`web: {}`).
+Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. `web` and `tcp` have no upstream identity to choose, so their grant is access itself (`web: {}`).
 
 ## `bot`
 

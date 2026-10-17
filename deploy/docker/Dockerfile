@@ -13,12 +13,19 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
+# The target cache is shared by every build on this Docker host. Cargo decides
+# what is stale from file timestamps, so builds of different checkouts (git
+# worktrees, branches) sharing one cache can leave it believing old sources
+# are current, and silently produce a binary of the wrong code. A stack that
+# builds next to others sets LIMEN_BUILD_CACHE to its own name (the demo
+# stacks do).
+ARG LIMEN_BUILD_CACHE=limen-target
 # rust-toolchain.toml pins the same version as the base image.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/src/target,id=${LIMEN_BUILD_CACHE} \
     cargo build --release --locked \
       --bin limen-control-plane --bin limen-audit-verify --bin limen-spool-adopt --bin limen-proxy --bin limen-worker --bin limen --bin fake-datadog --bin fake-ci-issuer \
- && mkdir -p /out /state/ca /state/ca-public /state/audit /state/spool /state/recordings /state/proxy /state/worker \
+ && mkdir -p /out /state/ca /state/ca-public /state/audit /state/spool /state/recordings /state/proxy /state/worker /state/db-secrets /state/db-tls \
  && cp target/release/limen-control-plane target/release/limen-audit-verify target/release/limen-spool-adopt target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog target/release/fake-ci-issuer /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.

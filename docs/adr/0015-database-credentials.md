@@ -19,3 +19,9 @@ The brief says the worker bootstrap "creates and maintains the DB roles mapped t
 - − DB-native audit logs can't tell users apart without the session join.
 - Note (AWS docs): adding `rds_iam` to a PostgreSQL user makes IAM auth take precedence over the password. Never grant it to the master user.
 - *Unverified against real service* until an AWS account exists. Locally we test bootstrap SQL against vanilla PostgreSQL and MySQL with the IAM-specific clauses stubbed.
+
+## Amendment (2026-10-17, ADR-0033)
+- **Secret mode.** For servers without IAM authentication (self-hosted, and the local demo) the worker logs in with a password read from `password_dir/<role>` on the worker. Bootstrap creates the file (mode 0600) and sets the same password on the database. IAM remains the default for RDS and Aurora (`iam_auth: true`).
+- **Bootstrap placement.** Reconcile no longer runs by default every 10 minutes inside the worker. It is a one-shot task (`limen-worker --db-bootstrap-once`, with `--db-bootstrap-check` to only report), and an in-process loop is opt-in (`--db-bootstrap-interval`). This keeps the admin credential out of the data-path process by default.
+- **Admin credential.** A file (`admin_password_file`) today; Secrets Manager (`admin_secret_arn`) is not supported yet.
+- **No role membership.** Bootstrap keeps `limen_*` roles members of nothing (except `rds_iam`), which is what makes `SET ROLE` harmless.

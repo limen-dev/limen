@@ -18,17 +18,13 @@
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers, and the bots that act for them, log in through their identity provider and get short-lived, audited access to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps. There are no static SSH keys, shared database passwords, or hand-made users.
 
-> **Status: Phase 5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots) work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
-
-Every phase is checked against the running stack, not only by unit tests. Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), and Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events). The exit criteria for each phase are in [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria); [`deploy/compose/README.md`](deploy/compose/README.md) explains how to bring up the local stack.
-
 ## What it connects to
 
 <table>
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="assets/icons/terminal.svg" height="48" alt="SSH"><br><br><b>SSH</b><br><sub>EC2 and any SSH host<br>per-session certificates, recorded</sub><br><sub>✅ Working</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/postgresql" height="48" alt="PostgreSQL"><br><br><b>PostgreSQL</b><br><sub>RDS · Aurora · Amazon Redshift<br>IAM auth, every statement audited</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/9">Phase 6</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mysql" height="48" alt="MySQL"><br><br><b>MySQL</b><br><sub>RDS · Aurora<br>IAM auth, every statement audited</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/9">Phase 6</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/postgresql" height="48" alt="PostgreSQL"><br><br><b>PostgreSQL</b><br><sub>RDS · Aurora · Amazon Redshift<br>IAM auth, every statement audited</sub><br><sub>✅ Working (IAM and Redshift unverified on AWS)</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mysql" height="48" alt="MySQL"><br><br><b>MySQL</b><br><sub>RDS · Aurora<br>IAM auth, every statement audited</sub><br><sub>✅ Working (IAM unverified on AWS)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/redis" height="48" alt="Redis / Valkey"><br><br><b>Redis / Valkey</b><br><sub>ElastiCache<br>values redacted in audit</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/10">Phase 7</a></sub><br><br></td>
   </tr>
   <tr>
@@ -130,6 +126,7 @@ limen login                                       # roles are fixed at login: si
 # 4. Use it
 limen ls                                          # what can I reach?
 limen ssh web-staging-1                           # a recorded SSH session
+# databases: see docs/guides/databases.md, or run deploy/compose/demo-phase6.sh
 
 # 5. Open the console in your browser (sign in with the same user)
 open https://localhost:3443/console/              # macOS; elsewhere just paste the URL
@@ -147,8 +144,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
 | 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
-| Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
-| 6 | PostgreSQL, MySQL, Aurora, Redshift | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/9) |
+| 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
 | 6.5 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
 | 7 | Redis and Valkey | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/10) |
 | 8 | Kubernetes (EKS) | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/11) |
@@ -157,6 +153,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 11 | RabbitMQ and Kafka | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/14) |
 | 12 | Internal web apps and TCP services | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
 | 13 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |
+| Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
 
 ## Why "Limen"
 Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.
@@ -164,7 +161,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), and [bots for CI](docs/guides/bots.md)
+- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), and [bots for CI](docs/guides/bots.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs

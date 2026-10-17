@@ -21,6 +21,31 @@
 </form>
 {% endif %}
 
+{% if s.is_db %}
+<h2>Statements</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> statement{% if statement_total != 1 %}s{% endif %}{% if statement_errors != 0 %}, <strong>{{ statement_errors }}</strong> with an error{% endif %}.
+  Database sessions have no terminal recording; this is the audited record of what was sent.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
+{% if statements.is_empty() %}
+<div class="card empty"><div>No statements yet. They appear here within a few seconds of being sent.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Time</th><th>Type</th><th>Statement</th><th>Outcome</th></tr></thead>
+  <tbody>
+  {% for st in statements %}
+  <tr>
+    <td class="nowrap">{{ st.time }}</td>
+    <td class="nowrap mono">{{ st.kind }}</td>
+    <td class="mono stmt">{{ st.text }}</td>
+    <td><span class="pill {{ st.outcome_class }}">{{ st.outcome }}</span>{% if !st.detail.is_empty() %}<div class="cell-sub stmt-detail">{{ st.detail }}</div>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% else %}
 <h2>Recording</h2>
 {% if s.has_recording %}
 <div class="card player-card"><div id="player" data-src="/console/sessions/{{ s.id }}/recording"></div></div>
@@ -29,6 +54,7 @@
 <script src="/console/static/player-init.js?v={{ chrome.assets }}"></script>
 {% else %}
 <div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg><div>{{ s.recording_note }}</div></div>
+{% endif %}
 {% endif %}
 
 {% if s.bot %}

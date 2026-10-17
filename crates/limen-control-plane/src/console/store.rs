@@ -345,6 +345,81 @@ fn summarize(data: &serde_json::Value) -> String {
     out
 }
 
+/// One statement of a database session, with how it ended.
+#[derive(Debug)]
+pub struct DbStatementRow {
+    pub at: OffsetDateTime,
+    pub phase: Option<String>,
+    pub statement_type: Option<String>,
+    pub statement: Option<String>,
+    pub truncated: bool,
+    pub status: Option<String>,
+    pub rows: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub error_code: Option<String>,
+    pub error: Option<String>,
+}
+
+/// The longest statement text kept in the console's table.
+const MAX_STATEMENT_TEXT: usize = 16 * 1024;
+
+/// The statements of a session in the order they were sent, at most `limit`.
+pub async fn db_statements(
+    db: &Db,
+    id: Uuid,
+    limit: i64,
+) -> Result<Vec<DbStatementRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT at, phase, statement_type, statement, truncated, status, \"rows\", duration_ms, error_code, error
+         FROM db_statements WHERE session_id = $1 AND statement_type IS NOT NULL
+         ORDER BY at, event_id LIMIT $2",
+    )
+    .bind(id)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(DbStatementRow {
+                at: r.try_get("at")?,
+                phase: r.try_get("phase")?,
+                statement_type: r.try_get("statement_type")?,
+                statement: r.try_get("statement")?,
+                truncated: r.try_get("truncated")?,
+                status: r.try_get("status")?,
+                rows: r.try_get("rows")?,
+                duration_ms: r.try_get("duration_ms")?,
+                error_code: r.try_get("error_code")?,
+                error: r.try_get("error")?,
+            })
+        })
+        .collect()
+}
+
+/// `(statements, errors)` of a session.
+pub async fn db_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT count(*) FILTER (WHERE statement_type IS NOT NULL) AS statements,
+                count(*) FILTER (WHERE status = 'error') AS errors
+         FROM db_statements WHERE session_id = $1",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok((row.try_get("statements")?, row.try_get("errors")?))
+}
+
+fn cut(text: &str, max: usize) -> (&str, bool) {
+    if text.len() <= max {
+        return (text, false);
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], true)
+}
+
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
@@ -417,6 +492,58 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(number(&e.data, "bytes_out"))
                 .bind(text(&e.data, "recording_sha256"))
                 .bind(text(&e.data, "actor_type").unwrap_or("user"))
+                .execute(&mut *tx)
+                .await?;
+            }
+            EventKind::DbQuery => {
+                let (statement, truncated) = cut(
+                    e.data
+                        .get("statement")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    MAX_STATEMENT_TEXT,
+                );
+                let truncated = truncated
+                    || e.data
+                        .get("truncated")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                sqlx::query(
+                    "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+                       phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+                       statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
+                )
+                .bind(e.event_id)
+                .bind(session_id)
+                .bind(e.time)
+                .bind(text(&e.data, "phase"))
+                .bind(text(&e.data, "statement_type"))
+                .bind((!statement.is_empty()).then_some(statement))
+                .bind(truncated)
+                .execute(&mut *tx)
+                .await?;
+            }
+            EventKind::DbQueryEnd => {
+                let Some(query_id) = text(&e.data, "query_id").and_then(|q| q.parse::<Uuid>().ok())
+                else {
+                    continue;
+                };
+                sqlx::query(
+                    "INSERT INTO db_statements (event_id, session_id, at, status, \"rows\", duration_ms, error_code, error)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     ON CONFLICT (event_id) DO UPDATE SET status = EXCLUDED.status, \"rows\" = EXCLUDED.\"rows\",
+                       duration_ms = EXCLUDED.duration_ms, error_code = EXCLUDED.error_code, error = EXCLUDED.error",
+                )
+                .bind(query_id)
+                .bind(session_id)
+                .bind(e.time)
+                .bind(text(&e.data, "status"))
+                .bind(number(&e.data, "rows"))
+                .bind(number(&e.data, "duration_ms"))
+                .bind(text(&e.data, "error_code"))
+                .bind(text(&e.data, "error"))
                 .execute(&mut *tx)
                 .await?;
             }
