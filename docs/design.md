@@ -2,7 +2,7 @@
 
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-14 (Phase 2 complete).
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-17 (Phase 5 complete). Phase status is in §13 only.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -298,10 +298,9 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 ## 11. Deployment
 - **Images:** multi-stage builds (`rust:1.99-bookworm` builder) on `gcr.io/distroless/cc-debian12:nonroot`.
 - **Terraform:**
-  - `modules/ecs`: VPC wiring, NLB, Fargate services (control plane, proxy, Grafana), Aurora PostgreSQL, KMS keys, S3, Glue, Athena workgroup, Secrets Manager, IAM, and worker services for target VPCs
-  - `modules/ec2`: ASG and systemd
-  - `modules/datadog`: monitors
-  - `examples/complete`: a single `terraform apply`
+  - `modules/audit` and `modules/datadog`: built
+  - `modules/ecs` and `modules/ec2`: planned for Phase 13 (not yet in the repo)
+  - `examples/complete`: planned for Phase 13; `examples/audit` exists
 - **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
@@ -316,15 +315,18 @@ crates/
   limen-auth/            # OIDC (PKCE, device), group→role mapping, IdP trait
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
+  limen-session/         # session lifecycle shared by proxy and worker
+  limen-component/       # component identity, enrollment and labels
+  limen-e2e/             # end-to-end tests across the binaries
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
   limen-testkit/         # fixtures, in-process cluster harness
   limen-control-plane/   # bin
   limen-proxy/           # bin
   limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, kube
   limen-cli/             # bin `limen`
-deploy/{docker,compose,terraform/{modules/{ecs,ec2,datadog},examples}}
+deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
 dashboards/grafana/{dashboards,alerting,provisioning}
-docs/{design.md,threat-model.md,adr/,runbooks/,audit-schema/}
+docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
 When a protocol module in the worker grows big enough, it moves to its own crate (`limen-proto-pg`, …) so it can be fuzzed in isolation.
@@ -354,25 +356,8 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 13 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
-- **Phase 2 status (2026-10-14).**
-  - Implemented and tested:
-    - SSH through proxy and worker, with per-session user and host certificates and recording
-    - signed grants and policy snapshots, with the grace period
-    - proxy peering
-    - static-token labels
-    - the outage semantics of §9: the in-process tests and the demo stop the control plane in the middle of a session
-  - *Deferred:*
-    - port forwarding through Limen
-    - recording upload to S3 (Phase 3)
-    - an IAM join method (Phase 13)
-- **Phase 1 status (2026-10-14).**
-  - Implemented and tested: OIDC login (PKCE with key-bound nonce, and device flow), user and component certificates, the policy engine, versioned policy administration, single-use and static join tokens, the reverse tunnel with proxy health checks and the control plane registry, proxy relaying with forwarded-certificate verification, renewal at half-life, the KMS signer (against local-kms), and the stub audit sink.
-  - Deferred to the phase that needs them:
-    - SSH user certificates at login (Phase 2)
-    - signed policy snapshots for proxies and workers, and the outage grace period (Phase 2, when the proxy first authorizes sessions)
-    - proxy peering (Phase 2)
-    - the disk spool and audit shipping (Phase 3)
-    - IAM join and a revocation CLI (Phase 13)
+- **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
+- **Deferred to Phase 13:** the IAM join method for components.
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.

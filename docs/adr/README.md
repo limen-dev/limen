@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 The format is [MADR](https://adr.github.io/madr/). Each record has a status: `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, or `Deprecated`.
-All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
+ADR-0001 to ADR-0015 were approved by the owner on 2026-10-13, at the end of Phase 0. Later ADRs carry their own approval date in their status line.
 
 | # | Title | Status |
 |---|---|---|
@@ -28,7 +28,7 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
-| [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Proposed |
+| [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Accepted |
 | [0025](0025-access-requests.md) | Access requests and just-in-time approval (with break-glass) | Proposed |
 | [0026](0026-audit-and-recording-search.md) | Searching audit events and recordings, and the auditor role | Proposed |
 | [0027](0027-resource-discovery.md) | Resource discovery by workers, with quarantine for tag-derived labels | Proposed |
