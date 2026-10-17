@@ -315,9 +315,9 @@ crates/
   limen-auth/            # OIDC (PKCE, device), group→role mapping, IdP trait
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
-  limen-session/         # session lifecycle shared by proxy and worker
-  limen-component/       # component identity, enrollment and labels
-  limen-e2e/             # end-to-end tests across the binaries
+  limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
+  limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
+  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
   limen-testkit/         # fixtures, in-process cluster harness
   limen-control-plane/   # bin
