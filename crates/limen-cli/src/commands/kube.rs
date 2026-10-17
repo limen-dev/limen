@@ -185,6 +185,7 @@ mod tests {
             "eks-dev",
             Some("CA"),
             Path::new("/bin/limen"),
+            Some(Path::new("/h")),
         );
         assert_eq!(
             cfg["clusters"][0]["cluster"]["server"],
