@@ -20,13 +20,6 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
 
 > **Status: Phase 5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots), and several control planes, proxies and workers running together (scale-out), work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-overview-dark.jpg">
-    <img src="docs/images/console-overview-light.jpg" alt="The Limen web console, showing resources, sessions, and workers" width="860">
-  </picture>
-</p>
-
 Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), `deploy/compose/demo-phase35.sh` (web console, locks, session kill), or `deploy/compose/demo-phase4.sh` (bots: a CI job logs in with an identity token).
 
 ## What it connects to
