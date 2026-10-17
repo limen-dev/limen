@@ -173,11 +173,13 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
 - **Limits.** Enforcement inside a session is the database's grants for the role; there is no statement-level allow or deny. Sessions end at `max_session_ttl`, or after an hour with no client activity. A frame the worker must read in full is capped at 64 MiB.
 - **IAM auth limitations to keep in mind** (from the AWS docs): IAM auth needs 300–1000 MiB of extra DB memory; IAM conditions don't support `aws:SourceIp` or `aws:SourceVpc`; tokens are at least about 1 KB. **The IAM paths and Redshift are unverified against the real services.**
 
-### 5.3 ElastiCache Redis (Phase 7)
-- `limen redis connect <resource>` opens a loopback listener for `redis-cli`.
-- The worker terminates RESP2 and RESP3 with its own codec (ADR-0012) and connects to ElastiCache over **TLS**. The preferred auth is **IAM**, which requires Redis OSS 7.0+ or Valkey 7.2+ and in-transit encryption: the worker sends a 15-minute SigV4 token through `AUTH`/`HELLO` as a user created with `authentication-mode Type=iam`, where user name = user ID. The fallback is **ACL users managed by the worker**, with passwords rotated by the worker and stored in Secrets Manager.
-- **Connection lifetime.** ElastiCache drops IAM connections after 12 hours unless re-AUTHed. The worker re-authenticates proactively, and never inside `MULTI` or Lua, where it isn't allowed.
-- **Audit.** One `redis.command` per command: the command name and key names. **Values are redacted by default.** This is configurable per resource and per command. `AUTH`, `HELLO` credentials, and `CONFIG SET requirepass` are always redacted. Policy can block commands (for example `FLUSHALL`, `CONFIG`, `MONITOR`, `DEBUG`) with ACL categories applied at the ElastiCache user level and checked again in the worker.
+### 5.3 Redis, Valkey, and ElastiCache (Phase 7)
+Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user guide is `docs/guides/redis.md`.
+- `limen redis connect <resource>` opens a loopback listener (or a private unix socket) for `redis-cli`. Each accepted connection is one Limen session over the proxy's `limen-redis/1` ALPN, with the same grant, worker, lock, and kill machinery as SSH.
+- The worker terminates RESP2 and RESP3 with its own codec (ADR-0012), drops the client's `AUTH`, and logs in to the server itself over TLS (optional for self-hosted) as the Redis user the role names. The credential is an **ElastiCache IAM token** (SigV4, 15 minutes; Redis OSS 7.0+ or Valkey 7.2+), or an **ACL password** the worker holds. The worker re-logs in at 11 hours, because ElastiCache drops IAM connections after 12, and never inside `MULTI`, a subscription, or with commands in flight.
+- **Policy at the worker.** Every command is checked against the role's grant (a default deny list, `allow_commands`, `deny_commands`, key patterns, databases) before it is forwarded; the server's ACL is the second layer. Key positions come from the server's `COMMAND INFO`.
+- **Audit.** One `redis.command` event per command, written before it is forwarded: command, subcommand, key names, argument count. **Values are not logged** unless the target opts in, and credential commands never are. A refused command is `auth.denied`. Key names can be hashed per resource.
+- Not supported yet: cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap. IAM, the 12-hour re-login, and TLS with the AWS bundle are unverified against real ElastiCache.
 
 ### 5.4 EKS (Phase 8)
 - `limen kube login <cluster>` writes a kubeconfig context:
@@ -351,7 +353,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host |
 | 6 ✅ | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018, ADR-0033) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
 | 6.5 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
-| 7 | Redis and Valkey | `redis-cli` through `limen redis connect`. Values are redacted |
+| 7 ✅ | Redis and Valkey (ADR-0034) | `redis-cli` through `limen redis connect`. Values are redacted |
 | 8 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
 | 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
 | 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
@@ -360,6 +362,9 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 13 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
+- **Phase 7 status (2026-10-17).**
+  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `deploy/compose/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
+  - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
 - **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
 - **Deferred to Phase 13:** the IAM join method for components.
 - **Deferred from Phase 6, not yet scheduled in §13:**
