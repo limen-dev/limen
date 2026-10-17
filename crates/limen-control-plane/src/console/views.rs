@@ -533,7 +533,11 @@ impl From<&super::store::DbStatementRow> for StatementView {
                 _ => kind,
             },
             outcome: outcome.to_owned(),
-            outcome_class: if failed { "warn" } else { "" },
+            outcome_class: match r.status.as_deref() {
+                Some("ok") => "ok",
+                Some("error") => "bad",
+                _ => "warn",
+            },
             detail: detail.join(" · "),
         }
     }

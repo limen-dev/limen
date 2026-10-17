@@ -31,15 +31,15 @@
 {% if statements.is_empty() %}
 <div class="card empty"><div>No statements yet. They appear here within a few seconds of being sent.</div></div>
 {% else %}
-<div class="card"><table class="table">
+<div class="table-wrap"><table>
   <thead><tr><th>Time</th><th>Type</th><th>Statement</th><th>Outcome</th></tr></thead>
   <tbody>
   {% for st in statements %}
   <tr>
-    <td class="mono nowrap">{{ st.time }}</td>
-    <td class="mono nowrap">{{ st.kind }}</td>
-    <td class="mono wrap">{{ st.text }}</td>
-    <td class="nowrap"><span class="{{ st.outcome_class }}">{{ st.outcome }}</span>{% if !st.detail.is_empty() %}<div class="hint">{{ st.detail }}</div>{% endif %}</td>
+    <td class="nowrap">{{ st.time }}</td>
+    <td class="nowrap mono">{{ st.kind }}</td>
+    <td class="mono stmt">{{ st.text }}</td>
+    <td><span class="pill {{ st.outcome_class }}">{{ st.outcome }}</span>{% if !st.detail.is_empty() %}<div class="cell-sub stmt-detail">{{ st.detail }}</div>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
