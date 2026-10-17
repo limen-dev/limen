@@ -292,7 +292,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 12] = [
+const SUMMARY_KEYS: [&str; 17] = [
     "action",
     "target_user",
     "component_id",
@@ -305,6 +305,12 @@ const SUMMARY_KEYS: [&str; 12] = [
     "worker_id",
     "bot",
     "method",
+    // kube.request
+    "verb",
+    "k8s_resource",
+    "namespace",
+    "name",
+    "status",
 ];
 
 /// Facts about a bot's CI run that may appear in the trail.

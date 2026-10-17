@@ -174,20 +174,20 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
 - **Connection lifetime.** ElastiCache drops IAM connections after 12 hours unless re-AUTHed. The worker re-authenticates proactively, and never inside `MULTI` or Lua, where it isn't allowed.
 - **Audit.** One `redis.command` per command: the command name and key names. **Values are redacted by default.** This is configurable per resource and per command. `AUTH`, `HELLO` credentials, and `CONFIG SET requirepass` are always redacted. Policy can block commands (for example `FLUSHALL`, `CONFIG`, `MONITOR`, `DEBUG`) with ACL categories applied at the ElastiCache user level and checked again in the worker.
 
-### 5.4 EKS (Phase 8)
-- `limen kube login <cluster>` writes a kubeconfig context:
+### 5.4 EKS (Phase 8, built: ADR-0033)
+- `limen kube login <cluster>` writes a kubeconfig (a file of its own, by default in the profile directory, or `--kubeconfig FILE`; `--print` writes it to standard output):
   - server `https://<proxy>/k8s/<cluster>`
-  - CA = the proxy CA
-  - a `client.authentication.k8s.io/v1` **exec plugin** (`limen kube credentials`) that returns `clientCertificateData` and `clientKeyData`, logging in again if needed
-- The proxy authorizes (does the user have *some* role for this cluster?) and routes the HTTP stream to the kube worker for that cluster.
-- The kube worker runs **in the cluster** under a service account bound to a ClusterRole that has `impersonate` on `users` and `groups` (and `userextras/*` for session IDs). It forwards each request to the API server with:
+  - CA = the CA pinned for the proxy
+  - a `client.authentication.k8s.io/v1` **exec plugin** (`limen kube credentials`) that returns `clientCertificateData` and `clientKeyData`: the user's short-lived Limen certificate. When it has expired the plugin fails and says to run `limen login`.
+- The proxy authorizes (which groups does policy let this user assume on this cluster? none is a 403) and relays the request to a kube worker for that cluster. Each request is one tunnel session carrying HTTP/1.1; the proxy never holds a cluster credential.
+- The kube worker serves one cluster. It runs **in the cluster** (or anywhere that can reach the API server, with `--kube-api-server`, `--kube-ca-file`, and `--kube-token-file`) under a service account bound to a ClusterRole that has `impersonate` on `users`, `groups`, and `userextras/limen-session`. It forwards each request to the API server with:
   - `Impersonate-User: <username>`
-  - `Impersonate-Group: <groups from roles>`
+  - `Impersonate-Group: <each group policy grants>`
   - `Impersonate-Extra-limen-session: <id>`
 
-  It strips any impersonation headers that come from the client. Kubernetes RBAC, bound to those group names (we ship example bindings), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
-- **exec, attach, and port-forward.** We support both SPDY and WebSocket upgrades: kubectl ≥ 1.30 uses WebSockets for exec. Exec and attach streams are recorded as asciicast v3. Port-forward is audited (pod and port) but not recorded.
-- **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies are not recorded by default.
+  It strips every identity header that comes from the client (`Authorization`, `Impersonate-*`, `X-Remote-*`). Kubernetes RBAC, bound to those group names (we ship example bindings in `deploy/kube/`), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
+- **exec, attach, and port-forward.** Both transports are supported: WebSocket (`v4`/`v5.channel.k8s.io`) and SPDY/3.1, and the SPDY-inside-WebSocket form kubectl 1.31 and later use for port-forward. The worker copies the bytes untouched and decodes a copy. A stream in a protocol it cannot decode is refused. Exec and attach output is recorded as asciicast v3 (stdin is not recorded, since it can hold passwords), with resizes and the exit status. Port-forward is audited (pod, namespace, ports, bytes) but not recorded.
+- **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies and query strings are not recorded. A stream adds `session.start` and `session.end` (command, exit code, ports, recording). If the audit trail is unavailable the worker answers 503 instead of the response.
 - **Later hardening.** Constrained impersonation (beta and on by default since Kubernetes 1.36) can narrow the worker's impersonation rights.
 
 ## 6. Reverse tunnel and HA routing (ADR-0003, ADR-0004)
@@ -345,7 +345,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 6 | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
 | 6.5 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
 | 7 | Redis and Valkey | `redis-cli` through `limen redis connect`. Values are redacted |
-| 8 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
+| 8 ✅ | **EKS** (ADR-0033) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
 | 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
 | 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
 | 11 | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |

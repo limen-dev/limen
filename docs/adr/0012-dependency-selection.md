@@ -23,7 +23,9 @@ A dependency is adopted only if all of these hold:
 | X.509 | rcgen 0.14.10, x509-parser 0.18.1 | | 2026-08 / 2026-02 | Adopt. Remote-signing spike in Phase 1 (ADR-0007) |
 | PEM | rustls-pemfile | 2.2.0 | 2024-09 | **Reject**: RUSTSEC-2025-0134 (unmaintained). Use `rustls-pki-types` PEM support. Banned in deny.toml |
 | AWS | aws-config 1.12, aws-sdk-{kms,s3,secretsmanager,rds} | | 2026-10 | Adopt |
-| Kubernetes | kube 4.2.0, k8s-openapi 0.28.0 | | 2026-07 / 2026-06 | Adopt |
+| Kubernetes | kube 4.2.0, k8s-openapi 0.28.0 | | 2026-07 / 2026-06 | Adopt in principle; **not used in Phase 8 (ADR-0033)**. The kube worker forwards the user's request to the API server and must pass `exec`/`port-forward` upgrades through byte for byte, which a typed client does not do. It uses hyper directly, the same as the rest of the HTTP code. Revisit for discovery of clusters (ADR-0027) |
+| Kubernetes streams (WebSocket) | tokio-tungstenite, tungstenite | | | **Reject for Phase 8.** We never terminate a WebSocket: the worker copies the bytes and decodes a copy to record them. A frame reader is ~150 lines (`limen-kube::ws`), fuzzable and tested, and cannot alter what it reads |
+| Kubernetes streams (SPDY/3.1) | none exists in Rust | | | **Write our own** (`limen-kube::spdy`), as ADR-0001 anticipated. Header blocks are zlib streams with a preset dictionary, inflated with `flate2` 1.1.10 (already in the tree for the audit pipeline) on its `zlib-rs` backend, which supports dictionaries. The 1423-byte dictionary is fixed by the SPDY/3 specification and copied from `moby/spdystream` (BSD-3-Clause, Copyright 2013 The Go Authors), noted in the source file |
 | OIDC | openidconnect | 4.0.1 | 2025-07 (repo active 2025-11) | Adopt. Stable and widely used. Watch maintenance; a fallback is `openidconnect` minus discovery plus `jsonwebtoken` |
 | SQL state | sqlx | 0.9.0 | 2026-05 | Adopt |
 | CLI | clap | 4.6.7 | 2026-09 | Adopt |

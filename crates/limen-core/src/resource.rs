@@ -84,7 +84,7 @@ impl ResourceKind {
                 ("limen db connect {name}", Some("Phase 6"))
             }
             ResourceKind::Redis => ("limen redis connect {name}", Some("Phase 7")),
-            ResourceKind::Kubernetes => ("limen kube login {name}", Some("Phase 8")),
+            ResourceKind::Kubernetes => ("limen kube login {name}", None),
             ResourceKind::Mongodb => ("limen mongo connect {name}", Some("Phase 9")),
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
                 ("limen search connect {name}", Some("Phase 10"))
@@ -119,12 +119,12 @@ mod tests {
     }
 
     #[test]
-    fn only_ssh_is_available_today() {
+    fn ssh_and_kubernetes_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
             .collect();
-        assert_eq!(available, [ResourceKind::Ssh]);
+        assert_eq!(available, [ResourceKind::Ssh, ResourceKind::Kubernetes]);
     }
 
     #[test]
