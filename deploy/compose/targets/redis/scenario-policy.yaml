@@ -1,0 +1,38 @@
+# Extra policy for test-phase7-scenarios.sh, applied on top of examples/policy.
+kind: resource
+version: v1
+metadata: { name: cache-tls, labels: { env: staging } }
+spec:
+  redis: { endpoint: "redis-tls:6379", iam_auth: false, tls: true, audit: { redact_keys: true } }
+  worker_selector: { pool: dev }
+---
+# TLS expected, but the server speaks plain text: must fail cleanly.
+kind: resource
+version: v1
+metadata: { name: cache-tls-bad, labels: { env: staging } }
+spec:
+  redis: { endpoint: "redis-target:6379", iam_auth: false, tls: true }
+  worker_selector: { pool: dev }
+---
+# Nothing listens there: must fail cleanly.
+kind: resource
+version: v1
+metadata: { name: cache-down, labels: { env: staging } }
+spec:
+  redis: { endpoint: "redis-nowhere:6379", iam_auth: false, tls: false }
+  worker_selector: { pool: dev }
+---
+# A second role for developers: limen-rw, but only on lab:* keys.
+kind: role
+version: v1
+metadata: { name: redis-lab }
+spec:
+  allow:
+    - resources: { kind: [redis], labels: { env: [staging] } }
+      redis: { users: [limen-rw], keys: ["lab:*"], allow_commands: [FLUSHDB, "CONFIG GET"] }
+---
+kind: role_mapping
+version: v1
+metadata: { name: lab-idp }
+spec:
+  - { idp_group: developers, roles: [redis-lab] }

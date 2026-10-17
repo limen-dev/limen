@@ -65,6 +65,7 @@ limen admin components                 # the proxy, the worker, and its tunnels
 deploy/compose/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
 deploy/compose/demo-phase3.sh          # audit to S3 and Datadog, sink outage, tamper check, Grafana
 deploy/compose/demo-phase35.sh         # web console, locking a user, ending a session
+deploy/compose/demo-phase7.sh          # Redis and Valkey through limen redis connect (own project and ports)
 ```
 
 By hand, after `limen admin apply examples/policy`:
@@ -188,3 +189,9 @@ LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state-scale/internal-ca
 It asserts that the long session outlasted all of this without a stall, every new session worked, `limen-audit-verify` finds every chain intact and no producer sequence gap, there is one chain per replica id, and S3 holds exactly one `ssh.exec`, `session.start`, and `session.end` per session the demo ran. It never SIGKILLs an ephemeral replica: that loses what it had acked but not shipped (ADR-0020), which `limen-audit-verify` would report as a gap. `LIMEN_SCALE_PROXY_LOG` sets the proxies' `RUST_LOG` (for example `info,h2=debug`).
 
 **If an image build looks stale.** The Dockerfile keeps Cargo's `target` directory in a BuildKit cache that all checkouts and worktrees on the machine share, and Cargo decides what to rebuild from file times. Building two different branches one after the other can link old code into the new image (a build fails, or a fix seems to have no effect). If that happens, rebuild with `--no-cache`, or clear the builder's cache (`docker builder prune`); either makes the next build compile from scratch.
+
+## Redis and Valkey (Phase 7)
+
+`docker-compose.redis.yml` is a separate project (`limen-redis`) with its own volumes and host ports (proxy 33443/33444, Dex 35556, control plane health 33081, S3 38333), so it runs next to the dev stack. It adds a Redis 7.4 and a Valkey 8.0 target with the ACL in `targets/redis/users.acl`, and gives the worker the matching passwords from `targets/redis/credentials.json` (dev only). `demo-phase7.sh` builds and starts it, seeds keys, and checks the exit criteria with `redis-cli` (or `targets/redis/resp-client.py` when `redis-cli` isn't installed). Stop it with `docker compose -p limen-redis -f deploy/compose/docker-compose.redis.yml down -v`. `dev-login.sh` takes `LIMEN_DEX_URL` (default `http://localhost:5556`) for a stack whose Dex has another port.
+
+`test-phase7-scenarios.sh` runs 26 more scenarios against the same targets plus a TLS Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). It is project `limen-redis-scn` on ports 36xxx; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.

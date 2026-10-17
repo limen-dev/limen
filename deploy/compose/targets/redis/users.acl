@@ -1,0 +1,3 @@
+user default off
+user limen-ro on >ro-dev-only ~* &* -@all +@read +@connection +command +info +ping
+user limen-rw on >rw-dev-only ~* &* +@all -@admin -@dangerous +info +command
