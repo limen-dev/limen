@@ -1175,6 +1175,25 @@ where
     Ok(())
 }
 
+/// A packet of exactly 0xffffff bytes is followed by the rest of the same
+/// payload (a row over 16 MB). Those packets are data, not new rows: pass them
+/// on without reading their first byte as an `ERR` or `EOF` marker.
+async fn forward_continuations<S>(
+    client: &mut S,
+    up: &mut BoxedIo,
+    mut last_len: usize,
+) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    while last_len == MAX_PACKET {
+        let next = read_packet(up).await?;
+        last_len = next.payload.len();
+        write_packet(client, &next).await?;
+    }
+    Ok(())
+}
+
 async fn relay_statement<S>(
     client: &mut S,
     up: &mut BoxedIo,
@@ -1252,6 +1271,7 @@ where
                     }
                     rows += 1;
                     write_packet(client, &p).await?;
+                    forward_continuations(client, up, p.payload.len()).await?;
                 }
             }
             None => return Err(Error::Protocol("empty response".into())),

@@ -249,6 +249,36 @@ async fn database_sessions_list_their_statements() {
             .await
             .expect("scan");
     assert_eq!(leaked, 0);
+    // Statement text expires with the audit events: after 30 days it is deleted.
+    let old = Uuid::now_v7();
+    let mut stale = event(
+        EventKind::DbQuery,
+        old,
+        DEVELOPER,
+        json!({ "phase": "simple", "statement_type": "select", "statement": "select 'old'" }),
+    );
+    stale.time = time::OffsetDateTime::now_utc() - time::Duration::days(31);
+    store::project_events(&db, &[stale]).await.expect("old");
+    assert_eq!(
+        store::db_statements(&db, old, 10).await.expect("old").len(),
+        1
+    );
+    limen_control_plane::db::cleanup(&db)
+        .await
+        .expect("cleanup");
+    assert!(
+        store::db_statements(&db, old, 10)
+            .await
+            .expect("gone")
+            .is_empty()
+    );
+    assert_eq!(
+        store::db_statements(&db, s, 10)
+            .await
+            .expect("recent")
+            .len(),
+        3
+    );
     // A session that never ran anything has nothing.
     let none = Uuid::now_v7();
     assert!(

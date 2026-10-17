@@ -521,6 +521,11 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    // The statement text of database sessions goes with the audit events it came from.
+    deleted += sqlx::query("DELETE FROM db_statements WHERE at < now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM console_sessions WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?

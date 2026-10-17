@@ -67,10 +67,17 @@ impl Client {
             .map_err(|e| QueryError::Other(e.to_string()))
     }
 
+    /// One logical packet: payloads of 0xffffff bytes continue in the next.
     async fn recv(&mut self) -> Result<Packet, QueryError> {
-        read_packet(&mut self.io)
-            .await
-            .map_err(|e| QueryError::Other(e.to_string()))
+        let io = |e: std::io::Error| QueryError::Other(e.to_string());
+        let mut packet = read_packet(&mut self.io).await.map_err(io)?;
+        let mut last = packet.payload.len();
+        while last == 0x00ff_ffff {
+            let more = read_packet(&mut self.io).await.map_err(io)?;
+            last = more.payload.len();
+            packet.payload.extend_from_slice(&more.payload);
+        }
+        Ok(packet)
     }
 
     /// Read one or more results (several for `CALL` or multi-statements) and

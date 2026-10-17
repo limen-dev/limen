@@ -556,3 +556,53 @@ async fn literals_can_be_normalized() {
         "{text}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rows_larger_than_one_packet_pass_through() {
+    let Some(env) = env() else {
+        return;
+    };
+    let _one_at_a_time = LOCK.lock().await;
+    let (dir, _) = prepared(&env).await;
+    let r = relay(&env, dir.path(), false).await;
+    let mut c = client(&r, "limen_my_ro", "orders", 0)
+        .await
+        .expect("connect");
+    // 20 MB in one row: the protocol splits it into several 16 MB packets.
+    let len = c
+        .scalar("select length(repeat('x', 20000000))")
+        .await
+        .expect("length");
+    assert_eq!(len.as_deref(), Some("20000000"));
+    let value = c
+        .scalar("select repeat('x', 20000000)")
+        .await
+        .expect("big value")
+        .expect("some");
+    assert_eq!(value.len(), 20_000_000);
+    // A row whose 16 MB continuation is three bytes starting with 0xfe: the
+    // relay must not read it as an end-of-rows marker. The row is a 4-byte
+    // length header plus the value, so a value of 16777214 bytes makes a
+    // 0xffffff-byte packet followed by exactly that 3-byte tail.
+    let rows = tokio::time::timeout(
+        Duration::from_secs(30),
+        c.query("select concat(repeat('a', 16777211), unhex('FE0102'))"),
+    )
+    .await
+    .expect("answered (a desynchronized relay stalls here)")
+    .expect("tricky row");
+    assert_eq!(rows.len(), 1, "one row, not a truncated answer");
+    // The session is still in step afterwards.
+    let alive = tokio::time::timeout(Duration::from_secs(30), c.scalar("select 1"))
+        .await
+        .expect("answered")
+        .expect("alive");
+    assert_eq!(alive.as_deref(), Some("1"));
+    // Several result sets in one answer (a procedure's), then a normal statement.
+    assert_eq!(
+        c.run_prepared("select * from customers")
+            .await
+            .expect("prepared"),
+        2
+    );
+}

@@ -649,3 +649,80 @@ async fn md5_password_login_works() {
         .get(0);
     assert_eq!(n, 3);
 }
+
+// ---- big frames, COPY in, and asynchronous messages ------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn large_results_copy_in_and_notifications_pass_through() {
+    use std::fmt::Write as _;
+
+    use sqlx::postgres::PgListener;
+    let Some(target) = target_addr() else {
+        return;
+    };
+    let secrets = prepare(&target).await;
+    let h = harness(&target, secrets.path(), false).await;
+    let mut c = PgConnection::connect_with(&client_opts(&h, ROLE_RO, "orders"))
+        .await
+        .expect("connect");
+
+    // A 6 MB value in one DataRow: streamed, not buffered, and intact.
+    let big: String = sqlx::query("select repeat('x', 6000000)")
+        .fetch_one(&mut c)
+        .await
+        .expect("big row")
+        .get(0);
+    assert_eq!(big.len(), 6_000_000);
+
+    // COPY ... FROM STDIN: the client's data frames stream to the database.
+    c.execute("create temp table t (a int, b text)")
+        .await
+        .expect("temp table");
+    let mut copy = c.copy_in_raw("copy t from stdin").await.expect("copy in");
+    let mut data = String::new();
+    for i in 0..50_000 {
+        let _ = writeln!(data, "{i}\trow-{i}");
+    }
+    copy.send(data.as_bytes()).await.expect("send");
+    assert_eq!(copy.finish().await.expect("finish"), 50_000);
+    let n: i64 = sqlx::query("select count(*) from t")
+        .fetch_one(&mut c)
+        .await
+        .expect("count")
+        .get(0);
+    assert_eq!(n, 50_000);
+
+    // LISTEN/NOTIFY: a message the database sends while the client is idle.
+    let pool = sqlx::PgPool::connect_with(client_opts(&h, ROLE_RO, "orders"))
+        .await
+        .expect("pool");
+    let mut listener = PgListener::connect_with(&pool).await.expect("listener");
+    listener.listen("limen_test").await.expect("listen");
+    let mut other = PgConnection::connect_with(&client_opts(&h, ROLE_RO, "orders"))
+        .await
+        .expect("second session");
+    other
+        .execute("select pg_notify('limen_test', 'hello')")
+        .await
+        .expect("notify");
+    let note = tokio::time::timeout(Duration::from_secs(10), listener.recv())
+        .await
+        .expect("a notification within 10 s")
+        .expect("recv");
+    assert_eq!(note.payload(), "hello");
+
+    // Pipelined extended protocol with an error in the middle of the batch.
+    let results = [
+        sqlx::query("select 1").execute(&mut c).await.is_ok(),
+        sqlx::query("select * from definitely_missing")
+            .execute(&mut c)
+            .await
+            .is_ok(),
+        sqlx::query("select 3").execute(&mut c).await.is_ok(),
+    ];
+    assert_eq!(
+        results,
+        [true, false, true],
+        "the session survives an error"
+    );
+}
