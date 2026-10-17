@@ -241,7 +241,17 @@ impl Deployment {
     }
 
     pub async fn start_worker(&self, join_token: &str, name: &str) -> RunningWorker {
-        let config: limen_worker::Config = parse(&[
+        self.start_worker_with(join_token, name, &[]).await
+    }
+
+    /// A worker with extra command-line flags, for example a Kubernetes cluster.
+    pub async fn start_worker_with(
+        &self,
+        join_token: &str,
+        name: &str,
+        extra: &[String],
+    ) -> RunningWorker {
+        let mut args = vec![
             format!("--proxy-addr={}", self.proxy_addr),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={join_token}"),
@@ -250,7 +260,9 @@ impl Deployment {
             "--drain-timeout=1s".into(),
             "--policy-refresh=1s".into(),
             "--policy-grace=3s".into(),
-        ]);
+        ];
+        args.extend_from_slice(extra);
+        let config: limen_worker::Config = parse(&args);
         let (worker, creds_tx) = limen_worker::Worker::start(config)
             .await
             .expect("worker start");

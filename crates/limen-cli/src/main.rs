@@ -1,5 +1,5 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts today, and (planned) databases, Redis, Kubernetes, MongoDB,
+//! to SSH hosts and Kubernetes clusters, and (planned) databases, Redis, MongoDB,
 //! search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
@@ -158,7 +158,7 @@ enum Command {
         #[command(subcommand)]
         command: RedisCommand,
     },
-    /// Kubernetes and EKS (planned, Phase 8).
+    /// Kubernetes and EKS.
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
@@ -237,8 +237,18 @@ enum RedisCommand {
 
 #[derive(Debug, Subcommand)]
 enum KubeCommand {
-    /// Write a kubeconfig context that uses the limen exec credential plugin.
-    Login { cluster: String },
+    /// Write a kubeconfig for a cluster; kubectl then asks `limen kube credentials`.
+    Login {
+        cluster: String,
+        /// Write the kubeconfig here instead of in the profile directory.
+        #[arg(long, value_name = "FILE")]
+        kubeconfig: Option<PathBuf>,
+        /// Print the kubeconfig instead of writing it.
+        #[arg(long, conflicts_with = "kubeconfig")]
+        print: bool,
+    },
+    /// The kubectl exec credential plugin: prints your short-lived certificate.
+    Credentials,
 }
 
 #[derive(Debug, Subcommand)]
@@ -358,7 +368,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         } => commands::ssh::config(proxy),
         Command::Db { .. } => not_yet("limen db connect", "database access", "Phase 6"),
         Command::Redis { .. } => not_yet("limen redis connect", "Redis access", "Phase 7"),
-        Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
+        Command::Kube { command } => match command {
+            KubeCommand::Login {
+                cluster,
+                kubeconfig,
+                print,
+            } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
+            KubeCommand::Credentials => commands::kube::credentials(proxy),
+        },
         Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
         Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
         Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
@@ -400,7 +417,6 @@ mod tests {
                 "127.0.0.1:5433",
             ][..],
             &["redis", "connect", "r", "--user", "u"],
-            &["kube", "login", "c"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
             &["search", "connect", "r", "--role", "x"],
             &["mq", "connect", "r", "--user", "u"],
@@ -412,6 +428,32 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn kube_commands_parse() {
+        for args in [
+            &["kube", "login", "c"][..],
+            &["kube", "login", "c", "--kubeconfig", "/tmp/k"],
+            &["kube", "login", "c", "--print"],
+            &["--proxy", "p:1", "kube", "credentials"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "limen",
+                "kube",
+                "login",
+                "c",
+                "--print",
+                "--kubeconfig",
+                "x"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

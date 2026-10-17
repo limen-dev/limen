@@ -33,28 +33,31 @@ pub struct KubeConfig {
     /// Serve this cluster. Must equal `kubernetes.cluster_name` of the
     /// resources this worker may serve.
     #[arg(long = "kube-cluster", env = "LIMEN_KUBE_CLUSTER")]
-    pub cluster: Option<String>,
+    pub kube_cluster: Option<String>,
 
     /// API server URL, for example `https://10.0.0.1:443`. Default: in-cluster.
     #[arg(long = "kube-api-server", env = "LIMEN_KUBE_API_SERVER")]
-    pub api_server: Option<String>,
+    pub kube_api_server: Option<String>,
 
     /// CA certificate(s) that sign the API server's certificate.
     #[arg(long = "kube-ca-file", env = "LIMEN_KUBE_CA_FILE")]
-    pub ca_file: Option<PathBuf>,
+    pub kube_ca_file: Option<PathBuf>,
 
     /// Service account token file. Re-read as it rotates.
     #[arg(long = "kube-token-file", env = "LIMEN_KUBE_TOKEN_FILE")]
-    pub token_file: Option<PathBuf>,
+    pub kube_token_file: Option<PathBuf>,
 }
 
 impl KubeConfig {
     /// The in-cluster defaults, where the flags are absent.
     pub(crate) fn resolve(&self) -> anyhow::Result<Option<Upstream>> {
-        let Some(cluster) = &self.cluster else {
+        let Some(cluster) = &self.kube_cluster else {
             return Ok(None);
         };
-        let api_server = match (&self.api_server, std::env::var("KUBERNETES_SERVICE_HOST")) {
+        let api_server = match (
+            &self.kube_api_server,
+            std::env::var("KUBERNETES_SERVICE_HOST"),
+        ) {
             (Some(url), _) => url.clone(),
             (None, Ok(host)) => {
                 let port =
@@ -73,8 +76,11 @@ impl KubeConfig {
         Upstream::new(
             cluster.clone(),
             &api_server,
-            &self.ca_file.clone().unwrap_or_else(|| in_cluster("ca.crt")),
-            self.token_file
+            &self
+                .kube_ca_file
+                .clone()
+                .unwrap_or_else(|| in_cluster("ca.crt")),
+            self.kube_token_file
                 .clone()
                 .unwrap_or_else(|| in_cluster("token")),
         )

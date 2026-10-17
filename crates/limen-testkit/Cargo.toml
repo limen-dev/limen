@@ -8,6 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+limen-kube.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+tokio-rustls.workspace = true
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true

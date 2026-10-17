@@ -8,6 +8,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+limen-kube.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+tokio-rustls.workspace = true
 limen-control-plane.workspace = true
 limen-core.workspace = true
 limen-proxy.workspace = true
