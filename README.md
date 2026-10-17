@@ -18,7 +18,7 @@
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers, and the bots that act for them, log in through their identity provider and get short-lived, audited access to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps. There are no static SSH keys, shared database passwords, or hand-made users.
 
-> **Status: Phase 4 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots) work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
+> **Status: Phase 5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots), and several control planes, proxies and workers running together (scale-out), work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
 
 <p align="center">
   <picture>
@@ -75,8 +75,8 @@ Each target works with the managed AWS service **and** any compatible self-hoste
 
 <table>
   <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>StatefulSet or Deployment</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/7">Phase 5</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/hard-drive.svg" height="48" alt="Amazon ECS and EC2"><br><br><b>Amazon ECS and EC2</b><br><sub>Fargate tasks or an Auto Scaling group</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/7">Phase 5</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>StatefulSet or Deployment</sub><br><sub>scale-out example, unverified on a cluster<br>EKS: ⏳ <a href="https://github.com/jfcmartins/limen/milestone/11">Phase 8</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/hard-drive.svg" height="48" alt="Amazon ECS and EC2"><br><br><b>Amazon ECS and EC2</b><br><sub>Fargate tasks or an Auto Scaling group</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 13</a></sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/terraform" height="48" alt="Terraform"><br><br><b>Terraform</b><br><sub>audit store and monitors today</sub><br><sub>✅ Working (audit module)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/docker" height="48" alt="Docker Compose"><br><br><b>Docker Compose</b><br><sub>the full local stack</sub><br><sub>✅ Working</sub><br><br></td>
   </tr>
@@ -153,7 +153,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 |---|---|---|
 | 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
-| 5 | Scale-out: many control planes, proxies, workers | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
+| 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/9) |
 | 6.5 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
