@@ -3007,6 +3007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "limen-kube"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "limen-policy"
 version = "0.1.0"
 dependencies = [
@@ -3039,7 +3048,9 @@ dependencies = [
  "futures",
  "governor",
  "http",
+ "http-body-util",
  "hyper",
+ "hyper-util",
  "limen-audit",
  "limen-ca",
  "limen-component",
@@ -3143,10 +3154,15 @@ dependencies = [
  "axum",
  "clap",
  "futures",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "limen-audit",
  "limen-ca",
  "limen-component",
  "limen-core",
+ "limen-kube",
  "limen-policy",
  "limen-proto",
  "limen-session",
@@ -3155,15 +3171,20 @@ dependencies = [
  "prost",
  "rand 0.10.3",
  "russh",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "ssh-key",
  "time",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tonic",
+ "tower",
  "tracing",
+ "url",
  "uuid",
 ]
 

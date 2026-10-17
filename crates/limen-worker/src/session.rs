@@ -47,7 +47,7 @@ pub(crate) async fn open(
     let signed = open
         .grant
         .ok_or_else(|| Status::invalid_argument("missing grant"))?;
-    let config = admit(&worker, &signed).await.map_err(|e| {
+    let admitted = admit(&worker, &signed).await.map_err(|e| {
         tracing::warn!(error = %e, "session refused");
         e
     })?;
@@ -59,10 +59,72 @@ pub(crate) async fn open(
             frame: Some(Frame::Opened(SessionOpened {})),
         }))
         .await;
+    let (ours, pump) = bridge(inbound, tx.clone());
+
+    let expires = config_expiry(&signed);
+    let until = move || {
+        (expires - OffsetDateTime::now_utc())
+            .max(time::Duration::ZERO)
+            .unsigned_abs()
+    };
+    match admitted {
+        Admitted::Ssh(config) => {
+            let session_id = config.session_id.clone();
+            let audit = worker.audit.clone();
+            tokio::spawn(async move {
+                let _guard = guard;
+                let (reason, outcome) =
+                    match tokio::time::timeout(until(), serve(ours, *config, audit)).await {
+                        Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
+                        Ok(Err(e)) => {
+                            (format!("error: {e}"), crate::ssh::SessionOutcome::default())
+                        }
+                        Err(_) => (
+                            "max_session_ttl reached".to_owned(),
+                            crate::ssh::SessionOutcome::default(),
+                        ),
+                    };
+                let _ = pump.await;
+                tracing::info!(session = %session_id, %reason, recording = %outcome.recording_uri, "session ended");
+                let _ = tx
+                    .send(Ok(TunnelFrame {
+                        frame: Some(Frame::Close(SessionClose {
+                            reason,
+                            recording_uri: outcome.recording_uri,
+                            recording_sha256: outcome.recording_sha256,
+                        })),
+                    }))
+                    .await;
+            });
+        }
+        Admitted::Kube(request) => {
+            let worker = worker.clone();
+            tokio::spawn(async move {
+                let _guard = guard;
+                crate::kube::serve(worker, *request, ours).await;
+                let _ = pump.await;
+                let _ = tx
+                    .send(Ok(TunnelFrame {
+                        frame: Some(Frame::Close(SessionClose::default())),
+                    }))
+                    .await;
+            });
+        }
+    }
+    Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+}
+
+/// Bridge the tunnel frames to a byte stream: what the proxy sends comes out
+/// of the returned stream, and what is written to it goes back as frames. The
+/// handle finishes when everything the session wrote has been sent.
+fn bridge(
+    mut inbound: Streaming<TunnelFrame>,
+    tx: tokio::sync::mpsc::Sender<Result<TunnelFrame, Status>>,
+) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
     let (ours, theirs) = tokio::io::duplex(256 * 1024);
     let (mut theirs_read, mut theirs_write) = tokio::io::split(theirs);
 
-    // Proxy → SSH server.
+    // Proxy → session.
     tokio::spawn(async move {
         while let Some(Ok(frame)) = inbound.next().await {
             match frame.frame {
@@ -78,57 +140,27 @@ pub(crate) async fn open(
         let _ = theirs_write.shutdown().await;
     });
 
-    // SSH server → proxy, then the closing frame with the recording.
-    let session_id = config.session_id.clone();
-    let expires = config_expiry(&signed);
-    let audit = worker.audit.clone();
-    tokio::spawn(async move {
-        let _guard = guard;
-        let pump_tx = tx.clone();
-        let pump = tokio::spawn(async move {
-            let mut buf = vec![0u8; FRAME_CHUNK];
-            loop {
-                match theirs_read.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if pump_tx
-                            .send(Ok(TunnelFrame {
-                                frame: Some(Frame::Data(buf[..n].to_vec())),
-                            }))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
+    // Session → proxy.
+    let pump = tokio::spawn(async move {
+        let mut buf = vec![0u8; FRAME_CHUNK];
+        loop {
+            match theirs_read.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx
+                        .send(Ok(TunnelFrame {
+                            frame: Some(Frame::Data(buf[..n].to_vec())),
+                        }))
+                        .await
+                        .is_err()
+                    {
+                        break;
                     }
                 }
             }
-        });
-        let until = (expires - OffsetDateTime::now_utc())
-            .max(time::Duration::ZERO)
-            .unsigned_abs();
-        let (reason, outcome) = match tokio::time::timeout(until, serve(ours, config, audit)).await
-        {
-            Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
-            Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
-            Err(_) => (
-                "max_session_ttl reached".to_owned(),
-                crate::ssh::SessionOutcome::default(),
-            ),
-        };
-        let _ = pump.await;
-        tracing::info!(session = %session_id, %reason, recording = %outcome.recording_uri, "session ended");
-        let _ = tx
-            .send(Ok(TunnelFrame {
-                frame: Some(Frame::Close(SessionClose {
-                    reason,
-                    recording_uri: outcome.recording_uri,
-                    recording_sha256: outcome.recording_sha256,
-                })),
-            }))
-            .await;
+        }
     });
-    Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    (ours, pump)
 }
 
 fn config_expiry(signed: &Signed) -> OffsetDateTime {
@@ -139,8 +171,13 @@ fn config_expiry(signed: &Signed) -> OffsetDateTime {
         .unwrap_or_else(OffsetDateTime::now_utc)
 }
 
+enum Admitted {
+    Ssh(Box<SshSessionConfig>),
+    Kube(Box<crate::kube::Admitted>),
+}
+
 /// Every check a session must pass before the worker touches the target.
-async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Status> {
+async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
     let creds = worker.credentials();
     let internal_ca = creds
         .internal_ca()
@@ -162,13 +199,25 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<SshSessionConfig, Sta
     {
         return Err(Status::permission_denied("grant already used"));
     }
-    if grant.kind != "ssh" {
-        return Err(Status::unimplemented(format!(
-            "{} sessions arrive in a later phase",
-            grant.kind
-        )));
+    match grant.kind.as_str() {
+        "ssh" => admit_ssh(worker, signed, &verified, now)
+            .await
+            .map(|c| Admitted::Ssh(Box::new(c))),
+        "kube" => crate::kube::admit(worker, &verified, now).map(|k| Admitted::Kube(Box::new(k))),
+        other => Err(Status::unimplemented(format!(
+            "{other} sessions arrive in a later phase"
+        ))),
     }
+}
 
+async fn admit_ssh(
+    worker: &Worker,
+    signed: &Signed,
+    verified: &limen_session::grant::VerifiedGrant,
+    now: OffsetDateTime,
+) -> Result<SshSessionConfig, Status> {
+    let creds = worker.credentials();
+    let grant = &verified.grant;
     // Our own policy decision, from our own snapshot.
     let snapshot = worker
         .policy

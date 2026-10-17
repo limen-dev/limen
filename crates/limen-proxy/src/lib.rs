@@ -3,8 +3,10 @@
 //! (ADR-0002 through ADR-0005).
 
 pub mod config;
+mod kube;
 mod peer;
 pub mod relay;
+mod session;
 mod ssh;
 pub mod tunnels;
 
@@ -328,7 +330,8 @@ async fn handle_connection(
             }
         }
         Some(p) if p == alpn::HTTP1 => {
-            // Browsers on HTTP/1.1: the relay answers only `/console/`.
+            // HTTP/1.1: browsers (the relay answers only `/console/`) and kubectl
+            // streams (`/k8s/<cluster>/`, which may upgrade).
             if let Err(e) =
                 limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone()))
                     .await

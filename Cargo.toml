@@ -14,6 +14,7 @@ publish = false
 [workspace.dependencies]
 # Internal crates
 limen-proto = { path = "crates/limen-proto" }
+limen-kube = { path = "crates/limen-kube" }
 limen-core = { path = "crates/limen-core" }
 limen-policy = { path = "crates/limen-policy" }
 limen-auth = { path = "crates/limen-auth" }

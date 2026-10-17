@@ -460,23 +460,7 @@ impl Policy {
         let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
         let mut out = Vec::new();
         for (name, resource) in &self.resources {
-            let mut principals = BTreeSet::new();
-            for rule in roles.iter().flat_map(|r| &r.spec.allow) {
-                if selector_matches(&rule.resources, resource) {
-                    principals.extend(rule_principals(rule, resource_kind(resource)));
-                }
-            }
-            for rule in roles.iter().flat_map(|r| &r.spec.deny) {
-                if selector_matches(&rule.resources, resource) {
-                    if rule_has_no_principals(rule) {
-                        principals.clear();
-                    } else {
-                        for p in rule_principals(rule, resource_kind(resource)) {
-                            principals.remove(&p);
-                        }
-                    }
-                }
-            }
+            let principals = granted_principals(&roles, resource);
             if !principals.is_empty() {
                 out.push(AccessibleResource {
                     name: name.clone(),
@@ -493,6 +477,44 @@ impl Policy {
         }
         out
     }
+
+    /// The Kubernetes groups the roles let a user assume on the cluster
+    /// resource `name`, minus any explicitly denied. Empty if the resource is
+    /// unknown or not a cluster.
+    #[must_use]
+    pub fn kube_groups(&self, roles: &[String], name: &str) -> Vec<String> {
+        let Some(resource) = self.resources.get(name) else {
+            return Vec::new();
+        };
+        if resource_kind(resource) != ResourceKind::Kubernetes {
+            return Vec::new();
+        }
+        let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
+        granted_principals(&roles, resource).into_iter().collect()
+    }
+}
+
+/// What `roles` grant on one resource: every allowed principal, less the ones
+/// a deny rule names (or all of them, for a deny rule that names none).
+fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<String> {
+    let mut principals = BTreeSet::new();
+    for rule in roles.iter().flat_map(|r| &r.spec.allow) {
+        if selector_matches(&rule.resources, resource) {
+            principals.extend(rule_principals(rule, resource_kind(resource)));
+        }
+    }
+    for rule in roles.iter().flat_map(|r| &r.spec.deny) {
+        if selector_matches(&rule.resources, resource) {
+            if rule_has_no_principals(rule) {
+                principals.clear();
+            } else {
+                for p in rule_principals(rule, resource_kind(resource)) {
+                    principals.remove(&p);
+                }
+            }
+        }
+    }
+    principals
 }
 
 /// The resource's single kind. Validation guarantees there is exactly one.

@@ -2,6 +2,7 @@
 //! serves sessions over reverse tunnels (ADR-0003). Protocol handlers
 //! (SSH, PostgreSQL, MySQL, Redis, Kubernetes) arrive in Phases 2 to 6.
 
+mod kube;
 pub mod recording;
 mod recordings;
 mod session;
@@ -80,6 +81,9 @@ pub struct Config {
 
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,
+
+    #[command(flatten)]
+    pub kube: kube::KubeConfig,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -112,6 +116,8 @@ pub struct Worker {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
+    /// The cluster this worker serves, if it is a kube worker (ADR-0033).
+    pub(crate) kube: Option<Arc<kube::Upstream>>,
     audit_spool: limen_audit::spool::Spool,
 }
 
@@ -156,6 +162,7 @@ impl Worker {
             &creds.id,
             config.audit_failure_mode,
         )?;
+        let kube = config.kube.resolve()?.map(Arc::new);
         let (tx, rx) = watch::channel(Arc::new(creds));
         Ok((
             Self {
@@ -167,6 +174,7 @@ impl Worker {
                 policy,
                 nonces: Arc::default(),
                 audit,
+                kube,
                 audit_spool,
             },
             tx,

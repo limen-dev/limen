@@ -689,3 +689,57 @@ mod bots {
         assert!(diff.added.contains(&"role/deployer".to_owned()));
     }
 }
+
+#[test]
+fn kube_groups_are_what_the_roles_grant_minus_denies() {
+    let docs = "\
+kind: resource
+version: v1
+metadata: {name: eks-dev, labels: {env: dev}}
+spec:
+  kubernetes: {cluster_name: dev}
+---
+kind: resource
+version: v1
+metadata: {name: web-dev, labels: {env: dev}}
+spec:
+  ssh: {address: 'h:22', host_key: 'ssh-ed25519 AAAA'}
+---
+kind: role
+version: v1
+metadata: {name: dev}
+spec:
+  allow:
+    - resources: {kind: [kubernetes], labels: {env: [dev]}}
+      kube: {groups: ['limen:view', 'limen:edit']}
+  deny:
+    - resources: {kind: [kubernetes]}
+      kube: {groups: ['limen:edit']}
+---
+kind: role
+version: v1
+metadata: {name: viewer}
+spec:
+  allow:
+    - resources: {kind: [kubernetes]}
+      kube: {groups: ['limen:view']}
+";
+    let p = Policy::parse_yaml([("p.yaml", docs)]).expect("valid");
+    assert_eq!(p.kube_groups(&roles(&["dev"]), "eks-dev"), ["limen:view"]);
+    assert_eq!(
+        p.kube_groups(&roles(&["dev", "viewer"]), "eks-dev"),
+        ["limen:view"]
+    );
+    assert_eq!(
+        p.kube_groups(&roles(&["nobody"]), "eks-dev"),
+        Vec::<String>::new()
+    );
+    assert!(
+        p.kube_groups(&roles(&["dev"]), "web-dev").is_empty(),
+        "not a cluster"
+    );
+    assert_eq!(
+        p.kube_groups(&roles(&["dev"]), "ghost"),
+        Vec::<String>::new()
+    );
+}
