@@ -300,7 +300,7 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 - **Terraform:**
   - `modules/audit` and `modules/datadog`: built
   - `modules/ecs` and `modules/ec2`: planned for Phase 13 (not yet in the repo)
-  - `examples/complete`: planned for Phase 13; `examples/audit` exists
+  - `examples/complete`: planned for Phase 13; `deploy/terraform/examples/audit` exists
 - **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout

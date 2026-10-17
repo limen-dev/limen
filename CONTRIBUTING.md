@@ -3,11 +3,13 @@
 ## Repository layout
 | Path | Contents |
 |---|---|
-| `crates/` | Rust workspace: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-cli` (binary `limen`), and the libraries they share |
+| `crates/` | Rust workspace. Binaries: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-cli` (binary `limen`). Libraries: `limen-core`, `limen-proto`, `limen-policy`, `limen-auth`, `limen-ca`, `limen-audit`, `limen-tunnel`, `limen-session`, `limen-component`. Tests: `limen-testkit`, `limen-e2e` |
 | `proto/` | Protobuf definitions for the control plane API and the worker tunnel |
 | `deploy/` | Dockerfiles, docker-compose dev stack, Terraform (audit store, Datadog monitors) |
 | `dashboards/` | Grafana dashboards and alert rules, generated for Athena and Trino |
-| `docs/` | Design, ADRs, threat model, runbooks |
+| `docs/` | Design, ADRs, threat model, policy and component references, guides (for users), runbooks (for operators) |
+| `examples/` | Example policy documents |
+| `scripts/` | Developer and operator helper scripts |
 
 
 ## Building and testing
@@ -17,7 +19,7 @@ Tools are pinned in `mise.toml`: Rust, protoc, cargo-deny, cargo-audit, actionli
 mise install
 cargo build --workspace
 cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo deny check && cargo audit
 
 # Integration tests need PostgreSQL, a KMS emulator, and an S3-compatible store:
@@ -43,7 +45,7 @@ The roadmap is GitHub milestones (one per phase) with an epic issue holding each
 ## Before opening a PR
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace
 cargo deny check
 cargo audit
