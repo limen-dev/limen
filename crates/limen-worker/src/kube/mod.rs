@@ -29,6 +29,7 @@ const IN_CLUSTER_DIR: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
 /// only `--kube-cluster` is needed: the API server address, CA, and service
 /// account token come from the pod's environment.
 #[derive(Debug, Clone, Args)]
+#[allow(clippy::struct_field_names)] // the `kube_` prefix keeps clap IDs unique in the worker config
 pub struct KubeConfig {
     /// Serve this cluster. Must equal `kubernetes.cluster_name` of the
     /// resources this worker may serve.

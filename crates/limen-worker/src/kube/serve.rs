@@ -72,7 +72,9 @@ pub(crate) async fn serve(worker: Worker, admitted: Admitted, io: tokio::io::Dup
         async move { Ok::<_, Infallible>(handle(ctx, req).await) }
     });
     let connection = hyper::server::conn::http1::Builder::new()
-        .keep_alive(false)
+        // No keep_alive(false): it would add `close` to `Connection: Upgrade`, which
+        // Go's SPDY and WebSocket handshakes reject. The proxy ends the stream
+        // after the one request instead.
         .serve_connection(TokioIo::new(io), TowerToHyperService::new(service))
         .with_upgrades();
     if let Err(e) = connection.await {
@@ -275,11 +277,33 @@ async fn start_stream(
     started: Instant,
 ) -> Response<Body> {
     let admitted = &ctx.admitted;
+    // What the API server agreed to speak. If it is not a protocol the
+    // recorder reads, the stream does not run.
+    let negotiated = response
+        .headers()
+        .get(SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let tunnelled_spdy = negotiated.starts_with("SPDY/3.1+");
+    let readable = spdy || tunnelled_spdy || is_channel_protocol(&negotiated);
+    if !readable {
+        tracing::warn!(protocol = %negotiated, "refusing a stream in a protocol the recorder cannot read");
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "this stream protocol cannot be recorded",
+        );
+    }
+    tracing::debug!(protocol = %negotiated, spdy, tunnelled_spdy, "kube stream protocol");
     let (subresource, kind) = match (sub, spdy) {
         (StreamSubresource::Exec, false) => ("exec", StreamKind::ExecWebSocket),
         (StreamSubresource::Exec, true) => ("exec", StreamKind::ExecSpdy),
         (StreamSubresource::Attach, false) => ("attach", StreamKind::ExecWebSocket),
         (StreamSubresource::Attach, true) => ("attach", StreamKind::ExecSpdy),
+        (StreamSubresource::PortForward, false) if tunnelled_spdy => {
+            ("portforward", StreamKind::PortForwardSpdyOverWebSocket)
+        }
         (StreamSubresource::PortForward, false) => {
             ("portforward", StreamKind::PortForwardWebSocket)
         }
@@ -453,6 +477,14 @@ fn forward_headers(
     Ok(out)
 }
 
+/// `channel.k8s.io`, `v4.channel.k8s.io`, `v2.portforward.k8s.io`: the binary
+/// protocols whose messages start with a channel byte.
+fn is_channel_protocol(protocol: &str) -> bool {
+    protocol == "channel.k8s.io"
+        || (protocol.starts_with('v')
+            && (protocol.ends_with(".channel.k8s.io") || protocol.ends_with(".portforward.k8s.io")))
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -496,7 +528,27 @@ fn failure(code: StatusCode, reason: &str, message: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
-    use super::percent_decode;
+    use super::{is_channel_protocol, percent_decode};
+
+    #[test]
+    fn only_binary_channel_protocols_are_readable() {
+        for ok in [
+            "channel.k8s.io",
+            "v4.channel.k8s.io",
+            "v5.channel.k8s.io",
+            "v2.portforward.k8s.io",
+        ] {
+            assert!(is_channel_protocol(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "base64.channel.k8s.io",
+            "SPDY/3.1+portforward.k8s.io",
+            "graphql-ws",
+        ] {
+            assert!(!is_channel_protocol(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn decodes_query_values() {

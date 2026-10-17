@@ -5,7 +5,7 @@
 //! certificate for kubectl to present to the proxy. Nothing long-lived is
 //! ever written into the kubeconfig.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use base64::Engine as _;
@@ -44,6 +44,7 @@ pub async fn login(
         cluster,
         profile::trusted_ca(&proxy_addr)?.as_deref(),
         &exe,
+        std::env::var_os("LIMEN_HOME").map(PathBuf::from).as_deref(),
     );
     let text = serde_json::to_string_pretty(&config)?;
     if print {
@@ -69,11 +70,15 @@ pub async fn login(
 }
 
 /// The kubeconfig, as JSON (kubectl reads JSON as readily as YAML).
+///
+/// `home` is `$LIMEN_HOME` when it is set. kubectl runs the plugin in its own
+/// environment, which need not have it, so it is written into the plugin's.
 fn kubeconfig_json(
     proxy: &str,
     cluster: &str,
     ca_pem: Option<&str>,
     exe: &Path,
+    home: Option<&Path>,
 ) -> serde_json::Value {
     let mut cluster_entry = json!({ "server": format!("https://{proxy}/k8s/{cluster}") });
     if let Some(ca) = ca_pem {
@@ -81,19 +86,23 @@ fn kubeconfig_json(
             json!(base64::engine::general_purpose::STANDARD.encode(ca));
     }
     let name = format!("limen-{cluster}");
+    let mut exec = json!({
+        "apiVersion": "client.authentication.k8s.io/v1",
+        "command": exe.display().to_string(),
+        "args": ["--proxy", proxy, "kube", "credentials"],
+        "interactiveMode": "Never",
+        "provideClusterInfo": false,
+    });
+    if let Some(home) = home {
+        exec["env"] = json!([{ "name": "LIMEN_HOME", "value": home.display().to_string() }]);
+    }
     json!({
         "apiVersion": "v1",
         "kind": "Config",
         "clusters": [{ "name": name, "cluster": cluster_entry }],
         "users": [{
             "name": "limen",
-            "user": { "exec": {
-                "apiVersion": "client.authentication.k8s.io/v1",
-                "command": exe.display().to_string(),
-                "args": ["--proxy", proxy, "kube", "credentials"],
-                "interactiveMode": "Never",
-                "provideClusterInfo": false,
-            }},
+            "user": { "exec": exec },
         }],
         "contexts": [{ "name": name, "context": { "cluster": name, "user": "limen" } }],
         "current-context": name,
@@ -182,6 +191,7 @@ mod tests {
             "https://limen.example:8443/k8s/eks-dev"
         );
         assert_eq!(cfg["users"][0]["user"]["exec"]["args"][3], "credentials");
+        assert_eq!(cfg["users"][0]["user"]["exec"]["env"][0]["value"], "/h");
         let text = cfg.to_string();
         assert!(!text.contains("KEY") && !text.contains("token"));
     }

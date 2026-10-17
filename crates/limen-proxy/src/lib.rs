@@ -329,19 +329,28 @@ async fn handle_connection(
                 }
             }
         }
-        Some(p) if p == alpn::HTTP1 => {
-            // HTTP/1.1: browsers (the relay answers only `/console/`) and kubectl
-            // streams (`/k8s/<cluster>/`, which may upgrade).
-            if let Err(e) =
-                limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone()))
-                    .await
-            {
-                tracing::debug!(error = %e, %remote, "browser connection ended with error");
-            }
-        }
+        Some(p) if p == alpn::HTTP1 => serve_http1(proxy, tls, peer, remote).await,
+        // No ALPN at all means HTTP/1.1 (RFC 7301). kubectl opens its exec,
+        // attach, and port-forward connections that way.
+        None => serve_http1(proxy, tls, peer, remote).await,
         other => {
             tracing::debug!(%remote, alpn = ?other.map(String::from_utf8_lossy), "unsupported or missing ALPN; closing");
         }
+    }
+}
+
+/// HTTP/1.1: browsers (the relay answers only `/console/`) and kubectl streams
+/// (`/k8s/<cluster>/`, which may upgrade).
+async fn serve_http1(
+    proxy: &Proxy,
+    tls: tokio_rustls::server::TlsStream<TcpStream>,
+    peer: PeerInfo,
+    remote: SocketAddr,
+) {
+    if let Err(e) =
+        limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone())).await
+    {
+        tracing::debug!(error = %e, %remote, "HTTP/1.1 connection ended with error");
     }
 }
 

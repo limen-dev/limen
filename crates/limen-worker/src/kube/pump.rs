@@ -6,6 +6,7 @@
 //! decoded or the recording cannot be written, the session ends: a stream we
 //! cannot record is a stream we do not carry.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -110,26 +111,28 @@ pub(super) async fn run<C, U>(
         exit: None,
         ports: info.query_ports.clone(),
     }));
+    let bytes_in = Arc::new(AtomicU64::new(0));
+    let bytes_out = Arc::new(AtomicU64::new(0));
     let (mut client_read, mut client_write) = tokio::io::split(client);
     let (mut up_read, mut up_write) = tokio::io::split(upstream);
 
     // kubectl → API server, decoding the client's side (resizes, stream types).
     let to_cluster = {
         let state = Arc::clone(&state);
+        let counter = Arc::clone(&bytes_in);
         async move {
             let mut buf = vec![0u8; CHUNK];
-            let mut bytes = 0u64;
             loop {
                 let n = match client_read.read(&mut buf).await {
-                    Ok(0) | Err(_) => break (bytes, End::Closed),
+                    Ok(0) | Err(_) => break End::Closed,
                     Ok(n) => n,
                 };
-                bytes += n as u64;
+                counter.fetch_add(n as u64, Ordering::Relaxed);
                 if let Err(fault) = decode(&state, &buf[..n], true) {
-                    break (bytes, End::Fault(fault));
+                    break End::Fault(fault);
                 }
                 if up_write.write_all(&buf[..n]).await.is_err() {
-                    break (bytes, End::Closed);
+                    break End::Closed;
                 }
             }
         }
@@ -137,21 +140,21 @@ pub(super) async fn run<C, U>(
     // API server → kubectl, decoding what the container printed.
     let to_client = {
         let state = Arc::clone(&state);
+        let counter = Arc::clone(&bytes_out);
         async move {
             let mut buf = vec![0u8; CHUNK];
-            let mut bytes = 0u64;
             loop {
                 let n = match up_read.read(&mut buf).await {
-                    Ok(0) | Err(_) => break (bytes, End::Closed),
+                    Ok(0) | Err(_) => break End::Closed,
                     Ok(n) => n,
                 };
-                bytes += n as u64;
+                counter.fetch_add(n as u64, Ordering::Relaxed);
                 // Record first: output that is not on tape does not reach the user.
                 if let Err(fault) = decode(&state, &buf[..n], false) {
-                    break (bytes, End::Fault(fault));
+                    break End::Fault(fault);
                 }
                 if client_write.write_all(&buf[..n]).await.is_err() {
-                    break (bytes, End::Closed);
+                    break End::Closed;
                 }
             }
         }
@@ -175,11 +178,15 @@ pub(super) async fn run<C, U>(
     let mut to_cluster = Box::pin(to_cluster);
     let mut to_client = Box::pin(to_client);
     tokio::pin!(revoked);
-    let (bytes_in, bytes_out, end, reason) = tokio::select! {
-        (bytes, end) = &mut to_cluster => (bytes, 0, end, "client disconnected"),
-        (bytes, end) = &mut to_client => (0, bytes, end, "cluster closed the stream"),
-        why = &mut revoked => (0, 0, End::Closed, why),
+    let (end, reason) = tokio::select! {
+        end = &mut to_cluster => (end, "client disconnected"),
+        end = &mut to_client => (end, "cluster closed the stream"),
+        why = &mut revoked => (End::Closed, why),
     };
+    let (bytes_in, bytes_out) = (
+        bytes_in.load(Ordering::Relaxed),
+        bytes_out.load(Ordering::Relaxed),
+    );
     // Dropping the halves above closes both sockets; nothing more is relayed.
     drop(to_cluster);
     drop(to_client);
@@ -249,6 +256,12 @@ fn decode(state: &Mutex<State>, bytes: &[u8], from_client: bool) -> Result<(), S
         state.decoder.server(bytes)
     }
     .map_err(|e| e.to_string())?;
+    tracing::trace!(
+        from_client,
+        bytes = bytes.len(),
+        ?events,
+        "kube stream data"
+    );
     state.apply(events).map_err(|e| format!("recording: {e}"))
 }
 

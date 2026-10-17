@@ -20,8 +20,12 @@ use crate::ws::{self, Message, Sender};
 pub enum StreamKind {
     ExecWebSocket,
     ExecSpdy,
+    /// `v?.portforward.k8s.io` or `v?.channel.k8s.io`: channel-prefixed messages.
     PortForwardWebSocket,
     PortForwardSpdy,
+    /// `SPDY/3.1+portforward.k8s.io`: SPDY frames carried in WebSocket messages,
+    /// which is what kubectl 1.31 and later use.
+    PortForwardSpdyOverWebSocket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +48,13 @@ enum Transport {
         server: ws::Decoder,
     },
     Spdy {
+        client: spdy::Decoder,
+        server: spdy::Decoder,
+    },
+    /// SPDY inside WebSocket messages: unwrap, then decode as SPDY.
+    SpdyTunnel {
+        ws_client: ws::Decoder,
+        ws_server: ws::Decoder,
         client: spdy::Decoder,
         server: spdy::Decoder,
     },
@@ -82,11 +93,19 @@ impl StreamDecoder {
                 client: spdy::Decoder::new(Sender::Client),
                 server: spdy::Decoder::new(Sender::Server),
             },
+            StreamKind::PortForwardSpdyOverWebSocket => Transport::SpdyTunnel {
+                ws_client: ws::Decoder::new(Sender::Client),
+                ws_server: ws::Decoder::new(Sender::Server),
+                client: spdy::Decoder::new(Sender::Client),
+                server: spdy::Decoder::new(Sender::Server),
+            },
         };
         Self {
             port_forward: matches!(
                 kind,
-                StreamKind::PortForwardWebSocket | StreamKind::PortForwardSpdy
+                StreamKind::PortForwardWebSocket
+                    | StreamKind::PortForwardSpdy
+                    | StreamKind::PortForwardSpdyOverWebSocket
             ),
             transport,
             spdy_streams: BTreeMap::new(),
@@ -111,46 +130,19 @@ impl StreamDecoder {
                 }
             }
             Transport::Spdy { client, .. } => {
-                for frame in client.push(bytes)? {
-                    match frame {
-                        Frame::SynStream { stream_id, headers } => {
-                            let find = |name: &str| {
-                                headers
-                                    .iter()
-                                    .find(|(n, _)| n.eq_ignore_ascii_case(name))
-                                    .map(|(_, v)| v.as_str())
-                            };
-                            let kind = match find("streamtype") {
-                                Some("stdin") => SpdyStream::Stdin,
-                                Some("stdout") => SpdyStream::Stdout,
-                                Some("stderr") => SpdyStream::Stderr,
-                                Some("error") => SpdyStream::Error,
-                                Some("resize") => SpdyStream::Resize,
-                                Some("data") => SpdyStream::Data,
-                                _ => SpdyStream::Other,
-                            };
-                            if self.spdy_streams.len() >= 1024 {
-                                return Err(Error::Spdy("too many streams"));
-                            }
-                            self.spdy_streams.insert(stream_id, kind);
-                            if let Some(port) = find("port").and_then(|p| p.parse::<u16>().ok())
-                                && self.ports.insert(port)
-                            {
-                                events.push(Event::Port(port));
-                            }
-                        }
-                        Frame::Data {
-                            stream_id, data, ..
-                        } => {
-                            if self.spdy_streams.get(&stream_id) == Some(&SpdyStream::Resize)
-                                && let Some(resize) = parse_resize(&data)
-                            {
-                                events.push(resize);
-                            }
-                        }
-                        Frame::Other => {}
+                let frames = client.push(bytes)?;
+                self.spdy_client_frames(frames, &mut events)?;
+            }
+            Transport::SpdyTunnel {
+                ws_client, client, ..
+            } => {
+                let mut frames = Vec::new();
+                for message in ws_client.push(bytes)? {
+                    if let Message::Binary(payload) = message {
+                        frames.extend(client.push(&payload)?);
                     }
                 }
+                self.spdy_client_frames(frames, &mut events)?;
             }
         }
         Ok(events)
@@ -190,28 +182,92 @@ impl StreamDecoder {
                 }
             }
             Transport::Spdy { server, .. } => {
-                for frame in server.push(bytes)? {
-                    let Frame::Data {
-                        stream_id, data, ..
-                    } = frame
-                    else {
-                        continue;
-                    };
-                    match self.spdy_streams.get(&stream_id) {
-                        Some(SpdyStream::Stdout | SpdyStream::Stderr) if !data.is_empty() => {
-                            if !self.port_forward {
-                                events.push(Event::Output(data));
-                            }
-                        }
-                        Some(SpdyStream::Error) if !self.port_forward => {
-                            events.extend(parse_status(&data).map(Event::Exit));
-                        }
-                        _ => {}
+                let frames = server.push(bytes)?;
+                self.spdy_server_frames(frames, &mut events);
+            }
+            Transport::SpdyTunnel {
+                ws_server, server, ..
+            } => {
+                let mut frames = Vec::new();
+                for message in ws_server.push(bytes)? {
+                    if let Message::Binary(payload) = message {
+                        frames.extend(server.push(&payload)?);
                     }
                 }
+                self.spdy_server_frames(frames, &mut events);
             }
         }
         Ok(events)
+    }
+
+    fn spdy_client_frames(
+        &mut self,
+        frames: Vec<Frame>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        for frame in frames {
+            match frame {
+                Frame::SynStream { stream_id, headers } => {
+                    let find = |name: &str| {
+                        headers
+                            .iter()
+                            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                            .map(|(_, v)| v.as_str())
+                    };
+                    let kind = match find("streamtype") {
+                        Some("stdin") => SpdyStream::Stdin,
+                        Some("stdout") => SpdyStream::Stdout,
+                        Some("stderr") => SpdyStream::Stderr,
+                        Some("error") => SpdyStream::Error,
+                        Some("resize") => SpdyStream::Resize,
+                        Some("data") => SpdyStream::Data,
+                        _ => SpdyStream::Other,
+                    };
+                    if self.spdy_streams.len() >= 1024 {
+                        return Err(Error::Spdy("too many streams"));
+                    }
+                    self.spdy_streams.insert(stream_id, kind);
+                    if let Some(port) = find("port").and_then(|p| p.parse::<u16>().ok())
+                        && self.ports.insert(port)
+                    {
+                        events.push(Event::Port(port));
+                    }
+                }
+                Frame::Data {
+                    stream_id, data, ..
+                } => {
+                    if self.spdy_streams.get(&stream_id) == Some(&SpdyStream::Resize)
+                        && let Some(resize) = parse_resize(&data)
+                    {
+                        events.push(resize);
+                    }
+                }
+                Frame::Other => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn spdy_server_frames(&self, frames: Vec<Frame>, events: &mut Vec<Event>) {
+        for frame in frames {
+            let Frame::Data {
+                stream_id, data, ..
+            } = frame
+            else {
+                continue;
+            };
+            match self.spdy_streams.get(&stream_id) {
+                Some(SpdyStream::Stdout | SpdyStream::Stderr) if !data.is_empty() => {
+                    if !self.port_forward {
+                        events.push(Event::Output(data));
+                    }
+                }
+                Some(SpdyStream::Error) if !self.port_forward => {
+                    events.extend(parse_status(&data).map(Event::Exit));
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -350,6 +406,20 @@ mod tests {
             spdy.server(&data(3, false, b"payload")).expect("server"),
             []
         );
+    }
+
+    #[test]
+    fn spdy_port_forward_inside_websocket_messages() {
+        let mut d = StreamDecoder::new(StreamKind::PortForwardSpdyOverWebSocket);
+        let mut z = Compressor::default();
+        let frames = z.syn_stream(1, &[("streamtype", "error"), ("port", "8080")]);
+        // The same bytes, split across two client messages.
+        let (a, b) = frames.split_at(10);
+        let mut wire = ws::encode(Sender::Client, 0x2, a);
+        wire.extend(ws::encode(Sender::Client, 0x2, b));
+        assert_eq!(d.client(&wire).expect("client"), [Event::Port(8080)]);
+        let reply = ws::encode(Sender::Server, 0x2, &data(1, false, b"x"));
+        assert_eq!(d.server(&reply).expect("server"), []);
     }
 
     #[test]

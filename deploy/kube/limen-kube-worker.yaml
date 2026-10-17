@@ -1,0 +1,45 @@
+# What a Limen kube worker needs in the cluster it serves (ADR-0033): a service
+# account that can impersonate users, the Limen groups, and the session extra.
+# It can do nothing else: what a user may do is decided by the RoleBindings in
+# limen-groups.yaml, evaluated by the API server for the impersonated identity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: limen-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: limen-kube-worker
+  namespace: limen-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: limen-impersonator
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  # Only the Limen groups. The worker also refuses system: groups itself.
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames: ["limen:view", "limen:edit", "limen:admin"]
+  # The Limen session ID, which then appears in the cluster's own audit log.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/limen-session"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: limen-kube-worker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: limen-impersonator
+subjects:
+  - kind: ServiceAccount
+    name: limen-kube-worker
+    namespace: limen-system
