@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use limen_audit::{Context, EventKind};
 use limen_core::labels::Labels;
+use limen_core::names::{NAME_LABEL, NamePattern};
 use serde_json::json;
 use time::OffsetDateTime;
 use tonic::Status;
@@ -160,26 +161,22 @@ pub async fn revoke_component(
 ) -> Result<bool, Status> {
     let component_id = component_id.trim();
     let reason = clean_reason(reason)?;
-    if db::component(&state.db, component_id)
+    let Some(component) = db::component(&state.db, component_id)
         .await
         .map_err(|e| internal("loading component", e))?
-        .is_none()
-    {
+    else {
         return Err(Status::not_found("no such component"));
-    }
+    };
     let revoked = db::revoke_component(&state.db, component_id, actor.username)
         .await
         .map_err(|e| internal("revoking component", e))?;
     if revoked {
-        tracing::warn!(component = component_id, by = actor.username, via = actor.via, %reason, "component revoked");
-        audit(
-            state,
-            EventKind::ComponentRevoke,
-            actor,
-            None,
-            json!({ "component_id": component_id, "reason": reason }),
-        )
-        .await?;
+        tracing::warn!(component = component_id, name = component.name.as_deref(), by = actor.username, via = actor.via, %reason, "component revoked");
+        let mut data = json!({ "component_id": component_id, "reason": reason });
+        if let Some(name) = &component.name {
+            data["component_name"] = json!(name);
+        }
+        audit(state, EventKind::ComponentRevoke, actor, None, data).await?;
     }
     Ok(revoked)
 }
@@ -192,6 +189,7 @@ pub async fn create_join_token(
     labels: &BTreeMap<String, String>,
     ttl: Option<Duration>,
     dns_names: &[String],
+    name: Option<&str>,
 ) -> Result<(String, OffsetDateTime), Status> {
     if !matches!(kind, "proxy" | "worker") {
         return Err(Status::invalid_argument("kind must be proxy or worker"));
@@ -201,8 +199,18 @@ pub async fn create_join_token(
             "worker certificates carry no DNS names",
         ));
     }
+    if labels.contains_key(NAME_LABEL) {
+        return Err(Status::invalid_argument(format!(
+            "{NAME_LABEL} is reserved: approve a name with the token's name instead"
+        )));
+    }
     let labels =
         Labels::try_from(labels.clone()).map_err(|e| Status::invalid_argument(e.to_string()))?;
+    let name = name
+        .filter(|n| !n.is_empty())
+        .map(NamePattern::parse)
+        .transpose()
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
     let ttl = ttl.unwrap_or(DEFAULT_TOKEN_TTL);
     if ttl > MAX_TOKEN_TTL {
         return Err(Status::invalid_argument("ttl must be at most 24h"));
@@ -212,12 +220,15 @@ pub async fn create_join_token(
     let labels_json = serde_json::to_value(&labels).map_err(|e| internal("labels", e))?;
     db::insert_join_token(
         &state.db,
-        &sha256(token.as_bytes()),
-        kind,
-        &labels_json,
-        dns_names,
-        actor.username,
-        expires_at,
+        &db::NewJoinToken {
+            token_hash: &sha256(token.as_bytes()),
+            kind,
+            labels: &labels_json,
+            dns_names,
+            name: name.as_ref().map(NamePattern::as_str),
+            created_by: actor.username,
+            expires_at,
+        },
     )
     .await
     .map_err(|e| internal("storing join token", e))?;
@@ -226,7 +237,13 @@ pub async fn create_join_token(
         EventKind::JoinTokenCreate,
         actor,
         None,
-        json!({ "kind": kind, "labels": labels, "dns_names": dns_names, "expires_at": unix(expires_at) }),
+        {
+            let mut data = json!({ "kind": kind, "labels": labels, "dns_names": dns_names, "expires_at": unix(expires_at) });
+            if let Some(name) = &name {
+                data["name"] = json!(name.as_str());
+            }
+            data
+        },
     )
     .await?;
     Ok((token, expires_at))

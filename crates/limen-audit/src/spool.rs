@@ -40,6 +40,10 @@ pub struct SpoolConfig {
     pub fsync_interval: Duration,
     /// Consumers that must read every record before it can be deleted.
     pub consumers: Vec<String>,
+    /// Refuse to open when the filesystem can't take the advisory lock
+    /// (some NFS). Off by default: a replica, proxy, or worker warns and runs
+    /// unlocked; a tool that relies on the lock as a guard turns it on.
+    pub require_lock: bool,
 }
 
 impl SpoolConfig {
@@ -51,6 +55,7 @@ impl SpoolConfig {
             max_bytes: 1024 * 1024 * 1024,
             fsync_interval: Duration::from_millis(10),
             consumers: consumers.iter().map(|c| (*c).to_owned()).collect(),
+            require_lock: false,
         }
     }
 }
@@ -69,6 +74,8 @@ pub enum SpoolError {
     UnknownConsumer(String),
     #[error("spool closed")]
     Closed,
+    #[error("another process has the spool at {0} open")]
+    Locked(String),
 }
 
 #[derive(Debug)]
@@ -95,6 +102,10 @@ struct State {
 pub struct Spool {
     config: Arc<SpoolConfig>,
     state: Arc<Mutex<State>>,
+    /// Holds the advisory lock on `<dir>/lock` for as long as any clone lives.
+    /// (The background flusher's copy has none, so it never outlives the callers' hold.)
+    #[allow(dead_code)] // held for its Drop
+    dir_lock: Option<Arc<File>>,
     /// Everything below this record number is durable.
     synced: watch::Sender<u64>,
     /// Woken on every durable append, for consumers tailing the spool.
@@ -149,6 +160,36 @@ fn scan(
     Ok((records, pos, torn))
 }
 
+/// Whether the filesystem can't do advisory locks at all (as opposed to
+/// someone else holding the lock). NFS without a lock manager gives `ENOLCK`.
+fn lock_unsupported(e: &std::io::Error) -> bool {
+    const ENOLCK: i32 = if cfg!(target_os = "linux") { 37 } else { 77 };
+    e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error() == Some(ENOLCK)
+}
+
+/// What to do with the result of taking the spool's lock.
+fn lock_outcome(
+    taken: Result<(), std::fs::TryLockError>,
+    config: &SpoolConfig,
+) -> Result<(), SpoolError> {
+    match taken {
+        Ok(()) => Ok(()),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err(SpoolError::Locked(config.dir.display().to_string()))
+        }
+        Err(std::fs::TryLockError::Error(e)) if lock_unsupported(&e) && !config.require_lock => {
+            tracing::warn!(
+                dir = %config.dir.display(),
+                error = %e,
+                "SPOOL NOT LOCKED: this filesystem does not support advisory locks; \
+                 make sure no other process (such as limen-spool-adopt) opens this spool"
+            );
+            Ok(())
+        }
+        Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+    }
+}
+
 impl Spool {
     /// Open (or create) the spool, recovering from a crash mid-append.
     pub fn open(config: SpoolConfig) -> Result<Self, SpoolError> {
@@ -156,6 +197,15 @@ impl Spool {
         let off_dir = config.dir.join("offsets");
         std::fs::create_dir_all(&seg_dir)?;
         std::fs::create_dir_all(&off_dir)?;
+
+        // One process per spool: a second opener (say an operator adopting a
+        // volume a replica still uses) would truncate and race the writer.
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(config.dir.join("lock"))?;
+        lock_outcome(lock.try_lock(), &config)?;
 
         let mut firsts: Vec<u64> = std::fs::read_dir(&seg_dir)?
             .filter_map(Result::ok)
@@ -240,6 +290,7 @@ impl Spool {
                 dirty: false,
                 offsets,
             })),
+            dir_lock: Some(Arc::new(lock)),
             synced,
             appended: Arc::new(Notify::new()),
         };
@@ -258,7 +309,8 @@ impl Spool {
 
     /// Start the group-commit flusher. Call once, inside a tokio runtime.
     pub fn start(&self) {
-        let spool = self.clone();
+        let mut spool = self.clone();
+        spool.dir_lock = None;
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(spool.config.fsync_interval);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -363,12 +415,19 @@ impl Spool {
 
     /// Up to `max` durable records for `consumer`, starting at its offset.
     pub fn read(&self, consumer: &str, max: usize) -> Result<Vec<(u64, Vec<u8>)>, SpoolError> {
-        let synced = *self.synced.borrow();
-        let st = self.lock();
-        let start = *st
+        let start = *self
+            .lock()
             .offsets
             .get(consumer)
             .ok_or_else(|| SpoolError::UnknownConsumer(consumer.to_owned()))?;
+        self.read_from(start, max)
+    }
+
+    /// Up to `max` durable records starting at record `start` (or at the
+    /// oldest retained record, if `start` was already deleted).
+    pub fn read_from(&self, start: u64, max: usize) -> Result<Vec<(u64, Vec<u8>)>, SpoolError> {
+        let synced = *self.synced.borrow();
+        let st = self.lock();
         let mut out = Vec::new();
         for seg in &st.segments {
             if Self::end(seg) <= start || seg.first >= synced || out.len() >= max {
@@ -411,6 +470,23 @@ impl Spool {
         while st.segments.len() > 1 && Self::end(&st.segments[0]) <= min {
             let seg = st.segments.remove(0);
             std::fs::remove_file(&seg.path)?;
+        }
+        Ok(())
+    }
+
+    /// The first record some consumer has not yet handled: everything from
+    /// here on is unshipped somewhere.
+    #[must_use]
+    pub fn min_offset(&self) -> u64 {
+        let st = self.lock();
+        st.offsets.values().copied().min().unwrap_or(st.next)
+    }
+
+    /// [`commit`](Self::commit) `upto` for every consumer (those already
+    /// past it stay where they are).
+    pub fn commit_all(&self, upto: u64) -> Result<(), SpoolError> {
+        for consumer in &self.config.consumers {
+            self.commit(consumer, upto)?;
         }
         Ok(())
     }
@@ -578,6 +654,58 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn unsupported_locks_warn_unless_the_lock_is_required() {
+        let dir = tempfile::tempdir().expect("dir");
+        let unsupported = || {
+            Err(std::fs::TryLockError::Error(std::io::Error::from(
+                std::io::ErrorKind::Unsupported,
+            )))
+        };
+        let mut c = config(dir.path());
+        lock_outcome(unsupported(), &c).expect("a replica runs unlocked");
+        c.require_lock = true;
+        assert!(matches!(
+            lock_outcome(unsupported(), &c),
+            Err(SpoolError::Io(_))
+        ));
+        // Someone else holding it is refused either way.
+        c.require_lock = false;
+        assert!(matches!(
+            lock_outcome(Err(std::fs::TryLockError::WouldBlock), &c),
+            Err(SpoolError::Locked(_))
+        ));
+        // Other I/O errors are not mistaken for "unsupported".
+        assert!(matches!(
+            lock_outcome(
+                Err(std::fs::TryLockError::Error(std::io::Error::from(
+                    std::io::ErrorKind::PermissionDenied
+                ))),
+                &c
+            ),
+            Err(SpoolError::Io(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_second_opener_is_refused_until_the_first_is_gone() {
+        let dir = tempfile::tempdir().expect("dir");
+        let first = Spool::open(config(dir.path())).expect("open");
+        first.start();
+        assert!(matches!(
+            Spool::open(config(dir.path())),
+            Err(SpoolError::Locked(_))
+        ));
+        let clone = first.clone();
+        drop(first);
+        assert!(
+            Spool::open(config(dir.path())).is_err(),
+            "a clone still holds it"
+        );
+        drop(clone);
+        Spool::open(config(dir.path())).expect("free again");
+    }
+
     #[tokio::test]
     async fn concurrent_appends_share_fsyncs_and_all_land() {
         let dir = tempfile::tempdir().expect("dir");
@@ -598,5 +726,44 @@ mod tests {
         indexes.sort_unstable();
         assert_eq!(indexes, (0..200).collect::<Vec<_>>());
         assert_eq!(spool.read("a", 1000).expect("read").len(), 200);
+    }
+
+    #[tokio::test]
+    async fn min_offset_read_from_and_commit_all_cover_every_consumer() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        assert_eq!(spool.min_offset(), 0);
+        for i in 0..30 {
+            spool
+                .append(format!("event-{i}").as_bytes())
+                .await
+                .expect("append");
+        }
+        // "a" shipped 20, "b" only 5: anything "b" hasn't passed is unshipped.
+        spool.commit("a", 20).expect("commit a");
+        spool.commit("b", 5).expect("commit b");
+        assert_eq!(spool.min_offset(), 5);
+        let batch = spool.read_from(spool.min_offset(), 10).expect("read");
+        assert_eq!(batch.len(), 10);
+        assert_eq!(batch[0], (5, b"event-5".to_vec()));
+        assert_eq!(batch[9].0, 14);
+
+        // Moving everyone to 15 leaves "a" (already further) where it was.
+        spool.commit_all(15).expect("commit all");
+        assert_eq!(spool.min_offset(), 15);
+        assert_eq!(spool.pending("a"), 10);
+        assert_eq!(spool.pending("b"), 15);
+        assert_eq!(spool.read_from(15, 100).expect("read").len(), 15);
+        spool.commit_all(30).expect("commit all");
+        assert_eq!(
+            spool.read_from(spool.min_offset(), 100).expect("read"),
+            vec![]
+        );
+
+        // Offsets are durable.
+        drop(spool);
+        let spool = Spool::open(config(dir.path())).expect("reopen");
+        assert_eq!(spool.min_offset(), 30);
     }
 }

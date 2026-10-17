@@ -117,16 +117,47 @@ where
     B::Data: Send,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
+    serve_h2_until(io, peer, service, settings, std::future::pending()).await
+}
+
+/// Like [`serve_h2`], but when `stop` resolves the connection shuts down
+/// gracefully: it sends GOAWAY, lets in-flight requests finish, then closes
+/// (an idle connection closes at once).
+pub async fn serve_h2_until<IO, S, B>(
+    io: IO,
+    peer: PeerInfo,
+    service: S,
+    settings: H2Settings,
+    stop: impl std::future::Future<Output = ()>,
+) -> Result<(), TransportError>
+where
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    S: Service<Request<Incoming>, Response = Response<B>, Error = Infallible>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let service = service.map_request(move |mut req: Request<Incoming>| {
         req.extensions_mut().insert(peer.clone());
         req
     });
-    hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+    let conn = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
         .timer(TokioTimer::new())
         .keep_alive_interval(Some(settings.keepalive_interval))
         .keep_alive_timeout(settings.keepalive_timeout)
         .max_concurrent_streams(settings.max_concurrent_streams)
-        .serve_connection(TokioIo::new(io), TowerToHyperService::new(service))
-        .await?;
+        .serve_connection(TokioIo::new(io), TowerToHyperService::new(service));
+    let mut conn = std::pin::pin!(conn);
+    tokio::select! {
+        r = conn.as_mut() => r?,
+        () = stop => {
+            conn.as_mut().graceful_shutdown();
+            conn.await?;
+        }
+    }
     Ok(())
 }

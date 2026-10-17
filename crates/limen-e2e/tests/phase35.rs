@@ -108,6 +108,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")

@@ -31,6 +31,53 @@ pub mod alpn {
     pub const ALL: [&[u8]; 7] = [TUNNEL, PEER, DB, REDIS, SSH, H2, HTTP11];
 }
 
+/// Refusals a worker makes before it reads anything from a session stream,
+/// marked in the status metadata so the proxy can act on them without
+/// parsing the message.
+pub mod refusal {
+    /// Metadata key on a marked refusal; the value says why.
+    pub const KEY: &str = "limen-refusal";
+    /// The worker is shutting down.
+    pub const DRAINING: &str = "draining";
+
+    /// The worker is draining. It read nothing (the grant is unused), so the
+    /// session can be tried on another worker.
+    #[must_use]
+    pub fn draining() -> tonic::Status {
+        let mut status = tonic::Status::unavailable(
+            "worker is draining: it is shutting down and takes no new sessions",
+        );
+        status
+            .metadata_mut()
+            .insert(KEY, tonic::metadata::MetadataValue::from_static(DRAINING));
+        status
+    }
+
+    /// Whether `status` is a [`draining`] refusal.
+    #[must_use]
+    pub fn is_draining(status: &tonic::Status) -> bool {
+        status.code() == tonic::Code::Unavailable
+            && status.metadata().get(KEY).is_some_and(|v| v == DRAINING)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn only_a_marked_unavailable_is_a_drain_refusal() {
+            assert!(super::is_draining(&super::draining()));
+            assert!(!super::is_draining(&tonic::Status::unavailable(
+                "worker is draining"
+            )));
+            let mut other = tonic::Status::permission_denied("no");
+            other.metadata_mut().insert(
+                super::KEY,
+                tonic::metadata::MetadataValue::from_static(super::DRAINING),
+            );
+            assert!(!super::is_draining(&other));
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
     #[error("TLS configuration: {0}")]

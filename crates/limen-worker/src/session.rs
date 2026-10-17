@@ -21,16 +21,25 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
-use crate::Worker;
 use crate::ssh::{SshSessionConfig, serve};
+use crate::{SessionGuard, Worker};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
 
 const FRAME_CHUNK: usize = 32 * 1024;
 
+/// How long a session cut short (drain, TTL) waits for its output pump.
+pub(crate) const PUMP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Why a session ended when the worker ended it at its drain timeout.
+pub(crate) const WORKER_DRAIN: &str = "worker_drain";
+
+/// `guard` holds the session's slot under the worker's cap: dropped on any
+/// early return, otherwise moved into the session task.
 pub(crate) async fn open(
     worker: Worker,
+    guard: SessionGuard,
     mut inbound: Streaming<TunnelFrame>,
 ) -> Result<Response<FrameStream>, Status> {
     let first = tokio::time::timeout(std::time::Duration::from_secs(10), inbound.message())
@@ -52,7 +61,6 @@ pub(crate) async fn open(
         e
     })?;
 
-    let guard = worker.session_started();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<TunnelFrame, Status>>(64);
     let _ = tx
         .send(Ok(TunnelFrame {
@@ -82,6 +90,7 @@ pub(crate) async fn open(
     let session_id = config.session_id.clone();
     let expires = config_expiry(&signed);
     let audit = worker.audit.clone();
+    let end = worker.end_sessions();
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -107,16 +116,28 @@ pub(crate) async fn open(
         let until = (expires - OffsetDateTime::now_utc())
             .max(time::Duration::ZERO)
             .unsigned_abs();
-        let (reason, outcome) = match tokio::time::timeout(until, serve(ours, config, audit)).await
-        {
-            Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
-            Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
-            Err(_) => (
-                "max_session_ttl reached".to_owned(),
-                crate::ssh::SessionOutcome::default(),
-            ),
-        };
-        let _ = pump.await;
+        let (reason, outcome) =
+            match tokio::time::timeout(until, serve(ours, config, audit, end)).await {
+                // The proxy's session.end carries this reason (`data.reason`).
+                Ok(Ok(outcome)) if outcome.ended_by_drain => (WORKER_DRAIN.to_owned(), outcome),
+                Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
+                Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
+                Err(_) => (
+                    "max_session_ttl reached".to_owned(),
+                    crate::ssh::SessionOutcome::default(),
+                ),
+            };
+        // The pump ends when the SSH server lets go of its stream. A session
+        // that was cut short (drain, TTL) may not have let go: don't wait
+        // for it forever.
+        if reason == "ended" {
+            let _ = pump.await;
+        } else {
+            let stop_pump = pump.abort_handle();
+            if tokio::time::timeout(PUMP_WAIT, pump).await.is_err() {
+                stop_pump.abort();
+            }
+        }
         tracing::info!(session = %session_id, %reason, recording = %outcome.recording_uri, "session ended");
         let _ = tx
             .send(Ok(TunnelFrame {

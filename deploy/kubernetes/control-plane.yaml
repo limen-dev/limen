@@ -1,0 +1,104 @@
+# Limen control plane: three replicas with stable ids and a volume each.
+# Every value marked REPLACE is yours to set. See README.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels: { app.kubernetes.io/name: limen-control-plane }
+spec:
+  # Headless: the name resolves to the pod IPs of the ready replicas, which
+  # proxies and workers look up again on every reconnect (ADR-0020).
+  clusterIP: None
+  selector: { app.kubernetes.io/name: limen-control-plane }
+  ports:
+    - { name: grpc, port: 3080, targetPort: grpc }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: control-plane
+  labels: { app.kubernetes.io/name: limen-control-plane }
+spec:
+  serviceName: control-plane
+  replicas: 3
+  # Roll one replica at a time; each drains its audit spool before it exits.
+  podManagementPolicy: OrderedReady
+  updateStrategy: { type: RollingUpdate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: limen-control-plane }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: limen-control-plane }
+    spec:
+      # Must exceed LIMEN_DRAIN_TIMEOUT (20s) by enough to finish the drain
+      # and the handoff; otherwise the kubelet kills the process mid-drain.
+      terminationGracePeriodSeconds: 45
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: topology.kubernetes.io/zone
+                labelSelector:
+                  matchLabels: { app.kubernetes.io/name: limen-control-plane }
+      containers:
+        - name: control-plane
+          image: REPLACE/limen-control-plane:REPLACE
+          ports:
+            - { name: grpc, containerPort: 3080 }
+            - { name: admin, containerPort: 3081 }
+          env:
+            # The pod name is control-plane-0, -1, -2: stable across restarts,
+            # so a restarted replica resumes its own spool and audit chain.
+            - name: LIMEN_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: LIMEN_SPOOL_MODE
+              value: durable
+            - name: LIMEN_AUDIT_SPOOL_DIR
+              value: /var/lib/limen/spool
+            - name: LIMEN_DNS_NAMES
+              value: control-plane,$(LIMEN_ID).control-plane
+            - name: LIMEN_ADVERTISE_URL
+              value: https://$(LIMEN_ID).control-plane:3080
+            - name: LIMEN_DRAIN_TIMEOUT
+              value: 20s
+            # With the KMS backend every replica uses the same keys by id.
+            # (File-backed keys need one volume shared by all replicas.)
+            - name: LIMEN_CA_BACKEND
+              value: kms
+            - { name: LIMEN_KMS_INTERNAL_CA_KEY, value: REPLACE }
+            - { name: LIMEN_KMS_USER_CA_KEY, value: REPLACE }
+            - { name: LIMEN_KMS_SSH_USER_CA_KEY, value: REPLACE }
+            - { name: LIMEN_KMS_SSH_HOST_CA_KEY, value: REPLACE }
+            - name: LIMEN_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: limen-database, key: url } }
+            - { name: LIMEN_OIDC_ISSUER, value: REPLACE }
+            - { name: LIMEN_OIDC_CLIENT_ID, value: REPLACE }
+            - { name: LIMEN_AUDIT_S3_BUCKET, value: REPLACE }
+          volumeMounts:
+            - { name: spool, mountPath: /var/lib/limen/spool }
+          # Not ready while draining: the headless Service stops listing the
+          # pod, so no new connection is sent to it.
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata: { name: spool }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 10Gi } }
+---
+# Keep two of three replicas through voluntary disruptions (node drains).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: control-plane
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: limen-control-plane }

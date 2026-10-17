@@ -34,6 +34,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let component = caller.component()?.clone();
         let events = request.into_inner().events;
@@ -71,6 +72,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<Streaming<RecordingChunk>>,
     ) -> Result<Response<UploadRecordingResponse>, Status> {
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
@@ -145,7 +147,10 @@ impl AuditIngest for IngestService {
             user: None,
             session_id: uuid::Uuid::parse_str(&session_id).ok(),
         };
-        let data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        let mut data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        if let Some(name) = limen_core::names::from_labels(&worker.labels) {
+            data["worker_name"] = json!(name);
+        }
         self.0
             .audit
             .emit(EventKind::SessionRecording, ctx, data)

@@ -1,0 +1,55 @@
+# Limen worker: scale on sessions per worker (limen_worker_sessions_active /
+# limen_worker_sessions_max), not on CPU.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels: { app.kubernetes.io/name: limen-worker }
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: limen-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: limen-worker }
+    spec:
+      # A worker waits for open sessions up to LIMEN_DRAIN_TIMEOUT_SECS, then
+      # ends the rest and uploads their recordings (about 20 s more). Set the
+      # grace period above both, or the kubelet ends sessions early.
+      terminationGracePeriodSeconds: 330
+      containers:
+        - name: worker
+          image: REPLACE/limen-worker:REPLACE
+          ports:
+            - { name: admin, containerPort: 3090 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: LIMEN_NAME
+              value: REPLACE-$(POD_NAME)
+            # Workers dial out; nothing connects to them.
+            - { name: LIMEN_PROXY_ADDR, value: "proxy.REPLACE:443" }
+            - { name: LIMEN_PROXY_NAME, value: REPLACE }
+            - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
+            - { name: LIMEN_MAX_SESSIONS, value: "200" }
+            # 5 minutes here; the default is 10. Lower it if you scale in often.
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: "300" }
+            - name: LIMEN_JOIN_TOKEN
+              valueFrom: { secretKeyRef: { name: limen-worker-join, key: token } }
+            - { name: LIMEN_DATA_DIR, value: /var/lib/limen/worker }
+          volumeMounts:
+            - { name: ca, mountPath: /etc/limen, readOnly: true }
+            - { name: data, mountPath: /var/lib/limen/worker }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+      volumes:
+        - name: ca
+          configMap: { name: limen-internal-ca }
+        - name: data
+          emptyDir: {}

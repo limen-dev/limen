@@ -1,8 +1,9 @@
 //! The control plane end of the audit pipeline (ADR-0009): its spool, the
 //! sinks that drain it, and where session recordings are stored.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -97,6 +98,28 @@ impl RecordingStore {
     }
 }
 
+/// What a drain left behind: records not yet shipped, per consumer (every
+/// consumer is listed, zero included).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrainReport {
+    pub pending: BTreeMap<String, u64>,
+}
+
+impl DrainReport {
+    /// Every sink has everything.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.pending.values().all(|n| *n == 0)
+    }
+}
+
+async fn all_done(tasks: &mut [tokio::task::JoinHandle<()>]) {
+    futures::future::join_all(tasks.iter_mut()).await;
+}
+
+/// How long consumers get to notice the deadline and stop.
+const DEADLINE_GRACE: Duration = Duration::from_millis(500);
+
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub spool: Spool,
@@ -104,17 +127,48 @@ pub struct Pipeline {
     s3: Option<S3Sink>,
     datadog: Option<DatadogSink>,
     config: Arc<Config>,
+    names: Arc<[String]>,
+    /// Consumers stop shipping once empty when this flips.
+    stop: Arc<watch::Sender<bool>>,
+    /// Consumers give up immediately when this flips.
+    deadline: Arc<watch::Sender<bool>>,
+    tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// While set, this replica writes nothing to S3: it cannot confirm that it
+    /// still owns its id (and so its manifest chain).
+    fenced: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Why S3 shipping is paused while the replica is fenced.
+fn check_fence(fenced: &std::sync::atomic::AtomicBool) -> Result<(), ShipError> {
+    if fenced.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(ShipError::Retry(
+            "S3 shipping is paused: this replica can't confirm it still owns its id".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The spool consumers a replica with this configuration runs.
+#[must_use]
+pub fn consumer_names(config: &Config) -> Vec<&'static str> {
+    let mut consumers = vec![CONSOLE];
+    if config.audit_file.is_some() {
+        consumers.push(JSONL);
+    }
+    if config.audit_s3_bucket.is_some() {
+        consumers.push(S3);
+    }
+    if config.datadog_logs_url.is_some() && config.datadog_api_key.is_some() {
+        consumers.push(DATADOG);
+    }
+    consumers
 }
 
 impl Pipeline {
     pub async fn open(config: &Arc<Config>, signer: SignerSlot) -> anyhow::Result<Self> {
-        let mut consumers: Vec<&str> = vec![CONSOLE];
-        if config.audit_file.is_some() {
-            consumers.push(JSONL);
-        }
+        let consumers = consumer_names(config);
         let s3 = match &config.audit_s3_bucket {
             Some(bucket) => {
-                consumers.push(S3);
                 let client = crate::sinks::s3_client(
                     config.audit_s3_endpoint.as_deref(),
                     config.audit_s3_path_style,
@@ -143,7 +197,6 @@ impl Pipeline {
         };
         let datadog = match (&config.datadog_logs_url, &config.datadog_api_key) {
             (Some(url), Some(key)) => {
-                consumers.push(DATADOG);
                 let http = reqwest::Client::builder()
                     .timeout(Duration::from_secs(30))
                     .redirect(reqwest::redirect::Policy::none())
@@ -183,34 +236,64 @@ impl Pipeline {
             s3,
             datadog,
             config: Arc::clone(config),
+            names: consumers.iter().map(|c| (*c).to_owned()).collect(),
+            stop: Arc::new(watch::channel(false).0),
+            deadline: Arc::new(watch::channel(false).0),
+            tasks: Arc::default(),
+            fenced: Arc::default(),
         })
     }
 
-    /// Start every configured sink.
-    pub fn start_sinks(&self, db: &crate::db::Db, shutdown: &watch::Receiver<bool>) {
-        let db = db.clone();
-        tokio::spawn(run_consumer(
+    fn spawn_consumer<F, Fut>(&self, config: ConsumerConfig, send: F)
+    where
+        F: Fn(Vec<(u64, Vec<u8>)>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<(), ShipError>> + Send + 'static,
+    {
+        let task = tokio::spawn(run_consumer(
             self.spool.clone(),
+            config,
+            send,
+            self.stop.subscribe(),
+            self.deadline.subscribe(),
+        ));
+        self.tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(task);
+    }
+
+    /// Pause (or resume) shipping to S3. Set when this replica can no longer
+    /// confirm that it owns its id: another process may be about to write the
+    /// same manifest chain.
+    pub fn set_fenced(&self, fenced: bool) {
+        self.fenced
+            .store(fenced, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether S3 shipping is paused.
+    #[must_use]
+    pub fn is_fenced(&self) -> bool {
+        self.fenced.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Start every configured sink. They run until [`Pipeline::drain`].
+    pub fn start_sinks(&self, db: &crate::db::Db) {
+        let db = db.clone();
+        self.spawn_consumer(
             ConsumerConfig {
                 name: CONSOLE.into(),
                 batch_max: 500,
                 linger: Duration::from_millis(200),
             },
             move |batch| project(db.clone(), batch),
-            shutdown.clone(),
-        ));
+        );
         if let Some(path) = self.config.audit_file.clone() {
             let consumer = ConsumerConfig {
                 name: JSONL.into(),
                 batch_max: 500,
                 linger: Duration::ZERO,
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| write_jsonl(path.clone(), batch),
-                shutdown.clone(),
-            ));
+            self.spawn_consumer(consumer, move |batch| write_jsonl(path.clone(), batch));
         }
         if let Some(sink) = self.s3.clone() {
             let consumer = ConsumerConfig {
@@ -218,15 +301,16 @@ impl Pipeline {
                 batch_max: 10_000,
                 linger: self.config.audit_s3_flush,
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| {
-                    let sink = sink.clone();
-                    async move { sink.ship(batch).await }
-                },
-                shutdown.clone(),
-            ));
+            let fenced = Arc::clone(&self.fenced);
+            self.spawn_consumer(consumer, move |batch| {
+                let (sink, fenced) = (sink.clone(), Arc::clone(&fenced));
+                async move {
+                    // Events stay in the spool while fenced: nothing is lost,
+                    // and the S3 chain is not written by two processes.
+                    check_fence(&fenced)?;
+                    sink.ship(batch).await
+                }
+            });
         }
         if let Some(sink) = self.datadog.clone() {
             let consumer = ConsumerConfig {
@@ -234,16 +318,49 @@ impl Pipeline {
                 batch_max: 1000,
                 linger: Duration::from_secs(1),
             };
-            tokio::spawn(run_consumer(
-                self.spool.clone(),
-                consumer,
-                move |batch| {
-                    let sink = sink.clone();
-                    async move { sink.ship(batch).await }
-                },
-                shutdown.clone(),
-            ));
+            self.spawn_consumer(consumer, move |batch| {
+                let sink = sink.clone();
+                async move { sink.ship(batch).await }
+            });
         }
+    }
+
+    /// Ship what is spooled to every sink, then stop them. Gives up on any
+    /// sink still behind, abandoning its in-flight send, so the call takes
+    /// at most `deadline` in all (a short grace for consumers to notice is
+    /// taken from the end of it).
+    pub async fn drain(&self, deadline: Duration) -> DrainReport {
+        let _ = self.stop.send(true);
+        let mut tasks = std::mem::take(
+            &mut *self
+                .tasks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let grace = DEADLINE_GRACE.min(deadline / 10);
+        if tokio::time::timeout(deadline.saturating_sub(grace), all_done(&mut tasks))
+            .await
+            .is_err()
+        {
+            tracing::warn!("audit drain deadline reached; giving up on the remaining records");
+            let _ = self.deadline.send(true);
+            // Handles that finished must not be polled again.
+            tasks.retain(|t| !t.is_finished());
+            if tokio::time::timeout(grace, all_done(&mut tasks))
+                .await
+                .is_err()
+            {
+                for t in &tasks {
+                    t.abort();
+                }
+            }
+        }
+        let pending = self
+            .names
+            .iter()
+            .map(|n| (n.clone(), self.spool.pending(n)))
+            .collect();
+        DrainReport { pending }
     }
 }
 
@@ -282,4 +399,21 @@ async fn write_jsonl(path: PathBuf, batch: Vec<(u64, Vec<u8>)>) -> Result<(), Sh
     }
     file.write_all(&buf).await.map_err(fail)?;
     file.sync_data().await.map_err(fail)
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use std::sync::atomic::AtomicBool;
+
+    use super::check_fence;
+
+    #[test]
+    fn a_fenced_replica_ships_nothing_to_s3_and_resumes_when_unfenced() {
+        let fenced = AtomicBool::new(false);
+        assert!(check_fence(&fenced).is_ok());
+        fenced.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(check_fence(&fenced).is_err(), "retry, never drop");
+        fenced.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(check_fence(&fenced).is_ok());
+    }
 }

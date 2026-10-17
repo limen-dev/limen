@@ -396,10 +396,13 @@ impl Policy {
         worker_labels: &BTreeMap<String, String>,
     ) -> bool {
         self.resources.get(resource).is_some_and(|r| {
-            r.spec
-                .worker_selector
-                .iter()
-                .all(|(k, v)| worker_labels.get(k).is_some_and(|actual| actual == v))
+            r.spec.worker_selector.iter().all(|(k, v)| {
+                // A component's name is display only (a token holder picks
+                // its value within the approved pattern), so no selector can
+                // match it, whatever the policy says.
+                k != limen_core::names::NAME_LABEL
+                    && worker_labels.get(k).is_some_and(|actual| actual == v)
+            })
         })
     }
 
@@ -709,6 +712,21 @@ fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError>
 fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     let name = &resource.metadata.name;
     validate_name("resource", name, name)?;
+    if resource
+        .spec
+        .worker_selector
+        .get(limen_core::names::NAME_LABEL)
+        .is_some()
+    {
+        return Err(invalid(
+            "resource",
+            name,
+            format!(
+                "worker_selector can't use {:?}: a component's name is for people, not for access decisions; select workers by the labels on their join token",
+                limen_core::names::NAME_LABEL
+            ),
+        ));
+    }
     let kinds = resource.spec.kinds();
     if kinds.len() != 1 {
         return Err(invalid(

@@ -12,6 +12,8 @@ limen="${LIMEN_BIN:-limen}"
 proxy="${LIMEN_PROXY:-localhost:3443}"
 here="$(cd "$(dirname "$0")" && pwd)"
 ca="${LIMEN_DEV_CA:-$here/.state/internal-ca.pem}"
+# Where the browser reaches Dex (the scale stack publishes it on another port).
+dex="${LIMEN_DEX_URL:-http://localhost:5556}"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -21,7 +23,7 @@ pid=$!
 
 url=""
 for _ in $(seq 1 100); do
-  url="$(grep -o 'http://localhost:5556/dex/auth[^ ]*' "$work/out" || true)"
+  url="$(grep -o "$dex/dex/auth[^ ]*" "$work/out" || true)"
   [ -n "$url" ] && break
   if ! kill -0 "$pid" 2>/dev/null; then cat "$work/out" >&2; exit 1; fi
   sleep 0.1
@@ -32,9 +34,9 @@ curl -sf -c "$work/jar" -b "$work/jar" -L -o "$work/form.html" "$url"
 action="$(grep -o 'action="[^"]*"' "$work/form.html" | head -1 | sed 's/^action="//; s/"$//; s/&amp;/\&/g')"
 curl -s -c "$work/jar" -b "$work/jar" -L -o /dev/null \
   --data-urlencode "login=$email" --data-urlencode "password=$password" \
-  "http://localhost:5556$action"
+  "$dex$action"
 
 status=0
 wait "$pid" || status=$?
-cat "$work/out" | grep -v '^Opening your browser\|^  http://localhost:5556\|^$' || true
+cat "$work/out" | grep -v "^Opening your browser\|^  $dex\|^\$" || true
 exit "$status"

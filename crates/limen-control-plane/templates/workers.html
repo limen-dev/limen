@@ -13,10 +13,10 @@
   <tbody>
   {% for c in components %}
     <tr>
-      <td class="nowrap"><div class="kind-cell"><span class="kind {{ c.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ c.icon }}"/></svg></span><div><div class="mono">{{ c.id }}</div><div class="cell-sub">{{ c.kind }}</div></div></div></td>
+      <td class="nowrap"><div class="kind-cell"><span class="kind {{ c.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ c.icon }}"/></svg></span><div>{% if let Some(name) = c.name %}<div class="mono"><b>{{ name }}</b></div><div class="cell-sub"><span class="mono">{{ c.id }}</span> · {{ c.kind }}</div>{% else %}<div class="mono">{{ c.id }}</div><div class="cell-sub">{{ c.kind }}</div>{% endif %}</div></div></td>
       <td><div class="chips">{% for l in c.label_list %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
       <td class="nowrap">{{ c.last_seen }}</td>
-      <td class="num">{{ c.tunnels }}</td>
+      <td class="num">{{ c.tunnels }}{% if !c.tunnel_peers.is_empty() %}<div class="cell-sub">{{ c.tunnel_peers }}</div>{% endif %}</td>
       <td class="nowrap">{{ c.cert_expires }}</td>
       <td>{% if c.revoked %}<span class="pill bad">revoked</span>{% else %}<span class="pill ok">enrolled</span>{% endif %}</td>
       <td class="actions">
@@ -36,17 +36,18 @@
 <h2>Outstanding join tokens</h2>
 <p class="sub">Created and not yet used or expired. The token values are never stored, so they can't be shown again.</p>
 <div class="table-wrap"><table>
-  <thead><tr><th>For</th><th>Labels</th><th>Created by</th><th>Expires</th></tr></thead>
+  <thead><tr><th>For</th><th>Name</th><th>Labels</th><th>Created by</th><th>Expires</th></tr></thead>
   <tbody>
   {% for t in pending %}
     <tr>
       <td class="nowrap"><div class="kind-cell"><span class="kind {{ t.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div>{{ t.kind }}</div></div></td>
+      <td class="mono">{% if let Some(name) = t.name %}{{ name }}{% else %}—{% endif %}</td>
       <td><div class="chips">{% for l in t.label_list %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
       <td>{{ t.created_by }}</td>
       <td class="nowrap">{{ t.expires }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="4" class="empty">None. Every token that was created has been used or has expired.</td></tr>
+    <tr><td colspan="5" class="empty">None. Every token that was created has been used or has expired.</td></tr>
   {% endfor %}
   </tbody>
 </table></div>
@@ -57,6 +58,9 @@
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <label><span>Kind</span>
     <select name="kind"><option value="worker">worker</option><option value="proxy">proxy</option></select>
+  </label>
+  <label><span>Name <span class="hint">optional: exact, or a pattern with one <code>*</code> such as <code>prod-a-*</code>; a-z, 0-9 and -</span></span>
+    <input type="text" name="name" maxlength="63" placeholder="prod-a-worker-1">
   </label>
   <label><span>Labels <span class="hint">one <code>key=value</code> per line</span></span>
     <textarea name="labels" rows="3" placeholder="pool=dev" class="mono"></textarea>

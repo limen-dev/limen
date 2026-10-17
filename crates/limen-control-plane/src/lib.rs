@@ -1,16 +1,19 @@
 //! Limen control plane: API, identity, policy, CA, worker registry, and
 //! audit emission. Stateless: all state is in PostgreSQL (ADR-0010).
 
+pub mod adopt;
 pub mod bots;
 pub mod ca_store;
 pub mod caller;
 pub mod config;
 pub mod console;
 pub mod db;
+pub mod handoff_client;
 pub mod http_client;
 pub mod jobs;
 pub mod oidc;
 pub mod pipeline;
+pub mod replicas;
 pub mod server;
 pub mod services;
 pub mod sinks;
@@ -31,27 +34,26 @@ use state::{AppState, Limits, PolicyStore};
 /// Build the shared state: connect and migrate the database, load the CAs,
 /// load the policy, and open the audit sink.
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
-    let db = db::connect(config.database_url.expose())
-        .await
-        .context("connecting to the database")?;
+    let db = db::connect_with(
+        config.database_url.expose(),
+        config.database_max_connections,
+    )
+    .await
+    .context("connecting to the database")?;
     let cas = ca_store::load(&config, &db)
         .await
         .context("loading CA keys")?;
     if let Some(dir) = &config.ca_export_dir {
         tokio::fs::create_dir_all(dir).await?;
-        tokio::fs::write(dir.join("internal-ca.pem"), cas.internal.cert_pem()).await?;
-        tokio::fs::write(dir.join("user-ca.pem"), cas.user.cert_pem()).await?;
+        // Replicas share this directory and rewrite it on every start, while
+        // sshd and enrolling components read it: replace each file atomically.
+        export(dir, "internal-ca.pem", cas.internal.cert_pem()).await?;
+        export(dir, "user-ca.pem", cas.user.cert_pem()).await?;
         // SSH targets trust this one (TrustedUserCAKeys); the CLI trusts the host CA.
-        tokio::fs::write(
-            dir.join("ssh-user-ca.pub"),
-            format!("{}\n", cas.ssh_user.public_key_openssh()?),
-        )
-        .await?;
-        tokio::fs::write(
-            dir.join("ssh-host-ca.pub"),
-            format!("{}\n", cas.ssh_host.public_key_openssh()?),
-        )
-        .await?;
+        let ssh_user = format!("{}\n", cas.ssh_user.public_key_openssh()?);
+        export(dir, "ssh-user-ca.pub", &ssh_user).await?;
+        let ssh_host = format!("{}\n", cas.ssh_host.public_key_openssh()?);
+        export(dir, "ssh-host-ca.pub", &ssh_host).await?;
         tracing::info!(dir = %dir.display(), "exported CA certificates");
     }
     let http = http_client::HttpClient::new()?;
@@ -71,11 +73,39 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let console = build_console(&config, &http)?;
     let policy = PolicyStore::empty();
     policy.refresh(&db).await.context("loading policy")?;
+    if config.spool_mode == replicas::SpoolMode::Ephemeral && config.advertise_url.is_none() {
+        // Peers hand their unshipped audit events to this URL at shutdown; the
+        // default (the first --dns-name and the listen port) is often a shared
+        // service name that doesn't reach this replica.
+        tracing::warn!(
+            url = %config.ingest_url(),
+            "ephemeral spool mode without --advertise-url: peers will try this URL for audit handoff; set --advertise-url to an address that reaches this replica"
+        );
+    }
+    // Claim the id before the pipeline opens the spool, so a duplicate
+    // replica never touches it.
+    let registration = replicas::register(&db, &config.id, &config.ingest_url(), config.spool_mode)
+        .await
+        .context("registering this replica")?;
     let config = Arc::new(config);
     let snapshot_signer: sinks::SignerSlot = Arc::default();
-    let pipeline = pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await?;
+    // If the start fails from here on, give the id back: a restart (say, of a
+    // crash-looping StatefulSet pod) must not wait out the row's 15 seconds.
+    let pipeline = match pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            if let Err(release) = replicas::deregister(&db, &registration).await {
+                tracing::warn!(error = %release, "couldn't release the replica id after a failed start");
+            }
+            return Err(e);
+        }
+    };
     let sink = Arc::new(SpoolSink(pipeline.spool.clone()));
     let audit = Emitter::new("control-plane", &config.id, sink, config.audit_failure_mode);
+    let limits = Arc::new(Limits::new(
+        config.unauthenticated_rate_per_minute,
+        config.unauthenticated_burst,
+    ));
     Ok(AppState {
         config,
         pipeline,
@@ -86,9 +116,23 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         bots,
         policy,
         audit,
-        limits: Arc::new(Limits::default()),
+        limits,
+        registration,
+        draining: Arc::default(),
         snapshot_signer,
     })
+}
+
+/// Replace `dir/name` with `contents` atomically: readers see the old file
+/// or the new one, never a partial one.
+async fn export(dir: &std::path::Path, name: &str, contents: &str) -> std::io::Result<()> {
+    let tmp = dir.join(format!(".{name}.{:016x}.tmp", rand::random::<u64>()));
+    tokio::fs::write(&tmp, contents).await?;
+    let renamed = tokio::fs::rename(&tmp, dir.join(name)).await;
+    if renamed.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    renamed
 }
 
 /// The web console is off unless `--console-public-url` is set.
@@ -129,21 +173,141 @@ fn build_console(
     Ok(Some(console::Console { origin, oidc }))
 }
 
-/// Run until `shutdown` flips to true.
+/// Share of the drain timeout kept back for handing the spool to a peer.
+const HANDOFF_RESERVE_PERCENT: u32 = 20;
+
+/// Longest the heartbeat or the final deregister may delay the exit.
+const WIND_DOWN_STEP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Time for shipping the spool: the drain timeout less the handoff reserve.
+pub(crate) fn ship_budget(drain_timeout: std::time::Duration) -> std::time::Duration {
+    drain_timeout * (100 - HANDOFF_RESERVE_PERCENT) / 100
+}
+
+/// Run until `shutdown` flips to true, then wind down in order: stop being
+/// ready and refuse new audit ingest, finish in-flight calls, ship the spool.
 pub async fn run(
     state: AppState,
     api: TcpListener,
-    shutdown: watch::Receiver<bool>,
+    mut shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    state.pipeline.start_sinks(&state.db, &shutdown);
-    tokio::spawn(jobs::policy_refresh(state.clone(), shutdown.clone()));
-    tokio::spawn(jobs::cleanup(state.clone(), shutdown.clone()));
+    // Our own stop signal: the outside world or a lost replica id flips it.
+    let (stop_tx, stop) = watch::channel(false);
+    let stop_tx = Arc::new(stop_tx);
+    // The whole wind-down is timed from the moment the stop flips.
+    let started: Arc<std::sync::OnceLock<tokio::time::Instant>> = Arc::default();
+    let forward = {
+        let stop_tx = Arc::clone(&stop_tx);
+        tokio::spawn(async move {
+            // A dropped sender counts as shutdown, too.
+            let _ = shutdown.wait_for(|stop| *stop).await;
+            let _ = stop_tx.send(true);
+        })
+    };
+    // Health and the heartbeat outlive the API drain: /readyz must report
+    // "shutting down" and the registry row must stay fresh while the spool
+    // ships.
+    let (done_tx, done) = watch::channel(false);
+    state.pipeline.start_sinks(&state.db);
+    tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
+    tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
+    let heartbeat = tokio::spawn(jobs::replica_heartbeat(
+        state.clone(),
+        done.clone(),
+        Arc::clone(&stop_tx),
+    ));
     let health = tokio::spawn(server::serve_health(
         state.clone(),
         state.config.admin_listen,
-        shutdown.clone(),
+        done,
     ));
-    server::serve_api(state, api, shutdown).await?;
+    {
+        let flag = Arc::clone(&state.draining);
+        let started = Arc::clone(&started);
+        let mut flipped = stop.clone();
+        tokio::spawn(async move {
+            let _ = flipped.wait_for(|stop| *stop).await;
+            started.get_or_init(tokio::time::Instant::now);
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+    let served = server::serve_api(state.clone(), api, stop, Arc::clone(&started)).await;
+    let t0 = *started.get_or_init(tokio::time::Instant::now);
+    let report = state
+        .pipeline
+        .drain(ship_budget(state.config.drain_timeout).saturating_sub(t0.elapsed()))
+        .await;
+    if report.is_clean() {
+        tracing::info!("audit spool shipped to every sink");
+    } else {
+        match state.config.spool_mode {
+            replicas::SpoolMode::Durable => {
+                tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline; they ship when this replica restarts on the same volume");
+            }
+            replicas::SpoolMode::Ephemeral => {
+                tracing::warn!(pending = ?report.pending, "audit records remain in the spool after the drain deadline; handing them to a peer");
+                // Whatever is left of the drain timeout: the handoff reserve.
+                let left = state.config.drain_timeout.saturating_sub(t0.elapsed());
+                match handoff_client::send_remaining(&state, left).await {
+                    Ok(sent) => {
+                        tracing::info!(sent, "handed the rest of the audit spool to a peer");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "audit records not handed off are lost with this replica's ephemeral spool");
+                    }
+                }
+            }
+        }
+    }
+    let _ = done_tx.send(true);
+    if tokio::time::timeout(WIND_DOWN_STEP, heartbeat)
+        .await
+        .is_err()
+    {
+        tracing::warn!("the replica heartbeat did not stop in time");
+    }
+    forward.abort();
+    match tokio::time::timeout(
+        WIND_DOWN_STEP,
+        replicas::deregister(&state.db, &state.registration),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "could not deregister this replica; its row expires");
+        }
+        Err(_) => tracing::warn!("deregistering timed out; this replica's row expires"),
+    }
+    // The health server stops with `done`; this is only a backstop.
     health.abort();
+    served?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn export_replaces_the_file_and_leaves_nothing_else() {
+        let dir = tempfile::tempdir().expect("dir");
+        super::export(dir.path(), "ca.pem", "old")
+            .await
+            .expect("first");
+        super::export(dir.path(), "ca.pem", "new")
+            .await
+            .expect("second");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ca.pem")).expect("read"),
+            "new"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).expect("ls").count(), 1);
+    }
+
+    #[test]
+    fn ship_budget_keeps_a_fifth_back() {
+        assert_eq!(
+            super::ship_budget(std::time::Duration::from_secs(30)),
+            std::time::Duration::from_secs(24)
+        );
+    }
 }

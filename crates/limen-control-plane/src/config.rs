@@ -9,11 +9,24 @@ use clap::{Args, ValueEnum};
 use limen_audit::FailureMode;
 use limen_core::secret::Secret;
 
+use crate::replicas::SpoolMode;
+
 #[derive(Debug, Clone, Args)]
 pub struct Config {
-    /// Stable identifier of this replica. Appears in audit events and its certificate.
-    #[arg(long, env = "LIMEN_ID", default_value = "control-plane")]
+    /// Stable identifier of this replica. Appears in audit events and its
+    /// certificate, and is the audit manifest writer. Defaults to the
+    /// hostname. Two live replicas with the same id refuse to start.
+    #[arg(long, env = "LIMEN_ID", default_value_t = default_id())]
     pub id: String,
+
+    /// Whether the audit spool directory survives this replica.
+    #[arg(long, env = "LIMEN_SPOOL_MODE", value_enum, default_value = "durable")]
+    pub spool_mode: SpoolMode,
+
+    /// URL peers use to reach this replica's ingest service. Defaults to
+    /// `https://<first --dns-name>:<--listen port>`.
+    #[arg(long, env = "LIMEN_ADVERTISE_URL")]
+    pub advertise_url: Option<String>,
 
     /// gRPC listener (mTLS). Proxies connect here.
     #[arg(long, env = "LIMEN_LISTEN", default_value = "0.0.0.0:3080")]
@@ -137,6 +150,11 @@ pub struct Config {
     /// Multi-use join tokens as `kind:token` (kind is proxy or worker). Meant
     /// for bootstrapping and autoscaled tasks until the AWS IAM join method
     /// exists (ADR-0016). Prefer single-use tokens from `limen admin token create`.
+    /// Labels follow as `kind:token:key=value;key=value`. The pseudo-label
+    /// `limen.io/name=<pattern>` approves component names instead: a pattern
+    /// with one `*` (such as `worker-*`), since a reusable token can't give
+    /// one exact name to many components. A component then picks its name
+    /// with `--name`; without one it gets none.
     #[arg(long = "static-join-token", env = "LIMEN_STATIC_JOIN_TOKENS", value_delimiter = ',', value_parser = parse_static_token)]
     pub static_join_tokens: Vec<StaticJoinToken>,
 
@@ -235,6 +253,44 @@ pub struct Config {
     /// On shutdown, how long in-flight connections may finish before they're cut.
     #[arg(long, env = "LIMEN_DRAIN_TIMEOUT", value_parser = parse_duration_or_zero, default_value = "20s")]
     pub drain_timeout: Duration,
+
+    /// Close each API connection gracefully (HTTP/2 GOAWAY) after about this
+    /// many seconds, ±10 % per connection, so clients reconnect, re-resolve
+    /// the control plane's name, and spread over replicas, including new
+    /// ones. 0 keeps connections for life. At most 604800 (7 days).
+    #[arg(long, env = "LIMEN_MAX_CONNECTION_AGE_SECS", default_value_t = 300,
+          value_parser = clap::value_parser!(u64).range(0..=604_800))]
+    pub max_connection_age_secs: u64,
+
+    /// After the maximum age, how long in-flight calls on that connection
+    /// may finish before it is cut. 1 to 3600: 0 would cut every busy
+    /// connection the moment it reaches its age.
+    #[arg(long, env = "LIMEN_CONNECTION_AGE_GRACE_SECS", default_value_t = 30,
+          value_parser = clap::value_parser!(u64).range(1..=3600))]
+    pub connection_age_grace_secs: u64,
+
+    /// The most connections this replica's pool opens to PostgreSQL. The
+    /// database sees up to this times the number of replicas: keep the
+    /// total under its `max_connections` (Aurora: by instance class), or
+    /// put RDS Proxy in front. 1 to 500.
+    #[arg(long, env = "LIMEN_DATABASE_MAX_CONNECTIONS", default_value_t = 16,
+          value_parser = clap::value_parser!(u32).range(1..=500))]
+    pub database_max_connections: u32,
+
+    /// Requests per minute from one client IP to the unauthenticated entry
+    /// points (logins, enrollment, bot logins). Counted per replica, so the
+    /// limit across a fleet is this times the number of replicas that the
+    /// load balancer spreads one IP over. Raise it for sites where many
+    /// users share one egress IP (browser sign-ins get twice as much).
+    #[arg(long, env = "LIMEN_UNAUTHENTICATED_RATE_PER_MINUTE", default_value_t = 30,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub unauthenticated_rate_per_minute: u32,
+
+    /// The burst allowed on top of the rate, per client IP. Browser sign-ins
+    /// get twice as much.
+    #[arg(long, env = "LIMEN_UNAUTHENTICATED_BURST", default_value_t = 10,
+          value_parser = clap::value_parser!(u32).range(1..=100_000))]
+    pub unauthenticated_burst: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -256,6 +312,8 @@ pub struct StaticJoinToken {
     pub token: Secret<String>,
     /// Labels for components enrolled with this token.
     pub labels: limen_core::labels::Labels,
+    /// Names components enrolled with this token may ask for. Always a pattern.
+    pub name: Option<limen_core::names::NamePattern>,
 }
 
 #[allow(clippy::unnecessary_wraps)] // clap value parsers must return Result
@@ -263,7 +321,8 @@ fn parse_secret(s: &str) -> Result<Secret<String>, String> {
     Ok(Secret::new(s.to_owned()))
 }
 
-/// `kind:token` or `kind:token:key=value;key=value`.
+/// `kind:token` or `kind:token:key=value;key=value`, where the key
+/// `limen.io/name` gives the name pattern rather than a label.
 fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
     let mut parts = s.splitn(3, ':');
     let kind = parts.next().unwrap_or_default();
@@ -275,6 +334,7 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
         return Err("static join tokens must be at least 32 characters".into());
     }
     let mut labels = limen_core::labels::Labels::default();
+    let mut name = None;
     for pair in parts
         .next()
         .unwrap_or_default()
@@ -284,12 +344,25 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
         let (k, v) = pair
             .split_once('=')
             .ok_or_else(|| format!("label {pair:?} must be key=value"))?;
+        if k == limen_core::names::NAME_LABEL {
+            let pattern = limen_core::names::NamePattern::parse(v).map_err(|e| e.to_string())?;
+            if pattern.exact().is_some() {
+                return Err(format!(
+                    "{k}={v}: a static token is reusable, so it can only approve a pattern with * (such as {v}-*), not one exact name"
+                ));
+            }
+            if name.replace(pattern).is_some() {
+                return Err(format!("{k} given twice"));
+            }
+            continue;
+        }
         labels.insert(k, v).map_err(|e| e.to_string())?;
     }
     Ok(StaticJoinToken {
         kind: kind.to_owned(),
         token: Secret::new(token.to_owned()),
         labels,
+        name,
     })
 }
 
@@ -307,9 +380,46 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     limen_policy::duration::DurationStr::parse(s).map(|d| d.0)
 }
 
+/// The hostname: `HOSTNAME`, then `/etc/hostname`, else `control-plane`.
+fn default_id() -> String {
+    let from_env = std::env::var("HOSTNAME").ok();
+    let from_file = || std::fs::read_to_string("/etc/hostname").ok();
+    pick_hostname(from_env, from_file)
+}
+
+fn pick_hostname(env: Option<String>, file: impl FnOnce() -> Option<String>) -> String {
+    [env, file()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.trim().to_owned())
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| "control-plane".to_owned())
+}
+
+impl Config {
+    /// Where peers reach this replica's ingest service.
+    #[must_use]
+    pub fn ingest_url(&self) -> String {
+        self.advertise_url.clone().unwrap_or_else(|| {
+            let host = self.dns_names.first().map_or("localhost", String::as_str);
+            format!("https://{host}:{}", self.listen.port())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hostname_default_prefers_env_then_file_then_fallback() {
+        assert_eq!(
+            pick_hostname(Some(" cp-0\n".into()), || Some("x".into())),
+            "cp-0"
+        );
+        assert_eq!(pick_hostname(None, || Some("box\n".into())), "box");
+        assert_eq!(pick_hostname(Some(String::new()), || None), "control-plane");
+    }
 
     #[test]
     fn static_tokens_with_labels() {
@@ -328,6 +438,107 @@ mod tests {
         assert!(parse_static_token("worker:short").is_err());
         assert!(parse_static_token("admin:0123456789abcdef0123456789abcdef").is_err());
         assert!(parse_static_token("worker:0123456789abcdef0123456789abcdef:BAD=x").is_err());
+    }
+
+    #[test]
+    fn static_tokens_with_name_patterns() {
+        let t = parse_static_token(
+            "worker:0123456789abcdef0123456789abcdef:pool=dev;limen.io/name=prod-a-*",
+        )
+        .expect("valid");
+        assert_eq!(
+            t.name.as_ref().map(limen_core::names::NamePattern::as_str),
+            Some("prod-a-*")
+        );
+        // The pattern is not a label.
+        assert_eq!(t.labels.get("limen.io/name"), None);
+        assert_eq!(t.labels.get("pool"), Some("dev"));
+        let t = parse_static_token("proxy:0123456789abcdef0123456789abcdef:limen.io/name=*")
+            .expect("any name");
+        assert!(t.name.is_some());
+        assert!(
+            parse_static_token("worker:0123456789abcdef0123456789abcdef")
+                .expect("plain")
+                .name
+                .is_none()
+        );
+        let exact =
+            parse_static_token("worker:0123456789abcdef0123456789abcdef:limen.io/name=worker-1")
+                .expect_err("exact names are refused for reusable tokens");
+        assert!(exact.contains("pattern"), "{exact}");
+        for bad in ["Prod-*", "a*b*", "-*", ""] {
+            assert!(
+                parse_static_token(&format!(
+                    "worker:0123456789abcdef0123456789abcdef:limen.io/name={bad}"
+                ))
+                .is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[derive(clap::Parser)]
+    struct Cli {
+        #[command(flatten)]
+        config: Config,
+    }
+
+    fn parse_with(extra: &[&str]) -> Result<Config, clap::Error> {
+        use clap::Parser as _;
+        let mut argv = vec![
+            "limen-control-plane",
+            "--database-url=postgres://x",
+            "--oidc-issuer=https://idp.example",
+            "--oidc-client-id=limen",
+        ];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn login_rate_limit_flags_keep_the_old_defaults_and_are_bounded() {
+        let ok = parse_with(&[]).expect("defaults");
+        assert_eq!(ok.unauthenticated_rate_per_minute, 30);
+        assert_eq!(ok.unauthenticated_burst, 10);
+        assert!(parse_with(&["--unauthenticated-rate-per-minute=0"]).is_err());
+        assert!(parse_with(&["--unauthenticated-burst=0"]).is_err());
+        assert_eq!(ok.database_max_connections, 16);
+        assert!(parse_with(&["--database-max-connections=0"]).is_err());
+        assert!(parse_with(&["--database-max-connections=501"]).is_err());
+        assert!(parse_with(&["--database-max-connections=40"]).is_ok());
+        assert!(parse_with(&["--unauthenticated-rate-per-minute=100001"]).is_err());
+        assert!(
+            parse_with(&[
+                "--unauthenticated-rate-per-minute=600",
+                "--unauthenticated-burst=100"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn connection_age_flags_are_bounded() {
+        let ok = parse_with(&[]).expect("defaults");
+        assert_eq!(ok.max_connection_age_secs, 300);
+        assert_eq!(ok.connection_age_grace_secs, 30);
+        assert!(
+            parse_with(&["--max-connection-age-secs=0"]).is_ok(),
+            "0 disables it"
+        );
+        assert!(parse_with(&["--max-connection-age-secs=604800"]).is_ok());
+        // Absurd ages fail at startup with a clear message, never later in
+        // the accept loop.
+        let err =
+            parse_with(&["--max-connection-age-secs=18446744073709551615"]).expect_err("too large");
+        assert!(err.to_string().contains("max-connection-age-secs"), "{err}");
+        assert!(parse_with(&["--max-connection-age-secs=604801"]).is_err());
+        // A grace of 0 would cut every busy connection at its age.
+        let err = parse_with(&["--connection-age-grace-secs=0"]).expect_err("zero grace");
+        assert!(
+            err.to_string().contains("connection-age-grace-secs"),
+            "{err}"
+        );
+        assert!(parse_with(&["--connection-age-grace-secs=3601"]).is_err());
     }
 
     #[test]

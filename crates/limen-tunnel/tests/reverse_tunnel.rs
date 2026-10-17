@@ -51,6 +51,7 @@ impl WorkerTunnel for Worker {
         Ok(Response::new(PingResponse {
             worker_id: self.id.clone(),
             draining: false,
+            ..Default::default()
         }))
     }
 }

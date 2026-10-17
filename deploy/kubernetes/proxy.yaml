@@ -1,0 +1,90 @@
+# Limen proxy: three stateless replicas behind a TCP load balancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy
+  labels: { app.kubernetes.io/name: limen-proxy }
+  annotations:
+    # AWS: a Network Load Balancer in TCP mode. TLS is end to end (ADR-0005).
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+spec:
+  type: LoadBalancer
+  selector: { app.kubernetes.io/name: limen-proxy }
+  ports:
+    - { name: public, port: 443, targetPort: public }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy
+  labels: { app.kubernetes.io/name: limen-proxy }
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 1, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: limen-proxy }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: limen-proxy }
+    spec:
+      # LIMEN_DRAIN_TIMEOUT_SECS (20) plus margin.
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: proxy
+          image: REPLACE/limen-proxy:REPLACE
+          ports:
+            - { name: public, containerPort: 3443 }
+            - { name: admin, containerPort: 3444 }
+          env:
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # Peers reach each other on the public port (ALPN limen-peer/1).
+            - name: LIMEN_PEER_ADDRESS
+              value: $(POD_IP):3443
+            # Optional readable name; the join token must approve it.
+            - name: LIMEN_NAME
+              value: REPLACE-$(POD_NAME)
+            # The headless Service: resolves to every ready control plane.
+            - { name: LIMEN_CONTROL_PLANE_ADDR, value: "control-plane:3080" }
+            - { name: LIMEN_CONTROL_PLANE_NAME, value: control-plane }
+            - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
+            - { name: LIMEN_DNS_NAMES, value: REPLACE }
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: "20" }
+            - name: LIMEN_JOIN_TOKEN
+              valueFrom: { secretKeyRef: { name: limen-proxy-join, key: token } }
+            - { name: LIMEN_DATA_DIR, value: /var/lib/limen/proxy }
+          volumeMounts:
+            - { name: ca, mountPath: /etc/limen, readOnly: true }
+            - { name: data, mountPath: /var/lib/limen/proxy }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+      volumes:
+        - name: ca
+          configMap: { name: limen-internal-ca }
+        # The proxy keeps its identity (certificate and audit spool) here.
+        # On SIGTERM it ships its spool to the control plane (up to 10 s
+        # after its connections are gone); whatever is left is lost with an
+        # emptyDir, and a replaced pod enrolls again with a new join token.
+        # Use a StatefulSet and a volume for a stable identity and no loss.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: proxy
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: limen-proxy }

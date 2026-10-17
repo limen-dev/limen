@@ -689,3 +689,37 @@ mod bots {
         assert!(diff.added.contains(&"role/deployer".to_owned()));
     }
 }
+
+#[test]
+fn a_component_name_can_not_be_a_worker_selector() {
+    let err = Policy::parse_yaml([(
+        "p.yaml",
+        r#"
+kind: resource
+version: v1
+metadata: { name: by-name }
+spec:
+  ssh: { address: "10.0.0.1:22" }
+  worker_selector: { limen.io/name: prod-a-worker-1 }
+"#,
+    )])
+    .expect_err("names are display only");
+    assert!(err.to_string().contains("limen.io/name"), "{err}");
+}
+
+#[test]
+fn the_matcher_ignores_a_name_selector_even_if_one_gets_through() {
+    // Validation refuses such a selector; this is the second lock, for a
+    // policy stored before the rule existed.
+    let mut p = example();
+    let resource = p.resources.get_mut("web-staging-1").expect("resource");
+    resource.spec.worker_selector = limen_core::labels::Labels::default();
+    resource
+        .spec
+        .worker_selector
+        .insert("limen.io/name", "prod-a-worker-1")
+        .expect("a valid label");
+    let named: BTreeMap<String, String> =
+        [("limen.io/name".to_owned(), "prod-a-worker-1".to_owned())].into();
+    assert!(!p.worker_may_serve("web-staging-1", &named));
+}

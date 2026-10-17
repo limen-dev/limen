@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use limen_audit::{Context, EventKind};
 use limen_ca::ComponentCertRequest;
 use limen_core::identity::ComponentKind;
+use limen_core::names::{NAME_LABEL, NamePattern, validate_name};
 use limen_proto::v1::enrollment_server::Enrollment;
 use limen_proto::v1::{
     EnrollRequest, EnrollResponse, RenewCertificateRequest, RenewCertificateResponse,
@@ -30,9 +31,50 @@ fn ca_error(e: limen_ca::CaError) -> Status {
     }
 }
 
+/// The token's labels with the name, if any, as [`NAME_LABEL`]. A
+/// `NAME_LABEL` in the token's own labels is dropped: only an approved,
+/// unique name may carry it.
+fn with_name(mut labels: serde_json::Value, name: Option<&str>) -> serde_json::Value {
+    if let Some(map) = labels.as_object_mut() {
+        map.remove(NAME_LABEL);
+        if let Some(name) = name {
+            map.insert(NAME_LABEL.to_owned(), json!(name));
+        }
+    }
+    labels
+}
+
+/// The name a component gets: the one it asked for, if the token approves
+/// it (`Err` if not); else a single-use token's exact name; else none. (A
+/// static token's name is always a pattern, so it never names on its own.)
+fn choose_name(
+    requested: Option<&str>,
+    approved: Option<&NamePattern>,
+    single_use: bool,
+) -> Result<Option<String>, ()> {
+    match (requested, approved) {
+        (Some(name), Some(pattern)) if pattern.matches(name) => Ok(Some(name.to_owned())),
+        (Some(_), _) => Err(()),
+        (None, Some(pattern)) if single_use => Ok(pattern.exact().map(str::to_owned)),
+        (None, _) => Ok(None),
+    }
+}
+
 /// Constant-time comparison of two secrets, by comparing their hashes.
 fn same_secret(a: &str, b: &str) -> bool {
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
+}
+
+impl EnrollmentService {
+    /// Audit a refused enrollment (`auth.denied`). Best effort: the
+    /// enrollment is refused either way.
+    async fn audit_denial(&self, data: serde_json::Value) {
+        let _ = self
+            .0
+            .audit
+            .emit(EventKind::AuthDenied, Context::default(), data)
+            .await;
+    }
 }
 
 #[tonic::async_trait]
@@ -52,6 +94,11 @@ impl Enrollment for EnrollmentService {
         if req.join_token.is_empty() || req.join_token.len() > 256 {
             return Err(Status::invalid_argument("invalid join token"));
         }
+        // Validated as sent: never trimmed or lowered.
+        let requested = (!req.name.is_empty()).then_some(req.name.as_str());
+        if let Some(name) = requested {
+            validate_name(name).map_err(|e| Status::invalid_argument(e.to_string()))?;
+        }
         let id = format!(
             "{}-{}",
             req.kind,
@@ -70,7 +117,7 @@ impl Enrollment for EnrollmentService {
             .static_join_tokens
             .iter()
             .find(|t| t.kind == req.kind && same_secret(t.token.expose(), &req.join_token));
-        let (labels, allowed_dns, token_type) = if let Some(token) = static_match {
+        let (labels, allowed_dns, approved, token_type) = if let Some(token) = static_match {
             let allowed = if kind == ComponentKind::Proxy {
                 self.0.config.proxy_dns_names.clone()
             } else {
@@ -78,7 +125,7 @@ impl Enrollment for EnrollmentService {
             };
             let labels = serde_json::to_value(&token.labels)
                 .map_err(|e| internal("static token labels", e))?;
-            (labels, allowed, "static")
+            (labels, allowed, token.name.clone(), "static")
         } else {
             match db::consume_join_token(
                 &mut tx,
@@ -89,16 +136,19 @@ impl Enrollment for EnrollmentService {
             .await
             .map_err(|e| internal("consuming join token", e))?
             {
-                Some((labels, dns)) => (labels, dns, "single_use"),
+                Some(token) => {
+                    let approved = token
+                        .name
+                        .as_deref()
+                        .map(NamePattern::parse)
+                        .transpose()
+                        .map_err(|e| internal("join token name", e))?;
+                    (token.labels, token.dns_names, approved, "single_use")
+                }
                 None => {
                     drop(tx);
                     tracing::warn!(kind = %req.kind, addr = ?caller.addr(), "enrollment rejected: invalid, expired, or used join token");
-                    let data = json!({ "action": "enroll", "kind": req.kind, "reason": "invalid join token", "client_addr": caller.addr().map(|a| a.to_string()) });
-                    let _ = self
-                        .0
-                        .audit
-                        .emit(EventKind::AuthDenied, Context::default(), data)
-                        .await;
+                    self.audit_denial(json!({ "action": "enroll", "kind": req.kind, "reason": "invalid join token", "client_addr": caller.addr().map(|a| a.to_string()) })).await;
                     return Err(Status::permission_denied(
                         "invalid, expired, or already used join token",
                     ));
@@ -110,6 +160,17 @@ impl Enrollment for EnrollmentService {
                 "DNS name {bad:?} is not allowed by this join token"
             )));
         }
+        let Ok(name) = choose_name(requested, approved.as_ref(), token_type == "single_use") else {
+            // Rolls back: a single-use token stays usable.
+            drop(tx);
+            tracing::warn!(kind = %req.kind, name = req.name, addr = ?caller.addr(), "enrollment rejected: name not approved by the join token");
+            self.audit_denial(json!({ "action": "enroll", "kind": req.kind, "reason": "name not approved by join token", "name": req.name, "token_type": token_type, "client_addr": caller.addr().map(|a| a.to_string()) })).await;
+            return Err(Status::permission_denied(format!(
+                "name {:?} is not approved by this join token",
+                req.name
+            )));
+        };
+        let labels = with_name(labels, name.as_deref());
 
         let issued = self
             .0
@@ -126,17 +187,38 @@ impl Enrollment for EnrollmentService {
             })
             .await
             .map_err(ca_error)?;
-        db::insert_component(
+        // Claims the name in the same transaction as the token: a name
+        // conflict rolls both back, so the token is not used up.
+        if let Err(e) = db::insert_component(
             &mut tx,
             &id,
             &req.kind,
+            name.as_deref(),
             &labels,
             &req.dns_names,
             issued.not_after,
         )
         .await
-        .map_err(|e| internal("storing component", e))?;
-        let data = json!({ "component_id": id, "kind": req.kind, "labels": labels, "dns_names": req.dns_names, "token_type": token_type, "cert_serial": issued.serial_hex });
+        {
+            if db::is_name_taken(&e) {
+                tracing::warn!(kind = %req.kind, name = name.as_deref(), client = ?caller.addr(), "enrollment rejected: name already in use");
+                // Someone holding a valid token tried to take a live
+                // component's name: record it like the other refusals. The
+                // transaction (and so the token) is released first; the
+                // audit write must not sit inside a failed transaction.
+                drop(tx);
+                self.audit_denial(json!({ "action": "enroll", "kind": req.kind, "reason": "name already in use", "name": name, "token_type": token_type, "client_addr": caller.addr().map(|a| a.to_string()) })).await;
+                return Err(Status::already_exists(format!(
+                    "name {:?} is already used by another enrolled proxy or worker; revoke that one first, or choose another name",
+                    name.unwrap_or_default()
+                )));
+            }
+            return Err(internal("storing component", e));
+        }
+        let mut data = json!({ "component_id": id, "kind": req.kind, "labels": labels, "dns_names": req.dns_names, "token_type": token_type, "cert_serial": issued.serial_hex });
+        if let Some(name) = &name {
+            data["component_name"] = json!(name);
+        }
         self.0
             .audit
             .emit(EventKind::WorkerEnroll, Context::default(), data)
@@ -145,7 +227,7 @@ impl Enrollment for EnrollmentService {
         tx.commit()
             .await
             .map_err(|e| internal("committing enrollment", e))?;
-        tracing::info!(component_id = %id, kind = %req.kind, token_type, "component enrolled");
+        tracing::info!(component_id = %id, name = name.as_deref(), kind = %req.kind, token_type, "component enrolled");
 
         let labels: BTreeMap<String, String> = serde_json::from_value(labels).unwrap_or_default();
         Ok(Response::new(EnrollResponse {
@@ -155,6 +237,7 @@ impl Enrollment for EnrollmentService {
             user_ca_pem: self.0.cas.user.cert_pem().to_owned(),
             expires_at_unix: unix(issued.not_after),
             labels: labels.into_iter().collect(),
+            name: name.unwrap_or_default(),
         }))
     }
 

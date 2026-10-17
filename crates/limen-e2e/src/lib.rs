@@ -44,6 +44,17 @@ pub struct Deployment {
     pub dir: tempfile::TempDir,
     pub idp: MockIdp,
     pub cp_addr: SocketAddr,
+    /// What proxies dial to reach the control plane: `cp_addr`, or a name
+    /// resolved by [`limen_tunnel::connect::set_test_resolution`] (see
+    /// [`Deployment::start_scaled`]).
+    pub cp_dial: String,
+    /// Control plane flags shared by every replica (not `--id` or paths).
+    cp_args: Vec<String>,
+    /// Extra flags for every proxy this deployment starts.
+    proxy_args: Vec<String>,
+    /// When the deployment started, if its proxies report to the registry
+    /// less often than release builds allow (see [`Self::check_registry_lease`]).
+    rare_reports_since: Option<std::time::Instant>,
     pub proxy_addr: SocketAddr,
     pub proxy: Option<RunningProxy>,
     cp_shutdown: watch::Sender<bool>,
@@ -57,11 +68,40 @@ pub struct RunningProxy {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
+impl RunningProxy {
+    /// Tell the proxy to stop, as SIGTERM does, without waiting: it drains.
+    pub fn begin_stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Whether the proxy's `run` has returned.
+    pub fn has_stopped(&self) -> bool {
+        self.task.is_finished()
+    }
+}
+
 #[derive(Debug)]
 pub struct RunningWorker {
     pub worker: limen_worker::Worker,
+    /// Its `--data-dir`.
+    pub data_dir: PathBuf,
     shutdown: watch::Sender<bool>,
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
+}
+
+/// A control plane replica started next to the deployment's own.
+#[derive(Debug)]
+pub struct RunningControlPlane {
+    pub addr: SocketAddr,
+    shutdown: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<anyhow::Result<()>>,
+}
+
+impl RunningControlPlane {
+    pub async fn stop(self) {
+        let _ = self.shutdown.send(true);
+        let _ = self.task.await;
+    }
 }
 
 impl RunningWorker {
@@ -69,22 +109,60 @@ impl RunningWorker {
         let _ = self.shutdown.send(true);
         let _ = self.task.await;
     }
+
+    /// Tell the worker to stop, as SIGTERM does, without waiting: it drains.
+    pub fn begin_stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Whether the worker's `run` has returned.
+    pub fn has_stopped(&self) -> bool {
+        self.task.is_finished()
+    }
 }
 
 impl Deployment {
     /// Start a control plane and one proxy. `None` without a test database.
     pub async fn start() -> Option<Self> {
-        Self::start_inner(false).await
+        Self::start_inner(false, &[], false, &[]).await
+    }
+
+    /// Like [`start`](Self::start), with extra flags for every proxy, such
+    /// as `--ping-interval-secs=3600`.
+    pub async fn start_with_proxy_args(proxy_args: &[&str]) -> Option<Self> {
+        let extra: Vec<String> = proxy_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &[], false, &extra).await
+    }
+
+    /// Like [`start`](Self::start), with extra flags for every control plane
+    /// (`cp_args`) and every proxy (`proxy_args`).
+    pub async fn start_with_args(cp_args: &[&str], proxy_args: &[&str]) -> Option<Self> {
+        let cp: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
+        let proxy: Vec<String> = proxy_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &cp, false, &proxy).await
+    }
+
+    /// For tests with several control plane replicas: proxies dial a name
+    /// that resolves (through the test hook) to the first replica until the
+    /// test says otherwise. `cp_args` go to every replica.
+    pub async fn start_scaled(cp_args: &[&str]) -> Option<Self> {
+        let extra: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(false, &extra, true, &[]).await
     }
 
     /// Like [`start`](Self::start), with the web console enabled. Its public
     /// URL is `https://localhost:<proxy port>`, and the mock IdP knows the
     /// console's OIDC client ([`CONSOLE_CLIENT_ID`], [`CONSOLE_SECRET`]).
     pub async fn start_with_console() -> Option<Self> {
-        Self::start_inner(true).await
+        Self::start_inner(true, &[], false, &[]).await
     }
 
-    async fn start_inner(console: bool) -> Option<Self> {
+    async fn start_inner(
+        console: bool,
+        extra_cp_args: &[String],
+        named: bool,
+        proxy_args: &[String],
+    ) -> Option<Self> {
         if std::env::var_os("LIMEN_TEST_LOG").is_some() {
             limen_core::telemetry::init(limen_core::telemetry::LogFormat::Text);
         }
@@ -113,7 +191,7 @@ impl Deployment {
             ));
             console_args.push(format!("--console-oidc-client-secret={CONSOLE_SECRET}"));
         }
-        let mut cp_args = vec!["--id=cp-e2e".to_owned(), format!("--database-url={db_url}")];
+        let mut cp_args = vec![format!("--database-url={db_url}")];
         cp_args.extend(console_args);
         cp_args.extend([
             format!("--ca-dir={}", dir.path().join("ca").display()),
@@ -121,16 +199,9 @@ impl Deployment {
             format!("--oidc-issuer={}", idp.issuer),
             format!("--oidc-client-id={CLIENT_ID}"),
             "--bootstrap-admin-group=admins".into(),
-            format!("--static-join-token=proxy:{PROXY_TOKEN}"),
+            // Proxies may pick any name with --name (none by default).
+            format!("--static-join-token=proxy:{PROXY_TOKEN}:limen.io/name=*"),
             "--proxy-dns-name=localhost".into(),
-            format!(
-                "--audit-file={}",
-                dir.path().join("audit/control-plane.jsonl").display()
-            ),
-            format!(
-                "--audit-spool-dir={}",
-                dir.path().join("cp-spool").display()
-            ),
             format!(
                 "--recordings-dir={}",
                 dir.path().join("recordings").display()
@@ -140,21 +211,25 @@ impl Deployment {
             // The mock issuer is plain http.
             "--bot-allow-insecure-issuers".into(),
         ]);
-        let cp_config: limen_control_plane::Config = parse(&cp_args);
-        let state = limen_control_plane::build_state(cp_config)
-            .await
-            .expect("control plane state");
-        let cp_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let cp_addr = cp_listener.local_addr().expect("addr");
-        let (cp_tx, cp_rx) = watch::channel(false);
-        let cp_task = tokio::spawn(limen_control_plane::run(state, cp_listener, cp_rx));
+        cp_args.extend_from_slice(extra_cp_args);
+        let (cp_addr, cp_tx, cp_task) =
+            spawn_control_plane(&cp_args, dir.path(), "cp-e2e", "control-plane", "cp-spool").await;
+        let cp_dial = if named {
+            let name = format!("cp-{}.limen.test:3080", uuid::Uuid::now_v7().simple());
+            limen_tunnel::connect::set_test_resolution(&name, vec![cp_addr]);
+            name
+        } else {
+            cp_addr.to_string()
+        };
 
         let mut deployment = Self {
             dir,
             idp,
             cp_addr,
+            cp_dial,
+            cp_args,
+            proxy_args: proxy_args.to_vec(),
+            rare_reports_since: rare_reports(proxy_args).then(std::time::Instant::now),
             proxy_addr,
             proxy: None,
             cp_shutdown: cp_tx,
@@ -162,6 +237,23 @@ impl Deployment {
         };
         deployment.proxy = Some(deployment.start_proxy(proxy_listener).await);
         Some(deployment)
+    }
+
+    /// With a report interval past the release cap, proxies renew their
+    /// registry leases only when a tunnel changes, so a test must finish
+    /// well within the lease or peers lose the tunnels. Fails fast, with a
+    /// clear message, once such a deployment is 30 s old.
+    pub fn check_registry_lease(&self) {
+        if let Some(since) = self.rare_reports_since {
+            let age = since.elapsed();
+            assert!(
+                age < RARE_REPORTS_MAX_AGE,
+                "this test runs its proxies with a long --report-interval-secs and is {age:?} old: \
+                 past {RARE_REPORTS_MAX_AGE:?}, the {}s registry leases may expire mid-test; \
+                 make the test shorter",
+                limen_core::registry::TUNNEL_LEASE_SECS
+            );
+        }
     }
 
     pub fn ca_file(&self) -> PathBuf {
@@ -173,6 +265,25 @@ impl Deployment {
         std::fs::read_to_string(self.dir.path().join("ca-public").join(name)).expect("exported CA")
     }
 
+    /// Start another control plane replica on the same database and CA.
+    /// Proxies reach it only once the test adds its address to
+    /// [`cp_dial`](Self::cp_dial)'s resolution.
+    pub async fn start_extra_control_plane(&self, id: &str) -> RunningControlPlane {
+        let (addr, shutdown, task) = spawn_control_plane(
+            &self.cp_args,
+            self.dir.path(),
+            id,
+            id,
+            &format!("{id}-spool"),
+        )
+        .await;
+        RunningControlPlane {
+            addr,
+            shutdown,
+            task,
+        }
+    }
+
     /// Stop the control plane abruptly: no drain, open connections are cut.
     pub async fn stop_control_plane(&mut self) {
         let _ = self.cp_shutdown.send(true);
@@ -182,27 +293,40 @@ impl Deployment {
     }
 
     async fn start_proxy(&self, listener: tokio::net::TcpListener) -> RunningProxy {
-        self.start_named_proxy(listener, "proxy").await
+        self.start_named_proxy(listener, "proxy", &[]).await
     }
 
     /// Another proxy, with its own identity and data directory. Returns it
     /// and the address it listens on.
     pub async fn start_extra_proxy(&self, name: &str) -> (RunningProxy, SocketAddr) {
+        self.start_extra_proxy_with(name, &[]).await
+    }
+
+    /// [`start_extra_proxy`](Self::start_extra_proxy) with extra flags for
+    /// this proxy only, such as `--name=proxy-b`. They replace the
+    /// deployment's proxy flags they repeat.
+    pub async fn start_extra_proxy_with(
+        &self,
+        name: &str,
+        extra: &[&str],
+    ) -> (RunningProxy, SocketAddr) {
+        self.check_registry_lease();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
-        (self.start_named_proxy(listener, name).await, addr)
+        (self.start_named_proxy(listener, name, extra).await, addr)
     }
 
     async fn start_named_proxy(
         &self,
         listener: tokio::net::TcpListener,
         name: &str,
+        extra: &[&str],
     ) -> RunningProxy {
         let addr = listener.local_addr().expect("addr");
-        let config: limen_proxy::Config = parse(&[
-            format!("--control-plane-addr={}", self.cp_addr),
+        let mut args = vec![
+            format!("--control-plane-addr={}", self.cp_dial),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={PROXY_TOKEN}"),
             format!("--data-dir={}", self.dir.path().join(name).display()),
@@ -211,7 +335,18 @@ impl Deployment {
             "--drain-timeout-secs=1".into(),
             "--policy-refresh-secs=1".into(),
             "--policy-grace-secs=3".into(),
-        ]);
+        ];
+        // This proxy's own flags replace the deployment's that they repeat.
+        let flag = |a: &str| a.split('=').next().unwrap_or_default().to_owned();
+        let own: Vec<String> = extra.iter().map(|a| flag(a)).collect();
+        args.extend(
+            self.proxy_args
+                .iter()
+                .filter(|a| !own.contains(&flag(a)))
+                .cloned(),
+        );
+        args.extend(extra.iter().map(|&a| a.to_owned()));
+        let config: limen_proxy::Config = parse(&args);
         let (proxy, creds_tx) = limen_proxy::Proxy::start(config)
             .await
             .expect("proxy start");
@@ -241,16 +376,32 @@ impl Deployment {
     }
 
     pub async fn start_worker(&self, join_token: &str, name: &str) -> RunningWorker {
-        let config: limen_worker::Config = parse(&[
+        self.start_worker_with(join_token, name, &[]).await
+    }
+
+    /// [`start_worker`](Self::start_worker) with extra flags, such as
+    /// `--max-sessions=1` or `--drain-timeout-secs=20` (default here: 1).
+    pub async fn start_worker_with(
+        &self,
+        join_token: &str,
+        name: &str,
+        extra: &[&str],
+    ) -> RunningWorker {
+        let data_dir = self.dir.path().join(name);
+        let mut args = vec![
             format!("--proxy-addr={}", self.proxy_addr),
             format!("--ca-file={}", self.ca_file().display()),
             format!("--join-token={join_token}"),
-            format!("--data-dir={}", self.dir.path().join(name).display()),
+            format!("--data-dir={}", data_dir.display()),
             "--admin-listen=127.0.0.1:0".into(),
-            "--drain-timeout=1s".into(),
             "--policy-refresh=1s".into(),
             "--policy-grace=3s".into(),
-        ]);
+        ];
+        if !extra.iter().any(|a| a.starts_with("--drain-timeout-secs")) {
+            args.push("--drain-timeout-secs=1".into());
+        }
+        args.extend(extra.iter().map(|&a| a.to_owned()));
+        let config: limen_worker::Config = parse(&args);
         let (worker, creds_tx) = limen_worker::Worker::start(config)
             .await
             .expect("worker start");
@@ -258,6 +409,7 @@ impl Deployment {
         let task = tokio::spawn(limen_worker::run(worker.clone(), creds_tx, rx));
         RunningWorker {
             worker,
+            data_dir,
             shutdown: tx,
             task,
         }
@@ -325,6 +477,54 @@ impl Deployment {
             .into_inner();
         Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
     }
+}
+
+/// How long a deployment whose proxies report rarely may run (see
+/// [`Deployment::check_registry_lease`]): well within the registry lease.
+const RARE_REPORTS_MAX_AGE: Duration = Duration::from_secs(30);
+
+/// Whether `proxy_args` set a report interval past the release cap.
+fn rare_reports(proxy_args: &[String]) -> bool {
+    proxy_args.iter().any(|a| {
+        a.strip_prefix("--report-interval-secs=")
+            .and_then(|v| v.parse::<u64>().ok())
+            .is_some_and(|v| v > limen_core::registry::MAX_REPORT_INTERVAL_SECS)
+    })
+}
+
+/// Start a control plane replica with `args` plus its own id, audit file,
+/// and spool under `dir`.
+async fn spawn_control_plane(
+    args: &[String],
+    dir: &std::path::Path,
+    id: &str,
+    audit_name: &str,
+    spool: &str,
+) -> (
+    SocketAddr,
+    watch::Sender<bool>,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    let mut args = args.to_vec();
+    args.extend([
+        format!("--id={id}"),
+        format!(
+            "--audit-file={}",
+            dir.join(format!("audit/{audit_name}.jsonl")).display()
+        ),
+        format!("--audit-spool-dir={}", dir.join(spool).display()),
+    ]);
+    let config: limen_control_plane::Config = parse(&args);
+    let state = limen_control_plane::build_state(config)
+        .await
+        .expect("control plane state");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (tx, rx) = watch::channel(false);
+    let task = tokio::spawn(limen_control_plane::run(state, listener, rx));
+    (addr, tx, task)
 }
 
 /// Poll `check` until it returns true or `timeout` passes.
@@ -464,5 +664,21 @@ pub mod ssh_client {
             }
         }
         Ok((String::from_utf8_lossy(&out).into_owned(), status))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_report_intervals_past_the_release_cap_count_as_rare() {
+        let args = |a: &[&str]| a.iter().map(|&s| s.to_owned()).collect::<Vec<_>>();
+        assert!(super::rare_reports(&args(&["--report-interval-secs=3600"])));
+        assert!(super::rare_reports(&args(&[
+            "--x",
+            "--report-interval-secs=16"
+        ])));
+        assert!(!super::rare_reports(&args(&["--report-interval-secs=15"])));
+        assert!(!super::rare_reports(&args(&["--ping-interval-secs=3600"])));
+        assert!(!super::rare_reports(&[]));
     }
 }

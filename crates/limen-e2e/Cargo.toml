@@ -10,11 +10,11 @@ publish.workspace = true
 [dependencies]
 limen-control-plane.workspace = true
 limen-core.workspace = true
-limen-proxy.workspace = true
+limen-proxy = { workspace = true, features = ["test-hooks"] }
 limen-worker.workspace = true
 limen-proto.workspace = true
 limen-testkit.workspace = true
-limen-tunnel.workspace = true
+limen-tunnel = { workspace = true, features = ["test-hooks"] }
 anyhow.workspace = true
 clap.workspace = true
 rcgen.workspace = true
