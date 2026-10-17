@@ -161,10 +161,19 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
     };
     *upstream_req.headers_mut() = headers;
 
+    let record = Record {
+        info: &info,
+        method: &method,
+        path: &path,
+        client_addr: client_addr.as_deref(),
+        started,
+    };
+
     let tls = match ctx.upstream.connect().await {
         Ok(tls) => tls,
         Err(e) => {
             tracing::warn!(error = %e, "kube: cannot reach the API server");
+            record_failure(&record, &ctx, "unreachable").await;
             return failure(
                 StatusCode::BAD_GATEWAY,
                 "ServiceUnavailable",
@@ -177,6 +186,7 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
             Ok(pair) => pair,
             Err(e) => {
                 tracing::warn!(error = %e, "kube: API server handshake failed");
+                record_failure(&record, &ctx, "handshake failed").await;
                 return failure(
                     StatusCode::BAD_GATEWAY,
                     "ServiceUnavailable",
@@ -191,6 +201,8 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(error = %e, "kube: the API server request failed");
+            // The API server may have applied it before the connection broke.
+            record_failure(&record, &ctx, "request failed").await;
             return failure(
                 StatusCode::BAD_GATEWAY,
                 "ServiceUnavailable",
@@ -202,38 +214,11 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
 
     // Audit before the answer leaves: if the trail is unavailable the user
     // gets an error, not the data.
-    let mut event = json!({
-        "kind": "kube",
-        "actor_type": admitted.actor_type,
-        "resource": admitted.resource,
-        "groups": admitted.groups,
-        "worker_id": ctx.worker.id(),
-        "proxy_id": admitted.proxy_id,
-        "client_addr": client_addr,
-        "method": method.as_str(),
-        "verb": info.verb,
-        "k8s_group": info.api_group,
-        "k8s_resource": info.resource,
-        "namespace": info.namespace,
-        "name": info.name,
-        "subresource": info.subresource,
-        "path": path,
-        "status": status.as_u16(),
-        "latency_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-    });
-    if let Some(ci) = &admitted.ci {
-        event["ci"] = json!(ci);
-    }
     let audit_ctx = Context {
         user: Some(admitted.username.clone()),
         session_id: uuid::Uuid::parse_str(&admitted.session_id).ok(),
     };
-    if let Err(e) = ctx
-        .worker
-        .audit
-        .emit(EventKind::KubeRequest, audit_ctx.clone(), event)
-        .await
-    {
+    if let Err(e) = record.emit(&ctx, status.as_u16(), None).await {
         tracing::error!(error = %e, "audit unavailable; refusing the kube request");
         return failure(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -242,6 +227,18 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
         );
     }
     metrics::counter!("limen_kube_requests_total", "verb" => info.verb.clone()).increment(1);
+
+    // The API server refusing the worker's own credential is the operator's
+    // problem, not the user's: kubectl would answer a 401 by re-running the
+    // login plugin and report "You must be logged in".
+    if status == StatusCode::UNAUTHORIZED {
+        tracing::error!("kube: the API server rejected the worker's service account token");
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "the cluster rejected the worker's credential",
+        );
+    }
 
     if status == StatusCode::SWITCHING_PROTOCOLS {
         let (Some((sub, spdy)), Some(client_upgrade)) = (stream, client_upgrade) else {
@@ -277,6 +274,72 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
         parts.headers.remove(name);
     }
     Response::from_parts(parts, watch_body(body, Arc::clone(&ctx)))
+}
+
+/// What `kube.request` says about one request.
+struct Record<'a> {
+    info: &'a RequestInfo,
+    method: &'a http::Method,
+    path: &'a str,
+    client_addr: Option<&'a str>,
+    started: Instant,
+}
+
+impl Record<'_> {
+    async fn emit(
+        &self,
+        ctx: &Ctx,
+        status: u16,
+        error: Option<&str>,
+    ) -> Result<(), limen_audit::AuditError> {
+        let admitted = &ctx.admitted;
+        let mut event = json!({
+            "kind": "kube",
+            "actor_type": admitted.actor_type,
+            "resource": admitted.resource,
+            "groups": admitted.groups,
+            "worker_id": ctx.worker.id(),
+            "proxy_id": admitted.proxy_id,
+            "client_addr": self.client_addr,
+            "method": self.method.as_str(),
+            "verb": self.info.verb,
+            "k8s_group": self.info.api_group,
+            "k8s_resource": self.info.resource,
+            "namespace": self.info.namespace,
+            "name": self.info.name,
+            "subresource": self.info.subresource,
+            "path": self.path,
+            "status": status,
+            "latency_ms": u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        });
+        if let Some(error) = error {
+            event["error"] = json!(error);
+        }
+        if let Some(ci) = &admitted.ci {
+            event["ci"] = json!(ci);
+        }
+        let audit_ctx = Context {
+            user: Some(admitted.username.clone()),
+            session_id: uuid::Uuid::parse_str(&admitted.session_id).ok(),
+        };
+        ctx.worker
+            .audit
+            .emit(EventKind::KubeRequest, audit_ctx, event)
+            .await
+            .map(|_| ())
+    }
+}
+
+/// A request that failed on the way to or from the API server still counts:
+/// it may have been applied. The user already gets an error, so a failing
+/// trail adds nothing but a log line.
+async fn record_failure(record: &Record<'_>, ctx: &Ctx, why: &str) {
+    if let Err(e) = record
+        .emit(ctx, StatusCode::BAD_GATEWAY.as_u16(), Some(why))
+        .await
+    {
+        tracing::error!(error = %e, "audit unavailable while recording a failed kube request");
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -529,12 +592,14 @@ fn forward_headers(
     let a = &ctx.admitted;
     out.insert(
         IMPERSONATE_USER,
-        HeaderValue::from_str(&a.username).map_err(|_| "the user name is not a valid header")?,
+        HeaderValue::from_bytes(a.username.as_bytes())
+            .map_err(|_| "the user name is not a valid header")?,
     );
     for group in &a.groups {
         out.append(
             IMPERSONATE_GROUP,
-            HeaderValue::from_str(group).map_err(|_| "a group name is not a valid header")?,
+            HeaderValue::from_bytes(group.as_bytes())
+                .map_err(|_| "a group name is not a valid header")?,
         );
     }
     out.insert(

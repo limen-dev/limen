@@ -130,7 +130,17 @@ impl KubeApi {
                     };
                     let service = hyper::service::service_fn(move |req| {
                         let (shared, token) = (shared.clone(), token.clone());
-                        async move { Ok::<_, Infallible>(shared.handle(&token, req)) }
+                        async move {
+                            // `/reset`: take the request, then drop the connection
+                            // without answering, as a failing API server does.
+                            if req.uri().path().ends_with("/reset") {
+                                let _ = shared.handle(&token, req);
+                                return Err(std::io::Error::from(
+                                    std::io::ErrorKind::ConnectionReset,
+                                ));
+                            }
+                            Ok(shared.handle(&token, req))
+                        }
                     });
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(tls), service)
@@ -159,7 +169,12 @@ impl KubeApi {
             headers: req
                 .headers()
                 .iter()
-                .map(|(n, v)| (n.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
+                .map(|(n, v)| {
+                    (
+                        n.as_str().to_owned(),
+                        String::from_utf8_lossy(v.as_bytes()).into_owned(),
+                    )
+                })
                 .collect(),
         };
         if let Ok(mut all) = self.requests.lock() {

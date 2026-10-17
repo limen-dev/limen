@@ -50,7 +50,7 @@ kubectl port-forward svc/db 5432:5432    # audited
          kube: { groups: ["limen:edit"] }
    ```
 
-   Groups may not start with `system:`. A user gets every group their roles grant on the cluster.
+   Groups may not start with `system:`, and neither may a user name (a user called `system:kube-scheduler` would inherit that identity's RBAC), so the worker refuses both. A user gets every group their roles grant on the cluster.
 2. **Cluster.** Apply [`deploy/kube/limen-kube-worker.yaml`](../../deploy/kube/limen-kube-worker.yaml) (a service account that can only impersonate) and bind your groups to roles, as in [`limen-groups.yaml`](../../deploy/kube/limen-groups.yaml).
 3. **Worker.** One kube worker per cluster, enrolled like any worker ([runbook](../runbooks/worker-enrollment.md)) with the cluster flags. In a pod, `--kube-cluster` is enough: the API server address, CA, and service account token come from the pod.
 
@@ -62,7 +62,7 @@ kubectl port-forward svc/db 5432:5432    # audited
    ```
 
    Run the worker with labels that match `worker_selector`. A worker serves exactly one cluster and refuses grants for another.
-4. **Audit.** The worker needs the control plane to be reachable to audit; if the trail is unavailable it answers `503` instead of the cluster's response (fail closed, ADR-0009).
+4. **Audit.** The worker needs the control plane to be reachable to audit; if the trail is unavailable it answers `503` instead of the cluster's response (fail closed, ADR-0009). A request that fails on the way to or from the API server (it may already have been applied) is audited too, with status `502` and an `error` field; the cluster rejecting the worker's own token is a `503`, not a login prompt.
 
 ## Limits today
 

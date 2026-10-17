@@ -69,12 +69,21 @@ spec:
     - resources: {{ kind: [kubernetes] }}
       kube: {{ groups: ["limen:view"] }}
 ---
+kind: role
+version: v1
+metadata: {{ name: cluster-admin }}
+spec:
+  allow:
+    - resources: {{ kind: [kubernetes] }}
+      kube: {{ groups: ["limen:admin"] }}
+---
 kind: role_mapping
 version: v1
 metadata: {{ name: idp }}
 spec:
   - {{ idp_group: ops, roles: [ops] }}
   - {{ idp_group: viewers, roles: [viewer] }}
+  - {{ idp_group: admins, roles: [cluster-admin] }}
 ---
 kind: resource
 version: v1

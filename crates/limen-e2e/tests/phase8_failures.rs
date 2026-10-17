@@ -161,6 +161,111 @@ async fn worker_problems_are_service_errors_not_denials() {
     );
 }
 
+/// The API server refusing the worker's own token is the operator's fault.
+/// A 401 passed through would make kubectl re-run the login plugin and tell
+/// the user to log in again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejected_worker_token_is_a_service_error() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    let dev = env.d.login(DEVELOPER, &["ops"]).await.expect("developer");
+    std::fs::write(&env.token_file, "revoked-token\n").expect("rotate token");
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(dev)).await;
+    let (status, body) = text(
+        conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/pods"))
+            .await
+            .expect("response"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body.contains("rejected the worker's credential"), "{body}");
+}
+
+/// A user named like a built-in identity would inherit that identity's RBAC
+/// (`system:kube-scheduler`, `system:serviceaccount:…`). Whatever the IdP
+/// says, the cluster must not see the name.
+#[tokio::test(flavor = "multi_thread")]
+async fn built_in_identities_cannot_be_impersonated() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    for name in [
+        "system:kube-scheduler",
+        "system:serviceaccount:kube-system:x",
+    ] {
+        let who = env.d.login(name, &["ops"]).await.expect("login");
+        let mut conn = connect(&env.d, env.d.proxy_addr, Some(who)).await;
+        let (status, body) = text(
+            conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/pods"))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{name}: {body}");
+    }
+    assert!(env.api.seen().is_empty(), "the cluster saw none of them");
+}
+
+/// Names are not always ASCII; the API server takes UTF-8 impersonation
+/// headers as they are.
+#[tokio::test(flavor = "multi_thread")]
+async fn non_ascii_user_names_are_impersonated_intact() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    let who = env
+        .d
+        .login("josé.müller@example.com", &["ops"])
+        .await
+        .expect("login");
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(who)).await;
+    let (status, body) = text(
+        conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/pods"))
+            .await
+            .expect("response"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let seen = env.api.seen();
+    assert_eq!(
+        seen.last().expect("seen").headers_named("impersonate-user"),
+        ["josé.müller@example.com"]
+    );
+}
+
+/// The API server dies after taking a write. The user gets a 502, and the
+/// request is in the trail: it may have been applied.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_that_fails_upstream_is_still_audited() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    let dev = env.d.login(DEVELOPER, &["ops"]).await.expect("developer");
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(dev)).await;
+    let (status, body) = text(
+        conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/configmaps/reset"))
+            .await
+            .expect("response"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    eventually(
+        Duration::from_secs(20),
+        "the failed request is audited",
+        || async {
+            common::read_jsonl(&env.d).iter().any(|e| {
+                e["kind"] == "kube.request"
+                    && e["data"]["status"] == 502
+                    && e["data"]["error"] == "request failed"
+                    && e["data"]["name"] == "reset"
+                    && e["user"] == DEVELOPER
+            })
+        },
+    )
+    .await;
+}
+
 /// ADR-0004: the worker is tunnelled to proxy A, the user lands on proxy B.
 #[tokio::test(flavor = "multi_thread")]
 async fn kubectl_through_a_peer_proxy() {

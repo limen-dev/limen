@@ -3116,6 +3116,7 @@ dependencies = [
  "chrono",
  "flate2",
  "http",
+ "http-body",
  "http-body-util",
  "hyper",
  "hyper-util",

@@ -126,7 +126,16 @@ impl Upstream {
             .as_ref()
             .is_some_and(|(at, _)| at.elapsed() < TOKEN_TTL);
         if !fresh {
-            *cached = Some((Instant::now(), self.read_token()?));
+            // Kubelet swaps a projected token in place; a read that fails
+            // mid-rotation must not take down requests the old token (valid
+            // for its full lifetime) can still serve.
+            match self.read_token() {
+                Ok(token) => *cached = Some((Instant::now(), token)),
+                Err(e) if cached.is_some() => {
+                    tracing::warn!(error = %e, "kube: cannot refresh the token; using the last one");
+                }
+                Err(e) => return Err(e),
+            }
         }
         let Some((_, token)) = cached.as_ref() else {
             anyhow::bail!("no token");
@@ -135,5 +144,64 @@ impl Upstream {
             .context("the service account token is not a valid header value")?;
         value.set_sensitive(true);
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn upstream(token_file: PathBuf) -> Upstream {
+        let config = rustls::ClientConfig::builder_with_provider(limen_tunnel::tls::provider())
+            .with_safe_default_protocol_versions()
+            .expect("versions")
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        Upstream {
+            cluster: "c".into(),
+            addr: "localhost:6443".into(),
+            host_header: "localhost:6443".into(),
+            server_name: ServerName::try_from("localhost").expect("name"),
+            tls: std::sync::Arc::new(config),
+            token_file,
+            token: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn a_token_that_cannot_be_refreshed_is_still_used() {
+        let file = std::env::temp_dir().join(format!("limen-token-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&file, "first\n").expect("write");
+        let up = upstream(file.clone());
+        let first = up.authorization().expect("first");
+        assert_eq!(first.to_str().expect("str"), "Bearer first");
+        assert!(first.is_sensitive());
+
+        // Expire the cache and break the file, as a kubelet swap can briefly.
+        std::fs::remove_file(&file).expect("remove");
+        let old = Instant::now()
+            .checked_sub(TOKEN_TTL + Duration::from_secs(1))
+            .expect("instant");
+        let token = up.token.lock().expect("lock").take().expect("cached").1;
+        *up.token.lock().expect("lock") = Some((old, token));
+        assert_eq!(
+            up.authorization().expect("stale").to_str().expect("str"),
+            "Bearer first"
+        );
+
+        // Once the file is back, the new token is picked up.
+        std::fs::write(&file, "second\n").expect("write");
+        assert_eq!(
+            up.authorization().expect("fresh").to_str().expect("str"),
+            "Bearer second"
+        );
+        std::fs::remove_file(&file).expect("clean up");
+    }
+
+    #[test]
+    fn no_token_at_all_is_an_error() {
+        let up =
+            upstream(std::env::temp_dir().join(format!("limen-none-{}", uuid::Uuid::new_v4())));
+        assert!(up.authorization().is_err());
     }
 }

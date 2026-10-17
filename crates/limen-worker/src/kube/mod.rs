@@ -127,6 +127,13 @@ pub(crate) fn admit(
             "refusing to impersonate the group {bad:?}"
         )));
     }
+    // A user name that is also a built-in identity (`system:kube-scheduler`,
+    // `system:serviceaccount:…`) would inherit that identity's cluster RBAC.
+    if grant.username.is_empty() || grant.username.starts_with("system:") {
+        return Err(Status::permission_denied(
+            "refusing to impersonate a user named like a built-in identity",
+        ));
+    }
     let snapshot = worker
         .policy
         .fresh(now)
