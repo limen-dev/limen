@@ -168,6 +168,7 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
   - extended protocol: the statement is logged at Parse, and each Execute is logged with its name. **Parameter values are never logged** (the earlier `audit.log_parameters` option is not built)
   - `COPY`, multi-statement messages (one event each), and `CALL` and `DO` blocks are logged as written; row data never is
   - per-resource `normalize_literals: true` replaces literals with `?`. Full text is the default (clarified with the owner)
+  - the console projects these events into `db_statements` and lists them on the session page (database sessions have no recording)
 - **Aurora**: the same code. The cluster writer and reader endpoints are separate resources.
 - **Limits.** Enforcement inside a session is the database's grants for the role; there is no statement-level allow or deny. Sessions end at `max_session_ttl`, or after an hour with no client activity. A frame the worker must read in full is capped at 64 MiB.
 - **IAM auth limitations to keep in mind** (from the AWS docs): IAM auth needs 300–1000 MiB of extra DB memory; IAM conditions don't support `aws:SourceIp` or `aws:SourceVpc`; tokens are at least about 1 KB. **The IAM paths and Redshift are unverified against the real services.**

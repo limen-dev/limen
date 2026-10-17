@@ -196,6 +196,7 @@ pub fn path_segment(s: &str) -> String {
 
 // ---- sessions --------------------------------------------------------------------
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct SessionView {
     pub id: String,
     pub user: String,
@@ -213,6 +214,8 @@ pub struct SessionView {
     pub reason: String,
     pub active: bool,
     pub has_recording: bool,
+    /// A SQL database session: no recording, but audited statements.
+    pub is_db: bool,
     pub recording_sha256: String,
     pub recording_note: &'static str,
     pub bytes: String,
@@ -259,11 +262,14 @@ impl From<&SessionRow> for SessionView {
             },
             active: s.active,
             has_recording,
+            is_db: matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
                 "The recording is uploaded when the session ends."
             } else if s.recording_sha256.is_some() {
                 "The recording was made but hasn't reached the control plane yet. Check again shortly."
+            } else if matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")) {
+                "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
             } else {
                 "This session wasn't recorded."
             },
@@ -470,6 +476,67 @@ pub struct SessionsPage {
 pub struct SessionPage {
     pub chrome: Chrome,
     pub s: SessionView,
+    /// Database sessions: the statements sent, oldest first.
+    pub statements: Vec<StatementView>,
+    pub statement_total: i64,
+    pub statement_errors: i64,
+}
+
+/// One statement of a database session, ready to show.
+#[derive(Debug)]
+pub struct StatementView {
+    pub time: String,
+    pub kind: String,
+    pub text: String,
+    pub outcome: String,
+    pub outcome_class: &'static str,
+    pub detail: String,
+}
+
+impl From<&super::store::DbStatementRow> for StatementView {
+    fn from(r: &super::store::DbStatementRow) -> Self {
+        let failed = r.status.as_deref() == Some("error");
+        let outcome = match r.status.as_deref() {
+            Some("ok") => "ok",
+            Some("error") => "error",
+            Some(_) => "not completed",
+            None => "…",
+        };
+        let mut detail = Vec::new();
+        if let Some(n) = r.rows {
+            detail.push(format!("{n} row{}", if n == 1 { "" } else { "s" }));
+        }
+        if let Some(ms) = r.duration_ms {
+            detail.push(format!("{ms} ms"));
+        }
+        if failed {
+            detail.push(
+                [r.error_code.as_deref(), r.error.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(": "),
+            );
+        }
+        let kind = r.statement_type.clone().unwrap_or_default();
+        Self {
+            time: time_text(Some(r.at)),
+            text: match (&r.statement, r.phase.as_deref()) {
+                (Some(t), _) if r.truncated => format!("{t} … (cut)"),
+                (Some(t), _) => t.clone(),
+                (None, Some("execute")) => "(prepared statement; see its parse)".to_owned(),
+                (None, _) => String::new(),
+            },
+            kind: match r.phase.as_deref() {
+                Some("parse") => format!("{kind} (prepare)"),
+                Some("execute") => format!("{kind} (run)"),
+                _ => kind,
+            },
+            outcome: outcome.to_owned(),
+            outcome_class: if failed { "warn" } else { "" },
+            detail: detail.join(" · "),
+        }
+    }
 }
 
 /// One bot from policy, with what the control plane has seen of it.

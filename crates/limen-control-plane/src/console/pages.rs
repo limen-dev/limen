@@ -19,8 +19,9 @@ use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
     PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView,
-    ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage,
-    UserView, UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
+    ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, StatementView, Stats,
+    TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers, error_page, list_text,
+    path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -541,6 +542,9 @@ async fn visible_session(
     }
 }
 
+/// The most statements the session page lists.
+const STATEMENT_LIMIT: i64 = 500;
+
 pub async fn session_detail(
     State(state): State<AppState>,
     auth: Auth,
@@ -552,10 +556,29 @@ pub async fn session_detail(
             // Names beside the ids, for the components that have one.
             s.proxy = with_name(&state, row.proxy_id.as_deref(), s.proxy).await;
             s.worker = with_name(&state, row.worker_id.as_deref(), s.worker).await;
+            // Best effort: the page still renders without the statements.
+            let (statements, statement_total, statement_errors) = if s.is_db {
+                let list = store::db_statements(&state.db, row.session_id, STATEMENT_LIMIT)
+                    .await
+                    .unwrap_or_default();
+                let (total, errors) = store::db_session_counts(&state.db, row.session_id)
+                    .await
+                    .unwrap_or_default();
+                (
+                    list.iter().map(StatementView::from).collect(),
+                    total,
+                    errors,
+                )
+            } else {
+                (Vec::new(), 0, 0)
+            };
             html(
                 SessionPage {
                     chrome: chrome(&state, &auth, "sessions"),
                     s,
+                    statements,
+                    statement_total,
+                    statement_errors,
                 }
                 .render(),
             )

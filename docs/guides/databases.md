@@ -37,6 +37,7 @@ Also: the proxy writes `session.start` and `session.end` (with `database`), refu
 - **Prepared statements**: the text is logged at `Parse`/`COM_STMT_PREPARE`, and each `Execute` is logged with the statement's name and `parse_query_id`. **Parameter values are never logged**, in this release.
 - **Never logged**: result rows, `COPY` data, and passwords.
 - **`normalize_literals: true`** on a resource replaces literals with `?` in the logged text (`email = 'a@b.c'` becomes `email = ?`). Text that can't be tokenized is withheld in this mode.
+- **In the console**, a database session's page lists its statements (time, type, text, outcome, rows, duration, error), up to 500, newest last. Database sessions have no terminal recording; this list is the record. The console keeps statement text up to 16 KiB in the control plane's database (table `db_statements`), visible only to admins and to the session's own user. The complete trail stays in S3 and Datadog.
 - Statement text can still contain secrets that a user typed into it. Treat the audit store accordingly ([threat model](../threat-model.md)).
 
 Joining your database's own logs to Limen: Limen sets `application_name` (PostgreSQL, Redshift) or the `limen_session` connection attribute (MySQL) to `limen:<session id>` / the session id.
