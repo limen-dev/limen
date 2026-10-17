@@ -20,7 +20,7 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
 
 > **Status: Phase 5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots), and several control planes, proxies and workers running together (scale-out), work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
 
-Try it locally: [`deploy/compose/README.md`](deploy/compose/README.md), or run `deploy/compose/demo-phase2.sh` (SSH), `deploy/compose/demo-phase3.sh` (audit pipeline and dashboards), `deploy/compose/demo-phase35.sh` (web console, locks, session kill), or `deploy/compose/demo-phase4.sh` (bots: a CI job logs in with an identity token).
+Every phase is checked against the running stack, not only by unit tests. Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), and Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events). The exit criteria for each phase are in [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria); [`deploy/compose/README.md`](deploy/compose/README.md) explains how to bring up the local stack.
 
 ## What it connects to
 
@@ -136,7 +136,7 @@ open https://localhost:3443/console/              # macOS; elsewhere just paste 
 ```
 
 > [!NOTE]
-> The proxy's certificate comes from the Limen dev CA, so a browser warns about it. That is expected here. Don't add the CA to your system trust store; click through the warning on localhost, or use `curl --cacert deploy/compose/.state/internal-ca.pem`. The dev users and their passwords are in [`deploy/compose/README.md`](deploy/compose/README.md). Want it scripted instead? `deploy/compose/demo-phase35.sh` does all of this, including the console, and checks the results.
+> The proxy's certificate comes from the Limen dev CA, so a browser warns about it. That is expected here. Don't add the CA to your system trust store; click through the warning on localhost, or use `curl --cacert deploy/compose/.state/internal-ca.pem`. The dev users and their passwords are in [`deploy/compose/README.md`](deploy/compose/README.md).
 
 ## Roadmap
 
