@@ -18,7 +18,7 @@
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers, and the bots that act for them, log in through their identity provider and get short-lived, audited access to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps. There are no static SSH keys, shared database passwords, or hand-made users.
 
-> **Status: Phase 4 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots) work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
+> **Status: Phase 5 complete.** OIDC login, policy, proxies with peering, workers, SSH with session recording, the audit pipeline (S3, Datadog, optional Grafana), a web console with built-in dashboards, and machine identities for CI jobs (bots) work end to end against local stand-ins. Everything else below is planned: see the [roadmap](#roadmap).
 
 Every phase is checked against the running stack, not only by unit tests. Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), and Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events). The exit criteria for each phase are in [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria); [`deploy/compose/README.md`](deploy/compose/README.md) explains how to bring up the local stack.
 
@@ -146,7 +146,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 |---|---|---|
 | 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
-| 5 | Scale-out: many control planes, proxies, workers | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
+| 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/9) |
 | 6.5 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
