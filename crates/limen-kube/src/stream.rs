@@ -428,3 +428,116 @@ mod tests {
         assert!(d.server(&[0xC2, 0]).is_err());
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // test noise and tiny test frames
+mod robustness {
+    use super::*;
+    use crate::spdy::build::{Compressor, data};
+
+    /// xorshift: deterministic noise without a dependency.
+    struct Noise(u64);
+    impl Noise {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn bytes(&mut self, n: usize) -> Vec<u8> {
+            (0..n).map(|_| (self.next() >> 24) as u8).collect()
+        }
+    }
+
+    const KINDS: [StreamKind; 5] = [
+        StreamKind::ExecWebSocket,
+        StreamKind::ExecSpdy,
+        StreamKind::PortForwardWebSocket,
+        StreamKind::PortForwardSpdy,
+        StreamKind::PortForwardSpdyOverWebSocket,
+    ];
+
+    /// Whatever arrives, the decoders return events or an error. They do not
+    /// panic, and they do not grow without bound.
+    #[test]
+    fn random_bytes_in_random_chunks_never_panic() {
+        let mut noise = Noise(0x9e37_79b9_7f4a_7c15);
+        for round in 0..4000 {
+            let mut d = StreamDecoder::new(KINDS[round % KINDS.len()]);
+            for _ in 0..=(noise.next() % 6) {
+                let n = (noise.next() % 400) as usize;
+                let mut chunk = noise.bytes(n);
+                // Bias some chunks toward plausible headers so deeper states are reached.
+                if noise.next().is_multiple_of(3) && chunk.len() > 8 {
+                    chunk[..4].copy_from_slice(if noise.next().is_multiple_of(2) {
+                        &[0x80, 0x03, 0x00, 0x01]
+                    } else {
+                        &[0x82, 0x7e, 0x00, 0x10]
+                    });
+                }
+                let _ = d.client(&chunk);
+                let _ = d.server(&chunk);
+            }
+        }
+    }
+
+    /// A valid stream cut at every byte, and fed one byte at a time, gives
+    /// the same events as when it arrives whole.
+    #[test]
+    fn valid_streams_decode_the_same_however_they_are_split() {
+        let mut z = Compressor::default();
+        let mut client = z.syn_stream(1, &[("streamtype", "error")]);
+        client.extend(z.syn_stream(3, &[("streamtype", "resize")]));
+        client.extend(data(3, false, br#"{"Width":80,"Height":24}"#));
+        let mut server = data(1, false, br#"{"status":"Success"}"#);
+        server.extend(data(5, false, b"unknown stream"));
+
+        let whole = {
+            let mut d = StreamDecoder::new(StreamKind::ExecSpdy);
+            let mut ev = d.client(&client).expect("client");
+            ev.extend(d.server(&server).expect("server"));
+            ev
+        };
+        assert_eq!(
+            whole,
+            [Event::Resize { cols: 80, rows: 24 }, Event::Exit(0)]
+        );
+        for split in 0..client.len() {
+            let mut d = StreamDecoder::new(StreamKind::ExecSpdy);
+            let mut ev = d.client(&client[..split]).expect("first half");
+            ev.extend(d.client(&client[split..]).expect("second half"));
+            ev.extend(d.server(&server).expect("server"));
+            assert_eq!(ev, whole, "split at {split}");
+        }
+    }
+
+    /// A header block that inflates to far more than it should is refused
+    /// without allocating what it claims.
+    #[test]
+    fn a_header_compression_bomb_is_refused() {
+        use flate2::{Compress, Compression, FlushCompress};
+        let mut z = Compress::new(Compression::best(), true);
+        z.set_dictionary(&crate::spdy_dictionary::HEADER_DICTIONARY)
+            .expect("dictionary");
+        let zeros = vec![0u8; 8 * 1024 * 1024];
+        let mut block = Vec::with_capacity(64 * 1024);
+        z.compress_vec(&zeros, &mut block, FlushCompress::Sync)
+            .expect("compress");
+        assert!(
+            block.len() < 20_000,
+            "the bomb is small on the wire: {}",
+            block.len()
+        );
+        let mut payload = 1u32.to_be_bytes().to_vec();
+        payload.extend([0u8; 6]);
+        payload.extend(&block);
+        let mut frame = vec![0x80, 3, 0, 1, 0];
+        frame.extend(&(payload.len() as u32).to_be_bytes()[1..]);
+        frame.extend(&payload);
+        let mut d = StreamDecoder::new(StreamKind::ExecSpdy);
+        assert!(
+            d.client(&frame).is_err(),
+            "inflating 8 MiB of headers must fail"
+        );
+    }
+}

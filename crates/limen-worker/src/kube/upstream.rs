@@ -46,7 +46,16 @@ impl Upstream {
         let ca = std::fs::read_to_string(ca_file)
             .with_context(|| format!("reading the API server CA {}", ca_file.display()))?;
         let roots = limen_tunnel::tls::certs_from_pem(&ca)?;
-        let config = limen_tunnel::tls::client_config(&roots, None, &[])?;
+        // API servers behind older load balancers may not speak TLS 1.3; this
+        // is the one connection that is not between Limen components.
+        let mut store = rustls::RootCertStore::empty();
+        for root in roots {
+            store.add(root).context("adding the API server CA")?;
+        }
+        let config = rustls::ClientConfig::builder_with_provider(limen_tunnel::tls::provider())
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(store)
+            .with_no_client_auth();
         let host = host
             .trim_start_matches('[')
             .trim_end_matches(']')

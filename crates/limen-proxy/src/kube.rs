@@ -42,7 +42,7 @@ type Body = tonic::body::Body;
 
 /// Headers a client must not choose. The worker strips these too; stripping
 /// them here keeps them off the tunnel at all.
-const CLIENT_CONTROLLED: [&str; 3] = ["authorization", "x-remote-user", "x-remote-group"];
+const CLIENT_CONTROLLED: [&str; 1] = ["authorization"];
 
 pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Response<Body> {
     let peer = req.extensions().get::<PeerInfo>().cloned();
@@ -228,6 +228,7 @@ fn sanitize(headers: &mut HeaderMap, upgrading: bool) {
             let k = k.as_str();
             k.starts_with("x-limen-")
                 || k.starts_with("impersonate-")
+                || k.starts_with("x-remote-")
                 || CLIENT_CONTROLLED.contains(&k)
                 || (HOP_BY_HOP.contains(&k) && !(upgrading && k == "connection"))
         })

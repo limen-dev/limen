@@ -27,7 +27,7 @@ kubectl port-forward svc/db 5432:5432    # audited
 | `exec`, `attach` | `session.start` (command, pod) and `session.end` (exit code) | yes: output, resizes, exit status, as asciicast. **Stdin is not recorded**, because it holds passwords. Play it in the console or with `asciinema play` |
 | `port-forward` | `session.start` and `session.end` with the ports and bytes each way | no |
 
-`kubectl cp`, `kubectl debug`, and `kubectl run -it` use exec or attach underneath and are recorded the same way. A stream Limen cannot decode is refused rather than let through unrecorded. Locking a user, or killing a session, ends open streams within a second or two.
+`kubectl cp`, `kubectl debug`, and `kubectl run -it` use exec or attach underneath and are recorded the same way. A stream Limen cannot decode is refused rather than let through unrecorded. Locking a user, or killing a session, ends open streams and long-running responses (`get -w`, `logs -f`) within a second or two, and a grant that reaches its `max_session_ttl` ends them too.
 
 ## As an operator
 
@@ -69,4 +69,5 @@ kubectl port-forward svc/db 5432:5432    # audited
 - Verified against **kind** with kubectl 1.35 and Kubernetes 1.37, over WebSocket and SPDY. **Not verified on Amazon EKS** (no AWS account): EKS endpoint access (private endpoints need the worker inside the VPC), and the worker's token and CA on EKS, are the parts that may differ.
 - Limen policy picks groups, not verbs or namespaces; use RBAC for those.
 - Constrained impersonation (Kubernetes 1.36 and later) is not used yet.
+- Each request is a session with a one-time grant, and a worker remembers 100,000 grants for a minute. That is about 1,700 requests a second per worker before it refuses new ones (fail closed).
 - One request is one tunnel session, which suits `kubectl` but would be heavy for a controller issuing thousands of requests a second. Use a service account in the cluster for those.

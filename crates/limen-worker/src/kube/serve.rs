@@ -11,9 +11,9 @@ use std::time::Instant;
 
 use http::header::{CONNECTION, CONTENT_TYPE, HOST, UPGRADE};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-use http_body_util::BodyExt as _;
 use http_body_util::combinators::UnsyncBoxBody;
-use hyper::body::{Bytes, Incoming};
+use http_body_util::{BodyExt as _, StreamBody};
+use hyper::body::{Bytes, Frame, Incoming};
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 use limen_audit::{Context, EventKind};
@@ -36,7 +36,7 @@ const SEC_WEBSOCKET_PROTOCOL: HeaderName = HeaderName::from_static("sec-websocke
 /// Never forwarded from the client: hop-by-hop headers, anything that names an
 /// identity, and the WebSocket extensions (compression would hide the frames
 /// from the recorder).
-const DROP: [&str; 13] = [
+const DROP: [&str; 11] = [
     "host",
     "authorization",
     "connection",
@@ -47,8 +47,6 @@ const DROP: [&str; 13] = [
     "trailer",
     "upgrade",
     "sec-websocket-extensions",
-    "x-remote-user",
-    "x-remote-group",
     "forwarded",
 ];
 
@@ -106,6 +104,14 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
         return failure(StatusCode::FORBIDDEN, "Forbidden", why);
     }
 
+    if !is_canonical(&path) {
+        return failure(
+            StatusCode::BAD_REQUEST,
+            "BadRequest",
+            "the path is not canonical",
+        );
+    }
+
     let upgrade = req
         .headers()
         .get(UPGRADE)
@@ -124,7 +130,20 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
         }
     };
 
-    let headers = match forward_headers(&ctx, req.headers(), upgrade.as_deref()) {
+    // The worker's own credential. If it is unreadable that is the operator's
+    // problem, not the user's: say so, don't call it a denial.
+    let bearer = match ctx.upstream.authorization() {
+        Ok(bearer) => bearer,
+        Err(e) => {
+            tracing::error!(error = %e, "kube: the service account token is unavailable");
+            return failure(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "the worker has no usable cluster credential",
+            );
+        }
+    };
+    let headers = match forward_headers(&ctx, bearer, req.headers(), upgrade.as_deref()) {
         Ok(h) => h,
         Err(why) => return failure(StatusCode::FORBIDDEN, "Forbidden", &why),
     };
@@ -257,10 +276,7 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
     ] {
         parts.headers.remove(name);
     }
-    Response::from_parts(
-        parts,
-        body.map_err(|e| Box::new(e) as BoxError).boxed_unsync(),
-    )
+    Response::from_parts(parts, watch_body(body, Arc::clone(&ctx)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -382,6 +398,14 @@ async fn start_stream(
     tokio::spawn(async move {
         let _guard = guard;
         let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) else {
+            // The stream never ran: close what session.start opened.
+            metrics::gauge!("limen_sessions_active", "kind" => "kube").decrement(1.0);
+            let ctx = Context {
+                user: Some(admitted.username.clone()),
+                session_id: uuid::Uuid::parse_str(&admitted.session_id).ok(),
+            };
+            let end = json!({ "kind": "kube", "resource": admitted.resource, "login": stream_info.subresource, "worker_id": worker.id(), "reason": "the connection was not upgraded" });
+            let _ = worker.audit.emit(EventKind::SessionEnd, ctx, end).await;
             return;
         };
         pump::run(
@@ -408,17 +432,91 @@ async fn start_stream(
     )
 }
 
+/// Why a response that is still streaming (a `watch`, `logs -f`) must stop:
+/// the user was locked, the session was killed, or the grant ran out.
+fn must_stop(ctx: &Ctx) -> Option<&'static str> {
+    let admitted = &ctx.admitted;
+    if time::OffsetDateTime::now_utc() >= admitted.expires {
+        return Some("max_session_ttl reached");
+    }
+    ctx.worker.policy.latest().and_then(|snapshot| {
+        snapshot
+            .restrictions
+            .blocks(&admitted.username, &admitted.session_id)
+    })
+}
+
+/// Relay the API server's response body, and cut it off if the user is locked
+/// or the grant expires while it streams. Without this a `kubectl get -w`
+/// would outlive a lock, which an SSH session never does.
+fn watch_body(mut body: Incoming, ctx: Arc<Ctx>) -> Body {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Frame<Bytes>, BoxError>>(4);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                frame = body.frame() => match frame {
+                    Some(Ok(frame)) => {
+                        if tx.send(Ok(frame)).await.is_err() {
+                            return; // the proxy hung up
+                        }
+                    }
+                    Some(Err(e)) => {
+                        let _ = tx.send(Err(Box::new(e) as BoxError)).await;
+                        return;
+                    }
+                    None => return,
+                },
+                // The proxy hung up (the user pressed ctrl-c). An idle watch
+                // sends nothing, so notice it here, not on the next frame.
+                () = tx.closed() => return,
+                _ = tick.tick() => {
+                    if let Some(why) = must_stop(&ctx) {
+                        tracing::warn!(session = %ctx.admitted.session_id, user = %ctx.admitted.username, reason = why, "ending a streaming response");
+                        let _ = tx.send(Err(why.into())).await;
+                        return;
+                    }
+                }
+            }
+        }
+    });
+    StreamBody::new(tokio_stream::wrappers::ReceiverStream::new(rx)).boxed_unsync()
+}
+
+/// A path the API server and we would read the same way. Anything with dot
+/// segments, empty segments, or an encoded slash or dot could be classified
+/// as one thing in the audit trail and routed as another.
+fn is_canonical(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let Some(rest) = path.strip_prefix('/') else {
+        return false;
+    };
+    if path.contains('\\') || ["%2e", "%2f", "%5c"].iter().any(|bad| lower.contains(bad)) {
+        return false;
+    }
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    rest.is_empty()
+        || rest
+            .split('/')
+            .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
+}
+
 /// The headers for the API server: the client's, minus anything that names an
 /// identity, plus this worker's credential and the impersonation of the user.
 fn forward_headers(
     ctx: &Ctx,
+    bearer: HeaderValue,
     client: &HeaderMap,
     upgrade: Option<&str>,
 ) -> Result<HeaderMap, String> {
     let mut out = HeaderMap::new();
     for (name, value) in client {
         let n = name.as_str();
-        if DROP.contains(&n) || n.starts_with("impersonate-") || n.starts_with("x-limen-") {
+        if DROP.contains(&n)
+            || n.starts_with("impersonate-")
+            || n.starts_with("x-limen-")
+            || n.starts_with("x-remote-")
+        {
             continue;
         }
         out.append(name.clone(), value.clone());
@@ -427,10 +525,7 @@ fn forward_headers(
         HOST,
         HeaderValue::from_str(ctx.upstream.host_header()).map_err(|e| e.to_string())?,
     );
-    out.insert(
-        http::header::AUTHORIZATION,
-        ctx.upstream.authorization().map_err(|e| e.to_string())?,
-    );
+    out.insert(http::header::AUTHORIZATION, bearer);
     let a = &ctx.admitted;
     out.insert(
         IMPERSONATE_USER,
@@ -528,7 +623,36 @@ fn failure(code: StatusCode, reason: &str, message: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_channel_protocol, percent_decode};
+    use super::{is_canonical, is_channel_protocol, percent_decode};
+
+    #[test]
+    fn only_canonical_paths_are_forwarded() {
+        for ok in [
+            "/",
+            "/api",
+            "/api/v1/namespaces/dev/pods/",
+            "/apis/apps/v1/deployments",
+            "/openapi/v3",
+        ] {
+            assert!(is_canonical(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "api/v1",
+            "//api",
+            "/api//v1",
+            "/api/v1/../../x",
+            "/api/./v1",
+            "/api/v1/%2e%2e/x",
+            "/api/v1/%2E%2E/x",
+            "/api%2fv1",
+            "/api\\v1",
+            "/api/v1/..",
+            "/a//",
+        ] {
+            assert!(!is_canonical(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn only_binary_channel_protocols_are_readable() {

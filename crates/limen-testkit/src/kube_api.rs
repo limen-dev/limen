@@ -5,6 +5,8 @@
 //! the worker sent: its own credential, and the impersonation headers.
 //!
 //! - `GET /api/v1/namespaces/dev/pods` answers a `PodList`.
+//! - `GET /api/v1/pods?watch=true` streams a JSON line every 100 ms until the
+//!   client goes away (`&idle=1`: sends nothing, like a quiet watch); `watching` counts the streams currently open.
 //! - A WebSocket upgrade on `.../exec` answers 101 and plays a short exec:
 //!   `hello from pod` on stdout, `warning` on stderr, then a failure status
 //!   with exit code 3. Whatever the client sends is kept in `client_bytes`.
@@ -17,7 +19,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use http::{Request, Response, StatusCode};
-use http_body_util::Full;
+use http_body_util::{BodyExt as _, Full, combinators::UnsyncBoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper_util::rt::TokioIo;
 use limen_kube::ws::{self, Sender};
@@ -59,6 +61,34 @@ pub struct KubeApi {
     pub requests: Arc<Mutex<Vec<Seen>>>,
     /// Everything exec clients sent after the upgrade.
     pub client_bytes: Arc<Mutex<Vec<u8>>>,
+    /// Watch streams currently open.
+    pub watching: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+type Reply = Response<UnsyncBoxBody<Bytes, Infallible>>;
+
+/// A response body fed from a channel.
+#[derive(Debug)]
+struct Feed(tokio::sync::mpsc::Receiver<Bytes>);
+
+impl http_body::Body for Feed {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, Infallible>>> {
+        self.0
+            .poll_recv(cx)
+            .map(|chunk| chunk.map(|b| Ok(http_body::Frame::data(b))))
+    }
+}
+
+fn full(status: StatusCode, body: &str) -> Reply {
+    let mut r = Response::new(Full::new(Bytes::from(body.to_owned())).boxed_unsync());
+    *r.status_mut() = status;
+    r
 }
 
 impl KubeApi {
@@ -87,6 +117,7 @@ impl KubeApi {
             ca_pem,
             requests: Arc::default(),
             client_bytes: Arc::default(),
+            watching: Arc::default(),
         };
         let shared = api.clone();
         let token = token.to_owned();
@@ -121,7 +152,7 @@ impl KubeApi {
         self.requests.lock().map(|r| r.clone()).unwrap_or_default()
     }
 
-    fn handle(&self, token: &str, mut req: Request<Incoming>) -> Response<Full<Bytes>> {
+    fn handle(&self, token: &str, mut req: Request<Incoming>) -> Reply {
         let seen = Seen {
             method: req.method().to_string(),
             uri: req.uri().to_string(),
@@ -134,11 +165,7 @@ impl KubeApi {
         if let Ok(mut all) = self.requests.lock() {
             all.push(seen.clone());
         }
-        let reply = |status: StatusCode, body: &str| {
-            let mut r = Response::new(Full::new(Bytes::from(body.to_owned())));
-            *r.status_mut() = status;
-            r
-        };
+        let reply = full;
         if seen.header("authorization") != Some(&format!("Bearer {token}")) {
             return reply(StatusCode::UNAUTHORIZED, r#"{"kind":"Status","code":401}"#);
         }
@@ -178,8 +205,7 @@ impl KubeApi {
                     }
                 }
             });
-            let mut r = Response::new(Full::new(Bytes::new()));
-            *r.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+            let mut r = full(StatusCode::SWITCHING_PROTOCOLS, "");
             let h = r.headers_mut();
             h.insert("connection", "Upgrade".parse().expect("header"));
             h.insert("upgrade", "websocket".parse().expect("header"));
@@ -188,6 +214,37 @@ impl KubeApi {
                 "sec-websocket-protocol",
                 "v4.channel.k8s.io".parse().expect("header"),
             );
+            return r;
+        }
+        let query = req.uri().query().unwrap_or_default().to_owned();
+        if path == "/api/v1/pods" && query.starts_with("watch=true") {
+            let idle = query.contains("idle=1");
+            let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+            let open = Arc::clone(&self.watching);
+            open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+                if idle {
+                    // A quiet watch: nothing to send, so only the hang-up shows.
+                    tx.closed().await;
+                    open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
+                loop {
+                    tick.tick().await;
+                    if tx
+                        .send(Bytes::from_static(b"{\"type\":\"BOOKMARK\"}\n"))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            });
+            let mut r = Response::new(Feed(rx).boxed_unsync());
+            r.headers_mut()
+                .insert("content-type", "application/json".parse().expect("header"));
             return r;
         }
         drop(req);

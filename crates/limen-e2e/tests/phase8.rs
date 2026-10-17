@@ -4,169 +4,33 @@
 //! The API server is a test double (`limen_testkit::kube_api`). Real clusters
 //! are covered by `deploy/compose/demo-phase8.sh` on kind.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use http::{Request, StatusCode};
-use http_body_util::{BodyExt as _, Empty};
+use http_body_util::Empty;
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
-use limen_e2e::{Deployment, eventually};
+use limen_e2e::eventually;
 use limen_kube::ws::{self, Sender};
-use limen_proto::v1::admin_client::AdminClient;
-use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
-use limen_testkit::kube_api::KubeApi;
-use limen_testkit::users::{ADMIN, DEVELOPER};
-use limen_tunnel::tls::{Identity, client_config};
+use limen_testkit::users::DEVELOPER;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-const POLICY: &str = r#"
-kind: role
-version: v1
-metadata: { name: ops }
-spec:
-  allow:
-    - resources: { kind: [kubernetes], labels: { env: [test] } }
-      kube: { groups: ["limen:view", "limen:edit"] }
----
-kind: role
-version: v1
-metadata: { name: prod-only }
-spec:
-  allow:
-    - resources: { kind: [kubernetes], labels: { env: [prod] } }
-      kube: { groups: ["limen:view"] }
----
-kind: role_mapping
-version: v1
-metadata: { name: idp }
-spec:
-  - { idp_group: ops, roles: [ops] }
-  - { idp_group: guests, roles: [prod-only] }
----
-kind: resource
-version: v1
-metadata: { name: eks-dev, labels: { env: test } }
-spec:
-  kubernetes: { cluster_name: dev }
-  worker_selector: { pool: dev }
----
-kind: resource
-version: v1
-metadata: { name: eks-prod, labels: { env: prod } }
-spec:
-  kubernetes: { cluster_name: prod }
-  worker_selector: { pool: dev }
-"#;
+mod common;
 
-type Sender1 = hyper::client::conn::http1::SendRequest<Empty<Bytes>>;
-
-/// An HTTP/1.1 connection to the proxy, presenting `identity` if given.
-async fn connect(d: &Deployment, identity: Option<Identity>) -> Sender1 {
-    let roots =
-        limen_tunnel::tls::certs_from_pem(&std::fs::read_to_string(d.ca_file()).expect("ca"))
-            .expect("roots");
-    let tls = client_config(&roots, identity, &[limen_tunnel::alpn::HTTP1]).expect("tls");
-    let tcp = tokio::net::TcpStream::connect(d.proxy_addr)
-        .await
-        .expect("tcp");
-    let tls = tokio_rustls::TlsConnector::from(std::sync::Arc::new(tls))
-        .connect("localhost".try_into().expect("name"), tcp)
-        .await
-        .expect("tls handshake");
-    let (sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
-        .await
-        .expect("http");
-    tokio::spawn(async move {
-        let _ = conn.with_upgrades().await;
-    });
-    sender
-}
-
-async fn text(response: http::Response<hyper::body::Incoming>) -> (StatusCode, String) {
-    let status = response.status();
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body")
-        .to_bytes();
-    (status, String::from_utf8_lossy(&body).into_owned())
-}
-
-fn read_jsonl(d: &Deployment) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(d.dir.path().join("audit/control-plane.jsonl"))
-        .unwrap_or_default()
-        .lines()
-        .map(|l| serde_json::from_str(l).expect("json"))
-        .collect()
-}
+use common::{Env, connect, read_jsonl, text};
 
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread")]
 async fn kubectl_by_impersonation_with_recorded_exec() {
-    let Some(d) = Deployment::start().await else {
+    let Some(Env { d, api, worker, .. }) = Env::start().await else {
         return;
     };
-    let api = KubeApi::start("sa-token-123").await;
-    let ca_file = d.dir.path().join("kube-ca.pem");
-    let token_file = d.dir.path().join("kube-token");
-    std::fs::write(&ca_file, &api.ca_pem).expect("ca");
-    std::fs::write(&token_file, "sa-token-123\n").expect("token");
-
-    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
-    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
-    let applied = admin
-        .apply_policy(ApplyPolicyRequest {
-            sources: vec![PolicySource {
-                name: "policy.yaml".into(),
-                content: POLICY.into(),
-            }],
-            dry_run: false,
-            source_ref: String::new(),
-        })
-        .await
-        .expect("apply")
-        .into_inner();
-    let token = admin
-        .create_join_token(CreateJoinTokenRequest {
-            kind: "worker".into(),
-            ttl_seconds: 600,
-            labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
-            dns_names: vec![],
-        })
-        .await
-        .expect("token")
-        .into_inner()
-        .token;
-    let worker = d
-        .start_worker_with(
-            &token,
-            "worker",
-            &[
-                "--kube-cluster=dev".into(),
-                format!("--kube-api-server={}", api.url()),
-                format!("--kube-ca-file={}", ca_file.display()),
-                format!("--kube-token-file={}", token_file.display()),
-            ],
-        )
-        .await;
-    eventually(
-        Duration::from_secs(15),
-        "worker tunnels and policy",
-        || async {
-            d.proxy().tunnels.summaries().len() == 2
-                && d.proxy().policy_version() == Some(applied.version)
-                && worker.worker.policy_version() == Some(applied.version)
-        },
-    )
-    .await;
 
     let dev = d.login(DEVELOPER, &["ops"]).await.expect("developer");
 
     // 1. A plain request: the worker's credential and the user's impersonation,
     //    whatever the client tried to send.
-    let mut conn = connect(&d, Some(dev.clone())).await;
+    let mut conn = connect(&d, d.proxy_addr, Some(dev.clone())).await;
     let request = Request::get("/k8s/eks-dev/api/v1/namespaces/dev/pods?limit=5")
         .header("host", "localhost")
         .header("authorization", "Bearer stolen")
@@ -193,7 +57,7 @@ async fn kubectl_by_impersonation_with_recorded_exec() {
 
     // 2. Refusals never reach the cluster.
     let before = api.seen().len();
-    let mut conn = connect(&d, Some(dev.clone())).await;
+    let mut conn = connect(&d, d.proxy_addr, Some(dev.clone())).await;
     let (status, body) = text(
         conn.send_request(
             Request::get("/k8s/eks-prod/api/v1/pods")
@@ -214,7 +78,7 @@ async fn kubectl_by_impersonation_with_recorded_exec() {
         .login("outsider@example.com", &["guests"])
         .await
         .expect("login");
-    let mut conn = connect(&d, Some(outsider)).await;
+    let mut conn = connect(&d, d.proxy_addr, Some(outsider)).await;
     let (status, _) = text(
         conn.send_request(
             Request::get("/k8s/eks-dev/api/v1/pods")
@@ -227,7 +91,7 @@ async fn kubectl_by_impersonation_with_recorded_exec() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let mut conn = connect(&d, None).await;
+    let mut conn = connect(&d, d.proxy_addr, None).await;
     let (status, _) = text(
         conn.send_request(
             Request::get("/k8s/eks-dev/api/v1/pods")
@@ -243,7 +107,7 @@ async fn kubectl_by_impersonation_with_recorded_exec() {
     assert_eq!(api.seen().len(), before, "the cluster saw none of them");
 
     // 3. Only exec, attach, and port-forward may upgrade.
-    let mut conn = connect(&d, Some(dev.clone())).await;
+    let mut conn = connect(&d, d.proxy_addr, Some(dev.clone())).await;
     let (status, _) = text(
         conn.send_request(
             Request::get("/k8s/eks-dev/api/v1/namespaces/dev/pods?watch=true")
@@ -260,7 +124,7 @@ async fn kubectl_by_impersonation_with_recorded_exec() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // 4. exec over WebSocket: relayed untouched, recorded, audited.
-    let mut conn = connect(&d, Some(dev.clone())).await;
+    let mut conn = connect(&d, d.proxy_addr, Some(dev.clone())).await;
     let mut response = conn
         .send_request(
             Request::get("/k8s/eks-dev/api/v1/namespaces/dev/pods/web/exec?command=ls&command=-l&stdout=true&tty=true")

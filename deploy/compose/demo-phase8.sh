@@ -20,7 +20,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 state="$root/deploy/compose/.state/phase8"
 cluster="${LIMEN_DEMO_CLUSTER:-limen-demo8}"
 ctx="kind-$cluster"
-pg="limen-demo8-postgres"
+pg="${cluster}-postgres"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
@@ -85,7 +85,8 @@ docker rm -f "$pg" >/dev/null 2>&1 || true
 docker run -d --name "$pg" -e POSTGRES_USER=limen -e POSTGRES_PASSWORD=limen-dev-only -e POSTGRES_DB=limen \
   -p 127.0.0.1::5432 postgres:18-alpine >/dev/null
 pgport="$(docker port "$pg" 5432/tcp | head -1 | sed 's/.*://')"
-wait_for "postgres" docker exec "$pg" pg_isready -U limen
+# pg_isready also answers during the image's init-time server, which has no TCP listener. A TCP query does not.
+wait_for "postgres" docker exec "$pg" psql -h 127.0.0.1 -U limen -d limen -c "select 1"
 (
   cd "$root"
   KIND_API_SERVER="$api" KIND_CA_FILE="$state/ca.pem" KIND_TOKEN_FILE="$state/token" \
