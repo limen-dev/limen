@@ -14,7 +14,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 
 **Goals (v1)**
 - Log in with OIDC (Okta first) and turn IdP groups into roles. Credentials last 10 minutes by default.
-- Access, end to end: SSH (EC2 and any SSH host), RDS PostgreSQL and MySQL, Aurora (both engines), ElastiCache Redis, and EKS.
+- Access, end to end: SSH (EC2 and any SSH host), RDS PostgreSQL and MySQL, Aurora (both engines), ElastiCache for Redis and Valkey (and self-managed servers), and EKS.
 - Policy as YAML, deny by default, with resources selected by label.
 - Audit everything: a versioned JSON event schema, delivered at least once to S3 and Datadog, with Grafana over Athena.
 - Workers connect outbound only. No inbound ports into private networks.

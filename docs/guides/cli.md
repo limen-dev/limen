@@ -33,7 +33,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen status` | Show your identity, roles, and the time left on your credentials |
 | `limen ls [--json]` | List the resources you can access |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
-| `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any client; each connection is an audited session (see [the Redis guide](redis.md)) |
+| `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
 | `limen admin apply <files or dirs> [--dry-run] [--source-ref SHA]` | Validate and apply policy YAML; shows a coloured diff |
 | `limen admin policy` | Show the active policy version, digest, and author |

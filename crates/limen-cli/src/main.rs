@@ -1,6 +1,6 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts and Redis today, and (planned) databases, Kubernetes, MongoDB,
-//! search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, and Redis or Valkey today, and (planned)
+//! Kubernetes, MongoDB, search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -228,10 +228,10 @@ enum DbCommand {
 
 #[derive(Debug, Subcommand)]
 enum RedisCommand {
-    /// Open a local listener that redis-cli (or any client) connects to without a password.
+    /// Open a local listener that redis-cli (or any Redis or Valkey client) connects to without a password.
     Connect {
         resource: String,
-        /// The Redis user to act as. Optional when policy allows only one.
+        /// The Redis ACL user to act as (Valkey has the same). Optional when policy allows only one.
         #[arg(long)]
         user: Option<String>,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.

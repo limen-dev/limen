@@ -1,6 +1,6 @@
 # Redis and Valkey
 
-Connect with `redis-cli` (or any Redis client) through Limen. You never see a password: the worker logs in to the server as the Redis user your role names, checks every command against your role, and audits it. Design: [ADR-0034](../adr/0034-redis-and-valkey-access.md).
+Connect with `redis-cli` (or any Redis or Valkey client) through Limen. "Redis" below means both: they speak the same protocol, and the resource kind, command, and policy are all named `redis`. You never see a password: the worker logs in to the server as the Redis user (the ACL user, the same on Valkey) your role names, checks every command against your role, and audits it. Design: [ADR-0034](../adr/0034-redis-and-valkey-access.md).
 
 ## Connect
 
