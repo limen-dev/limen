@@ -277,6 +277,16 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         names,
         ["orders-mysql-staging", "orders-staging", "web-staging-1"]
     );
+    // SQL resources say which database `limen db connect` uses by default.
+    let default_of = |name: &str| {
+        listed
+            .resources
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| r.default_database.as_str())
+    };
+    assert_eq!(default_of("orders-staging"), Some("orders"));
+    assert_eq!(default_of("web-staging-1"), Some(""));
 
     // The developer is not an admin.
     let err = admin

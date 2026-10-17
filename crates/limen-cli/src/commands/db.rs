@@ -22,6 +22,8 @@ const IDLE: Duration = Duration::from_hours(1);
 struct Plan {
     kind: String,
     role: String,
+    /// The resource's `default_database`, if it has one.
+    default_database: Option<String>,
 }
 
 /// The resource's kind and the DB role to use: the one named, or the only one allowed.
@@ -60,6 +62,7 @@ async fn plan(proxy: Option<&str>, resource: &str, role: Option<&str>) -> anyhow
     Ok(Plan {
         kind: found.kind,
         role,
+        default_database: Some(found.default_database).filter(|d| !d.is_empty()),
     })
 }
 
@@ -99,6 +102,14 @@ pub async fn connect(
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
     profile.identity()?; // fail early on expired credentials
     let plan = plan(proxy, resource, db_role).await?;
+    // Fail here, not on the first client connection, where the user would
+    // only see the client's generic "lost connection".
+    let database = database.or(plan.default_database.as_deref());
+    if database.is_none() {
+        bail!(
+            "{resource} has no default database; name one: limen db connect {resource} --database <name>"
+        );
+    }
     let ca = profile::trusted_ca(&proxy_addr)?
         .with_context(|| format!("no CA pinned for {proxy_addr}"))?;
     let tls = Arc::new(client_config(

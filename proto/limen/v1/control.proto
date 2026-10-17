@@ -122,6 +122,8 @@ message Resource {
   string kind = 2;
   map<string, string> labels = 3;
   repeated string principals = 4;
+  // SQL resources: the database used when the user names none. Empty if there is none.
+  string default_database = 5;
 }
 
 message ListResourcesResponse {
