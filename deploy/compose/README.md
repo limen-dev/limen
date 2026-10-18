@@ -62,7 +62,7 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 ### Kubernetes (Phase 8)
 
-`deploy/compose/setup.sh --stacks kube` adds a kind cluster and a Kubernetes worker to this stack (`stacks/kube.yml`) and prints how to sign in and use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
+`deploy/compose/setup.sh --stacks kube` adds a Kubernetes cluster (k3s, a Compose service of this stack) and a Kubernetes worker (`stacks/kube.yml`) and prints how to sign in and use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
 
 ### Dev users
 
@@ -111,9 +111,9 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `redis` | `stacks/redis.yml` | `redis-target`, `valkey-target` (ACL users) |
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
-| `kube` | `stacks/kube.yml` | a kind cluster (created by `setup.sh`) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
+| `kube` | `stacks/kube.yml` | `kubernetes` (a k3s cluster in one privileged container, so it belongs to the project and `down -v` removes it) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
 
-**Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the kind cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
+**Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the k3s cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
 
 `setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
 

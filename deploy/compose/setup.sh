@@ -15,7 +15,7 @@
 # redis    Redis and Valkey with ACL users                      stacks/redis.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
-# kube     a kind cluster and a worker serving it               stacks/kube.yml
+# kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
 # the admin, applies examples/policy, and seeds the targets, so `limen ls` shows
@@ -72,9 +72,6 @@ if [ "$cmd" != up ]; then
   if [ "$cmd" = status ]; then exec "${compose[@]}" ps; fi
   "${compose[@]}" down -v --remove-orphans
   rm -f "$STACK_STATE/stack.env"
-  if [ -n "${KUBE_CLUSTER:-}" ] && stack_kind get clusters 2>/dev/null | grep -qx "$KUBE_CLUSTER"; then
-    stack_kind delete cluster --name "$KUBE_CLUSTER" >/dev/null 2>&1 && ui_ok "Deleted the kind cluster $KUBE_CLUSTER"
-  fi
   exit 0
 fi
 
@@ -120,7 +117,7 @@ export LIMEN_HOME="$state/home-admin"
 step "Build and start"
 (cd "$root" && cargo build --release -q -p limen-cli)
 if has kube; then
-  step "Kind cluster $KUBE_CLUSTER and the worker's service account"
+  step "Kubernetes cluster $KUBE_CLUSTER and the worker's service account"
   stack_kube_prepare
 fi
 "${compose[@]}" up -d --build --quiet-pull >/dev/null
