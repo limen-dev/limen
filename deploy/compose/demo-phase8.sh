@@ -14,6 +14,10 @@
 # Checked against kind, a real Kubernetes API server. Not checked against EKS
 # (no AWS account): see docs/guides/kubernetes.md for what differs.
 set -euo pipefail
+# The kind context lives in the default kubeconfig. A KUBECONFIG left over from
+# a previous run (env.sh points it at Limen's) would hide it, and kind would
+# write the new cluster into the wrong file.
+unset KUBECONFIG
 keep=false
 manual=false
 for arg in "$@"; do
