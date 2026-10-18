@@ -397,11 +397,12 @@ pub async fn db_statements(
         .collect()
 }
 
-/// `(statements, errors)` of a session.
+/// `(statements, errors)` of a session. Errors include Redis commands that
+/// policy refused.
 pub async fn db_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE statement_type IS NOT NULL) AS statements,
-                count(*) FILTER (WHERE status = 'error') AS errors
+                count(*) FILTER (WHERE status IN ('error', 'denied')) AS errors
          FROM db_statements WHERE session_id = $1",
     )
     .bind(id)
@@ -526,6 +527,16 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .execute(&mut *tx)
                 .await?;
             }
+            // Redis sessions have no recording either; their commands share the
+            // statements table (ADR-0034). The text holds key names (hashed if
+            // the resource asks) and never values.
+            EventKind::RedisCommand => {
+                project_redis_command(&mut tx, e, session_id, "allowed", None).await?;
+            }
+            EventKind::AuthDenied if text(&e.data, "action") == Some("redis") => {
+                project_redis_command(&mut tx, e, session_id, "denied", text(&e.data, "reason"))
+                    .await?;
+            }
             EventKind::DbQueryEnd => {
                 let Some(query_id) = text(&e.data, "query_id").and_then(|q| q.parse::<Uuid>().ok())
                 else {
@@ -563,6 +574,62 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         }
     }
     tx.commit().await
+}
+
+/// The command a Redis event names, as the console shows it: the command,
+/// its subcommand, then the arguments if the resource logs them, else the
+/// keys it touched.
+fn redis_statement(data: &serde_json::Value) -> String {
+    let words = |key: &str| -> Option<Vec<String>> {
+        data.get(key)?.as_array().map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+    };
+    let mut parts: Vec<String> = Vec::new();
+    parts.extend(text(data, "command").map(str::to_owned));
+    parts.extend(text(data, "subcommand").map(str::to_owned));
+    let listed = words("args").or_else(|| words("keys")).unwrap_or_default();
+    let shown = listed.len();
+    parts.extend(listed);
+    // The event lists at most 100 keys; say when there were more.
+    if let Some(total) = number(data, "keys_total")
+        && let Ok(total) = usize::try_from(total)
+        && total > shown
+    {
+        parts.push(format!("… (+{} more keys)", total - shown));
+    }
+    parts.join(" ")
+}
+
+async fn project_redis_command(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+    status: &str,
+    reason: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let statement = redis_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, statement_type, statement, truncated, status, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           statement_type = EXCLUDED.statement_type, statement = EXCLUDED.statement,
+           truncated = EXCLUDED.truncated, status = EXCLUDED.status, error = EXCLUDED.error",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "command").map_or_else(|| "redis".to_owned(), str::to_lowercase))
+    .bind((!statement.is_empty()).then_some(statement))
+    .bind(truncated)
+    .bind(status)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 // ---- browser sessions and logins -------------------------------------------

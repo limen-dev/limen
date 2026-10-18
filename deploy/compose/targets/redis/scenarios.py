@@ -513,6 +513,29 @@ def subscribing_after_pipelined_commands_keeps_order():
 
 
 @scenario
+def the_console_lists_the_commands_of_a_redis_session():
+    marker = f"console{int(time.time())}"
+    with Listener("cache-staging", who="dev", user="limen-rw") as l:
+        c = l.conn()
+        check(c.call("SET", f"lab:{marker}", "the-secret-value") == "OK")
+        check(c.call("GET", f"lab:{marker}") == b"the-secret-value")
+        check(denied(c.call("FLUSHALL")))
+    rows = ""
+    for _ in range(30):   # events reach the control plane in batches
+        r = compose("exec", "-T", "postgres", "psql", "-U", "limen", "-d", "limen", "-At", "-F", "|", "-c",
+                    "SELECT statement_type, statement, status FROM db_statements "
+                    f"WHERE statement LIKE '%{marker}%' OR (statement = 'FLUSHALL' AND status = 'denied') ORDER BY at")
+        rows = r.stdout
+        if f"GET lab:{marker}" in rows and "FLUSHALL" in rows:
+            break
+        time.sleep(2)
+    check(f"set|SET lab:{marker}|allowed" in rows, rows)
+    check(f"get|GET lab:{marker}|allowed" in rows, rows)
+    check("flushall|FLUSHALL|denied" in rows, rows)
+    check("the-secret-value" not in rows, "values never reach the console table")
+
+
+@scenario
 def developer_readonly_user_gets_two_layers_of_control():
     with Listener("cache-staging", who="dev", user="limen-ro") as l:
         c = l.conn()

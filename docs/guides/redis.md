@@ -41,6 +41,8 @@ A role grants Redis users with optional limits (`docs/policy.md` has the full sy
 
 One `redis.command` event per command, **before** it is forwarded (if it can't be written, the command is refused): the user, session, command, subcommand, key names, argument count, resource, and Redis user. **Values are not logged.** A target can opt in with `audit.log_values: true`, and can hash key names with `audit.redact_keys: true`. `AUTH`, `HELLO`, `ACL`, `MIGRATE`, and `CONFIG` arguments are never logged. A refused command is an `auth.denied` event with `action: redis`. `session.start` and `session.end` carry `kind: redis`. Locking a user or killing a session ends the Redis session like any other.
 
+**In the console**, a Redis session's page lists its commands (time, command, outcome), up to 500, newest last, including the ones policy refused. Redis sessions have no terminal recording; this list is the record. It shows the command and the key names (hashed if the resource sets `audit.redact_keys`), and the arguments only if the resource sets `audit.log_values`; values are never kept otherwise. The console keeps this text in the control plane's database for 30 days (table `db_statements`, shared with SQL sessions), visible only to admins and to the session's own user. The complete trail stays in S3 and Datadog. A command's outcome is "allowed" (policy let it through; it was audited and forwarded) or "refused" (with the reason); the server's reply is not recorded, so a command the server's own ACL rejects still shows as allowed.
+
 ## Operating it
 
 **Resource**
