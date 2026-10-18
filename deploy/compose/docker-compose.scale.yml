@@ -1,5 +1,6 @@
 # Limen scale-out stack (Phase 5): three control planes on one database,
-# three proxies, three workers, an SSH target, S3, Postgres, and Dex.
+# three proxies, three workers, S3, Postgres, and Dex. Targets (ssh, db, redis,
+# datadog...) layer on like the single stack: deploy/compose/stack.sh --scale up.
 #
 #   docker compose -f deploy/compose/docker-compose.scale.yml up -d --build
 #   deploy/compose/demo-phase5.sh          # the exit test for Phase 5
@@ -22,6 +23,8 @@ x-control-plane: &control-plane
   build: { <<: *limen-build, target: control-plane }
   image: limen-control-plane:scale
   restart: unless-stopped
+  env_file:
+    - { path: .state/stack.env, required: false }   # written by stack.sh (datadog, bots, redis wiring)
   # Longer than LIMEN_DRAIN_TIMEOUT, so a stop (SIGTERM) drains and hands
   # off instead of being cut short by Docker's SIGKILL.
   stop_grace_period: 40s
@@ -83,6 +86,8 @@ x-worker: &worker
   build: { <<: *limen-build, target: worker }
   image: limen-worker:scale
   restart: unless-stopped
+  env_file:
+    - { path: .state/stack.env, required: false }   # written by stack.sh (datadog, bots, redis wiring)
   # Longer than the workers' LIMEN_DRAIN_TIMEOUT_SECS (20 here) plus 18 s,
   # so a stop (SIGTERM) lets open sessions finish, ends the rest, and
   # uploads their recordings before Docker's SIGKILL.
@@ -226,6 +231,9 @@ services:
     volumes:
       - worker-0-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
+      - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
 
   worker-1:
     <<: *worker
@@ -233,6 +241,9 @@ services:
     volumes:
       - worker-1-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
+      - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
 
   worker-2:
     <<: *worker
@@ -240,17 +251,14 @@ services:
     volumes:
       - worker-2-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
-
-  # The dev stack's SSH target (trusts only Limen per-session certificates).
-  sshd-target:
-    build: ./targets/sshd
-    image: limen-sshd-target:scale
-    restart: unless-stopped
-    volumes:
-      - ca-public:/etc/ssh/limen:ro
+      - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
 
 volumes:
   postgres: {}
+  db-tls: {}
+  db-secrets: {}
   s3-data: {}
   cp-ca: {}
   ca-public: {}

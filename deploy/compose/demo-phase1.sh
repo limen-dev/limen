@@ -12,7 +12,9 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/deploy/compose"
 # shellcheck source=dev-users.sh
 source "$here/dev-users.sh"
-compose=(docker compose --progress=quiet -f "$here/docker-compose.yml" --profile ssh --profile observability)
+# shellcheck source=stack-lib.sh
+source "$here/stack-lib.sh"
+stack_setup ssh observability bots
 export LIMEN_HOME="$here/.state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY=localhost:3443

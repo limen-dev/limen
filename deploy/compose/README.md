@@ -14,42 +14,74 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
 | `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy). Profile `ssh` | none |
 
-## Core and target stacks
+## Stacks
 
-`docker-compose.yml` is the core Limen needs to run: `postgres`, `dex`, `kms`, `s3`, the audit fakes (`fake-datadog`, `fake-ci-issuer`), `control-plane`, `proxy`, and `worker`. Everything Limen connects *to* lives in its own compose file behind a profile, and the core pulls them in with `include`:
+Limen is one stack and everything it connects to or reports to is another, each its own compose file layered on with `-f` (and a profile of the same name):
 
-| Profile | File | Adds |
+| Stack | File | Adds |
 |---|---|---|
+| limen | `docker-compose.yml` | `postgres`, `dex`, `s3`, `kms`, `control-plane`, `proxy`, `worker`. Postgres holds state, S3 the audit batches and recordings |
+| limen, scaled | `docker-compose.scale.yml` | the same with 3 control planes, 3 proxies, 3 workers (ports 23xxx; replaces the line above) |
 | `ssh` | `docker-compose.ssh-target.yml` | `sshd-target` |
-| `db` | `docker-compose.db-targets.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`) |
+| `db` | `docker-compose.db-targets.yml`, `docker-compose.db-tools.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`), the role bootstrap |
 | `redis` | `docker-compose.redis-targets.yml` | `redis-target`, `valkey-target` (ACL users) |
-| `observability` | `docker-compose.observability.yml` | `trino`, `trino-init`, `grafana` (http://localhost:3000) |
+| `observability` | `docker-compose.observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
+| `bots` | `docker-compose.bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
 
-`stack.sh` starts the core plus the stacks you name (all of them by default), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
+`stack.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
 
 ```sh
-deploy/compose/stack.sh up                # everything
-deploy/compose/stack.sh up ssh redis      # core + SSH + Redis only
+deploy/compose/stack.sh up                  # limen + every stack
+deploy/compose/stack.sh up ssh redis        # limen + SSH + Redis
+deploy/compose/stack.sh --scale up ssh db   # scaled limen + SSH + databases
 deploy/compose/stack.sh status
-deploy/compose/stack.sh down              # removes the volumes too
+deploy/compose/stack.sh down                # removes the volumes too (add --scale for the scaled one)
 ```
 
-By hand it is `docker compose -f deploy/compose/docker-compose.yml --profile ssh --profile db up -d --build`. The isolated phase stacks (`docker-compose.{scale,db,redis}.yml`) stay separate projects on other ports so each demo can run beside this one; `docker-compose.redis.yml` and `docker-compose.db.yml` reuse the same target files.
+Demos use the same helper (`stack-lib.sh`). The isolated Phase 6 and 7 stacks (`docker-compose.{db,redis}.yml`) stay separate projects on other ports, reusing the target files, so each can run beside this one. Both limen variants publish their ports on 127.0.0.1, so run one at a time per variant.
 
 Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
 
 ## Quick start
 
-You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`.
+### Requirements
+
+`setup.sh` checks these first and stops with install instructions for anything missing.
+
+| Needed | Why | Install |
+|---|---|---|
+| Docker with Compose v2.24 or newer, and a running daemon | runs every service | macOS: [OrbStack](https://orbstack.dev) (`brew install --cask orbstack`) or Docker Desktop. Linux: [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin |
+| Rust toolchain from `mise.toml` (and `protoc`) | builds the `limen` CLI | `mise install` ([mise](https://mise.jdx.dev)), or [rustup](https://rustup.rs). Skip it by setting `LIMEN_BIN` to an existing `limen` binary |
+| `curl` | health checks and the scripted logins | your package manager |
+| OpenSSH client | only if you enable the `ssh` stack (`limen ssh`) | your package manager |
+| Free host ports | see the table in [Stacks](#stacks); `setup.sh` reports any that are taken, and by what | stop the other stack |
+
+The scripts are plain bash, written for macOS (tested) and Linux (untested). On Windows, run them inside WSL 2 (untested). The first build takes several minutes.
+
+### Run it
 
 ```sh
-deploy/compose/demo-phase1.sh        # builds everything, resets the stack, checks every Phase 1 criterion
+deploy/compose/setup.sh
 ```
 
-Or step by step:
+It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends by listing every port and how the services connect. `setup.sh --yes` enables everything without asking, and `--scale --stacks ssh,redis` picks explicitly. Stop it with `deploy/compose/stack.sh down` (add `--scale` for a scaled one).
+
+Then log in as the developer and try a resource:
 
 ```sh
-docker compose -f deploy/compose/docker-compose.yml --profile ssh up -d --build   # or: deploy/compose/stack.sh up
+export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443 LIMEN_HOME=deploy/compose/.state/home-dev
+LIMEN_DEV_CA=deploy/compose/.state/internal-ca.pem deploy/compose/dev-login.sh developer@example.com
+limen ls
+limen ssh web-staging-1 -- uptime
+```
+
+To check a phase's exit criteria instead, run its demo, which builds and resets its own stack: `deploy/compose/demo-phase1.sh`.
+
+### By hand
+
+```sh
+deploy/compose/stack.sh up ssh                     # or any other stacks; it starts Limen and applies the policy
+# Without stack.sh: docker compose -f deploy/compose/docker-compose.yml up -d --build
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
 
 # The proxy's certificate comes from the Limen internal CA. Pin it once.
@@ -103,7 +135,7 @@ limen ssh web-staging-1 -- uptime             # one command
 limen ssh root@web-staging-1                  # denied, and audited
 limen config ssh >> ~/.ssh/config && ssh ubuntu@web-staging-1.limen
 
-docker compose -f deploy/compose/docker-compose.yml --profile ssh logs sshd-target | grep 'Accepted certificate'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.ssh-target.yml --profile ssh logs sshd-target | grep 'Accepted certificate'
 docker compose -f deploy/compose/docker-compose.yml cp worker:/var/lib/limen/worker/recordings ./recordings
 asciinema play recordings/<session-id>.cast   # if you have asciinema 3.x
 ```
@@ -116,8 +148,9 @@ PostgreSQL 18 and MySQL 8.4 targets with TLS, a `limen_admin` login, and a seede
 
 ```sh
 deploy/compose/demo-phase6.sh          # psql and mysql through `limen db connect`, bootstrap, audit, cancel, lock
-docker compose -f deploy/compose/docker-compose.yml --profile db up -d postgres-target mysql-target db-secrets-init
-docker compose -f deploy/compose/docker-compose.yml --profile db run --rm db-bootstrap --db-bootstrap-once   # create the limen_* roles
+db=(-f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.db-targets.yml -f deploy/compose/docker-compose.db-tools.yml --profile db)
+docker compose "${db[@]}" up -d postgres-target mysql-target db-secrets-init
+docker compose "${db[@]}" --profile tools run --rm db-bootstrap --db-bootstrap-once   # create the limen_* roles
 ```
 
 The demo runs its own project (`limen-dbdemo`, `docker-compose.db.yml`) on other host ports, so it can run next to the dev stack. The roles and resources come from `examples/policy`; the worker reads role passwords from the `db-secrets` volume and verifies the databases against the `db-tls` CA. Guide: [`docs/guides/databases.md`](../../docs/guides/databases.md). Runbook: [`docs/runbooks/database-onboarding.md`](../../docs/runbooks/database-onboarding.md).

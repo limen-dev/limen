@@ -1,0 +1,14 @@
+# Fake CI identity issuer for bots (profile `bots`, ADR-0019). stack.sh also
+# lets the control plane trust plain-http issuers (LIMEN_BOT_ALLOW_INSECURE_ISSUERS).
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+services:
+  # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).
+  # DEVELOPMENT ONLY: it mints any token to anyone who asks.
+  fake-ci-issuer:
+    profiles: ["bots"]
+    build: { <<: *limen-build, target: fake-ci-issuer }
+    image: limen-fake-ci-issuer:dev
+    ports: ["127.0.0.1:8130:8130"]

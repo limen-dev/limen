@@ -28,7 +28,9 @@ here="$root/deploy/compose"
 # shellcheck source=dev-users.sh
 source "$here/dev-users.sh"
 state="$here/.state-scale"
-compose=(docker compose --progress=quiet -p limen-scale -f "$here/docker-compose.scale.yml")
+# shellcheck source=stack-lib.sh
+source "$here/stack-lib.sh"
+stack_setup --scale ssh
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY=localhost:23443

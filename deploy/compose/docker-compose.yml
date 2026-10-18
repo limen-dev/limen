@@ -6,17 +6,12 @@
 # development only: static tokens, Dex static passwords, file-backed CA keys.
 name: limen
 
-# Targets and optional tooling live in their own files, each behind a profile:
-#   ssh            docker-compose.ssh-target.yml      OpenSSH host
-#   db             docker-compose.db-targets.yml      PostgreSQL and MySQL (Phase 6)
-#   redis          docker-compose.redis-targets.yml   Redis and Valkey (Phase 7)
-#   observability  docker-compose.observability.yml   Trino and Grafana
-# deploy/compose/stack.sh starts core plus whichever profiles you name.
-include:
-  - docker-compose.ssh-target.yml
-  - docker-compose.db-targets.yml
-  - docker-compose.redis-targets.yml
-  - docker-compose.observability.yml
+# The core: what Limen needs to run (Postgres, Dex, S3, KMS emulator, control
+# plane, proxy, worker). Everything it connects to or reports to is a separate
+# stack file, layered on with -f. deploy/compose/stack.sh does that for you:
+#   ssh  db  redis  datadog  dashboards  bots
+# Stack wiring that needs a setting on a Limen service (a Datadog URL, the
+# Redis credentials) goes through .state/stack.env, which stack.sh writes.
 
 x-limen-image: &limen-build
   context: ../..
@@ -66,28 +61,16 @@ services:
     ports: ["127.0.0.1:8333:8333"]
     volumes: [s3-data:/data, "./s3/s3.json:/etc/seaweedfs/s3.json:ro"]
 
-  # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
-  fake-datadog:
-    build: { <<: *limen-build, target: fake-datadog }
-    image: limen-fake-datadog:dev
-    ports: ["127.0.0.1:8126:8126"]
-
-  # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).
-  # DEVELOPMENT ONLY: it mints any token to anyone who asks.
-  fake-ci-issuer:
-    build: { <<: *limen-build, target: fake-ci-issuer }
-    image: limen-fake-ci-issuer:dev
-    ports: ["127.0.0.1:8130:8130"]
-
   control-plane:
     build: { <<: *limen-build, target: control-plane }
     image: limen-control-plane:dev
     restart: unless-stopped
+    env_file:
+      - { path: .state/stack.env, required: false }   # written by stack.sh: datadog, bots, redis wiring
     depends_on:
       postgres: { condition: service_healthy }
       dex: { condition: service_started }
       s3: { condition: service_started }
-      fake-datadog: { condition: service_started }
     environment:
       RUST_LOG: info
       LIMEN_ID: control-plane-1
@@ -102,7 +85,7 @@ services:
       LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
       LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
       LIMEN_PROXY_DNS_NAMES: localhost,proxy
-      # Every component's audit events end up here (and in S3 and Datadog below).
+      # Every component's audit events end up here and in S3 (and Datadog, with the datadog stack).
       LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
       LIMEN_AUDIT_S3_BUCKET: limen-audit
       LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
@@ -113,14 +96,10 @@ services:
       AWS_ACCESS_KEY_ID: dev
       AWS_SECRET_ACCESS_KEY: dev-only-secret
       AWS_REGION: us-east-1
-      LIMEN_DATADOG_LOGS_URL: http://fake-datadog:8126/api/v2/logs
-      DD_API_KEY: dev-only-datadog-key
       LIMEN_ENVIRONMENT: dev
       # The web console, served by the proxy at https://localhost:3443/console/
       LIMEN_CONSOLE_PUBLIC_URL: https://localhost:3443
       LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
-      # Bots (ADR-0019): the dev stack's fake CI issuer is plain http.
-      LIMEN_BOT_ALLOW_INSECURE_ISSUERS: "true"
     ports: ["127.0.0.1:3081:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca
@@ -154,6 +133,8 @@ services:
     image: limen-worker:dev
     restart: unless-stopped
     depends_on: [proxy]
+    env_file:
+      - { path: .state/stack.env, required: false }   # written by stack.sh: datadog, bots, redis wiring
     environment:
       RUST_LOG: info
       LIMEN_PROXY_ADDR: proxy:3443
@@ -161,55 +142,18 @@ services:
       LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
       LIMEN_JOIN_TOKEN: *worker-token
       LIMEN_DATA_DIR: /var/lib/limen/worker
-      # Phase 7: the ACL passwords of the Redis users the roles name.
-      LIMEN_REDIS_CREDENTIALS_FILE: /etc/limen/redis-credentials.json
     volumes:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
+      # Phase 7: ACL passwords of the Redis users (read when the redis stack sets LIMEN_REDIS_CREDENTIALS_FILE).
       - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
-      # Phase 6: the database CA, and one password file per database role.
-      - db-tls:/var/lib/limen/db-tls:ro
-      - db-secrets:/var/lib/limen/db-secrets
-
-  # Phase 6: the admin login the role bootstrap uses (ADR-0033). Dev only.
-  db-secrets-init:
-    profiles: ["db"]
-    image: alpine:3.22
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        printf 'limen-admin-dev-only' > /s/.admin && mkdir -p /s/postgres /s/mysql &&
-        chown -R 65532:65532 /s && chmod 700 /s /s/postgres /s/mysql && chmod 600 /s/.admin
-    volumes: [db-secrets:/s]
-
-  # Phase 6: create and repair the limen_* database roles, then exit.
-  #   docker compose --profile db run --rm db-bootstrap [--db-bootstrap-check]
-  db-bootstrap:
-    profiles: ["tools"]
-    build: { <<: *limen-build, target: worker }
-    image: limen-worker:dev
-    command: ["--db-bootstrap-once"]
-    depends_on:
-      proxy: { condition: service_started }
-      db-secrets-init: { condition: service_completed_successfully }
-      postgres-target: { condition: service_healthy }
-      mysql-target: { condition: service_healthy }
-    environment:
-      RUST_LOG: info
-      LIMEN_PROXY_ADDR: proxy:3443
-      LIMEN_PROXY_NAME: proxy
-      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
-      LIMEN_JOIN_TOKEN: *worker-token
-      LIMEN_DATA_DIR: /var/lib/limen/worker
-    volumes:
-      - bootstrap-data:/var/lib/limen/worker
-      - ca-public:/var/lib/limen/ca-public:ro
+      # Phase 6: the database CA and one password file per database role (filled by the db stack).
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
 
 volumes:
   db-secrets: {}
-  bootstrap-data: {}
+  db-tls: {}
   postgres: {}
   cp-ca: {}
   ca-public: {}

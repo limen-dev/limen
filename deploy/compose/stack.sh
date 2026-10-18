@@ -1,46 +1,43 @@
 #!/usr/bin/env bash
-# Start the dev stack: the Limen core plus the target stacks you pick.
+# Start Limen and the stacks you pick, for development.
 #
-#   deploy/compose/stack.sh up                   # core + every target stack
-#   deploy/compose/stack.sh up ssh redis         # core + only those
-#   deploy/compose/stack.sh status
-#   deploy/compose/stack.sh down                 # also removes volumes
+#   deploy/compose/stack.sh up                    # Limen + every stack
+#   deploy/compose/stack.sh up ssh redis          # Limen + only those
+#   deploy/compose/stack.sh --scale up ssh db     # scaled Limen (3 of each component)
+#   deploy/compose/stack.sh status | down [--scale]
 #
-# Core (docker-compose.yml): postgres, dex, kms, s3, control plane, proxy, worker.
-# Target stacks, one compose file and profile each:
-#   ssh            OpenSSH host that trusts Limen certificates
-#   db             PostgreSQL and MySQL with TLS (roles bootstrapped here)
-#   redis          Redis and Valkey with ACL users
-#   observability  Trino and Grafana over the S3 audit batches
+# limen    postgres, dex, s3, kms, control plane, proxy, worker (always).
+#          docker-compose.yml, or docker-compose.scale.yml with --scale.
+# ssh      OpenSSH host that trusts Limen certificates
+# db       PostgreSQL and MySQL with TLS; the limen_* roles are bootstrapped
+# redis    Redis and Valkey with ACL users
+# observability  fake Datadog Logs intake (an audit sink) plus Trino and Grafana
+# bots     fake CI identity issuer (bot logins)
+# `stack.sh up none` starts Limen alone. For prompts and prerequisite checks use setup.sh.
 #
 # `up` also pins the CA, signs in as the admin, applies examples/policy, and
 # seeds the targets, so `limen ls` shows everything straight away.
-# Development only. The per-phase demos (demo-phase*.sh) are unchanged.
+# Development only. The per-phase demos (demo-phase*.sh) are separate.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/deploy/compose"
 # shellcheck source=dev-users.sh
 source "$here/dev-users.sh"
-state="$here/.state"
-all=(ssh db redis observability)
+# shellcheck source=stack-lib.sh
+source "$here/stack-lib.sh"
 
+scale=()
+if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
 cmd="${1:-up}"
 [ $# -gt 0 ] && shift
-profiles=("$@")
-[ ${#profiles[@]} -eq 0 ] && profiles=("${all[@]}")
-for p in ${profiles[@]+"${profiles[@]}"}; do
-  case " ${all[*]} " in *" $p "*) ;; *) echo "unknown stack '$p' (choose from: ${all[*]})" >&2; exit 2 ;; esac
-done
-has() { case " ${profiles[*]} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
-
-flags=()
-if [ "$cmd" = down ]; then
-  for p in "${all[@]}" tools; do flags+=(--profile "$p"); done
-else
-  for p in ${profiles[@]+"${profiles[@]}"}; do flags+=(--profile "$p"); done
-fi
-compose=(docker compose --progress=quiet -f "$here/docker-compose.yml" "${flags[@]}")
+if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
+stacks=("$@")
+[ ${#stacks[@]} -eq 0 ] && stacks=("${STACK_NAMES[@]}")
+[ "${stacks[0]}" = none ] && stacks=()
+[ "$cmd" = down ] && stacks=("${STACK_NAMES[@]}")
+stack_setup ${scale[@]+"${scale[@]}"} ${stacks[@]+"${stacks[@]}"} || exit 2
+has() { case " ${stacks[*]:-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
@@ -52,32 +49,39 @@ wait_for() {
 
 case "$cmd" in
   status) exec "${compose[@]}" ps ;;
-  down) exec "${compose[@]}" down -v --remove-orphans ;;
+  down) "${compose[@]}" down -v --remove-orphans; rm -f "$here/.state/stack.env"; exit 0 ;;
   up) ;;
-  *) echo "usage: stack.sh [up|down|status] [${all[*]}]" >&2; exit 2 ;;
+  *) echo "usage: stack.sh [--scale] [up|down|status] [${STACK_NAMES[*]}]" >&2; exit 2 ;;
 esac
 
+state="$STACK_STATE"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:3443
+export LIMEN_PROXY="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
 export LIMEN_HOME="$state/home-admin"
 
-step "Build and start: core + ${profiles[*]}"
+if [ -z "${LIMEN_PREFLIGHT_DONE:-}" ]; then
+  step "Checking prerequisites"
+  stack_preflight ${scale[@]+"${scale[@]}"} ${stacks[@]+"${stacks[@]}"} || fail "fix the items above and run again"
+fi
+
+step "Build and start: limen${scale[*]:+ (scaled)} + ${stacks[*]:-no extra stacks}"
 (cd "$root" && cargo build --release -q -p limen-cli)
 "${compose[@]}" up -d --build --quiet-pull >/dev/null
-wait_for "proxy readiness" curl -sf http://localhost:3444/readyz
+wait_for "proxy readiness" curl -sf "http://$STACK_HEALTH/readyz"
 mkdir -p "$state"
-"${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
+"${compose[@]}" cp "$STACK_CP:/var/lib/limen/ca-public/internal-ca.pem" "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
 "$here/dev-login.sh" "$ADMIN" >/dev/null
 "$LIMEN_BIN" admin apply "$root/examples/policy" --source-ref stack.sh >/dev/null
-wait_for "worker tunnels" sh -c "curl -sf http://localhost:3444/tunnels | grep -q worker_id"
+wait_for "worker tunnels" sh -c "curl -sf http://$STACK_HEALTH/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
+"$here/dev-login.sh" "$ADMIN" >/dev/null # roles are fixed at login: sign in again to get the applied ones
 
 if has db; then
   step "Database role bootstrap"
   wait_for "postgres-target" "${compose[@]}" exec -T postgres-target pg_isready -U postgres
   wait_for "mysql-target" "${compose[@]}" exec -T mysql-target mysqladmin ping -h 127.0.0.1 -uroot -pmysql-target-dev-only --silent
-  "${compose[@]}" --profile tools run --rm db-bootstrap --db-bootstrap-once >/dev/null 2>&1 || fail "db bootstrap failed"
+  "${compose[@]}" run --rm db-bootstrap --db-bootstrap-once >/dev/null 2>&1 || fail "db bootstrap failed"
 fi
 if has redis; then
   step "Seed Redis and Valkey"
@@ -89,11 +93,13 @@ fi
 
 step "Ready"
 "$LIMEN_BIN" ls | sed 's/^/  /'
-cat <<EOF
+stack_summary ${scale[@]+"${scale[@]}"} ${stacks[@]+"${stacks[@]}"}
+cat <<TRY
 
-  Console   https://localhost:3443/console/   (curl/browsers need --cacert $state/internal-ca.pem)
-  Dex       http://localhost:5556              admin@example.com / password
-$(has observability && echo "  Grafana   http://localhost:3000              admin / limen-dev-only")
-  CLI       export LIMEN_PROXY=localhost:3443 LIMEN_HOME=$state/home-admin
-  Stop      deploy/compose/stack.sh down
-EOF
+Try it (admin@example.com is signed in; developer@example.com has the day-to-day role)
+  export PATH="$root/target/release:\$PATH" LIMEN_PROXY=$STACK_PROXY LIMEN_DEX_URL=$STACK_DEX
+  export LIMEN_DEV_CA=$state/internal-ca.pem LIMEN_HOME=$state/home-dev
+  $here/dev-login.sh developer@example.com
+  limen ls
+  Console: https://$STACK_PROXY/console/    Stop: deploy/compose/stack.sh${scale[*]:+ --scale} down
+TRY
