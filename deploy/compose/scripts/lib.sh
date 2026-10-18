@@ -46,6 +46,7 @@ ui_bad() { # ui_bad LABEL MESSAGE HINT
   [ -n "${3:-}" ] && printf '      %s%s %s%s\n' "$C_DIM" "$G_HINT" "$3" "$C_RESET"
   return 0
 }
+ui_warn() { ui_init; printf '  %s! %s%s\n' "$C_YELLOW" "$*" "$C_RESET"; }
 ui_done() { ui_init; printf '\n%s%s %s%s\n' "$C_BOLD$C_GREEN" "$G_OK" "$*" "$C_RESET"; }
 
 stack_setup() {
@@ -82,8 +83,8 @@ stack_setup() {
       bots) files+=(-f "$here/stacks/bots.yml")
             env+=(LIMEN_BOT_ALLOW_INSECURE_ISSUERS=true) ;;
       kube) files+=(-f "$here/stacks/kube.yml")
-            KUBE_CLUSTER="${LIMEN_KIND_CLUSTER:-kubernetes-$LIMEN_ENV}"
-            export LIMEN_KIND_NODE="$KUBE_CLUSTER-control-plane" LIMEN_KUBE_DIR="$STACK_STATE/kube"
+            KUBE_CLUSTER="kubernetes-$LIMEN_ENV"
+            export LIMEN_KUBE_DIR="$STACK_STATE/kube"
             export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
@@ -107,7 +108,7 @@ stack_describe() {
     redis) echo "Redis and Valkey with ACL users (limen redis connect)" ;;
     observability) echo "fake Datadog intake, plus Trino and Grafana over the audit log" ;;
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
-    kube) echo "a kind cluster and a worker that serves it (limen kube login)" ;;
+    kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
   esac
 }
 
@@ -120,7 +121,6 @@ _hint() { # _hint docker|cargo|curl|ssh: how to install it on this OS
     cargo:*) echo "install the toolchain in mise.toml with 'mise install' (https://mise.jdx.dev) or rustup (https://rustup.rs); or set LIMEN_BIN to an existing limen binary" ;;
     curl:Darwin) echo "brew install curl" ;;
     curl:*) echo "install it with your package manager (apt install curl, dnf install curl, ...)" ;;
-    kind:*) echo "install it with 'mise install' (kind is pinned in mise.toml) or https://kind.sigs.k8s.io/docs/user/quick-start/#installation" ;;
     kubectl:*) echo "install it with 'mise install' (kubectl is pinned in mise.toml) or https://kubernetes.io/docs/tasks/tools/" ;;
     ssh:Darwin) echo "OpenSSH ships with macOS; check that 'ssh' is on PATH" ;;
     ssh:*) echo "install the OpenSSH client (apt install openssh-client, dnf install openssh-clients, ...)" ;;
@@ -225,9 +225,8 @@ stack_preflight() {
   fi
 
   if $want_kube; then
-    if command -v kind >/dev/null 2>&1 || { command -v mise >/dev/null 2>&1 && mise exec -- kind version >/dev/null 2>&1; }; then ok kind
-    else miss kind "$(_hint kind)"; fi
-    if command -v kubectl >/dev/null 2>&1; then ok kubectl; else miss kubectl "$(_hint kubectl)"; fi
+    if command -v kubectl >/dev/null 2>&1; then ok kubectl
+    else ui_warn "kubectl not found: setup works without it, but you need it to use the cluster ($(_hint kubectl))"; fi
   fi
 
   local project=limen port name what holder proj row hint
@@ -269,29 +268,19 @@ stack_summary() {
   while IFS='|' read -r port name what _; do
     [ -n "$port" ] && printf "  ${C_BOLD}%-6s${C_RESET} %-24s ${C_DIM}%s${C_RESET}\n" "$port" "$name" "$what"
   done < <(stack_ports ${scale[@]+"${scale[@]}"} "$@")
-  ui_note "Databases, Redis, the SSH host and the kind cluster are reached through Limen, not published."
+  ui_note "Databases, Redis, the SSH host and the Kubernetes cluster are reached through Limen, not published."
   return 0
 }
 
-# kind, from PATH or from mise.
-stack_kind() { if command -v kind >/dev/null 2>&1; then kind "$@"; else mise exec -- kind "$@"; fi; }
-
-# Creates the kind cluster, the worker's service account, and the files the kube worker
-# mounts ($LIMEN_KUBE_DIR). Needs stack_setup kube to have run, and $root.
+# Starts the cluster, applies the worker's service account, and writes the token and CA the
+# kube worker mounts ($LIMEN_KUBE_DIR). Needs stack_setup kube to have run, and $root. Uses
+# the kubectl inside the cluster container, so the host needs none.
 stack_kube_prepare() {
-  # The kind cluster's kubeconfig lives in the stack's state directory: the one
-  # in $KUBECONFIG or ~/.kube/config is never read or written.
-  unset KUBECONFIG
+  local k=("${compose[@]}" exec -T kubernetes kubectl) tok
   mkdir -p "$LIMEN_KUBE_DIR"
-  KIND_KUBECONFIG="$STACK_STATE/kind.kubeconfig"
-  if ! stack_kind get clusters 2>/dev/null | grep -qx "$KUBE_CLUSTER"; then
-    stack_kind create cluster --name "$KUBE_CLUSTER" --kubeconfig "$KIND_KUBECONFIG" --wait 180s >/dev/null 2>&1 \
-      || fail "could not create the kind cluster $KUBE_CLUSTER"
-  fi
-  stack_kind export kubeconfig --name "$KUBE_CLUSTER" --kubeconfig "$KIND_KUBECONFIG" >/dev/null 2>&1 \
-    || fail "could not read the kubeconfig of the kind cluster $KUBE_CLUSTER"
-  local k=(kubectl --kubeconfig "$KIND_KUBECONFIG")
-  "${k[@]}" apply -f "$root/deploy/kubernetes/access/limen-kube-worker.yaml" -f "$root/deploy/kubernetes/access/limen-groups.yaml" >/dev/null
+  "${compose[@]}" up -d --wait kubernetes >/dev/null 2>&1 || fail "the Kubernetes cluster did not become ready"
+  "${k[@]}" apply -f - <"$root/deploy/kubernetes/access/limen-kube-worker.yaml" >/dev/null
+  "${k[@]}" apply -f - <"$root/deploy/kubernetes/access/limen-groups.yaml" >/dev/null
   "${k[@]}" apply -f - >/dev/null <<'YAML'
 apiVersion: v1
 kind: Secret
@@ -301,12 +290,16 @@ metadata:
   annotations: { kubernetes.io/service-account.name: limen-kube-worker }
 type: kubernetes.io/service-account-token
 YAML
-  wait_for "the service account token" bash -c "kubectl --kubeconfig '$KIND_KUBECONFIG' -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' | grep -q ."
-  "${k[@]}" -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' | base64 -d >"$LIMEN_KUBE_DIR/token"
-  "${k[@]}" config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$LIMEN_KUBE_DIR/ca.pem"
+  for _ in $(seq 1 120); do
+    tok="$("${k[@]}" -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' 2>/dev/null || true)"
+    [ -n "$tok" ] && break
+    sleep 0.5
+  done
+  [ -n "$tok" ] || fail "no service account token for the Limen kube worker"
+  printf '%s' "$tok" | base64 -d >"$LIMEN_KUBE_DIR/token"
+  "${k[@]}" -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.ca\.crt}' | base64 -d >"$LIMEN_KUBE_DIR/ca.pem"
   # The worker runs as a different user in a container.
   chmod 755 "$LIMEN_KUBE_DIR"; chmod 644 "$LIMEN_KUBE_DIR/token" "$LIMEN_KUBE_DIR/ca.pem"
-  docker network inspect kind >/dev/null 2>&1 || fail "no Docker network named kind"
 }
 
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.

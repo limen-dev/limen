@@ -68,7 +68,7 @@ The console's **Audit trail → Kubernetes** tab shows every request as kubectl 
 
 ## Limits today
 
-- Verified against **kind** with kubectl 1.35 and Kubernetes 1.37, over WebSocket and SPDY. **Not verified on Amazon EKS** (no AWS account): EKS endpoint access (private endpoints need the worker inside the VPC), and the worker's token and CA on EKS, are the parts that may differ.
+- Verified against **kind** with kubectl 1.35 and Kubernetes 1.37, over WebSocket and SPDY. The compose stack's cluster is **k3s** 1.35: read, create, exec, port-forward and the RBAC denials were checked through Limen there (single and scaled Limen); the full Phase 8 demo runs on kind. **Not verified on Amazon EKS** (no AWS account): EKS endpoint access (private endpoints need the worker inside the VPC), and the worker's token and CA on EKS, are the parts that may differ.
 - Limen policy picks groups, not verbs or namespaces; use RBAC for those.
 - Constrained impersonation (Kubernetes 1.36 and later) is not used yet.
 - Each request is a session with a one-time grant, and a worker remembers 100,000 grants for a minute. That is about 1,700 requests a second per worker before it refuses new ones (fail closed).
@@ -78,7 +78,7 @@ The console's **Audit trail → Kubernetes** tab shows every request as kubectl 
 `demos/demo-phase8.sh --manual` builds a throwaway kind cluster and Postgres (named after `LIMEN_DEMO_CLUSTER`, default `kubernetes-demo8`), runs Limen with the web console in front of it, and prints the commands to use: `limen kube login`, `kubectl get/exec/port-forward/logs`, a view-only user, and `limen admin lock`. The console is on the same port (`/console/sessions`, `/console/audit`) and signs in as `admin@example.com`; write `email group` to the printed `browser-user` file to sign in as someone else. Ctrl-C stops Limen and keeps the cluster.
 
 ### With the full local stack and a real sign-in
-`deploy/compose/setup.sh --stacks kube` starts the dev stack (Compose project `limen`), a kind cluster named `kubernetes-dev`, and a second worker that serves it as `eks-staging` (pool `kube`). You sign in with the real `limen login` against Dex and use the console at `https://localhost:3443/console/`:
+`deploy/compose/setup.sh --stacks kube` starts the dev stack (Compose project `limen`), a k3s cluster named `kubernetes-dev` (a Compose service of the same project), and a second worker that serves it as `eks-staging` (pool `kube`). You sign in with the real `limen login` against Dex and use the console at `https://localhost:3443/console/`:
 
 ```sh
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # admin@example.com / password
@@ -87,4 +87,4 @@ export KUBECONFIG=/tmp/eks-staging.json
 kubectl get pods -A
 ```
 
-`admin@example.com` is in the `sre` group, which `examples/policy` grants `limen:edit` on Kubernetes resources labelled `env: staging`. Logins last 30 minutes. `deploy/compose/setup.sh down` stops the stack, deletes its data, and deletes the kind cluster. It uses the dev stack's ports (3443, 3444, 3081, 5556, and the others `setup.sh` lists) and refuses to start if another stack holds them.
+`admin@example.com` is in the `sre` group, which `examples/policy` grants `limen:edit` on Kubernetes resources labelled `env: staging`. Logins last 30 minutes. `deploy/compose/setup.sh down` stops the stack and deletes its data, including the cluster. It uses the dev stack's ports (3443, 3444, 3081, 5556, and the others `setup.sh` lists) and refuses to start if another stack holds them.
