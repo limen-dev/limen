@@ -1,0 +1,15 @@
+# Redis and Valkey targets with the same ACL file (profile `redis`).
+# No TLS here: the target network is local. The ElastiCache path (TLS, IAM) is
+# unverified. Included by docker-compose.yml and docker-compose.redis.yml.
+services:
+  redis-target:
+    profiles: ["redis"]
+    image: redis:7.4-alpine
+    command: ["redis-server", "--aclfile", "/etc/redis/users.acl"]
+    volumes: ["./targets/redis/users.acl:/etc/redis/users.acl:ro"]
+
+  valkey-target:
+    profiles: ["redis"]
+    image: valkey/valkey:8.0-alpine
+    command: ["valkey-server", "--aclfile", "/etc/valkey/users.acl"]
+    volumes: ["./targets/redis/users.acl:/etc/valkey/users.acl:ro"]

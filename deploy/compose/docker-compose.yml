@@ -6,9 +6,17 @@
 # development only: static tokens, Dex static passwords, file-backed CA keys.
 name: limen
 
-# PostgreSQL and MySQL targets for Phase 6 (profile `db`).
+# Targets and optional tooling live in their own files, each behind a profile:
+#   ssh            docker-compose.ssh-target.yml      OpenSSH host
+#   db             docker-compose.db-targets.yml      PostgreSQL and MySQL (Phase 6)
+#   redis          docker-compose.redis-targets.yml   Redis and Valkey (Phase 7)
+#   observability  docker-compose.observability.yml   Trino and Grafana
+# deploy/compose/stack.sh starts core plus whichever profiles you name.
 include:
+  - docker-compose.ssh-target.yml
   - docker-compose.db-targets.yml
+  - docker-compose.redis-targets.yml
+  - docker-compose.observability.yml
 
 x-limen-image: &limen-build
   context: ../..
@@ -153,9 +161,12 @@ services:
       LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
       LIMEN_JOIN_TOKEN: *worker-token
       LIMEN_DATA_DIR: /var/lib/limen/worker
+      # Phase 7: the ACL passwords of the Redis users the roles name.
+      LIMEN_REDIS_CREDENTIALS_FILE: /etc/limen/redis-credentials.json
     volumes:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
+      - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
       # Phase 6: the database CA, and one password file per database role.
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
@@ -195,46 +206,6 @@ services:
       - ca-public:/var/lib/limen/ca-public:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
-
-  # An SSH target that trusts only Limen per-session certificates.
-  sshd-target:
-    build: ./targets/sshd
-    image: limen-sshd-target:dev
-    restart: unless-stopped
-    volumes:
-      # ssh-user-ca.pub, exported by the control plane.
-      - ca-public:/etc/ssh/limen:ro
-
-  # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
-  trino:
-    image: trinodb/trino:483
-    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
-    depends_on: [s3]
-
-  # Creates the audit table and keeps its partitions in sync.
-  trino-init:
-    image: trinodb/trino:483
-    entrypoint: ["/init/sync.sh"]
-    volumes: ["./trino:/init:ro"]
-    depends_on: [trino]
-    restart: unless-stopped
-
-  # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
-  grafana:
-    image: grafana/grafana:13.0.2
-    depends_on: [trino]
-    environment:
-      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
-      GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/limen/limen-audit.json
-    ports: ["127.0.0.1:3000:3000"]
-    volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ../../dashboards/grafana/alerting/trino:/etc/grafana/provisioning/alerting:ro
-      - ../../dashboards/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro
 
 volumes:
   db-secrets: {}

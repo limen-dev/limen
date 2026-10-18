@@ -1,0 +1,38 @@
+# Audit dashboards over the S3 audit batches (profile `observability`):
+# Trino stands in for Athena, Grafana reads it. Included by docker-compose.yml.
+name: limen
+
+services:
+  # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
+  trino:
+    profiles: ["observability"]
+    image: trinodb/trino:483
+    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
+    depends_on: [s3]
+
+  # Creates the audit table and keeps its partitions in sync.
+  trino-init:
+    profiles: ["observability"]
+    image: trinodb/trino:483
+    entrypoint: ["/init/sync.sh"]
+    volumes: ["./trino:/init:ro"]
+    depends_on: [trino]
+    restart: unless-stopped
+
+  # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:13.0.2
+    depends_on: [trino]
+    environment:
+      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
+      GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/limen/limen-audit.json
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../dashboards/grafana/alerting/trino:/etc/grafana/provisioning/alerting:ro
+      - ../../dashboards/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro

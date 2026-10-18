@@ -19,7 +19,7 @@ here="$root/deploy/compose"
 # shellcheck source=dev-users.sh
 source "$here/dev-users.sh"
 state="$here/.state"
-compose=(docker compose --progress=quiet -f "$here/docker-compose.yml")
+compose=(docker compose --progress=quiet -f "$here/docker-compose.yml" --profile ssh --profile observability)
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY=localhost:3443
 base=https://localhost:3443

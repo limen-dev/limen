@@ -1,0 +1,17 @@
+# An SSH target that trusts only Limen per-session certificates (profile `ssh`).
+# Included by docker-compose.yml; start it with stack.sh ssh.
+name: limen
+
+services:
+  # An SSH target that trusts only Limen per-session certificates.
+  sshd-target:
+    profiles: ["ssh"]
+    build: ./targets/sshd
+    image: limen-sshd-target:dev
+    restart: unless-stopped
+    volumes:
+      # ssh-user-ca.pub, exported by the control plane.
+      - ca-public:/etc/ssh/limen:ro
+
+volumes:
+  ca-public: {}

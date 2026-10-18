@@ -1,7 +1,7 @@
 # Limen Redis and Valkey stack (Phase 7, ADR-0034): the control plane, a
 # proxy, and a worker, with a Redis and a Valkey server as targets.
 #
-#   docker compose -f deploy/compose/docker-compose.redis.yml up -d --build
+#   docker compose -f deploy/compose/docker-compose.redis.yml --profile redis up -d --build
 #   deploy/compose/demo-phase7.sh          # the exit test for Phase 7
 #
 # A separate project (`limen-redis`) with its own volumes and host ports, so
@@ -16,6 +16,9 @@
 #   33081  control plane health         LIMEN_REDIS_CP_PORT
 #   38333  S3 (SeaweedFS)               LIMEN_REDIS_S3_PORT
 name: limen-redis
+
+include:
+  - docker-compose.redis-targets.yml
 
 x-limen-image: &limen-build
   context: ../..
@@ -137,18 +140,6 @@ services:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
       - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
-
-  # Redis and Valkey targets with the same ACL file. No TLS here: the target
-  # network is local. The ElastiCache path (TLS, IAM) is unverified.
-  redis-target:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--aclfile", "/etc/redis/users.acl"]
-    volumes: ["./targets/redis/users.acl:/etc/redis/users.acl:ro"]
-
-  valkey-target:
-    image: valkey/valkey:8.0-alpine
-    command: ["valkey-server", "--aclfile", "/etc/valkey/users.acl"]
-    volumes: ["./targets/redis/users.acl:/etc/valkey/users.acl:ro"]
 
 volumes:
   postgres: {}

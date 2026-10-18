@@ -24,7 +24,7 @@ mkdir -p "$state"
 project="${LIMEN_REDIS_PROJECT:-limen-redis}"
 export LIMEN_REDIS_PROXY_PORT="${LIMEN_REDIS_PROXY_PORT:-33443}" LIMEN_REDIS_HEALTH_PORT="${LIMEN_REDIS_HEALTH_PORT:-33444}"
 export LIMEN_REDIS_DEX_PORT="${LIMEN_REDIS_DEX_PORT:-35556}" LIMEN_REDIS_CP_PORT="${LIMEN_REDIS_CP_PORT:-33081}" LIMEN_REDIS_S3_PORT="${LIMEN_REDIS_S3_PORT:-38333}"
-compose=(docker compose --progress=quiet -p "$project" -f "$here/docker-compose.redis.yml")
+compose=(docker compose --progress=quiet -p "$project" -f "$here/docker-compose.redis.yml" --profile redis)
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY="localhost:$LIMEN_REDIS_PROXY_PORT"

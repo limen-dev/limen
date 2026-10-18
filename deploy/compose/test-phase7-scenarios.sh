@@ -24,7 +24,7 @@ export LIMEN_REDIS_DEX_PORT="${LIMEN_REDIS_DEX_PORT:-36556}" LIMEN_REDIS_CP_PORT
 state="$here/.state/$LIMEN_REDIS_PROJECT"
 mkdir -p "$state/tls"
 export LIMEN_REDIS_TLS_DIR="$state/tls"
-files=(-f "$here/docker-compose.redis.yml" -f "$here/docker-compose.redis-tls.yml")
+files=(-f "$here/docker-compose.redis.yml" -f "$here/docker-compose.redis-tls.yml" --profile redis)
 compose=(docker compose --progress=quiet -p "$LIMEN_REDIS_PROJECT" "${files[@]}")
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY="localhost:$LIMEN_REDIS_PROXY_PORT" LIMEN_DEX_URL="http://localhost:$LIMEN_REDIS_DEX_PORT"

@@ -12,7 +12,29 @@ Runs a complete Limen deployment on your machine. Nothing here is fit for real u
 | `control-plane` | API, CA, policy, registry. Health on 3081 | 3081 |
 | `proxy` | Public entry point (3443) and admin/debug endpoints (3444) | 3443, 3444 |
 | `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
-| `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
+| `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy). Profile `ssh` | none |
+
+## Core and target stacks
+
+`docker-compose.yml` is the core Limen needs to run: `postgres`, `dex`, `kms`, `s3`, the audit fakes (`fake-datadog`, `fake-ci-issuer`), `control-plane`, `proxy`, and `worker`. Everything Limen connects *to* lives in its own compose file behind a profile, and the core pulls them in with `include`:
+
+| Profile | File | Adds |
+|---|---|---|
+| `ssh` | `docker-compose.ssh-target.yml` | `sshd-target` |
+| `db` | `docker-compose.db-targets.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`) |
+| `redis` | `docker-compose.redis-targets.yml` | `redis-target`, `valkey-target` (ACL users) |
+| `observability` | `docker-compose.observability.yml` | `trino`, `trino-init`, `grafana` (http://localhost:3000) |
+
+`stack.sh` starts the core plus the stacks you name (all of them by default), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
+
+```sh
+deploy/compose/stack.sh up                # everything
+deploy/compose/stack.sh up ssh redis      # core + SSH + Redis only
+deploy/compose/stack.sh status
+deploy/compose/stack.sh down              # removes the volumes too
+```
+
+By hand it is `docker compose -f deploy/compose/docker-compose.yml --profile ssh --profile db up -d --build`. The isolated phase stacks (`docker-compose.{scale,db,redis}.yml`) stay separate projects on other ports so each demo can run beside this one; `docker-compose.redis.yml` and `docker-compose.db.yml` reuse the same target files.
 
 Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
 
@@ -27,7 +49,7 @@ deploy/compose/demo-phase1.sh        # builds everything, resets the stack, chec
 Or step by step:
 
 ```sh
-docker compose -f deploy/compose/docker-compose.yml up -d --build
+docker compose -f deploy/compose/docker-compose.yml --profile ssh up -d --build   # or: deploy/compose/stack.sh up
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
 
 # The proxy's certificate comes from the Limen internal CA. Pin it once.
@@ -81,7 +103,7 @@ limen ssh web-staging-1 -- uptime             # one command
 limen ssh root@web-staging-1                  # denied, and audited
 limen config ssh >> ~/.ssh/config && ssh ubuntu@web-staging-1.limen
 
-docker compose -f deploy/compose/docker-compose.yml logs sshd-target | grep 'Accepted certificate'
+docker compose -f deploy/compose/docker-compose.yml --profile ssh logs sshd-target | grep 'Accepted certificate'
 docker compose -f deploy/compose/docker-compose.yml cp worker:/var/lib/limen/worker/recordings ./recordings
 asciinema play recordings/<session-id>.cast   # if you have asciinema 3.x
 ```

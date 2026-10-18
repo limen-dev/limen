@@ -78,7 +78,7 @@ while read -r ref; do
 done < "$dir/image-refs.txt"
 
 step "Helper images (built locally; not part of a release)"
-docker compose --progress=quiet -f "$here/docker-compose.yml" build fake-datadog sshd-target >/dev/null
+docker compose --progress=quiet -f "$here/docker-compose.yml" --profile ssh build fake-datadog sshd-target >/dev/null
 pass "fake-datadog and sshd-target"
 
 step "The Phase 3.5 demo, against the release"
