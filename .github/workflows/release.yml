@@ -264,7 +264,7 @@ jobs:
           mkdir -p dist
           mv "limen-${TAG}.sbom.cdx.json" dist/
           git archive --format=zip --prefix="limen-${TAG}/" -o "dist/limen-${TAG}-deploy.zip" HEAD \
-            deploy/compose deploy/terraform dashboards docs/runbooks LICENSE
+            deploy/compose deploy/terraform deploy/grafana docs/runbooks LICENSE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-and-deploy

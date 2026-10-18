@@ -5,15 +5,15 @@
 |---|---|
 | `crates/` | Rust workspace. Binaries: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-cli` (binary `limen`). Libraries: `limen-core`, `limen-proto`, `limen-policy`, `limen-auth`, `limen-ca`, `limen-audit`, `limen-tunnel`, `limen-session`, `limen-component`. Tests: `limen-testkit`, `limen-e2e` |
 | `proto/` | Protobuf definitions for the control plane API and the worker tunnel |
-| `deploy/` | Dockerfiles, docker-compose dev stack, Terraform (audit store, Datadog monitors) |
-| `dashboards/` | Grafana dashboards and alert rules, generated for Athena and Trino |
+| `deploy/` | `compose/` (the local dev stack, started by `setup.sh`), `cli/` (installer), `docker/`, `grafana/` (dashboards and alert rules, generated for Athena and Trino), `kubernetes/`, `terraform/` (audit store, Datadog monitors) |
+| `demos/` | One demo per phase, which checks its exit criteria against a running stack |
 | `docs/` | Design, ADRs, threat model, policy and component references, guides (for users), runbooks (for operators) |
 | `examples/` | Example policy documents |
-| `scripts/` | Developer and operator helper scripts |
+| `scripts/` | Release smoke test and CI helpers |
 
 
 ## Building and testing
-Tools are pinned in `mise.toml`: Rust, protoc, cargo-deny, cargo-audit, actionlint, Terraform.
+Tools are pinned in `mise.toml`: Rust, protoc, cargo-deny, cargo-audit, actionlint, shellcheck, Python, kind, kubectl, gh, Terraform. A container runtime (OrbStack or Docker) is the one thing it can't install.
 
 ```sh
 mise install
@@ -30,7 +30,7 @@ LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 ```
 
-The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade). Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
+The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `deploy/cli/install.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade). Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 ## Commits

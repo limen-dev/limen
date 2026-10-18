@@ -1103,7 +1103,7 @@ async fn names_reach_session_audit_tunnels_and_stay_fixed() {
 // Load at the design scale (about 500 users), in a CI-sized form. It runs the
 // real binaries' code in one process, so it measures this code, not the
 // network or a database over a wire; a larger run is described in
-// docs/scale-out.md. Off unless LIMEN_LOAD_TEST=1.
+// docs/guides/scale-out.md. Off unless LIMEN_LOAD_TEST=1.
 //   LIMEN_LOAD_USERS (500)   users that log in, 50 at a time
 //   LIMEN_LOAD_SESSIONS (100) of those that hold an SSH session at once
 //   LIMEN_LOAD_HOLD_SECS (10) how long each session stays open

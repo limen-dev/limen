@@ -4,30 +4,46 @@
 
 Runs a complete Limen deployment on your machine. Nothing here is fit for real use: Dex has static users whose password is `password`, join tokens are static, and CA keys sit on a Docker volume.
 
-| Service | What it is | Host port |
-|---|---|---|
-| `postgres` | Control plane state | 5432 |
-| `dex` | OIDC provider standing in for Okta | 5556 |
-| `kms` | KMS emulator ([local-kms](https://github.com/nsmithuk/local-kms)), used by tests | 8099 |
-| `control-plane` | API, CA, policy, registry. Health on 3081 | 3081 |
-| `proxy` | Public entry point (3443) and admin/debug endpoints (3444) | 3443, 3444 |
-| `worker` | Enrolls through the proxy (labels `pool=dev`) and holds two reverse tunnels | none (outbound only) |
-| `sshd-target` | OpenSSH host that trusts only Limen per-session certificates (`web-staging-1` in the example policy) | none |
-
-Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
-
 ## Quick start
 
-You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`.
+### Requirements
+
+`setup.sh` checks these first and stops with install instructions for anything missing.
+
+| Needed | Why | Install |
+|---|---|---|
+| Docker with Compose v2.24 or newer, and a running daemon | runs every service | macOS: [OrbStack](https://orbstack.dev) (`brew install --cask orbstack`) or Docker Desktop. Linux: [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin |
+| Rust toolchain from `mise.toml` (and `protoc`) | builds the `limen` CLI | `mise install` ([mise](https://mise.jdx.dev)), or [rustup](https://rustup.rs). Skip it by setting `LIMEN_BIN` to an existing `limen` binary |
+| `curl` | health checks and the scripted logins | your package manager |
+| OpenSSH client | only if you enable the `ssh` stack (`limen ssh`) | your package manager |
+| Free host ports | see the port table `setup.sh` prints, or the [Stacks](#stacks); `setup.sh` reports any that are taken, and by what | stop the other stack |
+
+The scripts are plain bash, written for macOS (tested) and Linux (untested). On Windows, run them inside WSL 2 (untested). The first build takes several minutes.
+
+### Run it
 
 ```sh
-deploy/compose/demo-phase1.sh        # builds everything, resets the stack, checks every Phase 1 criterion
+deploy/compose/setup.sh
 ```
 
-Or step by step:
+It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with the ports in use, the command for each enabled resource (SSH, PostgreSQL, MySQL, Redis, Kubernetes), and the CLI sign-in and console URL.
+
+Then log in as the developer and try a resource:
 
 ```sh
-docker compose -f deploy/compose/docker-compose.yml up -d --build
+export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443 LIMEN_HOME=deploy/compose/.state/home-dev
+LIMEN_DEV_CA=deploy/compose/.state/internal-ca.pem deploy/compose/scripts/dev-login.sh developer@example.com
+limen ls
+limen ssh web-staging-1 -- uptime
+```
+
+To check a phase's exit criteria instead, run its demo, which builds and resets its own stack: `demos/demo-phase1.sh`.
+
+### By hand
+
+```sh
+deploy/compose/setup.sh --yes --stacks ssh        # or any other stacks; it starts Limen and applies the policy
+# Without setup.sh: docker compose -f deploy/compose/docker-compose.yml up -d --build
 cargo build --release -p limen-cli && export PATH="$PWD/target/release:$PATH"
 
 # The proxy's certificate comes from the Limen internal CA. Pin it once.
@@ -46,7 +62,7 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 ### Kubernetes (Phase 8)
 
-`deploy/compose/local-kube.sh up` adds a kind cluster and a Kubernetes worker to this stack (`docker-compose.kube.yml`) and prints how to sign in and use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
+`deploy/compose/setup.sh --stacks kube` adds a kind cluster and a Kubernetes worker to this stack (`stacks/kube.yml`) and prints how to sign in and use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
 
 ### Dev users
 
@@ -61,15 +77,65 @@ limen admin components                 # the proxy, the worker, and its tunnels
 ### Logging in without a browser
 
 - `limen login --device` uses the device flow. Open the printed URL anywhere and enter the code.
-- `deploy/compose/dev-login.sh developer@example.com` automates Dex's password form. It's for scripts and tests only.
+- `deploy/compose/scripts/dev-login.sh developer@example.com` automates Dex's password form. It's for scripts and tests only.
+
+## Layout
+
+```
+deploy/compose/
+  setup.sh                  the entry point: checks prerequisites, asks what to enable, starts it
+  docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
+  stacks/                   one compose file per stack, layered on Limen with -f
+    scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
+    ssh.yml  db.yml  redis.yml  observability.yml  bots.yml  kube.yml
+  config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
+  scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
+                            dev-users.sh and gen-dev-users.py (generated user lists)
+demos/                      one demo per phase (exit criteria) and the Redis scenarios test
+scripts/                    smoke-release.sh, ci-db-targets.sh
+deploy/                     cli/ (installer), compose/, docker/, grafana/, kubernetes/, terraform/
+```
+
+Compose resolves relative paths against the first `-f` file's directory, so list `docker-compose.yml` first, or pass `--project-directory deploy/compose` when you start from a file in `stacks/`.
+
+## Stacks
+
+Limen is one stack and everything it connects to or reports to is another, each its own compose file layered on with `-f` (and a profile of the same name):
+
+| Stack | File | Adds |
+|---|---|---|
+| limen | `docker-compose.yml` | `postgres`, `dex`, `s3`, `kms`, `control-plane`, `proxy`, `worker`. Postgres holds state, S3 the audit batches and recordings |
+| limen, scaled | `stacks/scale.yml` | the same with 3 control planes, 3 proxies, 3 workers (ports 23xxx; replaces the line above) |
+| `ssh` | `stacks/ssh.yml` | `sshd-target` |
+| `db` | `stacks/db.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`), the role bootstrap |
+| `redis` | `stacks/redis.yml` | `redis-target`, `valkey-target` (ACL users) |
+| `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
+| `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
+| `kube` | `stacks/kube.yml` | a kind cluster (created by `setup.sh`) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
+
+**Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the kind cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
+
+`setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
+
+```sh
+deploy/compose/setup.sh --yes               # limen + every stack, no questions
+deploy/compose/setup.sh --stacks ssh,redis   # limen + SSH + Redis
+deploy/compose/setup.sh --scale --stacks ssh,db   # scaled limen + SSH + databases
+deploy/compose/setup.sh status
+deploy/compose/setup.sh down                # removes the volumes too (add --scale for the scaled one)
+```
+
+The demos in `demos/` use the same helper (`scripts/lib.sh`). The Phase 5, 6 and 7 demos run their own copy (project, images and host ports set through `LIMEN_PROJECT`, `LIMEN_IMAGE_TAG` and `LIMEN_PORT_*`, see `docker-compose.yml`), so each can run beside this one.
+
+Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
 
 ## SSH (Phase 2)
 
 ```sh
-deploy/compose/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
-deploy/compose/demo-phase3.sh          # audit to S3 and Datadog, sink outage, tamper check, Grafana
-deploy/compose/demo-phase35.sh         # web console, locking a user, ending a session
-deploy/compose/demo-phase7.sh          # Redis and Valkey through limen redis connect (own project and ports)
+demos/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
+demos/demo-phase3.sh          # audit to S3 and Datadog, sink outage, tamper check, Grafana
+demos/demo-phase35.sh         # web console, locking a user, ending a session
+demos/demo-phase7.sh          # Redis and Valkey through limen redis connect (own project and ports)
 ```
 
 By hand, after `limen admin apply examples/policy`:
@@ -81,7 +147,7 @@ limen ssh web-staging-1 -- uptime             # one command
 limen ssh root@web-staging-1                  # denied, and audited
 limen config ssh >> ~/.ssh/config && ssh ubuntu@web-staging-1.limen
 
-docker compose -f deploy/compose/docker-compose.yml logs sshd-target | grep 'Accepted certificate'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/stacks/ssh.yml --profile ssh logs sshd-target | grep 'Accepted certificate'
 docker compose -f deploy/compose/docker-compose.yml cp worker:/var/lib/limen/worker/recordings ./recordings
 asciinema play recordings/<session-id>.cast   # if you have asciinema 3.x
 ```
@@ -90,15 +156,16 @@ Audit events are in `proxy:/var/lib/limen/proxy/audit/proxy.jsonl` (`session.sta
 
 ## Databases (Phase 6)
 
-PostgreSQL 18 and MySQL 8.4 targets with TLS, a `limen_admin` login, and a seeded `orders` database are in `docker-compose.db-targets.yml` (profile `db`; the dev stack includes it):
+PostgreSQL 18 and MySQL 8.4 targets with TLS, a `limen_admin` login, and a seeded `orders` database are in `stacks/db.yml` (profile `db`, with the role bootstrap):
 
 ```sh
-deploy/compose/demo-phase6.sh          # psql and mysql through `limen db connect`, bootstrap, audit, cancel, lock
-docker compose -f deploy/compose/docker-compose.yml --profile db up -d postgres-target mysql-target db-secrets-init
-docker compose -f deploy/compose/docker-compose.yml --profile db run --rm db-bootstrap --db-bootstrap-once   # create the limen_* roles
+demos/demo-phase6.sh          # psql and mysql through `limen db connect`, bootstrap, audit, cancel, lock
+db=(-f deploy/compose/docker-compose.yml -f deploy/compose/stacks/db.yml --profile db)
+docker compose "${db[@]}" up -d postgres-target mysql-target db-secrets-init
+docker compose "${db[@]}" --profile tools run --rm db-bootstrap --db-bootstrap-once   # create the limen_* roles
 ```
 
-The demo runs its own project (`limen-dbdemo`, `docker-compose.db.yml`) on other host ports, so it can run next to the dev stack. The roles and resources come from `examples/policy`; the worker reads role passwords from the `db-secrets` volume and verifies the databases against the `db-tls` CA. Guide: [`docs/guides/databases.md`](../../docs/guides/databases.md). Runbook: [`docs/runbooks/database-onboarding.md`](../../docs/runbooks/database-onboarding.md).
+The demo runs its own project (`limen-dbdemo`, the core plus `stacks/db.yml`) on other host ports, so it can run next to the dev stack. The roles and resources come from `examples/policy`; the worker reads role passwords from the `db-secrets` volume and verifies the databases against the `db-tls` CA. Guide: [`docs/guides/databases.md`](../../docs/guides/databases.md). Runbook: [`docs/runbooks/database-onboarding.md`](../../docs/runbooks/database-onboarding.md).
 
 For the integration tests of the database relay (they print SKIPPED without these), get the CA out of the `db-tls` volume and point the tests at the targets:
 
@@ -153,16 +220,16 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 
 `https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
 
-The console's OIDC client (`limen-console`) and its dev secret are in `dex/config.yaml` and `docker-compose.yml`.
+The console's OIDC client (`limen-console`) and its dev secret are in `config/dex/config.yaml` and `docker-compose.yml`.
 
 ## Scale-out (Phase 5)
 
-`docker-compose.scale.yml` is a separate compose project, `limen-scale`, with its own volumes and host ports, so it runs next to the dev stack without touching it:
+`stacks/scale.yml` is a separate compose project, `limen-scale`, with its own volumes and host ports, so it runs next to the dev stack without touching it:
 
 ```sh
-docker compose -f deploy/compose/docker-compose.scale.yml up -d --build
-deploy/compose/demo-phase5.sh          # resets the scale stack, runs the exit test, stops it
-deploy/compose/demo-phase5.sh --keep   # reuse the running scale stack and leave it up
+docker compose --project-directory deploy/compose -f deploy/compose/stacks/scale.yml up -d --build
+demos/demo-phase5.sh          # resets the scale stack, runs the exit test, stops it
+demos/demo-phase5.sh --keep   # reuse the running scale stack and leave it up
 ```
 
 What is in it:
@@ -174,17 +241,17 @@ What is in it:
 - The CA: the CA certificates are in the database, and with the file backend the keys are on one volume (`cp-ca`) every replica mounts. Whichever replica starts first creates them; the others read the same files (creation is race-free). Separate key volumes per replica do not work: a replica whose key does not match the stored certificate refuses to start. With the KMS backend, every replica gets the same KMS key ids instead.
 - `proxy-0`, `-1`, `-2` reach the control plane through the `control-plane` alias, and share the alias `proxy`; `worker-0`, `-1`, `-2` dial `proxy` and so land on any of them (sessions reach a worker on another proxy by peering). They enroll with the same multi-use static dev tokens as the dev stack, which here also approve names: `limen.io/name=proxy-*` and `limen.io/name=worker-*` in `LIMEN_STATIC_JOIN_TOKENS`, and each proxy and worker asks for its own with `LIMEN_NAME` (`proxy-0`..`proxy-2`, `worker-0`..`worker-2`).
 - Names: optional, for people. They show beside the id in the console, `limen admin components`, the proxies' `/tunnels`, logs, and audit data (`worker_name` and `proxy_name` on `session.start`, `worker_name` on `session.end` and `session.recording`, `component_name` on `worker.enroll` and `component.revoke`), only for components that have one. The id stays the identity: certificates, policy, and revocation use it. A name is `a-z`, `0-9` and `-`, 1 to 63 characters, not starting or ending with `-`, and must be approved by the join token: exactly (`--name prod-a-worker-1`, given even if the component asks for none) or by a pattern with one `*`, which matches zero or more of those characters (`prod-a-*` accepts `prod-a-1`, not `prod-b-1` or `prod-a`). Static tokens are reusable, so they take patterns only. Anything else is refused (`permission_denied`, audited as `auth.denied`). Names are unique among enrolled, unrevoked proxies and workers together: a second component asking for a live name gets `already_exists` (audited as `auth.denied`, reason `name already in use`), and a single-use token is not used up by that. Revoking a component frees its name. The name is sent only at first enrollment and is fixed after that (also as the certificate label `limen.io/name`; policy can't select on it: a `worker_selector` on that key is refused, because a name is for people and whoever holds a pattern token picks its value, so select workers by the labels on their join token); a different `LIMEN_NAME` later is ignored with a warning. A component that loses its data directory and enrolls again under its old name is refused until the old one is revoked, so give autoscaled, ephemeral components unique names (for example with the instance id), or none.
-- The dev stack's `sshd-target`, SeaweedFS, PostgreSQL, and Dex (the same `dex/config.yaml`, rewritten at start for this stack's ports). No KMS, Datadog, Trino, or Grafana.
+- SeaweedFS, PostgreSQL, and Dex (the same `config/dex/config.yaml`, rewritten at start for this stack's ports). The SSH target and the other targets come from their stacks (`setup.sh --scale`); there is no KMS here.
 
 Host ports (127.0.0.1): proxies `23443` / `23453` / `23463` (admin `23444` / `23454` / `23464`), control plane admin `23081` / `23082` / `23083`, Dex `25556`, S3 `28333`. To use the CLI against it:
 
 ```sh
-docker compose -p limen-scale cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state-scale/internal-ca.pem
-LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state-scale/internal-ca.pem \
-  LIMEN_DEX_URL=http://localhost:25556 deploy/compose/dev-login.sh developer@example.com
+docker compose -p limen-scale cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/scale/internal-ca.pem
+LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca.pem \
+  LIMEN_DEX_URL=http://localhost:25556 deploy/compose/scripts/dev-login.sh developer@example.com
 ```
 
-`demo-phase5.sh` starts `control-plane-1` first and the proxies while it is the only replica, so all their traffic lands on it. It then opens a long SSH session and new sessions one after another, and while they run:
+`demos/demo-phase5.sh` starts `control-plane-1` first and the proxies while it is the only replica, so all their traffic lands on it. It then opens a long SSH session and new sessions one after another, and while they run:
 
 1. SIGKILLs `control-plane-1` (durable) while it holds acked, unshipped events, and starts it again: its spool ships from the same volume.
 2. Stops S3, waits until an ephemeral replica holds events it cannot ship, and SIGTERMs it: it drains what it can, then hands the rest to a live peer (`handed the rest of the audit spool to a peer` in its log). S3 comes back and the replica is started again.
@@ -196,6 +263,6 @@ It asserts that the long session outlasted all of this without a stall, every ne
 
 ## Redis and Valkey (Phase 7)
 
-`docker-compose.redis.yml` is a separate project (`limen-redis`) with its own volumes and host ports (proxy 33443/33444, Dex 35556, control plane health 33081, S3 38333), so it runs next to the dev stack. It adds a Redis 7.4 and a Valkey 8.0 target with the ACL in `targets/redis/users.acl`, and gives the worker the matching passwords from `targets/redis/credentials.json` (dev only). `demo-phase7.sh` builds and starts it, seeds keys, and checks the exit criteria with `redis-cli` (or `targets/redis/resp-client.py` when `redis-cli` isn't installed). Stop it with `docker compose -p limen-redis -f deploy/compose/docker-compose.redis.yml down -v`. `dev-login.sh` takes `LIMEN_DEX_URL` (default `http://localhost:5556`) for a stack whose Dex has another port.
+The demo runs its own project (`limen-redis`, the core plus `stacks/redis.yml`) with its own volumes and host ports (proxy 33443/33444, Dex 35556, control plane health 33081, S3 38333), so it runs next to the dev stack. The stack adds a Redis 7.4 and a Valkey 8.0 target with the ACL in `config/targets/redis/users.acl`, and gives the worker the matching passwords from `config/targets/redis/credentials.json` (dev only). `demos/demo-phase7.sh` builds and starts it, seeds keys, and checks the exit criteria with `redis-cli` (or `config/targets/redis/resp-client.py` when `redis-cli` isn't installed). Stop it with `docker compose -p limen-redis down -v`. `scripts/dev-login.sh` takes `LIMEN_DEX_URL` (default `http://localhost:5556`) for a stack whose Dex has another port.
 
-`test-phase7-scenarios.sh` runs 26 more scenarios against the same targets plus a TLS Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). It is project `limen-redis-scn` on ports 36xxx; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.
+`demos/test-phase7-scenarios.sh` runs 26 more scenarios against the same targets plus a TLS Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). It is project `limen-redis-scn` on ports 36xxx; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.

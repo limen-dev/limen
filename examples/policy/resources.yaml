@@ -59,7 +59,7 @@ metadata:
   name: web-staging-1
   labels: { env: staging }
 spec:
-  # The dev sshd target (deploy/compose/targets/sshd). The host key is pinned:
+  # The dev sshd target (deploy/compose/config/targets/sshd). The host key is pinned:
   # the worker refuses to connect if the target presents any other key.
   ssh:
     address: "sshd-target:22"

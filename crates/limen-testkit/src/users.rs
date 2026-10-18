@@ -1,4 +1,4 @@
-//! Generated from deploy/compose/dev-users.toml by gen-dev-users.py. Do not edit.
+//! Generated from deploy/compose/config/dev-users.toml by gen-dev-users.py. Do not edit.
 //! The users the integration tests talk about; rename them in the TOML file.
 
 pub const ADMIN: &str = "admin@example.com";

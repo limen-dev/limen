@@ -13,7 +13,7 @@ Plays session recordings (asciicast v3) in the web console (ADR-0017).
 
 The bundle is self-contained: no network access, no eval of recording content as markup. Its terminal emulator is WebAssembly, so it needs `'wasm-unsafe-eval'` in `script-src` (this permits compiling WebAssembly, not JS `eval`), plus `worker-src blob:` and `style-src-attr 'unsafe-inline'`. Nothing else is relaxed.
 
-To update: download the new tarball from the npm registry, replace both files, update this table, and play a recording (`deploy/compose/demo-phase3.sh` then open any session in the console).
+To update: download the new tarball from the npm registry, replace both files, update this table, and play a recording (`demos/demo-phase3.sh` then open any session in the console).
 
 # Vendored: fonts and icons (console look)
 

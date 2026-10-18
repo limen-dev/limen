@@ -1,0 +1,105 @@
+# The db stack (Phase 6, ADR-0033), profile `db`: PostgreSQL and MySQL targets
+# with TLS from a throwaway CA, seeded with a small `orders` database and a
+# `limen_admin` login, plus the role bootstrap. Layered on a Limen stack:
+#   docker compose -f docker-compose.yml -f stacks/db.yml --profile db --profile tools up -d
+# Run the bootstrap after policy is applied (profile `tools`):
+#   docker compose ... run --rm db-bootstrap --db-bootstrap-once [--db-bootstrap-check]
+# Development only.
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+x-dev-tokens:
+  worker: &worker-token dev-only-worker-join-token-2c8e6a4b0d1f3e5a
+
+services:
+  # Throwaway CA and server certificates for the database targets below.
+  db-tls:
+    profiles: ["db"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "/gen.sh"]
+    volumes:
+      - ./config/targets/tls/gen.sh:/gen.sh:ro
+      - db-tls:/tls
+
+  # A PostgreSQL database to reach with `limen db connect` (Phase 6, ADR-0033).
+  # Profile "db": docker compose --profile db up -d postgres-target
+  # Serves TLS (CA in the db-tls volume) and, for local tests, plain text too.
+  postgres-target:
+    container_name: postgres-orders-${LIMEN_ENV:-dev}
+    profiles: ["db"]
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/tls/pg.crt", "-c", "ssl_key_file=/tls/pg.key", "-c", "hba_file=/etc/limen/pg_hba.conf"]
+    environment:
+      POSTGRES_PASSWORD: postgres-target-dev-only
+    depends_on:
+      db-tls: { condition: service_completed_successfully }
+    volumes:
+      - ./config/targets/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ./config/targets/postgres/pg_hba.conf:/etc/limen/pg_hba.conf:ro
+      - db-tls:/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # A MySQL database for `limen db connect` (Phase 6). Serves TLS from the
+  # db-tls volume and plain text too.
+  mysql-target:
+    container_name: mysql-orders-${LIMEN_ENV:-dev}
+    profiles: ["db"]
+    image: mysql:8.4
+    command: ["mysqld", "--ssl-ca=/tls/ca.pem", "--ssl-cert=/tls/my.crt", "--ssl-key=/tls/my.key"]
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql-target-dev-only
+    depends_on:
+      db-tls: { condition: service_completed_successfully }
+    volumes:
+      - ./config/targets/mysql/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - db-tls:/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pmysql-target-dev-only --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Phase 6: the admin login the role bootstrap uses (ADR-0033). Dev only.
+  db-secrets-init:
+    profiles: ["db"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        printf 'limen-admin-dev-only' > /s/.admin && mkdir -p /s/postgres /s/mysql &&
+        chown -R 65532:65532 /s && chmod 700 /s /s/postgres /s/mysql && chmod 600 /s/.admin
+    volumes: [db-secrets:/s]
+
+  # Create and repair the limen_* database roles, then exit.
+  #   docker compose --profile db run --rm db-bootstrap [--db-bootstrap-check]
+  db-bootstrap:
+    profiles: ["tools"]
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:${LIMEN_IMAGE_TAG:-dev}
+    command: ["--db-bootstrap-once"]
+    depends_on:
+      db-secrets-init: { condition: service_completed_successfully }
+      postgres-target: { condition: service_healthy }
+      mysql-target: { condition: service_healthy }
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+    volumes:
+      - bootstrap-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
+
+volumes:
+  db-secrets: {}
+  db-tls: {}
+  bootstrap-data: {}

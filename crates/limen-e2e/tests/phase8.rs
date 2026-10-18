@@ -2,7 +2,7 @@
 //! stand-in API server, by impersonation, with exec recorded and audited.
 //!
 //! The API server is a test double (`limen_testkit::kube_api`). Real clusters
-//! are covered by `deploy/compose/demo-phase8.sh` on kind.
+//! are covered by `demos/demo-phase8.sh` on kind.
 
 use std::time::Duration;
 

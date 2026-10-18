@@ -6,9 +6,16 @@
 # development only: static tokens, Dex static passwords, file-backed CA keys.
 name: limen
 
-# PostgreSQL and MySQL targets for Phase 6 (profile `db`).
-include:
-  - docker-compose.db-targets.yml
+# The core: what Limen needs to run (Postgres, Dex, S3, KMS emulator, control
+# plane, proxy, worker). Everything it connects to or reports to is a separate
+# file in stacks/, layered on with -f. deploy/compose/setup.sh does that for you:
+#   ssh  db  redis  observability  bots   (and `scale`, which replaces this file)
+# Stack wiring that needs a setting on a Limen service (a Datadog URL, the
+# Redis credentials) goes through .state/stack.env, which setup.sh writes.
+#
+# Another copy can run beside this one (`docker compose -p <name>`) on other host
+# ports: LIMEN_PORT_{POSTGRES,DEX,KMS,S3,CP,PROXY,HEALTH}, and LIMEN_IMAGE_TAG
+# so its image builds stay apart.
 
 x-limen-image: &limen-build
   context: ../..
@@ -21,12 +28,13 @@ x-dev-tokens:
 
 services:
   postgres:
+    container_name: limen-postgres${LIMEN_SUFFIX:-}
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: limen
       POSTGRES_PASSWORD: limen-dev-only
       POSTGRES_DB: limen
-    ports: ["127.0.0.1:5432:5432"]
+    ports: ["127.0.0.1:${LIMEN_PORT_POSTGRES:-5432}:5432"]
     volumes: [postgres:/var/lib/postgresql]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U limen -d limen"]
@@ -35,51 +43,49 @@ services:
       retries: 30
 
   dex:
+    container_name: limen-dex${LIMEN_SUFFIX:-}
     image: ghcr.io/dexidp/dex:v2.46.0
-    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    # The CLI reaches Dex on the host port; the config names the default ports, so
+    # it is rewritten for another stack's (LIMEN_PORT_DEX, LIMEN_PORT_PROXY).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sed -e 's#localhost:5556#localhost:${LIMEN_PORT_DEX:-5556}#' -e 's#localhost:3443#localhost:${LIMEN_PORT_PROXY:-3443}#'
+        /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
     volumes:
-      - ./dex/config.yaml:/etc/dex/config.yaml:ro
-      - ./dex/theme:/srv/dex/web/themes/limen:ro
-    ports: ["127.0.0.1:5556:5556"]
+      - ./config/dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./config/dex/theme:/srv/dex/web/themes/limen:ro
+    ports: ["127.0.0.1:${LIMEN_PORT_DEX:-5556}:5556"]
 
   # KMS emulator for testing the KMS-backed CA path. LocalStack now needs an
   # account token, so we use local-kms. Pinned by digest.
   kms:
+    container_name: limen-kms${LIMEN_SUFFIX:-}
     image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
-    ports: ["127.0.0.1:8099:8080"]
+    ports: ["127.0.0.1:${LIMEN_PORT_KMS:-8099}:8080"]
 
   # S3-compatible object store for audit batches and recordings (MinIO no
   # longer publishes images). Requests must be signed with the dev or test
-  # keys in s3/s3.json: anonymous SeaweedFS rejects the SDK's signed
+  # keys in config/s3/s3.json: anonymous SeaweedFS rejects the SDK's signed
   # streaming uploads. Development only.
   s3:
+    container_name: limen-s3${LIMEN_SUFFIX:-}
     image: chrislusf/seaweedfs:4.48
     command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
-    ports: ["127.0.0.1:8333:8333"]
-    volumes: [s3-data:/data, "./s3/s3.json:/etc/seaweedfs/s3.json:ro"]
-
-  # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
-  fake-datadog:
-    build: { <<: *limen-build, target: fake-datadog }
-    image: limen-fake-datadog:dev
-    ports: ["127.0.0.1:8126:8126"]
-
-  # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).
-  # DEVELOPMENT ONLY: it mints any token to anyone who asks.
-  fake-ci-issuer:
-    build: { <<: *limen-build, target: fake-ci-issuer }
-    image: limen-fake-ci-issuer:dev
-    ports: ["127.0.0.1:8130:8130"]
+    ports: ["127.0.0.1:${LIMEN_PORT_S3:-8333}:8333"]
+    volumes: [s3-data:/data, "./config/s3/s3.json:/etc/seaweedfs/s3.json:ro"]
 
   control-plane:
+    container_name: limen-control-plane${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: control-plane }
-    image: limen-control-plane:dev
+    image: limen-control-plane:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
+    env_file:
+      - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh: observability, bots, redis wiring
     depends_on:
       postgres: { condition: service_healthy }
       dex: { condition: service_started }
       s3: { condition: service_started }
-      fake-datadog: { condition: service_started }
     environment:
       RUST_LOG: info
       LIMEN_ID: control-plane-1
@@ -87,14 +93,14 @@ services:
       LIMEN_DNS_NAMES: control-plane,localhost
       LIMEN_CA_DIR: /var/lib/limen/ca
       LIMEN_CA_EXPORT_DIR: /var/lib/limen/ca-public
-      # The CLI reaches Dex at localhost:5556, the control plane at dex:5556.
-      LIMEN_OIDC_ISSUER: http://localhost:5556/dex
+      # The CLI reaches Dex on its host port, the control plane at dex:5556.
+      LIMEN_OIDC_ISSUER: http://localhost:${LIMEN_PORT_DEX:-5556}/dex
       LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
       LIMEN_OIDC_CLIENT_ID: limen-cli
       LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
-      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev${LIMEN_EXTRA_JOIN_TOKENS:-}"
       LIMEN_PROXY_DNS_NAMES: localhost,proxy
-      # Every component's audit events end up here (and in S3 and Datadog below).
+      # Every component's audit events end up here and in S3 (and Datadog, with the datadog stack).
       LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
       LIMEN_AUDIT_S3_BUCKET: limen-audit
       LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
@@ -105,15 +111,11 @@ services:
       AWS_ACCESS_KEY_ID: dev
       AWS_SECRET_ACCESS_KEY: dev-only-secret
       AWS_REGION: us-east-1
-      LIMEN_DATADOG_LOGS_URL: http://fake-datadog:8126/api/v2/logs
-      DD_API_KEY: dev-only-datadog-key
       LIMEN_ENVIRONMENT: dev
       # The web console, served by the proxy at https://localhost:3443/console/
-      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:3443
+      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:${LIMEN_PORT_PROXY:-3443}
       LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
-      # Bots (ADR-0019): the dev stack's fake CI issuer is plain http.
-      LIMEN_BOT_ALLOW_INSECURE_ISSUERS: "true"
-    ports: ["127.0.0.1:3081:3081"]
+    ports: ["127.0.0.1:${LIMEN_PORT_CP:-3081}:3081"]
     volumes:
       - cp-ca:/var/lib/limen/ca
       - ca-public:/var/lib/limen/ca-public
@@ -122,8 +124,9 @@ services:
       - recordings:/var/lib/limen/recordings
 
   proxy:
+    container_name: limen-proxy${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: proxy }
-    image: limen-proxy:dev
+    image: limen-proxy:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
     depends_on: [control-plane]
     environment:
@@ -136,16 +139,19 @@ services:
       # How other proxies reach this one for peering (ADR-0004).
       LIMEN_PEER_ADDRESS: proxy:3443
       LIMEN_DATA_DIR: /var/lib/limen/proxy
-    ports: ["127.0.0.1:3443:3443", "127.0.0.1:3444:3444"]
+    ports: ["127.0.0.1:${LIMEN_PORT_PROXY:-3443}:3443", "127.0.0.1:${LIMEN_PORT_HEALTH:-3444}:3444"]
     volumes:
       - proxy-data:/var/lib/limen/proxy
       - ca-public:/var/lib/limen/ca-public:ro
 
   worker:
+    container_name: limen-worker${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: worker }
-    image: limen-worker:dev
+    image: limen-worker:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
     depends_on: [proxy]
+    env_file:
+      - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh: observability, bots, redis wiring
     environment:
       RUST_LOG: info
       LIMEN_PROXY_ADDR: proxy:3443
@@ -156,89 +162,15 @@ services:
     volumes:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
-      # Phase 6: the database CA, and one password file per database role.
+      # Phase 7: ACL passwords of the Redis users (read when the redis stack sets LIMEN_REDIS_CREDENTIALS_FILE).
+      - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      # Phase 6: the database CA and one password file per database role (filled by the db stack).
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
-
-  # Phase 6: the admin login the role bootstrap uses (ADR-0033). Dev only.
-  db-secrets-init:
-    profiles: ["db"]
-    image: alpine:3.22
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        printf 'limen-admin-dev-only' > /s/.admin && mkdir -p /s/postgres /s/mysql &&
-        chown -R 65532:65532 /s && chmod 700 /s /s/postgres /s/mysql && chmod 600 /s/.admin
-    volumes: [db-secrets:/s]
-
-  # Phase 6: create and repair the limen_* database roles, then exit.
-  #   docker compose --profile db run --rm db-bootstrap [--db-bootstrap-check]
-  db-bootstrap:
-    profiles: ["tools"]
-    build: { <<: *limen-build, target: worker }
-    image: limen-worker:dev
-    command: ["--db-bootstrap-once"]
-    depends_on:
-      proxy: { condition: service_started }
-      db-secrets-init: { condition: service_completed_successfully }
-      postgres-target: { condition: service_healthy }
-      mysql-target: { condition: service_healthy }
-    environment:
-      RUST_LOG: info
-      LIMEN_PROXY_ADDR: proxy:3443
-      LIMEN_PROXY_NAME: proxy
-      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
-      LIMEN_JOIN_TOKEN: *worker-token
-      LIMEN_DATA_DIR: /var/lib/limen/worker
-    volumes:
-      - bootstrap-data:/var/lib/limen/worker
-      - ca-public:/var/lib/limen/ca-public:ro
-      - db-tls:/var/lib/limen/db-tls:ro
-      - db-secrets:/var/lib/limen/db-secrets
-
-  # An SSH target that trusts only Limen per-session certificates.
-  sshd-target:
-    build: ./targets/sshd
-    image: limen-sshd-target:dev
-    restart: unless-stopped
-    volumes:
-      # ssh-user-ca.pub, exported by the control plane.
-      - ca-public:/etc/ssh/limen:ro
-
-  # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
-  trino:
-    image: trinodb/trino:483
-    volumes: ["./trino/catalog:/etc/trino/catalog:ro"]
-    depends_on: [s3]
-
-  # Creates the audit table and keeps its partitions in sync.
-  trino-init:
-    image: trinodb/trino:483
-    entrypoint: ["/init/sync.sh"]
-    volumes: ["./trino:/init:ro"]
-    depends_on: [trino]
-    restart: unless-stopped
-
-  # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
-  grafana:
-    image: grafana/grafana:13.0.2
-    depends_on: [trino]
-    environment:
-      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
-      GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/limen/limen-audit.json
-    ports: ["127.0.0.1:3000:3000"]
-    volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ../../dashboards/grafana/alerting/trino:/etc/grafana/provisioning/alerting:ro
-      - ../../dashboards/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro
 
 volumes:
   db-secrets: {}
-  bootstrap-data: {}
+  db-tls: {}
   postgres: {}
   cp-ca: {}
   ca-public: {}

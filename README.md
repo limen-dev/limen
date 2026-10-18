@@ -107,26 +107,24 @@ Behind both: short-lived certificates instead of keys and passwords, deny-by-def
 
 ## Quickstart
 
-You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Everything below runs on your machine against local stand-ins.
+You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`). Everything below runs on your machine against local stand-ins.
 
 ```sh
-# 1. Start the stack: control plane, proxy, worker, Postgres, Dex (the identity provider), a test SSH host
-docker compose -f deploy/compose/docker-compose.yml up -d --build
+# 1. One script: checks what you need, asks what to enable (SSH host, databases, Redis,
+#    Kubernetes, observability...), starts Limen, applies the example policy, and prints
+#    the ports, a command for each resource, and the CLI and console sign-in.
+deploy/compose/setup.sh
 
-# 2. Install the CLI (once; re-run after pulling to upgrade) and trust the dev stack's CA
-scripts/install-cli.sh
-mkdir -p deploy/compose/.state
-docker compose -f deploy/compose/docker-compose.yml cp control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
+# 2. Install the CLI (once; re-run after pulling to upgrade)
+deploy/cli/install.sh
 
-# 3. Sign in as the dev admin, admin@example.com (password: "password"), then load the example policy
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # opens your browser on Dex
-limen admin apply examples/policy
-limen login                                       # roles are fixed at login: sign in again to pick them up
+# 3. Sign in (a browser opens on Dex; the dev admin is admin@example.com, password "password")
+limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 
 # 4. Use it
 limen ls                                          # what can I reach?
 limen ssh web-staging-1                           # a recorded SSH session
-# databases: see docs/guides/databases.md, or run deploy/compose/demo-phase6.sh
+# databases, Redis and Kubernetes: the script prints the commands, or see docs/guides/
 
 # 5. Open the console in your browser (sign in with the same user)
 open https://localhost:3443/console/              # macOS; elsewhere just paste the URL
@@ -141,7 +139,11 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 
 | Phase | What | Status |
 |---|---|---|
-| 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
+| 0 | Design, ADRs, threat model, skeleton, CI | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/1) |
+| 1 | Control plane, OIDC login, worker enrollment and reverse tunnels | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/2) |
+| 2 | SSH with session recording | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/3) |
+| 3 | Audit pipeline: S3 and Datadog, hash chain, Grafana dashboards | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/4) |
+| 3.5 | Web console | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
 | 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |

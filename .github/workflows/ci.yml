@@ -11,7 +11,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # Pull requests are opened as drafts and run nothing until they are marked
+  # ready for review (the ready_for_review type starts the run then).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # The release workflow runs the whole suite before it builds anything, and
   # dispatches it for the release pull request (whose commits are pushed with
   # the workflow token, which doesn't start workflows by itself).
@@ -44,6 +47,8 @@ jobs:
   # Releases and manual runs (workflow_dispatch) always run everything.
   changes:
     name: what changed
+    # Every other job needs this one, so a draft pull request runs nothing.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 10
     outputs:
@@ -85,7 +90,7 @@ jobs:
           # so a change to the workflows is checked by the full suite.
           rust_re='^(crates/|proto/|deploy/docker/|\.github/|Cargo\.(toml|lock)$|(rust-toolchain|clippy|rustfmt|deny)\.toml$|mise\.toml$)'
           # Infrastructure code, plus crates (dashboards are generated from metric names).
-          infra_re='^(crates/|deploy/terraform/|dashboards/|deploy/compose/dev-users\.toml$|deploy/compose/gen-dev-users\.py$|\.github/)'
+          infra_re='^(crates/|deploy/terraform/|deploy/grafana/|deploy/compose/config/dev-users\.toml$|deploy/compose/scripts/gen-dev-users\.py$|\.github/)'
           workflows_re='^\.github/'
           # No base commit (new branch, manual run) means we can't tell, so run everything.
           if [ "$RUN_ALL" = true ] || ! base="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then
@@ -184,7 +189,7 @@ jobs:
       LIMEN_TEST_DATABASE_URL: postgres://limen:limen-ci@localhost:5432/limen
       LIMEN_TEST_KMS_ENDPOINT: http://localhost:8099
       LIMEN_TEST_S3_ENDPOINT: http://localhost:8333
-      # The test identity in deploy/compose/s3/s3.json.
+      # The test identity in deploy/compose/config/s3/s3.json.
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
@@ -220,13 +225,13 @@ jobs:
         run: >-
           docker rm -f s3 >/dev/null 2>&1 || true;
           docker run -d --name s3 -p 8333:8333
-          -v "$GITHUB_WORKSPACE/deploy/compose/s3/s3.json:/etc/seaweedfs/s3.json:ro"
+          -v "$GITHUB_WORKSPACE/deploy/compose/config/s3/s3.json:/etc/seaweedfs/s3.json:ro"
           chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
       # PostgreSQL and MySQL for the database tests (Phase 6): started with plain
       # docker like S3, and it exports LIMEN_TEST_PG_TARGET, LIMEN_TEST_MYSQL_TARGET,
       # and LIMEN_TEST_PG_CA_FILE to the steps below.
       - name: Start the database targets
-        run: deploy/compose/ci-db-targets.sh start
+        run: scripts/ci-db-targets.sh start
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test (and fail if any integration test skipped)
@@ -236,7 +241,7 @@ jobs:
           if grep -q '^SKIPPED:' test.log; then grep '^SKIPPED:' test.log; exit 1; fi
       - name: Stop the database targets
         if: always()
-        run: deploy/compose/ci-db-targets.sh stop
+        run: scripts/ci-db-targets.sh stop
 
   # macOS runners have no service containers, so integration tests skip
   # there (they print SKIPPED). Unit tests still run.
@@ -407,17 +412,17 @@ jobs:
           done
       - name: Generated dashboards are up to date
         run: |
-          python3 dashboards/grafana/generate.py
-          git diff --exit-code -- dashboards/grafana
+          python3 deploy/grafana/generate.py
+          git diff --exit-code -- deploy/grafana
       - name: Dev users file and what is generated from it agree
-        run: python3 deploy/compose/gen-dev-users.py --check
+        run: python3 deploy/compose/scripts/gen-dev-users.py --check
 
   # The one check to look at (and to require, if branch protection ever allows it).
   # Jobs skipped by the change filter count as passing; a failed or cancelled job fails this.
   ci:
     name: ci
     needs: [changes, lint, test-linux, test-macos, supply-chain, images, actionlint, terraform-and-dashboards]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     timeout-minutes: 5
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     env:

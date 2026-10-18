@@ -130,7 +130,7 @@ Aurora is the same code. The cluster **writer** and **reader** endpoints are sep
 | PostgreSQL TLS (`verify-full` against a CA, wrong name refused) | the same, against the compose target | Tested |
 | MySQL relay: text and binary protocol, multi-statements, guards, `KILL`, audit | `db_mysql.rs` against MySQL 8.4 with TLS | Tested |
 | Role bootstrap: create, idempotent re-run, drift repair, no secrets in events | `db_bootstrap.rs`, `db_mysql.rs` | Tested |
-| Through the proxy and worker: login, denial, audit, lock ends the session | `limen-e2e/tests/phase6.rs`, `deploy/compose/demo-phase6.sh` | Tested |
+| Through the proxy and worker: login, denial, audit, lock ends the session | `limen-e2e/tests/phase6.rs`, `demos/demo-phase6.sh` | Tested |
 | SigV4 signing | AWS's published examples (unit tests) | Matches the examples |
 | RDS/Aurora IAM tokens; `rds_iam` and `AWSAuthenticationPlugin` | token format and SQL shape; stub `rds_iam` role | **Unverified against real AWS** |
 | Redshift credential APIs, MD5 against Redshift | local HTTP stand-in; MD5 against PostgreSQL | **Unverified against a real cluster** |

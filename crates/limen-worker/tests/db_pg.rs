@@ -1,7 +1,7 @@
 //! PostgreSQL sessions through the worker's relay (ADR-0033, slice 6a), against
 //! a real PostgreSQL. Set `LIMEN_TEST_PG_TARGET=host:port` to a server whose
 //! `limen_admin` login (password `limen-admin-dev-only`) owns the `orders` and
-//! `billing` databases (`deploy/compose/targets/postgres/init.sql`). Without
+//! `billing` databases (`deploy/compose/config/targets/postgres/init.sql`). Without
 //! it the tests print SKIPPED.
 
 use std::sync::Arc;

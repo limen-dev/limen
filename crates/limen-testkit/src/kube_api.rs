@@ -12,7 +12,7 @@
 //!   with exit code 3. Whatever the client sends is kept in `client_bytes`.
 //!
 //! This is a test double. A real cluster (kind) is exercised by
-//! `deploy/compose/demo-phase8.sh`.
+//! `demos/demo-phase8.sh`.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;

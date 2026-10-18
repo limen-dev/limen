@@ -1,0 +1,42 @@
+# The kube stack (Phase 8, ADR-0038): one more worker, in its own pool, that
+# serves the kind cluster `staging`. setup.sh creates the cluster and exports
+# LIMEN_KIND_NODE and LIMEN_KUBE_DIR first, and LIMEN_EXTRA_JOIN_TOKENS so the
+# control planes accept this worker's join token (pool kube). Works with the
+# single Limen and with --scale: both reach the proxies through the name `proxy`.
+#
+# The worker joins kind's Docker network, so it reaches the API server by the
+# node's name, which is in the API server's certificate. Dev only.
+x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f2058
+
+services:
+  kube-worker:
+    container_name: limen-kube-worker${LIMEN_SUFFIX:-}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: worker
+    image: limen-worker:dev
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *kube-worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+      LIMEN_KUBE_CLUSTER: staging
+      LIMEN_KUBE_API_SERVER: https://${LIMEN_KIND_NODE:?set by setup.sh}:6443
+      LIMEN_KUBE_CA_FILE: /kube/ca.pem
+      LIMEN_KUBE_TOKEN_FILE: /kube/token
+    volumes:
+      - kube-worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - ${LIMEN_KUBE_DIR:?set by setup.sh}:/kube:ro
+    networks: [default, kind]
+
+networks:
+  kind:
+    external: true
+
+volumes:
+  kube-worker-data:

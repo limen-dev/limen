@@ -1,7 +1,7 @@
 //! Built-in dashboards (ADR-0017): what is happening, drawn on the server as
 //! plain SVG, so the console needs no charting library and no script. The data
 //! comes from the console's own tables, so it covers the last 30 days. Grafana
-//! dashboards for the full history are an optional extra (`dashboards/grafana`).
+//! dashboards for the full history are an optional extra (`deploy/grafana`).
 
 use askama::Template;
 use axum::extract::{Query, State};
