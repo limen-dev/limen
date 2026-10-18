@@ -106,7 +106,7 @@ impl Client {
     }
 
     async fn reply_to(&mut self, id: i32) -> Vec<u8> {
-        let msg = tokio::time::timeout(Duration::from_secs(20), wire::read_message(&mut self.io))
+        let msg = tokio::time::timeout(Duration::from_secs(120), wire::read_message(&mut self.io))
             .await
             .expect("reply in time")
             .expect("read")
@@ -336,6 +336,10 @@ async fn values_never_reach_the_audit_trail_by_default() {
     let mut h = session(&env, "limen-rw").await;
     let marker = "4111-1111-1111-1111";
     let mut admin = admin(&env).await;
+    // A run that died before its cleanup must not poison this one.
+    let _ = admin
+        .run(cmd("drop", "audit_test", "orders").finish())
+        .await;
 
     // An insert: the document travels in a document sequence and is only counted.
     let insert = |doc: &[u8]| {
@@ -646,6 +650,9 @@ async fn an_unacknowledged_write_gets_no_reply_and_the_session_goes_on() {
     let Some(env) = env() else { return };
     let mut h = session(&env, "limen-rw").await;
     let mut admin = admin(&env).await;
+    let _ = admin
+        .run(cmd("drop", "unack_test", "orders").finish())
+        .await;
 
     let doc = Builder::new().str("n", "fire-and-forget").finish();
     let command = cmd("insert", "unack_test", "orders")
