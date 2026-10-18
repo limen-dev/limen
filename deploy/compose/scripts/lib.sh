@@ -201,6 +201,25 @@ stack_autoport() {
   return 0
 }
 
+# One setup.sh at a time per stack. Two runs on the same Compose project recreate each other's
+# containers and fail with "connection refused" half way. The lock is a directory in the stack's
+# state directory (mkdir is atomic); a lock left by a run that is gone is replaced.
+stack_lock() {
+  local lock="$STACK_STATE/setup.lock" pid
+  mkdir -p "$STACK_STATE"
+  if ! mkdir "$lock" 2>/dev/null; then
+    pid="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      fail "another setup.sh (pid $pid) is already working on this stack ($STACK_STATE). Wait for it, or stop it first."
+    fi
+    rm -rf "$lock"
+    mkdir "$lock"
+  fi
+  printf '%s\n' "$$" >"$lock/pid"
+  # shellcheck disable=SC2064 # expand $lock now
+  trap "rm -rf '$lock'" EXIT
+}
+
 # Checks what the selection needs. Prints one line per check, returns 1 if any failed.
 stack_preflight() {
   ui_init

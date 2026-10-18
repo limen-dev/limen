@@ -70,6 +70,7 @@ if [ "$cmd" = up ]; then ui_banner "Limen" "local development stack"; fi
 if [ "$cmd" != up ]; then
   stack_setup ${scale_flag[@]+"${scale_flag[@]}"} "${STACK_NAMES[@]}"
   if [ "$cmd" = status ]; then exec "${compose[@]}" ps; fi
+  stack_lock
   "${compose[@]}" down -v --remove-orphans
   rm -f "$STACK_STATE/stack.env"
   exit 0
@@ -109,6 +110,7 @@ has() { case " ${stacks[*]:-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # ---- start ----------------------------------------------------------------------
 stack_setup ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
+stack_lock
 state="$STACK_STATE"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
