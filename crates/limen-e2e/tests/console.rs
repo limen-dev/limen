@@ -435,6 +435,7 @@ async fn console_end_to_end() {
         "/console/workers",
         "/console/policy",
         "/console/audit",
+        "/console/audit/kubernetes",
         "/console/dashboards",
     ] {
         let page = dev_user.get(path).await;
@@ -608,6 +609,11 @@ async fn console_end_to_end() {
         )
         .await;
     assert_eq!(page.status, 303, "{}", page.body);
+    // The Kubernetes tab renders for admins, empty when there is no cluster traffic.
+    let kube_tab = admin_user.get("/console/audit/kubernetes").await;
+    assert_eq!(kube_tab.status, 200, "{}", kube_tab.body);
+    assert!(kube_tab.body.contains("No Kubernetes requests match."));
+    assert!(kube_tab.body.contains("Refused or failed"));
     let user_page = admin_user
         .get(&format!("/console/users/{DEVELOPER_ENC}"))
         .await;

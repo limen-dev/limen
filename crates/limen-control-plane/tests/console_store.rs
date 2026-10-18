@@ -383,6 +383,17 @@ fn kube_request(
     e
 }
 
+/// `GET /version?x=1`: no resource, so the path (without its query) is kept.
+fn version_request() -> Event {
+    event(
+        EventKind::KubeRequest,
+        Uuid::now_v7(),
+        DEVELOPER,
+        json!({ "kind": "kube", "resource": "eks-dev", "verb": "get", "method": "GET",
+                "path": "/version?token=hunter2", "status": 200 }),
+    )
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn kubernetes_requests_are_listed_in_kubectls_terms() {
     let Some(db) = fresh_db().await else { return };
@@ -390,6 +401,7 @@ async fn kubernetes_requests_are_listed_in_kubectls_terms() {
         kube_request(DEVELOPER, "eks-dev", "list", "pods", "", 200),
         kube_request(DEVELOPER, "eks-dev", "delete", "pods", "web", 403),
         kube_request(GUEST, "eks-prod", "get", "secrets", "db", 200),
+        version_request(),
     ];
     // Delivered twice: the projection is idempotent.
     store::project_events(&db, &events).await.expect("first");
@@ -404,7 +416,9 @@ async fn kubernetes_requests_are_listed_in_kubectls_terms() {
     )
     .await
     .expect("list");
-    assert_eq!(all.len(), 3);
+    assert_eq!(all.len(), 4);
+    let version = all.iter().find(|r| r.resource.is_empty()).expect("version");
+    assert_eq!(version.path, "/version");
 
     let problems = store::list_kube_requests(
         &db,
@@ -443,7 +457,7 @@ async fn kubernetes_requests_are_listed_in_kubectls_terms() {
 
     // Only the request's shape is kept, never the query string.
     let kept: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM kube_requests WHERE row_to_json(kube_requests)::text LIKE '%secret=1%'",
+        "SELECT count(*) FROM kube_requests WHERE row_to_json(kube_requests)::text LIKE '%secret=1%' OR row_to_json(kube_requests)::text LIKE '%hunter2%'",
     )
     .fetch_one(&db)
     .await

@@ -1282,8 +1282,13 @@ pub async fn dry_run(
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {
-    let mut resource = r.resource.clone();
-    if !r.api_group.is_empty() && !resource.is_empty() {
+    // No resource (`/version`, `/healthz`): the path says what was asked.
+    let mut resource = if r.resource.is_empty() {
+        r.path.clone()
+    } else {
+        r.resource.clone()
+    };
+    if !r.api_group.is_empty() && !r.resource.is_empty() {
         resource = format!("{resource}.{}", r.api_group);
     }
     if !r.subresource.is_empty() {

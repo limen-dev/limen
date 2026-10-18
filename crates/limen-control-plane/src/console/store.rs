@@ -589,29 +589,38 @@ async fn project_kube_request(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     e: &limen_audit::Event,
 ) -> Result<(), sqlx::Error> {
+    let field = |key: &str| text(&e.data, key).unwrap_or_default();
+    // A path only where there is no resource to name (`/version`), and never
+    // its query string.
+    let path = if text(&e.data, "k8s_resource").is_none() {
+        field("path").split('?').next().unwrap_or_default()
+    } else {
+        ""
+    };
     sqlx::query(
-            "INSERT INTO kube_requests (event_id, at, username, session_id, cluster, verb, api_group, resource,
-                                        subresource, namespace, name, method, status, latency_ms, error)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-             ON CONFLICT (event_id) DO NOTHING",
-        )
-        .bind(e.event_id)
-        .bind(e.time)
-        .bind(&e.user)
-        .bind(e.session_id)
-        .bind(text(&e.data, "resource").unwrap_or_default())
-        .bind(text(&e.data, "verb").unwrap_or_default())
-        .bind(text(&e.data, "k8s_group").unwrap_or_default())
-        .bind(text(&e.data, "k8s_resource").unwrap_or_default())
-        .bind(text(&e.data, "subresource").unwrap_or_default())
-        .bind(text(&e.data, "namespace").unwrap_or_default())
-        .bind(text(&e.data, "name").unwrap_or_default())
-        .bind(text(&e.data, "method").unwrap_or_default())
-        .bind(i32::try_from(number(&e.data, "status").unwrap_or(0)).unwrap_or(0))
-        .bind(number(&e.data, "latency_ms"))
-        .bind(text(&e.data, "error"))
-        .execute(&mut **tx)
-        .await?;
+        "INSERT INTO kube_requests (event_id, at, username, session_id, cluster, verb, api_group, resource,
+                                    subresource, namespace, name, path, method, status, latency_ms, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(e.event_id)
+    .bind(e.time)
+    .bind(&e.user)
+    .bind(e.session_id)
+    .bind(field("resource"))
+    .bind(field("verb"))
+    .bind(field("k8s_group"))
+    .bind(field("k8s_resource"))
+    .bind(field("subresource"))
+    .bind(field("namespace"))
+    .bind(field("name"))
+    .bind(path)
+    .bind(field("method"))
+    .bind(i32::try_from(number(&e.data, "status").unwrap_or(0)).unwrap_or(0))
+    .bind(number(&e.data, "latency_ms"))
+    .bind(text(&e.data, "error"))
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -854,6 +863,7 @@ pub struct KubeRow {
     pub subresource: String,
     pub namespace: String,
     pub name: String,
+    pub path: String,
     pub method: String,
     pub status: i32,
     pub latency_ms: Option<i64>,
@@ -876,7 +886,7 @@ pub struct KubeFilter {
 pub async fn list_kube_requests(db: &Db, f: &KubeFilter) -> Result<Vec<KubeRow>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT at, username, session_id, cluster, verb, api_group, resource, subresource, namespace, name,
-                method, status, latency_ms, error
+                path, method, status, latency_ms, error
          FROM kube_requests
          WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR cluster = $2)
            AND ($3::text IS NULL OR namespace = $3) AND ($4::text IS NULL OR verb = $4)
@@ -905,6 +915,7 @@ pub async fn list_kube_requests(db: &Db, f: &KubeFilter) -> Result<Vec<KubeRow>,
                 subresource: r.try_get("subresource")?,
                 namespace: r.try_get("namespace")?,
                 name: r.try_get("name")?,
+                path: r.try_get("path")?,
                 method: r.try_get("method")?,
                 status: r.try_get("status")?,
                 latency_ms: r.try_get("latency_ms")?,
