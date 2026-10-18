@@ -10,12 +10,10 @@ x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f205
 
 services:
   # Nothing outside the stack needs these, and their fixed host ports are often
-  # taken (Postgres 5432, the S3 store 8333, the Datadog stand-in 8126).
+  # taken (Postgres 5432, the S3 store 8333).
   postgres:
     ports: !reset []
   s3:
-    ports: !reset []
-  fake-datadog:
     ports: !reset []
 
   control-plane:

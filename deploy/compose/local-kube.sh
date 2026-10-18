@@ -37,6 +37,8 @@ wait_for() {
   for _ in $(seq 1 240); do "$@" >/dev/null 2>&1 && return 0; sleep 0.5; done
   fail "timed out waiting for $what"
 }
+# The core reads .state/stack.env (stack.sh writes it); this stack has no extra stacks.
+mkdir -p "$here/.state" && : > "$here/.state/stack.env"
 compose() {
   docker compose -p "$project" -f "$here/docker-compose.yml" -f "$here/docker-compose.kube.yml" "$@"
 }
