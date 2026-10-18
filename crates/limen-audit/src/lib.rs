@@ -25,6 +25,9 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub enum EventKind {
     #[serde(rename = "auth.login")]
     AuthLogin,
+    /// A user ended their login (`limen logout`). `data.login_id` says which.
+    #[serde(rename = "auth.logout")]
+    AuthLogout,
     #[serde(rename = "auth.denied")]
     AuthDenied,
     #[serde(rename = "session.start")]

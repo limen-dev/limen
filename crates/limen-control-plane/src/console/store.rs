@@ -163,15 +163,31 @@ pub struct SessionRow {
     pub actor_type: String,
     /// The CI run, for a bot's session.
     pub ci: Option<serde_json::Value>,
+    /// When the login behind this session was ended by `limen logout`.
+    pub logged_out_at: Option<OffsetDateTime>,
+}
+
+/// Whether a `sessions` row is live, with the window in hours as `$1`. A
+/// `kubectl` row (one per login and cluster) has no end event: its `ended_at`
+/// is its last request, and it is live while that is recent.
+macro_rules! is_active {
+    () => {
+        "(CASE WHEN kind = 'kubectl' THEN ended_at > now() - interval '5 minutes'
+                 AND NOT EXISTS (SELECT 1 FROM login_revocations r WHERE r.login_id = sessions.login_id)
+               ELSE ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1) END)"
+    };
 }
 
 macro_rules! session_select {
     () => {
-        "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
+        concat!(
+            "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
         started_at, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_uri, recording_sha256,
         actor_type, ci,
-        (ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1)) AS active
-     FROM sessions"
+        (SELECT r.revoked_at FROM login_revocations r WHERE r.login_id = sessions.login_id) AS logged_out_at, ",
+            is_active!(),
+            " AS active FROM sessions"
+        )
     };
 }
 
@@ -196,6 +212,7 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
         active: r.try_get("active")?,
         actor_type: r.try_get("actor_type")?,
         ci: r.try_get("ci")?,
+        logged_out_at: r.try_get("logged_out_at")?,
     })
 }
 
@@ -216,7 +233,9 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
         "
          WHERE ($2::text IS NULL OR username = $2)
            AND ($6::text IS NULL OR resource = $6)
-           AND (NOT $3 OR (ended_at IS NULL AND started_at > now() - make_interval(hours => $1)))
+           AND (NOT $3 OR ",
+        is_active!(),
+        ")
          ORDER BY COALESCE(started_at, ended_at) DESC, session_id DESC
          LIMIT $4 OFFSET $5"
     ))
@@ -248,11 +267,11 @@ pub async fn session(db: &Db, id: Uuid) -> Result<Option<SessionRow>, sqlx::Erro
 pub async fn session_counts_by_resource(
     db: &Db,
 ) -> Result<std::collections::HashMap<String, (i64, i64)>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT resource, count(*) AS total,
-                count(*) FILTER (WHERE ended_at IS NULL AND started_at > now() - make_interval(hours => $1)) AS active
-         FROM sessions WHERE resource IS NOT NULL GROUP BY resource",
-    )
+    let rows = sqlx::query(concat!(
+        "SELECT resource, count(*) AS total, count(*) FILTER (WHERE ",
+        is_active!(),
+        ") AS active FROM sessions WHERE resource IS NOT NULL GROUP BY resource"
+    ))
     .bind(ACTIVE_WINDOW_HOURS)
     .fetch_all(db)
     .await?;
@@ -270,9 +289,10 @@ pub async fn session_counts_by_resource(
 }
 
 pub async fn active_session_count(db: &Db) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM sessions WHERE ended_at IS NULL AND started_at > now() - make_interval(hours => $1)",
-    )
+    sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM sessions WHERE ",
+        is_active!()
+    ))
     .bind(ACTIVE_WINDOW_HOURS)
     .fetch_one(db)
     .await
@@ -292,7 +312,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 16] = [
+const SUMMARY_KEYS: [&str; 20] = [
     "action",
     "target_user",
     "component_id",
@@ -309,6 +329,11 @@ const SUMMARY_KEYS: [&str; 16] = [
     "worker_name",
     "bot",
     "method",
+    // kube.request
+    "verb",
+    "k8s_resource",
+    "namespace",
+    "status",
 ];
 
 /// Facts about a bot's CI run that may appear in the trail.
@@ -441,6 +466,9 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         .bind(summarize(&e.data))
         .execute(&mut *tx)
         .await?;
+        if e.kind == EventKind::KubeRequest {
+            project_kube_request(&mut tx, e).await?;
+        }
         let Some(session_id) = e.session_id else {
             continue;
         };
@@ -574,6 +602,87 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         }
     }
     tx.commit().await
+}
+
+/// One `kube.request` event into the Kubernetes view's table.
+async fn project_kube_request(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+) -> Result<(), sqlx::Error> {
+    let field = |key: &str| text(&e.data, key).unwrap_or_default();
+    let login_session = kube_login_session(&e.data);
+    // A path only where there is no resource to name (`/version`), and never
+    // its query string.
+    let path = if text(&e.data, "k8s_resource").is_none() {
+        field("path").split('?').next().unwrap_or_default()
+    } else {
+        ""
+    };
+    sqlx::query(
+        "INSERT INTO kube_requests (event_id, at, username, session_id, login_session, cluster, verb, api_group,
+                                    resource, subresource, namespace, name, path, method, status, latency_ms, error)
+         VALUES ($1, $2, $3, $4, $17, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(e.event_id)
+    .bind(e.time)
+    .bind(&e.user)
+    .bind(e.session_id)
+    .bind(field("resource"))
+    .bind(field("verb"))
+    .bind(field("k8s_group"))
+    .bind(field("k8s_resource"))
+    .bind(field("subresource"))
+    .bind(field("namespace"))
+    .bind(field("name"))
+    .bind(path)
+    .bind(field("method"))
+    .bind(i32::try_from(number(&e.data, "status").unwrap_or(0)).unwrap_or(0))
+    .bind(number(&e.data, "latency_ms"))
+    .bind(text(&e.data, "error"))
+    .bind(login_session)
+    .execute(&mut **tx)
+    .await?;
+    if let Some(id) = login_session {
+        // One console session per login and cluster. It has no end event: it
+        // spans its first to its last request, so each request only widens
+        // it, which is idempotent and order-independent.
+        sqlx::query(
+            "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
+                                   started_at, ended_at, duration_ms, actor_type, ci, login_id)
+             VALUES ($1, $2, 'kubectl', $3, 'kubectl', $4, $5, $6, $7, $7, 0, $8, $9, $10)
+             ON CONFLICT (session_id) DO UPDATE SET
+               started_at = LEAST(sessions.started_at, EXCLUDED.started_at),
+               ended_at = GREATEST(sessions.ended_at, EXCLUDED.ended_at),
+               duration_ms = (EXTRACT(EPOCH FROM (GREATEST(sessions.ended_at, EXCLUDED.ended_at)
+                                                  - LEAST(sessions.started_at, EXCLUDED.started_at))) * 1000)::bigint",
+        )
+        .bind(id)
+        .bind(&e.user)
+        .bind(field("resource"))
+        .bind(text(&e.data, "worker_id"))
+        .bind(text(&e.data, "proxy_id"))
+        .bind(text(&e.data, "client_addr"))
+        .bind(e.time)
+        .bind(text(&e.data, "actor_type").unwrap_or("user"))
+        .bind(e.data.get("ci").filter(|c| c.is_object()))
+        .bind(text(&e.data, "login_id"))
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// The console session a `kube.request` belongs to: the same for every
+/// request of one login on one cluster, derived so that any order of delivery
+/// agrees. `None` for events from before the worker named the login.
+fn kube_login_session(data: &serde_json::Value) -> Option<Uuid> {
+    let login = text(data, "login_id")?;
+    let cluster = text(data, "resource")?;
+    Some(Uuid::new_v5(
+        &Uuid::NAMESPACE_OID,
+        format!("limen/kubectl/{login}/{cluster}").as_bytes(),
+    ))
 }
 
 /// The command a Redis event names, as the console shows it: the command,
@@ -799,6 +908,113 @@ pub async fn event_kinds(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT DISTINCT kind FROM audit_events ORDER BY kind")
         .fetch_all(db)
         .await
+}
+
+// ---- Kubernetes requests --------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct KubeRow {
+    pub at: OffsetDateTime,
+    pub username: Option<String>,
+    /// The request's own session: an exec's recording lives under it.
+    pub session_id: Option<Uuid>,
+    /// The console session of the login: the page that lists the request.
+    pub login_session: Option<Uuid>,
+    pub cluster: String,
+    pub verb: String,
+    pub api_group: String,
+    pub resource: String,
+    pub subresource: String,
+    pub namespace: String,
+    pub name: String,
+    pub path: String,
+    pub method: String,
+    pub status: i32,
+    pub latency_ms: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct KubeFilter {
+    pub username: Option<String>,
+    pub cluster: Option<String>,
+    pub namespace: Option<String>,
+    pub verb: Option<String>,
+    /// Only requests the cluster (or Limen) refused or failed: status 400 and up.
+    pub problems_only: bool,
+    /// Only this console session's requests, oldest first.
+    pub login_session: Option<Uuid>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Newest first.
+pub async fn list_kube_requests(db: &Db, f: &KubeFilter) -> Result<Vec<KubeRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT at, username, session_id, login_session, cluster, verb, api_group, resource, subresource, namespace, name,
+                path, method, status, latency_ms, error
+         FROM kube_requests
+         WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR cluster = $2)
+           AND ($3::text IS NULL OR namespace = $3) AND ($4::text IS NULL OR verb = $4)
+           AND (NOT $5 OR status >= 400) AND ($8::uuid IS NULL OR login_session = $8)
+         ORDER BY (CASE WHEN $8::uuid IS NOT NULL THEN at END) ASC, at DESC, event_id DESC LIMIT $6 OFFSET $7",
+    )
+    .bind(&f.username)
+    .bind(&f.cluster)
+    .bind(&f.namespace)
+    .bind(&f.verb)
+    .bind(f.problems_only)
+    .bind(f.limit + 1)
+    .bind(f.offset)
+    .bind(f.login_session)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(KubeRow {
+                at: r.try_get("at")?,
+                username: r.try_get("username")?,
+                session_id: r.try_get("session_id")?,
+                login_session: r.try_get("login_session")?,
+                cluster: r.try_get("cluster")?,
+                verb: r.try_get("verb")?,
+                api_group: r.try_get("api_group")?,
+                resource: r.try_get("resource")?,
+                subresource: r.try_get("subresource")?,
+                namespace: r.try_get("namespace")?,
+                name: r.try_get("name")?,
+                path: r.try_get("path")?,
+                method: r.try_get("method")?,
+                status: r.try_get("status")?,
+                latency_ms: r.try_get("latency_ms")?,
+                error: r.try_get("error")?,
+            })
+        })
+        .collect()
+}
+
+/// `(requests, refused or failed)` of a console session.
+pub async fn kube_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT count(*) AS total, count(*) FILTER (WHERE status >= 400) AS problems
+         FROM kube_requests WHERE login_session = $1",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok((row.try_get("total")?, row.try_get("problems")?))
+}
+
+/// The clusters and verbs seen, for the filters.
+pub async fn kube_filter_options(db: &Db) -> Result<(Vec<String>, Vec<String>), sqlx::Error> {
+    let clusters =
+        sqlx::query_scalar("SELECT DISTINCT cluster FROM kube_requests ORDER BY cluster")
+            .fetch_all(db)
+            .await?;
+    let verbs = sqlx::query_scalar("SELECT DISTINCT verb FROM kube_requests ORDER BY verb")
+        .fetch_all(db)
+        .await?;
+    Ok((clusters, verbs))
 }
 
 #[cfg(test)]

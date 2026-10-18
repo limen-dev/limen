@@ -44,6 +44,10 @@ limen ls
 limen admin components                 # the proxy, the worker, and its tunnels
 ```
 
+### Kubernetes (Phase 8)
+
+`deploy/compose/local-kube.sh up` adds a kind cluster and a Kubernetes worker to this stack (`docker-compose.kube.yml`) and prints how to sign in and use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
+
 ### Dev users
 
 <!-- BEGIN dev-users (generated from dev-users.toml) -->

@@ -452,6 +452,17 @@ impl Deployment {
 
     /// Log in through the proxy, as the CLI does. Returns a TLS identity.
     pub async fn login(&self, email: &str, groups: &[&str]) -> Result<Identity, tonic::Status> {
+        let (cert_pem, key_pem) = self.login_pem(email, groups).await?;
+        Ok(Identity::from_pem(&cert_pem, &key_pem).expect("identity"))
+    }
+
+    /// Like [`login`](Self::login), returning the certificate and private key
+    /// as PEM, which is what the CLI stores in a profile.
+    pub async fn login_pem(
+        &self,
+        email: &str,
+        groups: &[&str],
+    ) -> Result<(String, String), tonic::Status> {
         let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
         let csr = CertificateParams::default()
             .serialize_request(&key)
@@ -475,7 +486,7 @@ impl Deployment {
             })
             .await?
             .into_inner();
-        Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
+        Ok((resp.cert_pem, key.serialize_pem()))
     }
 }
 

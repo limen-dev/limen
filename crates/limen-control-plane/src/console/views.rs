@@ -71,7 +71,7 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
         "postgres" | "postgresql" => ("k-postgres", "k-postgres"),
         "mysql" => ("k-mysql", "k-mysql"),
         "redis" => ("k-redis", "k-redis"),
-        "kubernetes" => ("k-kubernetes", "k-kubernetes"),
+        "kubernetes" | "kube" | "kubectl" => ("k-kubernetes", "k-kubernetes"),
         "redshift" => ("warehouse", "k-redshift"),
         "mongodb" => ("k-mongodb", "k-mongodb"),
         "opensearch" => ("k-opensearch", "k-opensearch"),
@@ -218,6 +218,8 @@ pub struct SessionView {
     pub is_redis: bool,
     /// Either of the two: the page lists what was sent instead of a recording.
     pub has_statements: bool,
+    /// One login's kubectl requests on a cluster: the page lists them.
+    pub is_kubectl: bool,
     pub recording_sha256: String,
     pub recording_note: &'static str,
     pub bytes: String,
@@ -231,6 +233,7 @@ pub struct SessionView {
 
 impl From<&SessionRow> for SessionView {
     fn from(s: &SessionRow) -> Self {
+        // A login ended by `limen logout` ends its kubectl session at once.
         let (status, status_class) = if s.active {
             ("active", "live")
         } else if s.ended_at.is_some() {
@@ -249,13 +252,15 @@ impl From<&SessionRow> for SessionView {
             resource: dash(s.resource.as_deref()),
             login: dash(s.login.as_deref()),
             started: time_text(s.started_at),
-            ended: time_text(s.ended_at),
+            ended: time_text(s.logged_out_at.or(s.ended_at)),
             duration: duration_text(s.duration_ms),
             status,
             status_class,
             // "ended" says nothing the status doesn't.
             reason: if s.active {
                 String::new()
+            } else if s.logged_out_at.is_some() {
+                "logged out".to_owned()
             } else {
                 s.end_reason
                     .clone()
@@ -265,6 +270,7 @@ impl From<&SessionRow> for SessionView {
             active: s.active,
             has_recording,
             is_redis: s.kind.as_deref() == Some("redis"),
+            is_kubectl: s.kind.as_deref() == Some("kubectl"),
             has_statements: matches!(
                 s.kind.as_deref(),
                 Some("postgres" | "mysql" | "redshift" | "redis")
@@ -486,6 +492,10 @@ pub struct SessionPage {
     pub s: SessionView,
     /// Database sessions: the statements sent, oldest first.
     pub statements: Vec<StatementView>,
+    /// kubectl sessions: the API requests, oldest first.
+    pub requests: Vec<KubeView>,
+    pub request_total: i64,
+    pub request_problems: i64,
     pub statement_total: i64,
     pub statement_errors: i64,
 }
@@ -658,6 +668,44 @@ pub struct AuditPage {
     pub kinds: Vec<String>,
     pub kind_filter: Option<String>,
     pub user_filter: Option<String>,
+    pub newer: Option<String>,
+    pub older: Option<String>,
+}
+
+/// One Kubernetes API request, in kubectl's terms.
+pub struct KubeView {
+    pub at: String,
+    pub user: Option<String>,
+    pub user_path: Option<String>,
+    /// The kubectl session (one login on one cluster) that lists the request.
+    pub session_path: Option<String>,
+    /// For exec, attach, and port-forward: the stream's own session, which has the recording.
+    pub stream_path: Option<String>,
+    pub cluster: String,
+    pub verb: String,
+    /// `pods`, `pods/exec`, `deployments.apps`.
+    pub resource: String,
+    pub namespace: String,
+    pub name: String,
+    pub status: i32,
+    /// `ok` below 400, `bad` from 400 up.
+    pub tone: &'static str,
+    pub latency: String,
+    pub error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "kube_requests.html")]
+pub struct KubePage {
+    pub chrome: Chrome,
+    pub requests: Vec<KubeView>,
+    pub clusters: Vec<String>,
+    pub verbs: Vec<String>,
+    pub cluster_filter: Option<String>,
+    pub verb_filter: Option<String>,
+    pub user_filter: Option<String>,
+    pub namespace_filter: Option<String>,
+    pub problems_only: bool,
     pub newer: Option<String>,
     pub older: Option<String>,
 }

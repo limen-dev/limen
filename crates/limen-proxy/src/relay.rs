@@ -55,6 +55,10 @@ impl Service<Request<Incoming>> for RelayService {
     }
 
     fn call(&mut self, req: Request<Incoming>) -> Self::Future {
+        if req.uri().path().starts_with(crate::kube::PREFIX) {
+            let proxy = self.proxy.clone();
+            return Box::pin(async move { Ok(crate::kube::handle(&proxy, req).await) });
+        }
         let channel = self.proxy.cp_channel();
         Box::pin(async move { Ok(relay(channel, req).await) })
     }

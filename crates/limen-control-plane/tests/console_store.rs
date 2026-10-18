@@ -358,3 +358,262 @@ async fn redis_sessions_list_their_commands() {
         (3, 1)
     );
 }
+
+fn kube_request(
+    user: &str,
+    cluster: &str,
+    verb: &str,
+    resource: &str,
+    name: &str,
+    status: u16,
+) -> Event {
+    let mut e = event(
+        EventKind::KubeRequest,
+        Uuid::now_v7(),
+        user,
+        json!({
+            "kind": "kube", "resource": cluster, "verb": verb, "k8s_resource": resource,
+            "k8s_group": "", "subresource": "", "namespace": "default", "name": name,
+            "method": "GET", "status": status, "latency_ms": 12,
+            // Not part of the view, and must not be kept.
+            "path": "/api/v1/namespaces/default/pods?labelSelector=secret=1", "groups": ["limen:edit"],
+        }),
+    );
+    e.session_id = Some(Uuid::now_v7());
+    e
+}
+
+/// `GET /version?x=1`: no resource, so the path (without its query) is kept.
+fn version_request() -> Event {
+    event(
+        EventKind::KubeRequest,
+        Uuid::now_v7(),
+        DEVELOPER,
+        json!({ "kind": "kube", "resource": "eks-dev", "verb": "get", "method": "GET",
+                "path": "/version?token=hunter2", "status": 200 }),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kubernetes_requests_are_listed_in_kubectls_terms() {
+    let Some(db) = fresh_db().await else { return };
+    let events = [
+        kube_request(DEVELOPER, "eks-dev", "list", "pods", "", 200),
+        kube_request(DEVELOPER, "eks-dev", "delete", "pods", "web", 403),
+        kube_request(GUEST, "eks-prod", "get", "secrets", "db", 200),
+        version_request(),
+    ];
+    // Delivered twice: the projection is idempotent.
+    store::project_events(&db, &events).await.expect("first");
+    store::project_events(&db, &events).await.expect("again");
+
+    let all = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("list");
+    assert_eq!(all.len(), 4);
+    let version = all.iter().find(|r| r.resource.is_empty()).expect("version");
+    assert_eq!(version.path, "/version");
+
+    let problems = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            problems_only: true,
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("problems");
+    assert_eq!(problems.len(), 1);
+    assert_eq!(
+        (problems[0].verb.as_str(), problems[0].name.as_str()),
+        ("delete", "web")
+    );
+    assert_eq!(problems[0].status, 403);
+
+    let prod = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            cluster: Some("eks-prod".into()),
+            username: Some(GUEST.into()),
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("prod");
+    assert_eq!(prod.len(), 1);
+    assert_eq!(prod[0].resource, "secrets");
+
+    let (clusters, verbs) = store::kube_filter_options(&db).await.expect("options");
+    assert_eq!(clusters, ["eks-dev", "eks-prod"]);
+    assert_eq!(verbs, ["delete", "get", "list"]);
+
+    // Only the request's shape is kept, never the query string.
+    let kept: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kube_requests WHERE row_to_json(kube_requests)::text LIKE '%secret=1%' OR row_to_json(kube_requests)::text LIKE '%hunter2%'",
+    )
+    .fetch_one(&db)
+    .await
+    .expect("count");
+    assert_eq!(kept, 0);
+}
+
+fn login_request(login: &str, cluster: &str, verb: &str, status: u16, seconds: i64) -> Event {
+    let mut e = kube_request(DEVELOPER, cluster, verb, "pods", "web", status);
+    e.data["login_id"] = json!(login);
+    e.data["worker_id"] = json!("w1");
+    e.data["proxy_id"] = json!("p1");
+    e.time += time::Duration::seconds(seconds);
+    e
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_login_on_one_cluster_is_one_kubectl_session() {
+    let Some(db) = fresh_db().await else { return };
+    let (a0, a1, a2) = (
+        login_request("login-a", "eks-dev", "list", 200, 0),
+        login_request("login-a", "eks-dev", "get", 200, 30),
+        login_request("login-a", "eks-dev", "delete", 403, 90),
+    );
+    let other_login = login_request("login-b", "eks-dev", "get", 200, 10);
+    let other_cluster = login_request("login-a", "eks-prod", "get", 200, 20);
+    let no_login = kube_request(DEVELOPER, "eks-dev", "get", "pods", "web", 200);
+
+    // Out of order, and some delivered twice.
+    store::project_events(
+        &db,
+        &[a2.clone(), a0.clone(), other_login, other_cluster, no_login],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[a1, a0, a2])
+        .await
+        .expect("second batch");
+
+    let sessions = store::list_sessions(
+        &db,
+        &SessionFilter {
+            limit: 50,
+            ..SessionFilter::default()
+        },
+    )
+    .await
+    .expect("sessions");
+    // login-a/eks-dev, login-b/eks-dev, login-a/eks-prod. The event without a
+    // login (from before workers named it) belongs to no session.
+    assert_eq!(sessions.len(), 3, "{sessions:#?}");
+    assert!(
+        sessions
+            .iter()
+            .all(|s| s.kind.as_deref() == Some("kubectl"))
+    );
+
+    let main = sessions
+        .iter()
+        .find(|s| s.duration_ms == Some(90_000))
+        .expect("the 90 second session");
+    assert_eq!(main.resource.as_deref(), Some("eks-dev"));
+    assert_eq!(main.username.as_deref(), Some(DEVELOPER));
+    // The events are from just now, so the session is live.
+    assert!(main.active);
+
+    let (total, problems) = store::kube_session_counts(&db, main.session_id)
+        .await
+        .expect("counts");
+    assert_eq!((total, problems), (3, 1));
+    let requests = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            login_session: Some(main.session_id),
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("requests");
+    let verbs: Vec<_> = requests.iter().map(|r| r.verb.as_str()).collect();
+    assert_eq!(verbs, ["list", "get", "delete"], "oldest first");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logging_out_ends_the_kubectl_session_at_once() {
+    let Some(db) = fresh_db().await else { return };
+    store::project_events(
+        &db,
+        &[
+            login_request("login-a", "eks-dev", "list", 200, 0),
+            login_request("login-b", "eks-dev", "list", 200, 0),
+        ],
+    )
+    .await
+    .expect("project");
+    let list = |db: &limen_control_plane::db::Db| {
+        let db = db.clone();
+        async move {
+            store::list_sessions(
+                &db,
+                &SessionFilter {
+                    limit: 50,
+                    ..SessionFilter::default()
+                },
+            )
+            .await
+            .expect("sessions")
+        }
+    };
+    let before = list(&db).await;
+    assert_eq!(before.len(), 2);
+    assert!(before.iter().all(|s| s.active && s.logged_out_at.is_none()));
+    assert_eq!(store::active_session_count(&db).await.expect("count"), 2);
+
+    assert!(
+        limen_control_plane::db::revoke_login(
+            &db,
+            "login-a",
+            DEVELOPER,
+            time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        )
+        .await
+        .expect("logout")
+    );
+    let after = list(&db).await;
+    let active: Vec<_> = after.iter().filter(|s| s.active).collect();
+    assert_eq!(active.len(), 1, "only the other login is live");
+    let ended = after.iter().find(|s| !s.active).expect("ended");
+    assert!(ended.logged_out_at.is_some());
+    assert_eq!(store::active_session_count(&db).await.expect("count"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_logout_is_remembered_as_long_as_the_certificate_lives() {
+    let Some(db) = fresh_db().await else { return };
+    let now = time::OffsetDateTime::now_utc();
+    // A certificate with weeks left (a long configured lifetime) and one that
+    // expired days ago.
+    for (login, expires) in [
+        ("long-lived", now + time::Duration::days(20)),
+        ("long-gone", now - time::Duration::days(3)),
+    ] {
+        assert!(
+            limen_control_plane::db::revoke_login(&db, login, DEVELOPER, expires)
+                .await
+                .expect("logout")
+        );
+    }
+    // Backdate both logouts: a fixed window would have forgotten them.
+    sqlx::query("UPDATE login_revocations SET revoked_at = now() - interval '5 days'")
+        .execute(&db)
+        .await
+        .expect("backdate");
+    let remembered = limen_control_plane::db::recent_revoked_logins(&db)
+        .await
+        .expect("recent");
+    assert_eq!(remembered, ["long-lived"]);
+}

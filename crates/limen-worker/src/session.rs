@@ -3,7 +3,7 @@
 //! The first frame carries the proxy's signed grant. The worker checks it
 //! independently (defense in depth: both proxy and worker must allow), gets
 //! per-session SSH certificates from the control plane, then bridges the
-//! frame stream to its SSH server.
+//! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
 
@@ -92,6 +92,7 @@ pub(crate) async fn open(
     let expires = config_expiry(&signed);
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
+    let kube_worker = worker.clone();
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -137,6 +138,20 @@ pub(crate) async fn open(
                     let mut end = end;
                     tokio::select! {
                         r = redis::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Kube(request) => {
+                    // One HTTP request (and any stream it upgrades to). A
+                    // drain that reaches its timeout ends it too.
+                    let mut end = end;
+                    tokio::select! {
+                        () = crate::kube::serve(kube_worker, *request, ours) => {
+                            Ok(crate::ssh::SessionOutcome::default())
+                        }
                         _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
                             ended_by_drain: true,
                             ..Default::default()
@@ -193,6 +208,7 @@ enum Admitted {
     Ssh(Box<SshSessionConfig>),
     Db(Box<crate::db::DbSessionConfig>),
     Redis(Box<redis::Prepared>),
+    Kube(Box<crate::kube::Admitted>),
 }
 
 impl Admitted {
@@ -201,6 +217,7 @@ impl Admitted {
             Admitted::Ssh(c) => c.session_id.clone(),
             Admitted::Db(c) => c.session_id.to_string(),
             Admitted::Redis(p) => p.session_id().to_owned(),
+            Admitted::Kube(k) => k.session_id.clone(),
         }
     }
 }
@@ -251,6 +268,9 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "redis" => admit_redis(worker, &checked)
             .await
             .map(|c| Admitted::Redis(Box::new(c))),
+        "kube" => {
+            crate::kube::admit(worker, &checked.verified, now).map(|k| Admitted::Kube(Box::new(k)))
+        }
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -263,10 +283,11 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
     let creds = worker.credentials();
     let grant = &checked.verified.grant;
     let snapshot = &checked.snapshot;
-    if let Some(why) = snapshot
-        .restrictions
-        .blocks(&checked.verified.user.username, &grant.session_id)
-    {
+    if let Some(why) = snapshot.restrictions.blocks(
+        &checked.verified.user.username,
+        &checked.verified.user.login_id,
+        &grant.session_id,
+    ) {
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {

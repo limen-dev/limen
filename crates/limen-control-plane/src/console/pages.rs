@@ -18,10 +18,10 @@ use uuid::Uuid;
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
-    PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView,
-    ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, StatementView, Stats,
-    TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers, error_page, list_text,
-    path_segment, time_text,
+    KubePage, KubeView, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage,
+    ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage,
+    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers,
+    error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -557,6 +557,27 @@ pub async fn session_detail(
             s.proxy = with_name(&state, row.proxy_id.as_deref(), s.proxy).await;
             s.worker = with_name(&state, row.worker_id.as_deref(), s.worker).await;
             // Best effort: the page still renders without the statements.
+            let (requests, request_total, request_problems) = if s.is_kubectl {
+                let filter = store::KubeFilter {
+                    login_session: Some(row.session_id),
+                    limit: STATEMENT_LIMIT,
+                    ..store::KubeFilter::default()
+                };
+                let list = store::list_kube_requests(&state.db, &filter)
+                    .await
+                    .unwrap_or_default();
+                let (total, problems) = store::kube_session_counts(&state.db, row.session_id)
+                    .await
+                    .unwrap_or_default();
+                let shown = usize::try_from(STATEMENT_LIMIT).unwrap_or(500);
+                (
+                    list.iter().take(shown).map(kube_view).collect(),
+                    total,
+                    problems,
+                )
+            } else {
+                (Vec::new(), 0, 0)
+            };
             let (statements, statement_total, statement_errors) = if s.has_statements {
                 let list = store::db_statements(&state.db, row.session_id, STATEMENT_LIMIT)
                     .await
@@ -577,6 +598,9 @@ pub async fn session_detail(
                     chrome: chrome(&state, &auth, "sessions"),
                     s,
                     statements,
+                    requests,
+                    request_total,
+                    request_problems,
                     statement_total,
                     statement_errors,
                 }
@@ -1279,6 +1303,118 @@ pub async fn dry_run(
         },
     };
     policy_page(&state, &auth, form.yaml, Some(result))
+}
+
+fn kube_view(r: &store::KubeRow) -> KubeView {
+    // No resource (`/version`, `/healthz`): the path says what was asked.
+    let mut resource = if r.resource.is_empty() {
+        r.path.clone()
+    } else {
+        r.resource.clone()
+    };
+    if !r.api_group.is_empty() && !r.resource.is_empty() {
+        resource = format!("{resource}.{}", r.api_group);
+    }
+    if !r.subresource.is_empty() {
+        resource = format!("{resource}/{}", r.subresource);
+    }
+    KubeView {
+        at: time_text(Some(r.at)),
+        user_path: r.username.as_deref().map(path_segment),
+        user: r.username.clone(),
+        session_path: r.login_session.map(|id| id.to_string()),
+        stream_path: r
+            .session_id
+            .filter(|_| matches!(r.subresource.as_str(), "exec" | "attach" | "portforward"))
+            .map(|id| id.to_string()),
+        cluster: r.cluster.clone(),
+        verb: r.verb.clone(),
+        resource,
+        namespace: r.namespace.clone(),
+        name: r.name.clone(),
+        status: r.status,
+        tone: if r.status >= 400 { "bad" } else { "ok" },
+        latency: r
+            .latency_ms
+            .map(|ms| format!("{ms} ms"))
+            .unwrap_or_default(),
+        error: r.error.clone(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct KubeQuery {
+    user: Option<String>,
+    cluster: Option<String>,
+    namespace: Option<String>,
+    verb: Option<String>,
+    problems: Option<String>,
+    offset: Option<i64>,
+}
+
+/// The audit trail's Kubernetes tab: every API request, as kubectl would say it.
+pub async fn kube_requests(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<KubeQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let pick = |v: &Option<String>| v.clone().filter(|s| !s.is_empty());
+    let offset = q.offset.unwrap_or(0).max(0);
+    let filter = store::KubeFilter {
+        username: pick(&q.user),
+        cluster: pick(&q.cluster),
+        namespace: pick(&q.namespace),
+        verb: pick(&q.verb),
+        problems_only: q.problems.is_some_and(|p| p == "1"),
+        login_session: None,
+        limit: PAGE_SIZE,
+        offset,
+    };
+    let mut rows = match store::list_kube_requests(&state.db, &filter).await {
+        Ok(rows) => rows,
+        Err(e) => return db_error("listing Kubernetes requests", &e),
+    };
+    let (clusters, verbs) = store::kube_filter_options(&state.db)
+        .await
+        .unwrap_or_default();
+    let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
+    rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
+    let link = |offset: i64| {
+        let mut url = format!("/console/audit/kubernetes?offset={offset}");
+        for (key, value) in [
+            ("user", &filter.username),
+            ("cluster", &filter.cluster),
+            ("namespace", &filter.namespace),
+            ("verb", &filter.verb),
+        ] {
+            if let Some(v) = value {
+                url.push_str(&["&", key, "=", &path_segment(v)].concat());
+            }
+        }
+        if filter.problems_only {
+            url.push_str("&problems=1");
+        }
+        url
+    };
+    html(
+        KubePage {
+            chrome: chrome(&state, &auth, "audit"),
+            requests: rows.iter().map(kube_view).collect(),
+            clusters,
+            verbs,
+            cluster_filter: filter.cluster.clone(),
+            verb_filter: filter.verb.clone(),
+            user_filter: filter.username.clone(),
+            namespace_filter: filter.namespace.clone(),
+            problems_only: filter.problems_only,
+            newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
+            older: has_more.then(|| link(offset + PAGE_SIZE)),
+        }
+        .render(),
+    )
 }
 
 #[derive(Deserialize)]

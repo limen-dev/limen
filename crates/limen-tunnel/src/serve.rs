@@ -55,7 +55,8 @@ const HTTP1_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Serve `service` over HTTP/1.1 on one connection (browsers that did not
 /// negotiate `h2`). Every request gets `peer` in its extensions. Keep-alive
-/// is on; there are no upgrades.
+/// is on, and upgrades (`kubectl exec`'s WebSocket and SPDY) are allowed: the
+/// handler decides what to do with a request that asks for one.
 pub async fn serve_http1<IO, S, B>(io: IO, peer: PeerInfo, service: S) -> Result<(), TransportError>
 where
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -76,6 +77,7 @@ where
         .timer(TokioTimer::new())
         .header_read_timeout(HTTP1_HEADER_TIMEOUT)
         .serve_connection(TokioIo::new(io), TowerToHyperService::new(service))
+        .with_upgrades()
         .await?;
     Ok(())
 }

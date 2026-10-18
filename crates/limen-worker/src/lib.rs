@@ -3,6 +3,7 @@
 //! (SSH in Phase 2, Redis in Phase 7; databases and Kubernetes later).
 
 pub mod db;
+mod kube;
 pub mod recording;
 mod recordings;
 pub mod redis;
@@ -143,6 +144,9 @@ pub struct Config {
     /// For the local compose profile only (ADR-0033).
     #[arg(long, env = "LIMEN_ALLOW_INSECURE_DB_TARGETS")]
     pub allow_insecure_db_targets: bool,
+
+    #[command(flatten)]
+    pub kube: kube::KubeConfig,
 }
 
 /// `--drain-timeout-secs` when unset (and so is the legacy setting).
@@ -212,6 +216,8 @@ pub struct Worker {
     pub(crate) redis: Arc<redis::target::Settings>,
     pub(crate) db_registry: Arc<db::Registry>,
     aws: Arc<tokio::sync::OnceCell<Result<db::iam::CredentialSource, String>>>,
+    /// The cluster this worker serves, if it is a kube worker (ADR-0038).
+    pub(crate) kube: Option<Arc<kube::Upstream>>,
     audit_spool: limen_audit::spool::Spool,
 }
 
@@ -265,6 +271,7 @@ impl Worker {
             config.redis_ca_file.as_deref(),
             config.redis_credentials_file.as_deref(),
         )?;
+        let kube = config.kube.resolve()?.map(Arc::new);
         let (tx, rx) = watch::channel(Arc::new(creds));
         let sessions = SessionSlots::new(config.max_sessions);
         Ok((
@@ -282,6 +289,7 @@ impl Worker {
                 redis: Arc::new(redis),
                 db_registry: Arc::default(),
                 aws: Arc::default(),
+                kube,
                 audit_spool,
             },
             tx,

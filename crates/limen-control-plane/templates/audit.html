@@ -7,6 +7,7 @@
     <p class="sub">The last 30 days, newest first. This is a summary: the complete, signed events are in your audit sinks.</p>
   </div>
 </div>
+<nav class="tabs" aria-label="Audit views"><a href="/console/audit" aria-current="true">All events</a><a href="/console/audit/kubernetes">Kubernetes</a></nav>
 <form method="get" action="/console/audit" class="filters">
   <label><span>Event</span>
     <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if kind_filter.as_deref() == Some(k.as_str()) %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>

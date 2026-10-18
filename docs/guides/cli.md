@@ -9,7 +9,7 @@ limen ls                     # what can I reach?   add --json for scripts
 limen ssh web-staging-1      # connect; the login is picked from policy when there's only one
 limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
 limen redis connect cache-staging          # a local listener for redis-cli, no password
-limen logout                 # delete local credentials
+limen logout                 # end this login and delete local credentials
 ```
 
 What `limen ls` looks like:
@@ -29,7 +29,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 |---|---|
 | `limen login [--device] [--no-browser] [--ca-file PEM]` | Sign in through the identity provider and get short-lived credentials. `--ca-file` pins the proxy's CA for later commands |
 | `limen login --bot <github_actions\|gitlab\|oidc> [--bot-name N] [--token-env VAR] [--token-file FILE] [--audience A]` | Log in as a **bot** with a CI platform's identity token (for CI jobs; see [the bots guide](bots.md)) |
-| `limen logout` | Delete the local credentials |
+| `limen logout` | End this login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and delete the local credentials. Your other logins are not affected. If the proxy can't be reached the credentials are still deleted, and the certificate stays valid until it expires |
 | `limen status` | Show your identity, roles, and the time left on your credentials |
 | `limen ls [--json]` | List the resources you can access |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
@@ -42,8 +42,9 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin lock <user> --reason …` / `unlock <user>` / `locks` | Lock or unlock a user; list locks |
 | `limen admin kill-session <id> --reason …` | End one live session |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
+| `limen kube login <cluster> [--kubeconfig FILE \| --print]` | Write a kubeconfig for a cluster you may reach. `kubectl` then runs `limen kube credentials`, the exec plugin that prints your short-lived certificate. See [the Kubernetes guide](kubernetes.md) |
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
-| `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>

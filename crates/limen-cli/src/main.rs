@@ -1,6 +1,6 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts, SQL databases, and Redis or Valkey today, and (planned)
-//! Kubernetes, MongoDB, search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, Redis or Valkey, and Kubernetes clusters, and (planned)
+//! MongoDB, search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -158,7 +158,7 @@ enum Command {
         #[command(subcommand)]
         command: RedisCommand,
     },
-    /// Kubernetes and EKS (planned, Phase 8).
+    /// Kubernetes and EKS.
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
@@ -248,8 +248,18 @@ enum RedisCommand {
 
 #[derive(Debug, Subcommand)]
 enum KubeCommand {
-    /// Write a kubeconfig context that uses the limen exec credential plugin.
-    Login { cluster: String },
+    /// Write a kubeconfig for a cluster; kubectl then asks `limen kube credentials`.
+    Login {
+        cluster: String,
+        /// Write the kubeconfig here instead of in the profile directory.
+        #[arg(long, value_name = "FILE")]
+        kubeconfig: Option<PathBuf>,
+        /// Print the kubeconfig instead of writing it.
+        #[arg(long, conflicts_with = "kubeconfig")]
+        print: bool,
+    },
+    /// The kubectl exec credential plugin: prints your short-lived certificate.
+    Credentials,
 }
 
 #[derive(Debug, Subcommand)]
@@ -358,7 +368,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ca_file,
             ..
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
-        Command::Logout => commands::logout(proxy),
+        Command::Logout => commands::logout(proxy).await,
         Command::Status => commands::status(proxy),
         Command::Ls { json } => commands::ls(proxy, json).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
@@ -407,7 +417,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
+        Command::Kube { command } => match command {
+            KubeCommand::Login {
+                cluster,
+                kubeconfig,
+                print,
+            } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
+            KubeCommand::Credentials => commands::kube::credentials(proxy),
+        },
         Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
         Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
         Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
@@ -448,7 +465,7 @@ mod tests {
                 "--listen",
                 "127.0.0.1:5433",
             ][..],
-            &["kube", "login", "c"],
+            &["redis", "connect", "r", "--user", "u"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
             &["search", "connect", "r", "--role", "x"],
             &["mq", "connect", "r", "--user", "u"],
@@ -460,6 +477,32 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn kube_commands_parse() {
+        for args in [
+            &["kube", "login", "c"][..],
+            &["kube", "login", "c", "--kubeconfig", "/tmp/k"],
+            &["kube", "login", "c", "--print"],
+            &["--proxy", "p:1", "kube", "credentials"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "limen",
+                "kube",
+                "login",
+                "c",
+                "--print",
+                "--kubeconfig",
+                "x"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

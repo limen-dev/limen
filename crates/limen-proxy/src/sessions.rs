@@ -194,7 +194,11 @@ impl Route {
 
 /// Add `worker_name` and `proxy_name` to session event data, only for
 /// components that have a name: unnamed ones are audited as before names.
-fn add_names(data: &mut serde_json::Value, worker: &SessionWorker, proxy_name: Option<String>) {
+pub(crate) fn add_names(
+    data: &mut serde_json::Value,
+    worker: &SessionWorker,
+    proxy_name: Option<String>,
+) {
     if let Some(name) = &worker.name {
         data["worker_name"] = json!(name);
     }
@@ -205,20 +209,20 @@ fn add_names(data: &mut serde_json::Value, worker: &SessionWorker, proxy_name: O
 
 /// The worker serving a session. The name, if any, comes from its
 /// certificate (directly or through the registry), for display only.
-struct SessionWorker {
-    id: String,
-    name: Option<String>,
+pub(crate) struct SessionWorker {
+    pub(crate) id: String,
+    pub(crate) name: Option<String>,
 }
 
-struct Denial {
-    reason: String,
+pub(crate) struct Denial {
+    pub(crate) reason: String,
     /// Policy denials are audited; infrastructure failures are logged.
-    audit: bool,
+    pub(crate) audit: bool,
     /// For the audit event's `data.reason` instead of the message.
-    code: Option<&'static str>,
+    pub(crate) code: Option<&'static str>,
 }
 
-fn denied(reason: impl Into<String>) -> Denial {
+pub(crate) fn denied(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: true,
@@ -226,7 +230,7 @@ fn denied(reason: impl Into<String>) -> Denial {
     }
 }
 
-fn failed(reason: impl Into<String>) -> Denial {
+pub(crate) fn failed(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: false,
@@ -265,11 +269,11 @@ fn refused(s: &tonic::Status) -> Denial {
     }
 }
 
-type Outbound = tokio::sync::mpsc::Sender<TunnelFrame>;
-type Inbound = tonic::Streaming<TunnelFrame>;
+pub(crate) type Outbound = tokio::sync::mpsc::Sender<TunnelFrame>;
+pub(crate) type Inbound = tonic::Streaming<TunnelFrame>;
 /// Counts a local session in the worker's load (peered ones are counted by
 /// the proxy holding the tunnel).
-type Slot = Option<SessionSlot>;
+pub(crate) type Slot = Option<SessionSlot>;
 
 /// The principal, resource kind, and database a request names.
 fn resolve_principal(
@@ -341,7 +345,10 @@ async fn establish(
         .fresh(now)
         .map_err(|e| failed(format!("access can't be decided right now ({e})")))?;
     let policy = &snapshot.policy;
-    if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
+    if let Some(why) = snapshot
+        .restrictions
+        .blocks(&user.username, &user.login_id, "")
+    {
         return Err(denied(why));
     }
     let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
@@ -356,6 +363,49 @@ async fn establish(
             request.principal, request.resource
         )));
     }
+    let target = Target {
+        resource: &request.resource,
+        kind: &kind,
+        principal: &request.principal,
+        database: &database,
+        groups: Vec::new(),
+    };
+    let (session_id, worker, inbound, outbound, slot) =
+        open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
+    Ok((
+        session_id,
+        worker,
+        inbound,
+        outbound,
+        slot,
+        Resolved { kind, database },
+    ))
+}
+
+/// What a session is for. The caller has already decided policy allows it.
+pub(crate) struct Target<'a> {
+    pub resource: &'a str,
+    /// `ssh`, `kube`, a database kind, or `redis`.
+    pub kind: &'a str,
+    /// The upstream identity for single-principal kinds (an SSH login).
+    pub principal: &'a str,
+    pub database: &'a str,
+    /// The Kubernetes groups to impersonate.
+    pub groups: Vec<String>,
+}
+
+/// Pick a worker that may serve the resource, sign a grant for it, and open
+/// the stream, trying other workers if one is full or draining. Returns the
+/// session ID, the worker, both ends of the stream, and the load slot to hold
+/// until the session ends.
+pub(crate) async fn open_session(
+    proxy: &Proxy,
+    policy: &limen_policy::Policy,
+    user: &UserIdentity,
+    user_cert_der: &[u8],
+    target: &Target<'_>,
+    now: OffsetDateTime,
+) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
     let session_id = Uuid::now_v7();
     let ttl = policy.max_session_ttl(&user.roles);
     let creds = proxy.credentials();
@@ -370,7 +420,7 @@ async fn establish(
         let (route, slot) = choose_route(
             proxy,
             policy,
-            &request.resource,
+            target.resource,
             &tried,
             !refused_full.is_empty(),
         )
@@ -382,17 +432,18 @@ async fn establish(
             username: user.username.clone(),
             roles: user.roles.clone(),
             login_id: user.login_id.clone(),
-            resource: request.resource.clone(),
-            kind: kind.clone(),
-            principal: request.principal.clone(),
+            resource: target.resource.to_owned(),
+            kind: target.kind.to_owned(),
+            principal: target.principal.to_owned(),
             issued_at_unix: now.unix_timestamp(),
             establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
             session_expires_at_unix: (now + ttl).unix_timestamp(),
             nonce: rand::random::<[u8; 32]>().to_vec(),
-            user_cert_der: user_cert_der.clone(),
+            user_cert_der: user_cert_der.to_vec(),
             proxy_id: creds.id.clone(),
             worker_id: worker_id.clone(),
-            database: database.clone(),
+            database: target.database.to_owned(),
+            groups: target.groups.clone(),
         };
         let signed = limen_session::grant::sign(&proxy.signer(), &grant)
             .map_err(|e| failed(format!("signing grant: {e}")))?;
@@ -402,14 +453,7 @@ async fn establish(
                     id: worker_id,
                     name: worker_name,
                 };
-                return Ok((
-                    session_id,
-                    worker,
-                    inbound,
-                    outbound,
-                    slot,
-                    Resolved { kind, database },
-                ));
+                return Ok((session_id, worker, inbound, outbound, slot));
             }
             Err(Opening::Full(why)) => {
                 tracing::info!(worker = %worker_id, reason = %why, "worker is full; trying another");
@@ -423,7 +467,7 @@ async fn establish(
                 refused_full.push(worker_id.clone());
                 tried.push(worker_id);
                 if tried.len() >= MAX_ATTEMPTS {
-                    return Err(no_capacity(&request.resource));
+                    return Err(no_capacity(target.resource));
                 }
             }
             Err(Opening::Draining(why)) => {
@@ -436,9 +480,9 @@ async fn establish(
                 tried.push(worker_id);
                 if tried.len() >= MAX_ATTEMPTS {
                     return Err(if refused_full.is_empty() {
-                        shutting_down(&request.resource)
+                        shutting_down(target.resource)
                     } else {
-                        no_capacity(&request.resource)
+                        no_capacity(target.resource)
                     });
                 }
             }
@@ -679,10 +723,11 @@ async fn relay(
         loop {
             tick.tick().await;
             if let Some(snapshot) = proxy.policy.latest() {
-                if let Some(why) = snapshot
-                    .restrictions
-                    .blocks(&user.username, &session_id.to_string())
-                {
+                if let Some(why) = snapshot.restrictions.blocks(
+                    &user.username,
+                    &user.login_id,
+                    &session_id.to_string(),
+                ) {
                     return why;
                 }
                 if snapshot.restrictions.is_revoked(worker_id) {

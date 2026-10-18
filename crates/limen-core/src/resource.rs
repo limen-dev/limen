@@ -84,7 +84,7 @@ impl ResourceKind {
                 ("limen db connect {name}", None)
             }
             ResourceKind::Redis => ("limen redis connect {name}", None),
-            ResourceKind::Kubernetes => ("limen kube login {name}", Some("Phase 8")),
+            ResourceKind::Kubernetes => ("limen kube login {name}", None),
             ResourceKind::Mongodb => ("limen mongo connect {name}", Some("Phase 9")),
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
                 ("limen search connect {name}", Some("Phase 10"))
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_the_sql_databases_and_redis_are_available_today() {
+    fn ssh_the_sql_databases_redis_and_kubernetes_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
@@ -131,7 +131,8 @@ mod tests {
                 ResourceKind::Postgres,
                 ResourceKind::Mysql,
                 ResourceKind::Redshift,
-                ResourceKind::Redis
+                ResourceKind::Redis,
+                ResourceKind::Kubernetes
             ]
         );
     }

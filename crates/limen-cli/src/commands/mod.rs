@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod bot;
 pub mod db;
+pub mod kube;
 pub mod login;
 pub mod redis;
 pub mod ssh;
@@ -13,16 +14,48 @@ use limen_proto::v1::resources_client::ResourcesClient;
 use crate::profile::Profile;
 use crate::{api, ui};
 
-pub fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
+/// End the login at the proxy, then delete the local credentials. The proxy
+/// and workers refuse the certificate from then on, wherever a copy of it is.
+/// If the proxy can't be reached the local credentials still go, and the
+/// message says the certificate stays valid until it expires.
+pub async fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
     let proxy = api::resolve_proxy(proxy)?;
-    if Profile::delete(&proxy)? {
-        ui::success(&format!(
-            "Logged out of {}. Local credentials deleted.",
-            ui::bold(&proxy)
-        ));
-    } else {
+    let Some(profile) = Profile::load(&proxy)? else {
         ui::info(&format!("Not logged in to {proxy}."));
+        return Ok(());
+    };
+    let ended = if profile.is_expired() {
+        // Nothing left to end: an expired certificate is refused anyway.
+        Ok(())
+    } else {
+        end_login(&proxy, &profile).await
+    };
+    Profile::delete(&proxy)?;
+    match ended {
+        Ok(()) => ui::success(&format!(
+            "Logged out of {}. The login is ended and local credentials are deleted.",
+            ui::bold(&proxy)
+        )),
+        Err(e) => {
+            ui::warn(&format!(
+                "Local credentials for {} are deleted, but the login could not be ended at the proxy ({e:#}).",
+                ui::bold(&proxy)
+            ));
+            ui::hint(&format!(
+                "The certificate stays valid until {}. An admin can lock the user to cut it off sooner.",
+                profile.expires_at()
+            ));
+        }
     }
+    Ok(())
+}
+
+async fn end_login(proxy: &str, profile: &Profile) -> anyhow::Result<()> {
+    let channel = api::connect(proxy, Some(profile.identity()?))?;
+    limen_proto::v1::auth_client::AuthClient::new(channel)
+        .logout(limen_proto::v1::LogoutRequest {})
+        .await
+        .map_err(|s| api::status_error(&s))?;
     Ok(())
 }
 
