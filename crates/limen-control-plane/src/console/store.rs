@@ -427,6 +427,7 @@ fn cut(text: &str, max: usize) -> (&str, bool) {
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
+#[allow(clippy::too_many_lines)]
 pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<(), sqlx::Error> {
     use limen_audit::EventKind;
     let mut tx = db.begin().await?;
@@ -625,7 +626,7 @@ fn redis_statement(data: &serde_json::Value) -> String {
     parts.join(" ")
 }
 
-/// `(type, text)` of a RabbitMQ or Kafka event, as the console lists it.
+/// `(type, text)` of a `RabbitMQ` or Kafka event, as the console lists it.
 fn broker_statement(kind: limen_audit::EventKind, data: &serde_json::Value) -> (String, String) {
     let field = |k: &str| text(data, k).map(str::to_owned);
     let strings = |k: &str| -> Vec<String> {

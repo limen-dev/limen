@@ -1,7 +1,7 @@
 //! `RabbitMQ` and Amazon MQ sessions (design §5.5, ADR-0037). The worker is an
 //! AMQP 0-9-1 server toward the user's client and a client toward the broker:
 //!
-//! pika ──(TLS to proxy, tunnel)── worker ── (TLS, broker user) ── RabbitMQ
+//! pika ──(TLS to proxy, tunnel)── worker ── (TLS, broker user) ── `RabbitMQ`
 //!
 //! The client authenticates below AMQP (mTLS and the proxy's grant), so what
 //! it sends as credentials is accepted and dropped. The worker logs in to the
@@ -136,6 +136,8 @@ struct FrameReader<R> {
     reader: R,
     buf: Vec<u8>,
     max_payload: usize,
+    /// Where reads land; on the heap so futures that hold a reader stay small.
+    chunk: Vec<u8>,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
@@ -144,6 +146,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             reader,
             buf: Vec::new(),
             max_payload,
+            chunk: vec![0u8; 16 * 1024],
         }
     }
 
@@ -154,15 +157,14 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                 self.buf.drain(..used);
                 return Ok(Some(frame));
             }
-            let mut chunk = [0u8; 16 * 1024];
-            let n = self.reader.read(&mut chunk).await?;
+            let n = self.reader.read(&mut self.chunk).await?;
             if n == 0 {
                 if self.buf.is_empty() {
                     return Ok(None);
                 }
                 bail!("the connection closed in the middle of a frame");
             }
-            self.buf.extend_from_slice(&chunk[..n]);
+            self.buf.extend_from_slice(&self.chunk[..n]);
         }
     }
 }
@@ -649,7 +651,6 @@ where
     let _ = shared
         .to_broker(connection_close(200, "Limen: the session ended", 0, 0).encode())
         .await;
-    drop((from_client, from_broker, heartbeats));
     let config = &prepared.config;
     let summary = json!({
         "resource": config.resource,
@@ -836,8 +837,10 @@ fn effective(shared: &Shared, local: &HashMap<u16, Refused>, channel: u16) -> Op
         .or_else(|| shared.refused_state(channel))
 }
 
-/// Decide what one client frame means. Channel 0 and the content frames are
+/// Decide what one client frame means.
+/// Channel 0 and the content frames are
 /// handled here; method frames go to the rules.
+#[allow(clippy::too_many_lines)]
 fn plan_frame(
     frame: Frame,
     shared: &Shared,
@@ -853,10 +856,9 @@ fn plan_frame(
         plan.push(Planned {
             event: None,
             action,
-        })
+        });
     };
     match frame.kind {
-        HEARTBEAT => {}
         METHOD if channel == 0 => match frame.as_method() {
             Some((ids::CONNECTION, ids::CLOSE | ids::CLOSE_OK, _)) => {
                 push(plan, Action::Forward(vec![frame]));
@@ -1032,11 +1034,10 @@ fn plan_frame(
                 ),
             }
         }
-        BODY => {
-            if effective(shared, local, channel).is_none() {
-                push(plan, Action::Forward(vec![frame]));
-            }
+        BODY if effective(shared, local, channel).is_none() => {
+            push(plan, Action::Forward(vec![frame]));
         }
+        // Heartbeats, and body frames of a channel the worker closed.
         _ => {}
     }
 }
@@ -1145,7 +1146,7 @@ where
             // The channel is closed toward the client; finish closing it with the broker.
             match frame.as_method() {
                 Some((ids::CHANNEL, ids::CHANNEL_CLOSE_OK, _)) => {
-                    shared.mark_closed(channel, false)
+                    shared.mark_closed(channel, false);
                 }
                 Some((ids::CHANNEL, ids::CHANNEL_CLOSE, _)) => {
                     shared.to_broker(channel_close_ok(channel).encode()).await?;
@@ -1181,7 +1182,6 @@ where
                     .delivered_bytes
                     .fetch_add(frame.payload.len() as u64, Ordering::SeqCst);
             }
-            HEADER => {}
             _ => {}
         }
         shared.to_client(frame.encode())?;

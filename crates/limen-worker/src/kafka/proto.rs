@@ -191,6 +191,8 @@ pub fn parse_request(key: i16, version: i16, body: &[u8]) -> Result<Parsed, Malf
         }
         api::OFFSET_FETCH => {
             let group = r.string()?;
+            #[allow(clippy::redundant_closure_for_method_calls)]
+            // a path fails to unify the lifetimes
             let topics = topic_array(&mut r, |r| r.i32())?;
             Parsed::OffsetFetch { group, topics }
         }
@@ -360,7 +362,8 @@ pub fn append_refused(
             let at = if v >= 7 { 4 + 2 + 4 } else { 4 };
             (at, resp.len())
         }
-        api::LIST_OFFSETS => (if v >= 2 { 4 } else { 0 }, resp.len()),
+        // Throttle time first from v2 (ListOffsets, CreateTopics) or v3 (OffsetCommit).
+        api::LIST_OFFSETS | api::CREATE_TOPICS => (if v >= 2 { 4 } else { 0 }, resp.len()),
         api::OFFSET_COMMIT => (if v >= 3 { 4 } else { 0 }, resp.len()),
         api::OFFSET_FETCH => {
             let tail = if v >= 2 { 2 } else { 0 };
@@ -369,7 +372,6 @@ pub fn append_refused(
                 resp.len().checked_sub(tail).ok_or(Malformed)?,
             )
         }
-        api::CREATE_TOPICS => (if v >= 2 { 4 } else { 0 }, resp.len()),
         api::DELETE_TOPICS => (if v >= 1 { 4 } else { 0 }, resp.len()),
         _ => return Err(Malformed),
     };
@@ -542,14 +544,14 @@ pub fn refusal_response(
         | api::CREATE_TOPICS
         | api::DELETE_TOPICS => {
             // An empty response with every refused topic appended.
-            let topics = match parsed {
-                Parsed::Produce { topics, .. }
-                | Parsed::Fetch { topics }
-                | Parsed::ListOffsets { topics }
-                | Parsed::OffsetCommit { topics, .. }
-                | Parsed::CreateTopics { topics }
-                | Parsed::DeleteTopics { topics } => topics,
-                _ => return Err(Malformed),
+            let (Parsed::Produce { topics, .. }
+            | Parsed::Fetch { topics }
+            | Parsed::ListOffsets { topics }
+            | Parsed::OffsetCommit { topics, .. }
+            | Parsed::CreateTopics { topics }
+            | Parsed::DeleteTopics { topics }) = parsed
+            else {
+                return Err(Malformed);
             };
             let base = empty_topic_response(key, v);
             let refused: Vec<&TopicSpan> = topics.spans.iter().collect();
@@ -569,16 +571,12 @@ fn empty_topic_response(key: i16, v: i16) -> Vec<u8> {
             let w = if v >= 7 { w.i16(0).i32(0) } else { w }; // error_code, session_id
             w.i32(0).finish()
         }
-        api::LIST_OFFSETS => {
+        api::LIST_OFFSETS | api::CREATE_TOPICS => {
             let w = if v >= 2 { w.i32(0) } else { w };
             w.i32(0).finish()
         }
         api::OFFSET_COMMIT => {
             let w = if v >= 3 { w.i32(0) } else { w };
-            w.i32(0).finish()
-        }
-        api::CREATE_TOPICS => {
-            let w = if v >= 2 { w.i32(0) } else { w };
             w.i32(0).finish()
         }
         api::DELETE_TOPICS => {
@@ -941,9 +939,11 @@ mod tests {
             .nullable_string(None)
             .i16(acks)
             .i32(5000)
-            .i32(i32::try_from(topics.len()).unwrap());
+            .i32(i32::try_from(topics.len()).expect("small"));
         for (name, parts) in topics {
-            w = w.string(name).i32(i32::try_from(parts.len()).unwrap());
+            w = w
+                .string(name)
+                .i32(i32::try_from(parts.len()).expect("small"));
             for p in *parts {
                 w = w.i32(*p).bytes(b"record-batch-bytes");
             }
@@ -1365,7 +1365,7 @@ mod tests {
             for v in lo..=hi {
                 let body = refusal_response(key, v, &group, error::GROUP_AUTHORIZATION_FAILED)
                     .expect("builds");
-                assert!(!body.is_empty());
+                assert_ne!(body.len(), 0);
                 assert!(
                     body.windows(2).any(|w| w == [0, 30]),
                     "{} v{v} carries error 30",

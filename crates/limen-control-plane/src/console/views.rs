@@ -216,7 +216,7 @@ pub struct SessionView {
     pub has_recording: bool,
     /// A Redis or Valkey session: no recording, but audited commands.
     pub is_redis: bool,
-    /// A RabbitMQ or Kafka session: no recording, but audited operations.
+    /// A `RabbitMQ` or Kafka session: no recording, but audited operations.
     pub is_broker: bool,
     /// Either of the two: the page lists what was sent instead of a recording.
     pub has_statements: bool,

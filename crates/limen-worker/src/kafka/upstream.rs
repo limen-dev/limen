@@ -190,14 +190,11 @@ where
             .join(", ");
         bail!("the broker refused SASL mechanism {name} (error {code}); it offers: {offered}");
     }
-    let auth_version = if versions
-        .get(&api::SASL_AUTHENTICATE)
-        .is_some_and(|v| v.1 >= 1)
-    {
-        1
-    } else {
-        0
-    };
+    let auth_version = i16::from(
+        versions
+            .get(&api::SASL_AUTHENTICATE)
+            .is_some_and(|v| v.1 >= 1),
+    );
     let mut authenticate = async |token: Vec<u8>| -> anyhow::Result<Vec<u8>> {
         step("SaslAuthenticate", async {
             let reply = call(

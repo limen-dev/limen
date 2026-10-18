@@ -53,6 +53,9 @@ enum RawCredential {
     },
 }
 
+/// `(node id, host, port)` of each broker of a cluster, and when it was asked.
+type ClusterCache = HashMap<String, (Instant, Vec<(i32, String, i32)>)>;
+
 /// Settings the operator gives the worker for broker targets.
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
@@ -61,7 +64,7 @@ pub struct Settings {
     credentials: BTreeMap<String, BTreeMap<String, Credential>>,
     /// The brokers of Kafka clusters, as last asked, so that opening a
     /// session for a broker slot doesn't ask the bootstrap every time.
-    clusters: Arc<std::sync::Mutex<HashMap<String, (Instant, Vec<(i32, String, i32)>)>>>,
+    clusters: Arc<std::sync::Mutex<ClusterCache>>,
 }
 
 impl Settings {

@@ -7,7 +7,7 @@
 //! non-ASCII characters must be created the same way on the cluster.
 //!
 //! `AWS_MSK_IAM` is written from Amazon's published format of the client
-//! payload (a SigV4 presigned `kafka-cluster:Connect` request, as JSON). It
+//! payload (a `SigV4` presigned `kafka-cluster:Connect` request, as JSON). It
 //! is *unverified against a real MSK cluster*.
 
 use std::num::NonZeroU32;

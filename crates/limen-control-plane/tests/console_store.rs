@@ -359,7 +359,7 @@ async fn redis_sessions_list_their_commands() {
     );
 }
 
-/// RabbitMQ and Kafka sessions are listed like Redis ones (ADR-0037): names and
+/// `RabbitMQ` and Kafka sessions are listed like Redis ones (ADR-0037): names and
 /// sizes, refused operations marked, and nothing that looks like content.
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_sessions_list_their_operations() {

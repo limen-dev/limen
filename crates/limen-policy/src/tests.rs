@@ -776,12 +776,11 @@ fn mq_and_kafka_grants_come_from_matching_allow_rules() {
         [MqClass::Read, MqClass::Configure]
     );
     assert_eq!(mq[0].effective_vhosts(), ["orders-*"]);
-    assert!(policy.mq_grants(&r, "orders-mq", "other").is_empty());
-    assert!(policy.mq_grants(&r, "events-kafka", "limen-app").is_empty());
-    assert!(
-        policy
-            .mq_grants(&roles(&["ghost"]), "orders-mq", "limen-app")
-            .is_empty()
+    assert_eq!(policy.mq_grants(&r, "orders-mq", "other"), []);
+    assert_eq!(policy.mq_grants(&r, "events-kafka", "limen-app"), []);
+    assert_eq!(
+        policy.mq_grants(&roles(&["ghost"]), "orders-mq", "limen-app"),
+        []
     );
 
     let kafka = policy.kafka_grants(&r, "events-kafka", "limen-reader");
@@ -793,11 +792,7 @@ fn mq_and_kafka_grants_come_from_matching_allow_rules() {
         writer[0].effective_classes(),
         [KafkaClass::Write, KafkaClass::Admin]
     );
-    assert!(
-        policy
-            .kafka_grants(&r, "orders-mq", "limen-reader")
-            .is_empty()
-    );
+    assert_eq!(policy.kafka_grants(&r, "orders-mq", "limen-reader"), []);
 
     // Access itself is still decided by `evaluate`.
     let allowed = |resource: &str, principal| {
@@ -829,7 +824,7 @@ fn a_grant_without_the_new_fields_means_the_documented_defaults() {
     let mq = &policy.mq_grants(&r, "orders-mq", "u")[0];
     assert_eq!(mq.effective_classes(), [MqClass::Read, MqClass::Write]);
     assert_eq!(mq.effective_vhosts(), ["/"]);
-    assert!(mq.names.is_empty());
+    assert_eq!(mq.names, Vec::<String>::new());
     let kafka = &policy.kafka_grants(&r, "events-kafka", "u")[0];
     assert_eq!(kafka.effective_classes(), [KafkaClass::Read]);
     assert!(kafka.topics.is_empty() && kafka.groups.is_empty());

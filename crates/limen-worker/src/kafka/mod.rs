@@ -526,7 +526,6 @@ where
         r = &mut from_client => r,
         r = &mut from_broker => r,
     };
-    drop((from_client, from_broker));
 
     let summary = summary_event(&cx, &shared);
     let output_bytes = shared.bytes_out.load(Ordering::SeqCst);
@@ -644,7 +643,7 @@ where
                 .bytes_in
                 .fetch_add(msg.len() as u64 + 4, Ordering::SeqCst);
             shared.requests.fetch_add(1, Ordering::SeqCst);
-            plan.push(plan_message(msg, &shared, &cx, Instant::now()));
+            plan.push(plan_message(&msg, &shared, &cx, Instant::now()));
         }
         let written = futures::future::join_all(plan.iter().map(|p| async {
             let mut ok = true;
@@ -699,7 +698,7 @@ fn framed(msg: &[u8]) -> Vec<u8> {
     out
 }
 
-fn denied_event(cx: &Cx, operation: &str, detail: Value, reason: &str) -> (EventKind, Value) {
+fn denied_event(cx: &Cx, operation: &str, detail: &Value, reason: &str) -> (EventKind, Value) {
     let mut data = json!({
         "action": "kafka",
         "operation": operation,
@@ -720,7 +719,7 @@ fn request_event(
     key: i16,
     version: i16,
     client_id: Option<&str>,
-    detail: Value,
+    detail: &Value,
 ) -> (EventKind, Value) {
     let mut data = json!({
         "api": api::name(key),
@@ -740,15 +739,14 @@ fn request_event(
 
 /// Plan one request.
 #[allow(clippy::too_many_lines)]
-fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned {
+fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
     let fail = |why: String| Planned {
         events: Vec::new(),
         ok: Action::Fail(why.clone()),
         audit_failed: Action::Fail(why),
     };
-    let header = match parse_request_header(&msg) {
-        Ok(h) => h,
-        Err(_) => return fail("malformed request header".into()),
+    let Ok(header) = parse_request_header(msg) else {
+        return fail("malformed request header".into());
     };
     let (key, version, correlation) = (header.api_key, header.api_version, header.correlation_id);
     let client_id = header.client_id.as_deref();
@@ -784,7 +782,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
             events: vec![denied_event(
                 cx,
                 api::name(key),
-                json!({ "api_key": key, "version": version }),
+                &json!({ "api_key": key, "version": version }),
                 &reason,
             )],
             ok: Action::Fail(reason.clone()),
@@ -810,7 +808,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
     let mut events: Vec<(EventKind, Value)> = Vec::new();
     let refuse = |events: &mut Vec<(EventKind, Value)>, detail: Value, reason: &str| {
         shared.refused.fetch_add(1, Ordering::SeqCst);
-        events.push(denied_event(cx, api::name(key), detail, reason));
+        events.push(denied_event(cx, api::name(key), &detail, reason));
     };
 
     match &parsed {
@@ -854,7 +852,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                 client_id,
                 now,
                 body,
-                &msg,
+                msg,
                 header.body_at,
                 correlation,
                 *acks == 0,
@@ -873,7 +871,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
             client_id,
             now,
             body,
-            &msg,
+            msg,
             header.body_at,
             correlation,
             false,
@@ -891,7 +889,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
             client_id,
             now,
             body,
-            &msg,
+            msg,
             header.body_at,
             correlation,
             false,
@@ -919,7 +917,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                 client_id,
                 now,
                 body,
-                &msg,
+                msg,
                 header.body_at,
                 correlation,
                 false,
@@ -949,7 +947,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                     client_id,
                     now,
                     body,
-                    &msg,
+                    msg,
                     header.body_at,
                     correlation,
                     false,
@@ -961,10 +959,10 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                         key,
                         version,
                         client_id,
-                        json!({ "group": group, "topics": "all" }),
+                        &json!({ "group": group, "topics": "all" }),
                     )],
                     ok: forward(
-                        msg.clone(),
+                        msg.to_vec(),
                         Transform::OffsetFetch {
                             group: group.clone(),
                         },
@@ -1007,9 +1005,9 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                         key,
                         version,
                         client_id,
-                        json!({ "group": name }),
+                        &json!({ "group": name }),
                     )],
-                    ok: forward(msg.clone(), Transform::Coordinator),
+                    ok: forward(msg.to_vec(), Transform::Coordinator),
                     audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
                 },
             }
@@ -1034,12 +1032,12 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                         key,
                         version,
                         client_id,
-                        json!({ "group": group }),
+                        &json!({ "group": group }),
                     )]
                 };
                 Planned {
                     events,
-                    ok: forward(msg.clone(), Transform::None),
+                    ok: forward(msg.to_vec(), Transform::None),
                     audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
                 }
             }
@@ -1053,7 +1051,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
             version,
             client_id,
             body,
-            &msg,
+            msg,
             header.body_at,
             correlation,
         ),
@@ -1078,8 +1076,8 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
                 };
             }
             Planned {
-                events: vec![request_event(cx, key, version, client_id, json!({}))],
-                ok: forward(msg.clone(), Transform::None),
+                events: vec![request_event(cx, key, version, client_id, &json!({}))],
+                ok: forward(msg.to_vec(), Transform::None),
                 audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
             }
         }
@@ -1092,7 +1090,7 @@ fn plan_message(msg: Vec<u8>, shared: &Shared, cx: &Cx, now: Instant) -> Planned
             client_id,
             now,
             body,
-            &msg,
+            msg,
             header.body_at,
             correlation,
         ),
@@ -1200,7 +1198,7 @@ fn topic_request(
         events.push(denied_event(
             cx,
             api::name(key),
-            detail,
+            &detail,
             reasons.first().map_or("", String::as_str),
         ));
     }
@@ -1244,7 +1242,7 @@ fn topic_request(
         if let Some(g) = group {
             detail["group"] = json!(g);
         }
-        events.push(request_event(cx, key, version, client_id, detail));
+        events.push(request_event(cx, key, version, client_id, &detail));
     }
     let unavailable = |parsed: &Parsed| -> Action {
         if no_response {
@@ -1363,7 +1361,7 @@ fn metadata_request(
         events.push(denied_event(
             cx,
             api::name(key),
-            json!({ "topics": refused }),
+            &json!({ "topics": refused }),
             "your role doesn't reach that topic",
         ));
     }
@@ -1383,7 +1381,7 @@ fn metadata_request(
             key,
             version,
             client_id,
-            json!({ "topics": requested.map(|_| &visible), "all_topics": requested.is_none(), "requests": c.requests }),
+            &json!({ "topics": requested.map(|_| &visible), "all_topics": requested.is_none(), "requests": c.requests }),
         ));
     }
     // Automatic topic creation is a create: only for a role that may.
@@ -1497,10 +1495,11 @@ async fn transform_response(
             let mut m =
                 MetadataResponse::decode(version, body).map_err(|_| malformed("Metadata"))?;
             // Remember the real brokers; hand out the local ones.
-            *shared
+            shared
                 .brokers
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = m.brokers.clone();
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone_from(&m.brokers);
             m.topics.retain(|t| shared.rules.visible(&t.name));
             for name in refused {
                 m.topics.push(MetadataTopic {

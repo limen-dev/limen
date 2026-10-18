@@ -289,10 +289,10 @@ async fn start(
 }
 
 async fn rig(grants: Vec<MqGrant>) -> Rig {
-    match start(grants, "/", None).await {
-        Ok(rig) => rig,
-        Err(_) => panic!("the session was refused"),
-    }
+    start(grants, "/", None)
+        .await
+        .map_err(|(_, refusal)| refusal)
+        .expect("the session was refused")
 }
 
 fn events(sink: &MemorySink, kind: EventKind) -> Vec<serde_json::Value> {
@@ -441,7 +441,7 @@ async fn a_refused_vhost_is_audited_and_the_broker_never_sees_a_connection() {
     assert_eq!(denied.len(), 1, "{denied:?}");
     assert_eq!(denied[0]["operation"], "connect");
     assert_eq!(denied[0]["vhost"], "secret");
-    assert!(events(&sink, EventKind::MqOperation).is_empty());
+    assert_eq!(events(&sink, EventKind::MqOperation).len(), 0);
 }
 
 #[tokio::test]

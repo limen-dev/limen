@@ -141,7 +141,7 @@ services:
   # RabbitMQ with two users and three vhosts from a definitions file. The
   # consumer's broker permissions are read-only: the second layer under Limen's.
   rabbitmq-target:
-    image: rabbitmq:4.0-alpine
+    image: rabbitmq:4.0
     volumes:
       - ./targets/messaging/rabbitmq.conf:/etc/rabbitmq/conf.d/90-limen.conf:ro
       - ./targets/messaging/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro

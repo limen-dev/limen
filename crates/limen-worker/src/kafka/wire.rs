@@ -412,6 +412,7 @@ mod tests {
             Err(Malformed)
         );
         let mut r = Reader::new(&[0, 0, 0, 2, 0, 1, 0, 2]);
+        #[allow(clippy::redundant_closure_for_method_calls)] // a path fails to unify the lifetimes
         let v = r.array(|r| r.i16()).expect("ok").expect("not null");
         assert_eq!(v, [1, 2]);
     }

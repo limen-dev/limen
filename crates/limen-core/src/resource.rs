@@ -74,7 +74,7 @@ impl ResourceKind {
     }
 
     /// The command that opens this kind, and the phase that delivers it. SSH,
-    /// the SQL databases, Redis, RabbitMQ, and Kafka are served; the other kinds can be written
+    /// the SQL databases, Redis, `RabbitMQ`, and Kafka are served; the other kinds can be written
     /// in policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
     #[must_use]
     pub fn access(self) -> Access {

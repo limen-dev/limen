@@ -458,24 +458,22 @@ fn fetch_body(topic: &str) -> Vec<u8> {
 /// Topic names and per-partition errors in a Produce v8 response.
 fn produce_result(body: &[u8]) -> Vec<(String, Vec<(i32, i16)>)> {
     let mut r = Reader::new(body);
-    let topics = r
-        .array(|r| {
-            let name = r.string()?;
-            let parts = r
-                .array(|r| {
-                    let index = r.i32()?;
-                    let err = r.i16()?;
-                    r.skip(8 + 8 + 8)?;
-                    r.skip_array(|r| r.skip(0))?;
-                    r.nullable_string()?;
-                    Ok((index, err))
-                })?
-                .unwrap_or_default();
-            Ok((name, parts))
-        })
-        .expect("parses")
-        .unwrap_or_default();
-    topics
+    r.array(|r| {
+        let name = r.string()?;
+        let parts = r
+            .array(|r| {
+                let index = r.i32()?;
+                let err = r.i16()?;
+                r.skip(8 + 8 + 8)?;
+                r.skip_array(|r| r.skip(0))?;
+                r.nullable_string()?;
+                Ok((index, err))
+            })?
+            .unwrap_or_default();
+        Ok((name, parts))
+    })
+    .expect("parses")
+    .unwrap_or_default()
 }
 
 #[tokio::test]
@@ -783,7 +781,7 @@ async fn a_session_on_a_broker_slot_goes_to_the_broker_of_that_rank() {
     // Node 1 only answered the lookup of the broker list.
     assert_eq!(rig.brokers[0].seen(wire::api::METADATA).len(), 1);
     assert_eq!(rig.brokers[0].requests_after_login(), 1);
-    let _ = rig.done;
+    drop(rig.done);
     // And slot 1 is rank 0.
     let mut rig = start(
         vec![grant(&[KafkaClass::Read], &[], &[])],
@@ -882,7 +880,7 @@ async fn fetches_are_logged_at_first_contact_and_then_once_per_window_with_count
     drop(rig.client);
     let _ = tokio::time::timeout(Duration::from_secs(5), rig.done).await;
     let summary = &events(&rig.sink, EventKind::KafkaSummary)[0];
-    assert_eq!(summary["requests"].as_u64().expect("n") >= 7, true);
+    assert!(summary["requests"].as_u64().expect("n") >= 7);
     assert_eq!(summary["unlogged"][0]["name"], "orders.new");
 }
 

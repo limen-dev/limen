@@ -181,6 +181,19 @@ Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user gui
 - **Audit.** One `redis.command` event per command, written before it is forwarded: command, subcommand, key names, argument count. **Values are not logged** unless the target opts in, and credential commands never are. A refused command is `auth.denied`. Key names can be hashed per resource.
 - Not supported yet: cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap. IAM, the 12-hour re-login, and TLS with the AWS bundle are unverified against real ElastiCache.
 
+### 5.5 RabbitMQ and Amazon MQ (Phase 11)
+Built as [ADR-0037](adr/0037-messaging-access.md); the user guide is `docs/guides/messaging.md`.
+- `limen mq connect <resource>` opens a loopback listener for any AMQP 0-9-1 client. Each connection is one Limen session over the proxy's `limen-mq/1` ALPN.
+- The worker is an AMQP server toward the client and a client toward the broker. The client's login is dropped; the worker logs in as the broker user the role names (`PLAIN`, TLS optional for self-hosted), to the vhost the client opened if the grant allows it.
+- Method frames from the client are decoded and checked against the role (`read`, `write`, `configure` on vhost and name patterns) before they are forwarded; content headers and bodies pass through unread. A refused method closes its channel with `403`.
+- **Audit.** One `mq.operation` event per decoded operation, before it is forwarded; a publish carries the exchange, routing key, and body size. **Bodies are never read into an event.** Deliveries are counted in `mq.summary`.
+
+### 5.6 Kafka and MSK (Phase 11)
+- `limen kafka connect <resource>` opens a bootstrap listener and one per broker slot. A Kafka client talks to every broker at the address `Metadata` and `FindCoordinator` give it, so the worker rewrites those addresses to the CLI's loopback ports (the slot table travels in each session request) and a session on slot *n* is served by the broker of rank *n*.
+- The worker reads each request as far as policy needs (topics, group), pins the API versions it reads (non-flexible encodings; it answers `ApiVersions` itself), cuts a request down to the allowed topics, and adds the broker-style error for the rest. `Metadata` is filtered to the topics the role reaches. Transactions and administration APIs are not offered.
+- It logs in to the cluster with SASL `PLAIN`, `SCRAM-SHA-256/512`, or `AWS_MSK_IAM`.
+- **Audit.** `kafka.request` before forwarding; `Produce` and `Fetch` at first contact per topic and once a minute after, with counts; `kafka.summary` at the end. Record contents are never read.
+
 ### 5.4 EKS (Phase 8)
 - `limen kube login <cluster>` writes a kubeconfig context:
   - server `https://<proxy>/k8s/<cluster>`
@@ -357,7 +370,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 8 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
 | 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
 | 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
-| 11 | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
+| 11 ✅ | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018, ADR-0037) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
 | 12 | **Internal web apps and TCP services** (ADR-0022) | A browser reaches a compose web app at `https://app.apps.<domain>` after SSO; denied users and bots are refused; every request is audited; WebSockets work; `limen tcp` reaches a raw TCP service |
 | 13 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
@@ -365,6 +378,9 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 - **Phase 7 status (2026-10-17).**
   - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `deploy/compose/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
   - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
+- **Phase 11 status (2026-10-18).**
+  - Implemented and tested: `limen mq connect` and `limen kafka connect`, the proxy's `limen-mq/1` and `limen-kafka/1` sessions, the worker's AMQP 0-9-1 relay and Kafka request-level proxy (per-operation policy, audit before forwarding, address rewrite across a real three-broker cluster, SASL `PLAIN`/`SCRAM`), and the console's operation list. `deploy/compose/demo-phase11.sh` runs real RabbitMQ 4 and Apache Kafka 3.9 with pika and librdkafka.
+  - *Unverified against real AWS:* Amazon MQ, MSK (the `AWS_MSK_IAM` payload, TLS with the AWS bundle), and MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
 - **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
 - **Deferred to Phase 13:** the IAM join method for components.
 - **Deferred from Phase 6, not yet scheduled in §13:**
