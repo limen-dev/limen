@@ -74,7 +74,7 @@ impl ResourceKind {
     }
 
     /// The command that opens this kind, and the phase that delivers it. SSH,
-    /// the SQL databases, and Redis are served; the other kinds can be written
+    /// the SQL databases, Redis, RabbitMQ, and Kafka are served; the other kinds can be written
     /// in policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
     #[must_use]
     pub fn access(self) -> Access {
@@ -89,8 +89,8 @@ impl ResourceKind {
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
                 ("limen search connect {name}", Some("Phase 10"))
             }
-            ResourceKind::Rabbitmq => ("limen mq connect {name}", Some("Phase 11")),
-            ResourceKind::Kafka => ("limen kafka connect {name}", Some("Phase 11")),
+            ResourceKind::Rabbitmq => ("limen mq connect {name}", None),
+            ResourceKind::Kafka => ("limen kafka connect {name}", None),
             ResourceKind::Web => ("limen web open {name}", Some("Phase 12")),
             ResourceKind::Tcp => ("limen tcp {name}", Some("Phase 12")),
         };
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_the_sql_databases_and_redis_are_available_today() {
+    fn ssh_the_databases_redis_and_the_brokers_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
@@ -131,7 +131,9 @@ mod tests {
                 ResourceKind::Postgres,
                 ResourceKind::Mysql,
                 ResourceKind::Redshift,
-                ResourceKind::Redis
+                ResourceKind::Redis,
+                ResourceKind::Rabbitmq,
+                ResourceKind::Kafka
             ]
         );
     }

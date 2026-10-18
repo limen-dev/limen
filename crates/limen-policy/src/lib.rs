@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
-pub use model::{RedisAudit, RedisGrant, RedisTarget};
+pub use model::{
+    KafkaClass, KafkaGrant, KafkaSasl, MqClass, MqGrant, RedisAudit, RedisGrant, RedisTarget,
+};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
@@ -481,6 +483,42 @@ impl Policy {
             .collect()
     }
 
+    /// The `RabbitMQ` grants that let `roles` act as `user` on `resource`
+    /// (ADR-0037). Same contract as [`Policy::redis_grants`].
+    #[must_use]
+    pub fn mq_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<MqGrant> {
+        self.rules_for(roles, resource)
+            .filter_map(|rule| rule.mq.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
+    }
+
+    /// The `Kafka` grants that let `roles` act as `user` on `resource`
+    /// (ADR-0037). Same contract as [`Policy::redis_grants`].
+    #[must_use]
+    pub fn kafka_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<KafkaGrant> {
+        self.rules_for(roles, resource)
+            .filter_map(|rule| rule.kafka.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
+    }
+
+    /// The allow rules of `roles` whose selector matches `resource`.
+    fn rules_for<'a>(
+        &'a self,
+        roles: &'a [String],
+        resource: &str,
+    ) -> impl Iterator<Item = &'a Rule> {
+        let resource = self.resources.get(resource);
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(move |rule| resource.is_some_and(|res| selector_matches(&rule.resources, res)))
+    }
+
     /// Resources the roles grant at least one principal on, with those
     /// principals (minus any explicitly denied). Sorted by name.
     #[must_use]
@@ -716,6 +754,14 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 ));
             }
         }
+        if let Some(mq) = &rule.mq {
+            validate_patterns(name, "mq.vhosts", &mq.vhosts)?;
+            validate_patterns(name, "mq.names", &mq.names)?;
+        }
+        if let Some(kafka) = &rule.kafka {
+            validate_patterns(name, "kafka.topics", &kafka.topics)?;
+            validate_patterns(name, "kafka.groups", &kafka.groups)?;
+        }
         if let Some(db) = &rule.db {
             // The prefix is reserved: bootstrap never touches other roles, and
             // the name goes into SQL (ADR-0015, ADR-0033).
@@ -785,6 +831,22 @@ fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError>
     Ok(())
 }
 
+/// Name patterns in a grant: `*` is the only wildcard, and nothing may be
+/// blank or hold control characters.
+fn validate_patterns(role: &str, field: &str, values: &[String]) -> Result<(), PolicyError> {
+    match values
+        .iter()
+        .find(|v| v.is_empty() || v.len() > MAX_NAME_LEN || v.chars().any(char::is_control))
+    {
+        Some(v) => Err(invalid(
+            "role",
+            role,
+            format!("invalid value {v:?} in {field}"),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     let name = &resource.metadata.name;
     validate_name("resource", name, name)?;
@@ -834,6 +896,18 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
         ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
+    if resource
+        .spec
+        .rabbitmq
+        .as_ref()
+        .is_some_and(|t| t.sasl.is_some())
+    {
+        return Err(invalid(
+            "resource",
+            name,
+            "sasl applies to Kafka resources only; a RabbitMQ broker user logs in with a password",
+        ));
+    }
     let db_target = resource
         .spec
         .postgres
