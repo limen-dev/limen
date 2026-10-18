@@ -665,6 +665,8 @@ where
                 planned.ok
             } else {
                 tracing::error!(resource = %cx.config.resource, "audit unavailable; refusing a Kafka request");
+                metrics::counter!("limen_broker_audit_failures_total", "protocol" => "kafka")
+                    .increment(1);
                 planned.audit_failed
             };
             apply(&shared, action).await?;
@@ -699,6 +701,7 @@ fn framed(msg: &[u8]) -> Vec<u8> {
 }
 
 fn denied_event(cx: &Cx, operation: &str, detail: &Value, reason: &str) -> (EventKind, Value) {
+    metrics::counter!("limen_broker_refused_total", "protocol" => "kafka").increment(1);
     let mut data = json!({
         "action": "kafka",
         "operation": operation,
@@ -793,8 +796,8 @@ fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
         return fail(format!("malformed {} request", api::name(key)));
     };
     let rules = &shared.rules;
-    let forward = |bytes: Vec<u8>, transform: Transform| Action::Forward {
-        bytes: framed(&bytes),
+    let forward = |bytes: &[u8], transform: Transform| Action::Forward {
+        bytes: framed(bytes),
         pending: Some(Pending::Forwarded {
             correlation,
             key,
@@ -962,7 +965,7 @@ fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
                         &json!({ "group": group, "topics": "all" }),
                     )],
                     ok: forward(
-                        msg.to_vec(),
+                        msg,
                         Transform::OffsetFetch {
                             group: group.clone(),
                         },
@@ -1007,7 +1010,7 @@ fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
                         client_id,
                         &json!({ "group": name }),
                     )],
-                    ok: forward(msg.to_vec(), Transform::Coordinator),
+                    ok: forward(msg, Transform::Coordinator),
                     audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
                 },
             }
@@ -1037,7 +1040,7 @@ fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
                 };
                 Planned {
                     events,
-                    ok: forward(msg.to_vec(), Transform::None),
+                    ok: forward(msg, Transform::None),
                     audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
                 }
             }
@@ -1077,7 +1080,7 @@ fn plan_message(msg: &[u8], shared: &Shared, cx: &Cx, now: Instant) -> Planned {
             }
             Planned {
                 events: vec![request_event(cx, key, version, client_id, &json!({}))],
-                ok: forward(msg.to_vec(), Transform::None),
+                ok: forward(msg, Transform::None),
                 audit_failed: audit_down(retry_response(key, version, &parsed, unavailable)),
             }
         }

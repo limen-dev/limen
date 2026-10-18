@@ -1061,6 +1061,8 @@ async fn apply(
             if audit_failed {
                 // Fail closed: what can't be audited doesn't run.
                 tracing::error!(resource = %config.resource, "audit unavailable; refusing an AMQP operation");
+                metrics::counter!("limen_broker_audit_failures_total", "protocol" => "amqp")
+                    .increment(1);
                 let (class, method) = frames
                     .first()
                     .and_then(Frame::as_method)
@@ -1092,6 +1094,7 @@ async fn apply(
             class,
             method,
         } => {
+            metrics::counter!("limen_broker_refused_total", "protocol" => "amqp").increment(1);
             if audit_failed {
                 // A denial that can't be audited is still a denial.
                 tracing::error!(resource = %config.resource, "failed to audit a denied AMQP operation");
