@@ -8,6 +8,7 @@ services:
   # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).
   # DEVELOPMENT ONLY: it mints any token to anyone who asks.
   fake-ci-issuer:
+    container_name: ci-issuer-fake-${LIMEN_ENV:-dev}
     profiles: ["bots"]
     build: { <<: *limen-build, target: fake-ci-issuer }
     image: limen-fake-ci-issuer:dev

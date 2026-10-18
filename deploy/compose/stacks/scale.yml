@@ -107,6 +107,7 @@ x-worker-env: &worker-env
 
 services:
   postgres:
+    container_name: limen-postgres${LIMEN_SUFFIX:-}
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: limen
@@ -121,6 +122,7 @@ services:
 
   # The dev stack's Dex configuration, with this stack's host ports.
   dex:
+    container_name: limen-dex${LIMEN_SUFFIX:-}
     image: ghcr.io/dexidp/dex:v2.46.0
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -133,12 +135,14 @@ services:
     ports: ["127.0.0.1:25556:5556"]
 
   s3:
+    container_name: limen-s3${LIMEN_SUFFIX:-}
     image: chrislusf/seaweedfs:4.48
     command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
     ports: ["127.0.0.1:28333:8333"]
     volumes: [s3-data:/data, "./config/s3/s3.json:/etc/seaweedfs/s3.json:ro"]
 
   control-plane-0:
+    container_name: limen-control-plane-0${LIMEN_SUFFIX:-}
     <<: *control-plane
     environment:
       <<: *control-plane-env
@@ -155,6 +159,7 @@ services:
       - cp-0-recordings:/var/lib/limen/recordings
 
   control-plane-1:
+    container_name: limen-control-plane-1${LIMEN_SUFFIX:-}
     <<: *control-plane
     environment:
       <<: *control-plane-env
@@ -171,6 +176,7 @@ services:
       - cp-1-recordings:/var/lib/limen/recordings
 
   control-plane-2:
+    container_name: limen-control-plane-2${LIMEN_SUFFIX:-}
     <<: *control-plane
     environment:
       <<: *control-plane-env
@@ -187,6 +193,7 @@ services:
       - cp-2-recordings:/var/lib/limen/recordings
 
   proxy-0:
+    container_name: limen-proxy-0${LIMEN_SUFFIX:-}
     <<: *proxy
     environment:
       <<: *proxy-env
@@ -200,6 +207,7 @@ services:
       - ca-public:/var/lib/limen/ca-public:ro
 
   proxy-1:
+    container_name: limen-proxy-1${LIMEN_SUFFIX:-}
     <<: *proxy
     environment:
       <<: *proxy-env
@@ -213,6 +221,7 @@ services:
       - ca-public:/var/lib/limen/ca-public:ro
 
   proxy-2:
+    container_name: limen-proxy-2${LIMEN_SUFFIX:-}
     <<: *proxy
     environment:
       <<: *proxy-env
@@ -226,6 +235,7 @@ services:
       - ca-public:/var/lib/limen/ca-public:ro
 
   worker-0:
+    container_name: limen-worker-0${LIMEN_SUFFIX:-}
     <<: *worker
     environment: { <<: *worker-env, LIMEN_NAME: worker-0 }
     volumes:
@@ -236,6 +246,7 @@ services:
       - db-secrets:/var/lib/limen/db-secrets
 
   worker-1:
+    container_name: limen-worker-1${LIMEN_SUFFIX:-}
     <<: *worker
     environment: { <<: *worker-env, LIMEN_NAME: worker-1 }
     volumes:
@@ -246,6 +257,7 @@ services:
       - db-secrets:/var/lib/limen/db-secrets
 
   worker-2:
+    container_name: limen-worker-2${LIMEN_SUFFIX:-}
     <<: *worker
     environment: { <<: *worker-env, LIMEN_NAME: worker-2 }
     volumes:

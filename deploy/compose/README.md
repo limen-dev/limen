@@ -113,6 +113,8 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
 | `kube` | `stacks/kube.yml` | a kind cluster (created by `setup.sh`) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
 
+**Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the kind cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
+
 `setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
 
 ```sh

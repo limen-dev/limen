@@ -8,6 +8,7 @@ x-limen-image: &limen-build
 services:
   # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
   fake-datadog:
+    container_name: datadog-fake-${LIMEN_ENV:-dev}
     profiles: ["observability"]
     build: { <<: *limen-build, target: fake-datadog }
     image: limen-fake-datadog:dev
@@ -15,6 +16,7 @@ services:
 
   # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
   trino:
+    container_name: trino-${LIMEN_ENV:-dev}
     profiles: ["observability"]
     image: trinodb/trino:483
     volumes: ["./config/trino/catalog:/etc/trino/catalog:ro"]
@@ -22,6 +24,7 @@ services:
 
   # Creates the audit table and keeps its partitions in sync.
   trino-init:
+    container_name: trino-init-${LIMEN_ENV:-dev}
     profiles: ["observability"]
     image: trinodb/trino:483
     entrypoint: ["/init/sync.sh"]
@@ -31,6 +34,7 @@ services:
 
   # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
   grafana:
+    container_name: grafana-${LIMEN_ENV:-dev}
     profiles: ["observability"]
     image: grafana/grafana:13.0.2
     depends_on: [trino]

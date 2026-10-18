@@ -26,6 +26,7 @@ services:
   # Profile "db": docker compose --profile db up -d postgres-target
   # Serves TLS (CA in the db-tls volume) and, for local tests, plain text too.
   postgres-target:
+    container_name: postgres-orders-${LIMEN_ENV:-dev}
     profiles: ["db"]
     image: postgres:18-alpine
     command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/tls/pg.crt", "-c", "ssl_key_file=/tls/pg.key", "-c", "hba_file=/etc/limen/pg_hba.conf"]
@@ -46,6 +47,7 @@ services:
   # A MySQL database for `limen db connect` (Phase 6). Serves TLS from the
   # db-tls volume and plain text too.
   mysql-target:
+    container_name: mysql-orders-${LIMEN_ENV:-dev}
     profiles: ["db"]
     image: mysql:8.4
     command: ["mysqld", "--ssl-ca=/tls/ca.pem", "--ssl-cert=/tls/my.crt", "--ssl-key=/tls/my.key"]

@@ -62,6 +62,14 @@ stack_setup() {
     STACK_DEX=http://localhost:${LIMEN_PORT_DEX:-5556}
     STACK_CP=control-plane STACK_STATE="${LIMEN_STATE_DIR:-$here/.state}"
   fi
+  # The environment name ends the name of every stand-in target: postgres-orders-dev, redis-cache-dev, ...
+  # A demo's own project (limen-dbdemo) gives dbdemo; the scaled variant is `scale`.
+  if $scale; then LIMEN_ENV="${LIMEN_ENV:-scale}"
+  else LIMEN_ENV="${LIMEN_ENV:-${LIMEN_PROJECT:+${LIMEN_PROJECT#limen-}}}"; fi
+  export LIMEN_ENV="${LIMEN_ENV:-dev}"
+  # Limen itself is not an environment: its containers only get a suffix when a second copy
+  # (the scaled stack, a demo) runs beside the dev one.
+  if [ "$LIMEN_ENV" = dev ]; then export LIMEN_SUFFIX=""; else export LIMEN_SUFFIX="-$LIMEN_ENV"; fi
   local profiles=()
   for s in "$@"; do
     case "$s" in
@@ -74,7 +82,7 @@ stack_setup() {
       bots) files+=(-f "$here/stacks/bots.yml")
             env+=(LIMEN_BOT_ALLOW_INSECURE_ISSUERS=true) ;;
       kube) files+=(-f "$here/stacks/kube.yml")
-            KUBE_CLUSTER="${LIMEN_KIND_CLUSTER:-limen-dev}"
+            KUBE_CLUSTER="${LIMEN_KIND_CLUSTER:-kubernetes-$LIMEN_ENV}"
             export LIMEN_KIND_NODE="$KUBE_CLUSTER-control-plane" LIMEN_KUBE_DIR="$STACK_STATE/kube"
             export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;

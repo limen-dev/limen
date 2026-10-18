@@ -28,6 +28,7 @@ x-dev-tokens:
 
 services:
   postgres:
+    container_name: limen-postgres${LIMEN_SUFFIX:-}
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: limen
@@ -42,6 +43,7 @@ services:
       retries: 30
 
   dex:
+    container_name: limen-dex${LIMEN_SUFFIX:-}
     image: ghcr.io/dexidp/dex:v2.46.0
     # The CLI reaches Dex on the host port; the config names the default ports, so
     # it is rewritten for another stack's (LIMEN_PORT_DEX, LIMEN_PORT_PROXY).
@@ -58,6 +60,7 @@ services:
   # KMS emulator for testing the KMS-backed CA path. LocalStack now needs an
   # account token, so we use local-kms. Pinned by digest.
   kms:
+    container_name: limen-kms${LIMEN_SUFFIX:-}
     image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
     ports: ["127.0.0.1:${LIMEN_PORT_KMS:-8099}:8080"]
 
@@ -66,12 +69,14 @@ services:
   # keys in config/s3/s3.json: anonymous SeaweedFS rejects the SDK's signed
   # streaming uploads. Development only.
   s3:
+    container_name: limen-s3${LIMEN_SUFFIX:-}
     image: chrislusf/seaweedfs:4.48
     command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
     ports: ["127.0.0.1:${LIMEN_PORT_S3:-8333}:8333"]
     volumes: [s3-data:/data, "./config/s3/s3.json:/etc/seaweedfs/s3.json:ro"]
 
   control-plane:
+    container_name: limen-control-plane${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: control-plane }
     image: limen-control-plane:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
@@ -119,6 +124,7 @@ services:
       - recordings:/var/lib/limen/recordings
 
   proxy:
+    container_name: limen-proxy${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: proxy }
     image: limen-proxy:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
@@ -139,6 +145,7 @@ services:
       - ca-public:/var/lib/limen/ca-public:ro
 
   worker:
+    container_name: limen-worker${LIMEN_SUFFIX:-}
     build: { <<: *limen-build, target: worker }
     image: limen-worker:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped

@@ -10,6 +10,7 @@ x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f205
 
 services:
   kube-worker:
+    container_name: limen-kube-worker${LIMEN_SUFFIX:-}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile

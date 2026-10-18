@@ -30,7 +30,7 @@ done
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 state="$root/deploy/compose/.state/phase8"
-cluster="${LIMEN_DEMO_CLUSTER:-limen-demo8}"
+cluster="${LIMEN_DEMO_CLUSTER:-kubernetes-demo8}"
 ctx="kind-$cluster"
 pg="${cluster}-postgres"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }

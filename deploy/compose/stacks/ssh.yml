@@ -3,6 +3,7 @@
 services:
   # An SSH target that trusts only Limen per-session certificates.
   sshd-target:
+    container_name: ssh-web-${LIMEN_ENV:-dev}
     profiles: ["ssh"]
     build: ./config/targets/sshd
     image: limen-sshd-target:dev
