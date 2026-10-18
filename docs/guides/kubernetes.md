@@ -71,3 +71,6 @@ kubectl port-forward svc/db 5432:5432    # audited
 - Constrained impersonation (Kubernetes 1.36 and later) is not used yet.
 - Each request is a session with a one-time grant, and a worker remembers 100,000 grants for a minute. That is about 1,700 requests a second per worker before it refuses new ones (fail closed).
 - One request is one tunnel session, which suits `kubectl` but would be heavy for a controller issuing thousands of requests a second. Use a service account in the cluster for those.
+
+## Try it by hand
+`deploy/compose/demo-phase8.sh --manual` builds a throwaway kind cluster and Postgres (named after `LIMEN_DEMO_CLUSTER`, default `limen-demo8`), runs Limen with the web console in front of it, and prints the commands to use: `limen kube login`, `kubectl get/exec/port-forward/logs`, a view-only user, and `limen admin lock`. The console is on the same port (`/console/sessions`, `/console/audit`) and signs in as `admin@example.com`; write `email group` to the printed `browser-user` file to sign in as someone else. Ctrl-C stops Limen and keeps the cluster.

@@ -46,7 +46,15 @@ fn write_profile(home: &std::path::Path, proxy: &str, user: &str, cert: &str, ke
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a real cluster; run by deploy/kube/verify-kind.sh"]
 async fn serve_a_cluster_until_stopped() {
-    let Some(d) = Deployment::start().await else {
+    // KIND_CONSOLE=1 also serves the web console on the proxy's port. The mock
+    // IdP signs the browser in as whoever `browser-user` names (see below).
+    let console = std::env::var_os("KIND_CONSOLE").is_some();
+    let started = if console {
+        Deployment::start_with_console().await
+    } else {
+        Deployment::start().await
+    };
+    let Some(d) = started else {
         panic!("LIMEN_TEST_DATABASE_URL is required");
     };
     let out = PathBuf::from(var("KIND_OUT"));
@@ -164,8 +172,24 @@ spec:
     std::fs::write(out.join("ready"), &proxy).expect("ready");
     eprintln!("kind bridge ready on {proxy}");
 
+    // Who the console signs in next: write "email group" to `browser-user`.
+    let browser_user = out.join("browser-user");
+    if console {
+        d.idp.set_browser_user(ADMIN, &["admins"]);
+        std::fs::write(&browser_user, format!("{ADMIN} admins")).expect("browser user");
+    }
     let stop = out.join("stop");
+    let mut last = String::new();
     while !stop.exists() {
+        if console
+            && let Ok(text) = std::fs::read_to_string(&browser_user)
+            && text != last
+        {
+            if let Some((email, group)) = text.trim().split_once(' ') {
+                d.idp.set_browser_user(email, &[group]);
+            }
+            last = text;
+        }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     worker.stop().await;

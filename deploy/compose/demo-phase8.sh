@@ -4,6 +4,7 @@
 #
 #   deploy/compose/demo-phase8.sh          # creates the kind cluster, removes it after
 #   deploy/compose/demo-phase8.sh --keep   # leaves the cluster (and reuses it next time)
+#   deploy/compose/demo-phase8.sh --manual # sets everything up, serves the console, and waits for you (Ctrl-C ends it)
 #
 # It runs Limen (control plane, proxy, and a kube worker) in one process, the
 # way the end-to-end tests do, because the dev compose stack is single-tenant
@@ -14,7 +15,14 @@
 # (no AWS account): see docs/guides/kubernetes.md for what differs.
 set -euo pipefail
 keep=false
-[ "${1:-}" = "--keep" ] && keep=true
+manual=false
+for arg in "$@"; do
+  case "$arg" in
+    --keep) keep=true ;;
+    --manual) manual=true; keep=true; export KIND_CONSOLE=1 ;;
+    *) echo "unknown option $arg" >&2; exit 2 ;;
+  esac
+done
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 state="$root/deploy/compose/.state/phase8"
@@ -104,6 +112,44 @@ ops() { kubectl --kubeconfig "$out/kc-ops" "$@"; }
 viewer() { kubectl --kubeconfig "$out/kc-viewer" "$@"; }
 admin() { LIMEN_HOME="$out/home-admin" "$limen" admin "$@"; }
 pass "Limen is up on $(cat "$out/ready")"
+
+if $manual; then
+  proxy="$(cat "$out/ready")"
+  ca="$(echo "$out"/home-ops/profiles/*)/proxy-ca.pem"
+  cat <<EOF
+
+Limen is running. Try it by hand (nothing below is shared with other stacks).
+
+  export PATH="$root/target/debug:\$PATH"
+  export LIMEN_HOME=$out/home-ops          # logged in as developer@example.com (limen:edit)
+  limen ls                                  # the cluster appears as kind-dev
+  limen kube login kind-dev --kubeconfig /tmp/limen-kube.json
+  export KUBECONFIG=/tmp/limen-kube.json
+  kubectl get pods -A
+  kubectl auth whoami
+  kubectl run web --image=busybox:1.37 --restart=Never -- sleep 3600
+  kubectl exec -it web -- sh                # recorded; type a few commands, then exit
+  kubectl port-forward pod/web 8080:80
+  kubectl logs -f web
+  LIMEN_HOME=$out/home-viewer limen kube login kind-dev --kubeconfig /tmp/limen-viewer.json   # guest: limen:view only
+  kubectl --kubeconfig /tmp/limen-viewer.json delete pod web          # Forbidden, by the cluster's RBAC
+  LIMEN_HOME=$out/home-admin limen admin lock developer@example.com   # ends their open exec/logs/watch
+
+Console (on the proxy's port; signs in as admin@example.com):
+  https://$proxy/console/
+  Its certificate is signed by a throwaway CA: $ca
+  Import that into your browser only if you choose to; or use curl:
+    curl --cacert $ca https://$proxy/console/signin
+  To sign in as someone else: echo "developer@example.com ops" > $out/browser-user
+  Pages: /console/sessions (exec recordings, playable) and /console/audit (kube.request, session.start/end).
+  Raw audit file: $(cat "$out/audit-path")
+
+Logins last about 10 minutes (kubectl then says: run limen login); stop and rerun for fresh ones.
+Ctrl-C stops Limen; the cluster ($cluster) is kept: kind delete cluster --name $cluster
+EOF
+  trap 'exit 0' INT TERM
+  while true; do sleep 1; done
+fi
 
 step "kubectl get, as someone Limen impersonates"
 who="$(ops auth whoami)"
