@@ -173,12 +173,12 @@ enum Command {
         #[command(subcommand)]
         command: SearchCommand,
     },
-    /// RabbitMQ and Amazon MQ (planned, Phase 11).
+    /// RabbitMQ and Amazon MQ: `limen mq connect <resource>`.
     Mq {
         #[command(subcommand)]
         command: MqCommand,
     },
-    /// Kafka and MSK (planned, Phase 11).
+    /// Kafka and MSK: `limen kafka connect <resource>`.
     Kafka {
         #[command(subcommand)]
         command: KafkaCommand,
@@ -280,25 +280,41 @@ enum SearchCommand {
 
 #[derive(Debug, Subcommand)]
 enum MqCommand {
-    /// Open a local AMQP listener.
+    /// Open a local listener that AMQP 0-9-1 clients (pika, amqplib, Bunny, ...) connect to without a password.
     Connect {
         resource: String,
+        /// The broker user to act as. Optional when policy allows only one.
         #[arg(long)]
         user: Option<String>,
+        /// The vhost the printed URL names. The client chooses the real one; policy limits it.
+        #[arg(long, default_value = "/")]
+        vhost: String,
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
         #[arg(long, value_name = "ADDR")]
         listen: Option<String>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum KafkaCommand {
-    /// Open local listeners for Kafka clients.
+    /// Open local listeners that Kafka clients (kcat, the Java client, librdkafka, ...) bootstrap from without a password.
     Connect {
         resource: String,
+        /// The broker user to act as. Optional when policy allows only one.
         #[arg(long)]
         user: Option<String>,
+        /// Local address of the bootstrap listener. Defaults to a free port on 127.0.0.1.
         #[arg(long, value_name = "ADDR")]
         listen: Option<String>,
+        /// Broker slots to open (one local listener per broker of the cluster).
+        #[arg(long, default_value_t = commands::kafka::DEFAULT_BROKERS, value_parser = commands::kafka::brokers_parser)]
+        brokers: usize,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -410,8 +426,46 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
         Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
         Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
-        Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
-        Command::Kafka { .. } => not_yet("limen kafka connect", "Kafka access", "Phase 11"),
+        Command::Mq {
+            command:
+                MqCommand::Connect {
+                    resource,
+                    user,
+                    vhost,
+                    listen,
+                    idle_timeout,
+                },
+        } => {
+            commands::mq::connect(
+                proxy,
+                &resource,
+                user.as_deref(),
+                &vhost,
+                listen.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
+        Command::Kafka {
+            command:
+                KafkaCommand::Connect {
+                    resource,
+                    user,
+                    listen,
+                    brokers,
+                    idle_timeout,
+                },
+        } => {
+            commands::kafka::connect(
+                proxy,
+                &resource,
+                user.as_deref(),
+                listen.as_deref(),
+                brokers,
+                idle_timeout,
+            )
+            .await
+        }
         Command::Web { .. } => not_yet("limen web open", "web app access", "Phase 12"),
         Command::Tcp { .. } => not_yet("limen tcp", "TCP service access", "Phase 12"),
     }
@@ -451,8 +505,6 @@ mod tests {
             &["kube", "login", "c"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
             &["search", "connect", "r", "--role", "x"],
-            &["mq", "connect", "r", "--user", "u"],
-            &["kafka", "connect", "r", "--user", "u"],
             &["web", "open", "app", "--no-browser"],
             &["tcp", "r", "--listen", "127.0.0.1:2121"],
         ] {
@@ -460,6 +512,47 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn mq_and_kafka_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(
+            ok(&[
+                "mq",
+                "connect",
+                "r",
+                "--user",
+                "u",
+                "--vhost",
+                "orders",
+                "--listen",
+                "127.0.0.1:5673"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["mq", "connect", "r", "--idle-timeout", "30m"]).is_ok());
+        assert!(
+            ok(&[
+                "kafka",
+                "connect",
+                "r",
+                "--user",
+                "u",
+                "--brokers",
+                "3",
+                "--listen",
+                "127.0.0.1:9192"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["kafka", "connect", "r", "--brokers", "0"]).is_err());
+        assert!(ok(&["kafka", "connect", "r", "--brokers", "65"]).is_err());
+        assert!(ok(&["kafka", "connect", "r", "--idle-timeout", "soon"]).is_err());
     }
 
     #[test]

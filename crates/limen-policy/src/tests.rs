@@ -145,6 +145,9 @@ fn accessible_lists_resources_and_principals() {
         [
             ("cache-staging", vec!["limen-ro"]),
             ("cache-valkey", vec!["limen-ro"]),
+            ("events-kafka-scram", vec!["limen-consumer"]),
+            ("events-kafka-staging", vec!["limen-consumer"]),
+            ("events-rabbit-staging", vec!["limen-consumer"]),
             ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
             ("web-staging-1", vec!["ubuntu"])
@@ -159,6 +162,9 @@ fn accessible_lists_resources_and_principals() {
             "bastion-staging",
             "cache-staging",
             "cache-valkey",
+            "events-kafka-scram",
+            "events-kafka-staging",
+            "events-rabbit-staging",
             "orders-mysql-staging",
             "orders-prod",
             "orders-staging",
@@ -207,7 +213,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 7);
+    assert_eq!(diff.removed.len(), 10);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
@@ -340,7 +346,8 @@ mod planned_integrations {
     #[test]
     fn principals_must_fit_the_kind() {
         let policy = with_planned();
-        let sre = roles(&["sre-planned"]);
+        // The brokers are served now, so their grants are in `sre`.
+        let sre = roles(&["sre", "sre-planned"]);
         let eval = |resource: &str, principal: Principal| {
             policy.evaluate(&AccessRequest {
                 roles: &sre,

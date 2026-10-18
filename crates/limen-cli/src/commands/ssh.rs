@@ -159,7 +159,24 @@ pub(crate) async fn open_session(
     alpn: &[u8],
     resource: &str,
     principal: &str,
-) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
+    open_session_for(proxy, alpn, resource, principal, "").await
+}
+
+/// [`open_session`] with the request's `database` field, which carries
+/// what the CLI knows that the worker needs (a database name; for Kafka the
+/// table of local listeners).
+pub(crate) async fn open_session_for(
+    proxy: Option<&str>,
+    alpn: &[u8],
+    resource: &str,
+    principal: &str,
+    database: &str,
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
@@ -182,7 +199,7 @@ pub(crate) async fn open_session(
         &SessionRequest {
             resource: resource.to_owned(),
             principal: principal.to_owned(),
-            database: String::new(),
+            database: database.to_owned(),
         },
     )
     .await?;

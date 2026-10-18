@@ -3,7 +3,9 @@
 pub mod admin;
 pub mod bot;
 pub mod db;
+pub mod kafka;
 pub mod login;
+pub mod mq;
 pub mod redis;
 pub mod ssh;
 

@@ -62,24 +62,10 @@ spec:
 ---
 kind: resource
 version: v1
-metadata: { name: events-rabbit-staging, labels: { env: staging, team: platform } }
-spec:
-  rabbitmq: { endpoint: "rabbitmq-target:5672" }
-  worker_selector: { pool: dev }
----
-kind: resource
-version: v1
 metadata: { name: orders-mq, labels: { env: prod, team: payments } }
 spec:
   rabbitmq: { endpoint: "b-example.mq.eu-west-1.amazonaws.com:5671", region: eu-west-1, aws: true }
   worker_selector: { pool: prod }
----
-kind: resource
-version: v1
-metadata: { name: events-kafka-staging, labels: { env: staging, team: platform } }
-spec:
-  kafka: { endpoint: "kafka-target:9092" }
-  worker_selector: { pool: dev }
 ---
 kind: resource
 version: v1
@@ -116,10 +102,6 @@ spec:
       mongo: { roles: [limen-read], databases: ["*"] }
     - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
       search: { roles: [limen-read] }
-    - resources: { kind: [rabbitmq], labels: { env: [staging] } }
-      mq: { users: [limen-consumer] }
-    - resources: { kind: [kafka], labels: { env: [staging] } }
-      kafka: { users: [limen-consumer] }
     - resources: { kind: [web], labels: { env: [staging] } }
       web: {}
 ---
@@ -138,10 +120,6 @@ spec:
       mongo: { roles: [limen-read, limen-rw], databases: ["*"] }
     - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
       search: { roles: [limen-read, limen-write] }
-    - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }
-      mq: { users: [limen-consumer, limen-admin] }
-    - resources: { kind: [kafka], labels: { "*": ["*"] } }
-      kafka: { users: [limen-consumer, limen-admin] }
     - resources: { kind: [web], labels: { "*": ["*"] } }
       web: {}
     - resources: { kind: [tcp], labels: { "*": ["*"] } }
