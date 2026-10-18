@@ -1,13 +1,13 @@
 //! MongoDB sessions through the worker's relay (ADR-0035), against a real
 //! MongoDB. Set `LIMEN_TEST_MONGO_TARGET=host:port` to a server started as
-//! `deploy/compose/ci-db-targets.sh` does (TLS, SCRAM, X.509; users and data
-//! from `deploy/compose/targets/mongo/init.js`), with
+//! `scripts/ci-db-targets.sh` does (TLS, SCRAM, X.509; users and data
+//! from `deploy/compose/config/targets/mongo/init.js`), with
 //! `LIMEN_TEST_MONGO_CA_FILE` and `LIMEN_TEST_MONGO_CLIENT_PEM`. Without them
 //! the tests print SKIPPED.
 //!
 //! The client here speaks the wire protocol with the worker's own codec, so
 //! these tests check the relay; `mongosh` through the full stack is
-//! `deploy/compose/demo-phase9.sh`.
+//! `demos/demo-phase9.sh`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +42,7 @@ fn env() -> Option<Env> {
         }),
         _ => {
             eprintln!(
-                "SKIPPED: set LIMEN_TEST_MONGO_TARGET, LIMEN_TEST_MONGO_CA_FILE, and LIMEN_TEST_MONGO_CLIENT_PEM (see deploy/compose/ci-db-targets.sh)"
+                "SKIPPED: set LIMEN_TEST_MONGO_TARGET, LIMEN_TEST_MONGO_CA_FILE, and LIMEN_TEST_MONGO_CLIENT_PEM (see scripts/ci-db-targets.sh)"
             );
             None
         }

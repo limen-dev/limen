@@ -2,7 +2,7 @@
 
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-17 (Phase 5 complete). Phase status is in §13 only.
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-18 (Phase 9 built). Phase status is in §13 only.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -197,6 +197,14 @@ Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user gui
 - **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies and query strings are not recorded. A stream adds `session.start` and `session.end` (command, exit code, ports, recording). If the audit trail is unavailable the worker answers 503 instead of the response.
 - **Later hardening.** Constrained impersonation (beta and on by default since Kubernetes 1.36) can narrow the worker's impersonation rights.
 
+### 5.5 MongoDB, Atlas, and DocumentDB (Phase 9, ADR-0035)
+Built as [ADR-0035](adr/0035-mongodb-access.md) describes; the user guide is `docs/guides/mongodb.md`.
+- `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR | --socket PATH]` opens a loopback listener (or a private unix socket) for `mongosh` and prints a connection string with no password. Each accepted connection is one Limen session of kind `mongodb` over the proxy's `limen-mongo/1` ALPN, with the same grant, worker, lock, and kill machinery as SSH. A driver opens a few connections, so one shell is a few short sessions.
+- **The worker is a message-aware relay.** It plays the server toward the driver (answering the handshake itself, as a standalone writable server, so no transactions or retryable writes) and logs in to the real server itself over TLS: **SCRAM-SHA-256**, **SCRAM-SHA-1**, **X.509**, or **`MONGODB-AWS`** (the worker's IAM identity). It relays `OP_MSG` commands one at a time with its own BSON and wire code, reading each command in full and each reply only for its outcome and any cursor it opened. Result documents are never inspected. A replica set member is enough as an endpoint: the worker follows the primary it names. `mongodb+srv://` is not resolved yet.
+- **Enforcement at the worker.** Each command's `$db` is checked against policy (grants, wildcards, deny rules) and refused with `Unauthorized` otherwise; login commands are refused so a client can't swap the identity; `admin` is closed except read-only metadata; `deny_commands` on a grant refuses named commands; cursors are kept with the session that opened them. The server's own grants for the role are the real boundary.
+- **Audit and recording.** One `mongo.command` per command, written before it is forwarded (fail closed), and a `mongo.command.end` with status, duration, documents, and the server's error code. **Values are redacted by default**: the event keeps the command, collection, and the shape of the filter, update, or pipeline with every value replaced by `?`; inserted documents are only counted; `full_commands` per resource keeps values (never fields named like secrets). There is no replayable recording: the audited command timeline is the record, projected into the console's session page like SQL and Redis sessions.
+- **Unverified against real services:** Atlas, DocumentDB, `MONGODB-AWS`, a multi-node replica set, and sharded clusters. Everything else runs against a real MongoDB 8 in compose.
+
 ## 6. Reverse tunnel and HA routing (ADR-0003, ADR-0004)
 - The worker dials the NLB with ALPN `limen-tunnel/1` and its worker cert. After the TLS handshake **the roles flip**: the worker serves the `WorkerTunnel` gRPC service (tonic, HTTP/2) over that connection, and the proxy is the client. Each session is one bidirectional stream, so HTTP/2 multiplexes many sessions over one TCP connection, with flow control giving backpressure.
 - Each worker keeps **N ≥ 2 tunnels** (default 2) and reconnects with exponential backoff and full jitter (base 1 s, cap 60 s). Health checks use both HTTP/2 PING and `Ping` RPCs (every 15 s, with a 45 s dead-peer timeout).
@@ -354,7 +362,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 6 ✅ | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018, ADR-0033) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
 | 7 ✅ | Redis and Valkey (ADR-0034) | `redis-cli` through `limen redis connect`. Values are redacted |
 | 8 ✅ | **EKS** (ADR-0038) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
-| 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
+| 9 ✅ | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018, ADR-0035) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified. Built with a console command list in place of a recording, `deny_commands`, and cursor isolation |
 | 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
 | 11 | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
 | 12 | **Internal web apps and TCP services** (ADR-0022) | A browser reaches a compose web app at `https://app.apps.<domain>` after SSO; denied users and bots are refused; every request is audited; WebSockets work; `limen tcp` reaches a raw TCP service |
@@ -367,6 +375,10 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
   - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
 - **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
 - **Deferred to Phase 14:** the IAM join method for components.
+- **Deferred from Phase 9, not yet scheduled in §13:**
+  - `mongodb+srv://` (DNS SRV and TXT) resolution; sharded clusters (`mongos`); presenting the server as a replica set so drivers can use transactions and retryable writes (needs the CLI to tell the worker its listener address)
+  - a role bootstrap for MongoDB users (the users are made by hand, as `docs/guides/mongodb.md` says), SASLprep for non-ASCII passwords, and per-collection or per-operation policy (policy is by database and command name)
+  - fuzzing the BSON reader and wire framing with `cargo-fuzz`, and Grafana panels and typed audit columns for the `mongo.*` events (the audit table ignores fields it doesn't list, as for `db.*`)
 - **Deferred from Phase 6, not yet scheduled in §13:**
   - Secrets Manager for the bootstrap admin (`admin_secret_arn`); the admin password is a file
   - `audit.log_parameters`: query parameters are never logged
@@ -375,6 +387,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
   - fuzzing the MySQL codec and the PostgreSQL frame splitter with `cargo-fuzz`, promised in ADR-0012
   - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
 - **Unverified against real services (Phase 6):** RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; PostgreSQL `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login against a real Redshift server, and Redshift behavior in general.
+- **Unverified against real services (Phase 9):** Atlas (SCRAM, X.509, `MONGODB-AWS`, TLS with the public CA, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, and `mongos`. The SigV4 signature for `MONGODB-AWS` is checked against a fixture; SCRAM against the RFC vectors.
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.

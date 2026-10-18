@@ -1,0 +1,64 @@
+# MongoDB target (Phase 9, ADR-0035), profile `mongo`: MongoDB 8 with TLS from a
+# throwaway CA, SCRAM-SHA-256/SHA-1 and X.509 enabled, seeded by init.js with
+# `orders` and `billing`, the users `limen-read` and `limen-rw`, and an X.509
+# user for the worker's client certificate. Layered on a Limen stack by
+# setup.sh mongo. Development only.
+#
+# The worker holds the credentials (the `mongo-worker` volume, mounted by the
+# Limen stack at /etc/limen/mongo): the CA, one password file per role, and the
+# client certificate. The server's own key stays in the `mongo-tls` volume.
+# Atlas and DocumentDB are unverified; this is the self-hosted path.
+services:
+  # Throwaway CA and certificates for the MongoDB target.
+  mongo-tls:
+    profiles: ["mongo"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "/gen.sh"]
+    volumes:
+      - ./config/targets/mongo/gen-tls.sh:/gen.sh:ro
+      - mongo-tls:/tls
+
+  # Lays out what the worker holds, from the certificates and the dev passwords.
+  mongo-creds:
+    profiles: ["mongo"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "/creds.sh"]
+    depends_on:
+      mongo-tls: { condition: service_completed_successfully }
+    volumes:
+      - ./config/targets/mongo/worker-creds.sh:/creds.sh:ro
+      - mongo-tls:/tls:ro
+      - mongo-worker:/worker
+
+  mongo-target:
+    container_name: mongo-catalog-${LIMEN_ENV:-dev}
+    profiles: ["mongo"]
+    image: mongo:8.0
+    command:
+      - mongod
+      - --auth
+      - --tlsMode=requireTLS
+      - --tlsCertificateKeyFile=/tls/mongo.pem
+      - --tlsCAFile=/tls/ca.pem
+      - --tlsAllowConnectionsWithoutCertificates
+      - --setParameter=authenticationMechanisms=SCRAM-SHA-256,SCRAM-SHA-1,MONGODB-X509
+      - --wiredTigerCacheSizeGB=0.25
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: limen_admin
+      MONGO_INITDB_ROOT_PASSWORD: limen-admin-dev-only
+    depends_on:
+      mongo-tls: { condition: service_completed_successfully }
+      mongo-creds: { condition: service_completed_successfully }
+    volumes:
+      - ./config/targets/mongo/init.js:/docker-entrypoint-initdb.d/10-init.js:ro
+      - mongo-tls:/tls:ro
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()' | grep -q '^3$$'"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+volumes:
+  mongo-tls: {}
+  mongo-data: {}

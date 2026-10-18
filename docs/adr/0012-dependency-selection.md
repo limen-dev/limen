@@ -40,6 +40,7 @@ A dependency is adopted only if all of these hold:
 | SQL parsing | sqlparser 0.63.0 | | 2026-09 | **Adopted (Phase 6)**, `default-features = false`, and only its **tokenizer**: statement splitting, the first keyword, literal normalization. Never for allow/deny decisions. No advisories on 2026-10-17 |
 | MD5 | md-5 0.11.0 (RustCrypto) | | 2026 | **Adopt (Phase 6)**, for the legacy PostgreSQL MD5 password exchange Redshift uses. Used for nothing else |
 | AWS credentials | aws-credential-types 1.2 (with aws-config 1.12) | | 2026-10 | **Adopt (Phase 6)**: the default credential chain for IAM database authentication (also the worker's ElastiCache IAM token for Redis, Phase 7). SigV4 itself is hand-written on aws-lc-rs and checked against AWS's published examples |
+| MongoDB wire and BSON | bson, mongodb (MongoDB, Rust driver) | | active | **Not used (Phase 9).** A relay walks and bounds documents rather than building typed values, and the driver brings a large tree. We write the BSON reader and `OP_MSG` framing ourselves (`limen-worker/src/mongo/bson.rs`, `wire.rs`; a few hundred lines), tested at the byte level and against a real MongoDB 8 and `mongosh` in the demo. SCRAM-SHA-1 and SHA-256 use `aws-lc-rs` and the `md-5` crate already adopted. A fuzz target is not added yet |
 | YAML | serde_yaml | 0.9.34+deprecated | 2024-03 | **Reject**: deprecated |
 | YAML | serde_yml | 0.0.13 | | **Reject**: RUSTSEC-2025-0068 (unsound, unmaintained) |
 | YAML | serde-saphyr | 2.0.0 | 2026-10-13 | **Adopt** (pure Rust, active) |

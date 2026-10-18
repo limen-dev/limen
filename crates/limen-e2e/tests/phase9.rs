@@ -3,7 +3,7 @@
 //! every command, and the denials and locks of the earlier phases (ADR-0035).
 //!
 //! Needs `LIMEN_TEST_DATABASE_URL` (control plane state) and the MongoDB
-//! target of `deploy/compose/ci-db-targets.sh`: `LIMEN_TEST_MONGO_TARGET`,
+//! target of `scripts/ci-db-targets.sh`: `LIMEN_TEST_MONGO_TARGET`,
 //! `LIMEN_TEST_MONGO_CA_FILE`.
 
 use std::collections::HashMap;

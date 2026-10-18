@@ -4,7 +4,7 @@ Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--s
 
 ## Evaluation
 
-Access is **denied by default**. A request names a resource and the principal to use on it (an SSH login, DB role, Kubernetes group, or Redis user).
+Access is **denied by default**. A request names a resource and the principal to use on it (an SSH login, DB role, Kubernetes group, Redis user, or MongoDB role).
 
 1. If any of the user's roles has a `deny` rule that matches the resource (and the principal, if the rule names principals), the request is denied.
 2. Otherwise it's allowed if some `allow` rule matches the resource **and** lists the principal.
@@ -77,7 +77,7 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
 
 ### Redis grants
 
@@ -90,13 +90,16 @@ Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, w
 
 With several roles granting the same user, the session may do whatever any one grant allows. [The Redis guide](guides/redis.md) lists the defaults.
 
+### MongoDB grants
+
+`mongo: { roles: [...], databases: [...] }` names the MongoDB roles a role may act as (names the worker has a credential for in the resource's `credentials_dir`) and the databases they may use (`*` for all; deny rules apply). `deny_commands: [dropDatabase, drop]` refuses named commands (case-insensitive) on those databases. Enforced by the worker on every command (ADR-0035); the server's own grants for the MongoDB user are the second layer. With several grants covering the same database, a session may do whatever any one of them permits. Role names are `[A-Za-z0-9_.-]` (up to 64), and database names must be valid MongoDB database names. [The MongoDB guide](guides/mongodb.md) has the details.
+
 ### Planned integrations
 
-These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH and the SQL databases (`postgres`, `mysql`, `redshift`) are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
+These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH, the SQL databases (`postgres`, `mysql`, `redshift`), Redis, and MongoDB are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
 
 | Kind | Resource fields | Grant section | Command (planned) |
 |---|---|---|---|
-| `mongodb` | `endpoint`, `flavor: standard \| atlas \| documentdb` | `mongo: { roles, databases }` | `limen mongo connect` (Phase 9) |
 | `opensearch`, `elasticsearch` | `endpoint`, `region`, `aws` | `search: { roles }` | `limen search connect` (Phase 10) |
 | `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ) | `mq: { users }` | `limen mq connect` (Phase 11) |
 | `kafka` | `endpoint`, `region`, `aws` (MSK) | `kafka: { users }` | `limen kafka connect` (Phase 11) |
