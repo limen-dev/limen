@@ -437,6 +437,10 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query("DELETE FROM kube_requests WHERE at < now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM console_sessions WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?

@@ -573,6 +573,41 @@ pub struct AuditPage {
     pub older: Option<String>,
 }
 
+/// One Kubernetes API request, in kubectl's terms.
+pub struct KubeView {
+    pub at: String,
+    pub user: Option<String>,
+    pub user_path: Option<String>,
+    pub session_path: Option<String>,
+    pub cluster: String,
+    pub verb: String,
+    /// `pods`, `pods/exec`, `deployments.apps`.
+    pub resource: String,
+    pub namespace: String,
+    pub name: String,
+    pub status: i32,
+    /// `ok` below 400, `bad` from 400 up.
+    pub tone: &'static str,
+    pub latency: String,
+    pub error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "kube_requests.html")]
+pub struct KubePage {
+    pub chrome: Chrome,
+    pub requests: Vec<KubeView>,
+    pub clusters: Vec<String>,
+    pub verbs: Vec<String>,
+    pub cluster_filter: Option<String>,
+    pub verb_filter: Option<String>,
+    pub user_filter: Option<String>,
+    pub namespace_filter: Option<String>,
+    pub problems_only: bool,
+    pub newer: Option<String>,
+    pub older: Option<String>,
+}
+
 #[derive(Template)]
 #[template(path = "token.html")]
 pub struct TokenPage {

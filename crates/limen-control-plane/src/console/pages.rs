@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
+    self, AuditPage, BotView, KubePage, KubeView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
     PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView,
     ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage,
     UserView, UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
@@ -1209,6 +1209,105 @@ pub async fn dry_run(
         },
     };
     policy_page(&state, &auth, form.yaml, Some(result))
+}
+
+fn kube_view(r: &store::KubeRow) -> KubeView {
+    let mut resource = r.resource.clone();
+    if !r.api_group.is_empty() && !resource.is_empty() {
+        resource = format!("{resource}.{}", r.api_group);
+    }
+    if !r.subresource.is_empty() {
+        resource = format!("{resource}/{}", r.subresource);
+    }
+    KubeView {
+        at: time_text(Some(r.at)),
+        user_path: r.username.as_deref().map(path_segment),
+        user: r.username.clone(),
+        session_path: r.session_id.map(|id| id.to_string()),
+        cluster: r.cluster.clone(),
+        verb: r.verb.clone(),
+        resource,
+        namespace: r.namespace.clone(),
+        name: r.name.clone(),
+        status: r.status,
+        tone: if r.status >= 400 { "bad" } else { "ok" },
+        latency: r.latency_ms.map(|ms| format!("{ms} ms")).unwrap_or_default(),
+        error: r.error.clone(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct KubeQuery {
+    user: Option<String>,
+    cluster: Option<String>,
+    namespace: Option<String>,
+    verb: Option<String>,
+    problems: Option<String>,
+    offset: Option<i64>,
+}
+
+/// The audit trail's Kubernetes tab: every API request, as kubectl would say it.
+pub async fn kube_requests(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<KubeQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let pick = |v: &Option<String>| v.clone().filter(|s| !s.is_empty());
+    let offset = q.offset.unwrap_or(0).max(0);
+    let filter = store::KubeFilter {
+        username: pick(&q.user),
+        cluster: pick(&q.cluster),
+        namespace: pick(&q.namespace),
+        verb: pick(&q.verb),
+        problems_only: q.problems.is_some_and(|p| p == "1"),
+        limit: PAGE_SIZE,
+        offset,
+    };
+    let mut rows = match store::list_kube_requests(&state.db, &filter).await {
+        Ok(rows) => rows,
+        Err(e) => return db_error("listing Kubernetes requests", &e),
+    };
+    let (clusters, verbs) = store::kube_filter_options(&state.db)
+        .await
+        .unwrap_or_default();
+    let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
+    rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
+    let link = |offset: i64| {
+        let mut url = format!("/console/audit/kubernetes?offset={offset}");
+        for (key, value) in [
+            ("user", &filter.username),
+            ("cluster", &filter.cluster),
+            ("namespace", &filter.namespace),
+            ("verb", &filter.verb),
+        ] {
+            if let Some(v) = value {
+                url.push_str(&format!("&{key}={}", path_segment(v)));
+            }
+        }
+        if filter.problems_only {
+            url.push_str("&problems=1");
+        }
+        url
+    };
+    html(
+        KubePage {
+            chrome: chrome(&state, &auth, "audit"),
+            requests: rows.iter().map(kube_view).collect(),
+            clusters,
+            verbs,
+            cluster_filter: filter.cluster.clone(),
+            verb_filter: filter.verb.clone(),
+            user_filter: filter.username.clone(),
+            namespace_filter: filter.namespace.clone(),
+            problems_only: filter.problems_only,
+            newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
+            older: has_more.then(|| link(offset + PAGE_SIZE)),
+        }
+        .render(),
+    )
 }
 
 #[derive(Deserialize)]

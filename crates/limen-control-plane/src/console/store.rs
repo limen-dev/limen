@@ -367,6 +367,31 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         .bind(summarize(&e.data))
         .execute(&mut *tx)
         .await?;
+        if e.kind == EventKind::KubeRequest {
+            sqlx::query(
+                "INSERT INTO kube_requests (event_id, at, username, session_id, cluster, verb, api_group, resource,
+                                            subresource, namespace, name, method, status, latency_ms, error)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 ON CONFLICT (event_id) DO NOTHING",
+            )
+            .bind(e.event_id)
+            .bind(e.time)
+            .bind(&e.user)
+            .bind(e.session_id)
+            .bind(text(&e.data, "resource").unwrap_or_default())
+            .bind(text(&e.data, "verb").unwrap_or_default())
+            .bind(text(&e.data, "k8s_group").unwrap_or_default())
+            .bind(text(&e.data, "k8s_resource").unwrap_or_default())
+            .bind(text(&e.data, "subresource").unwrap_or_default())
+            .bind(text(&e.data, "namespace").unwrap_or_default())
+            .bind(text(&e.data, "name").unwrap_or_default())
+            .bind(text(&e.data, "method").unwrap_or_default())
+            .bind(i32::try_from(number(&e.data, "status").unwrap_or(0)).unwrap_or(0))
+            .bind(number(&e.data, "latency_ms"))
+            .bind(text(&e.data, "error"))
+            .execute(&mut *tx)
+            .await?;
+        }
         let Some(session_id) = e.session_id else {
             continue;
         };
@@ -607,6 +632,91 @@ pub async fn event_kinds(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT DISTINCT kind FROM audit_events ORDER BY kind")
         .fetch_all(db)
         .await
+}
+
+// ---- Kubernetes requests --------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct KubeRow {
+    pub at: OffsetDateTime,
+    pub username: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub cluster: String,
+    pub verb: String,
+    pub api_group: String,
+    pub resource: String,
+    pub subresource: String,
+    pub namespace: String,
+    pub name: String,
+    pub method: String,
+    pub status: i32,
+    pub latency_ms: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct KubeFilter {
+    pub username: Option<String>,
+    pub cluster: Option<String>,
+    pub namespace: Option<String>,
+    pub verb: Option<String>,
+    /// Only requests the cluster (or Limen) refused or failed: status 400 and up.
+    pub problems_only: bool,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Newest first.
+pub async fn list_kube_requests(db: &Db, f: &KubeFilter) -> Result<Vec<KubeRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT at, username, session_id, cluster, verb, api_group, resource, subresource, namespace, name,
+                method, status, latency_ms, error
+         FROM kube_requests
+         WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR cluster = $2)
+           AND ($3::text IS NULL OR namespace = $3) AND ($4::text IS NULL OR verb = $4)
+           AND (NOT $5 OR status >= 400)
+         ORDER BY at DESC, event_id DESC LIMIT $6 OFFSET $7",
+    )
+    .bind(&f.username)
+    .bind(&f.cluster)
+    .bind(&f.namespace)
+    .bind(&f.verb)
+    .bind(f.problems_only)
+    .bind(f.limit + 1)
+    .bind(f.offset)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(KubeRow {
+                at: r.try_get("at")?,
+                username: r.try_get("username")?,
+                session_id: r.try_get("session_id")?,
+                cluster: r.try_get("cluster")?,
+                verb: r.try_get("verb")?,
+                api_group: r.try_get("api_group")?,
+                resource: r.try_get("resource")?,
+                subresource: r.try_get("subresource")?,
+                namespace: r.try_get("namespace")?,
+                name: r.try_get("name")?,
+                method: r.try_get("method")?,
+                status: r.try_get("status")?,
+                latency_ms: r.try_get("latency_ms")?,
+                error: r.try_get("error")?,
+            })
+        })
+        .collect()
+}
+
+/// The clusters and verbs seen, for the filters.
+pub async fn kube_filter_options(db: &Db) -> Result<(Vec<String>, Vec<String>), sqlx::Error> {
+    let clusters = sqlx::query_scalar("SELECT DISTINCT cluster FROM kube_requests ORDER BY cluster")
+        .fetch_all(db)
+        .await?;
+    let verbs = sqlx::query_scalar("SELECT DISTINCT verb FROM kube_requests ORDER BY verb")
+        .fetch_all(db)
+        .await?;
+    Ok((clusters, verbs))
 }
 
 #[cfg(test)]
