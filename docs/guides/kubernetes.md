@@ -20,7 +20,7 @@ kubectl port-forward svc/db 5432:5432    # audited
 - `--as`, `--as-group`, and a token in your kubeconfig are ignored. You are always yourself.
 
 ## What gets recorded and audited
-The console's **Audit trail → Kubernetes** tab shows every request as kubectl would say it (`get pods default/web 200`), with filters for cluster, verb, namespace, user, and refused or failed requests. Under **Sessions**, one login on one cluster is one `kubectl` session, like a database session: its page lists every API request that login made (time, verb, resource, namespace, name, status), refused ones marked, and it counts as active while the last request is under five minutes old. Exec and attach also get their own session with a recording, linked from the request's row.
+The console's **Audit trail → Kubernetes** tab shows every request as kubectl would say it (`get pods default/web 200`), with filters for cluster, verb, namespace, user, and refused or failed requests. Under **Sessions**, one login on one cluster is one `kubectl` session, like a database session: its page lists every API request that login made (time, verb, resource, namespace, name, status), refused ones marked, and it counts as active while the last request is under five minutes old, or until the user runs `limen logout`, which ends it at once (reason "logged out"). After a logout the login's certificate is refused by the proxy and workers, open `watch`, `logs -f`, and `exec` streams on it end, and the user's other logins carry on. Exec and attach also get their own session with a recording, linked from the request's row.
 
 
 | Action | Audit | Recording |

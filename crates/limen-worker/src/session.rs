@@ -283,10 +283,11 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
     let creds = worker.credentials();
     let grant = &checked.verified.grant;
     let snapshot = &checked.snapshot;
-    if let Some(why) = snapshot
-        .restrictions
-        .blocks(&checked.verified.user.username, &grant.session_id)
-    {
+    if let Some(why) = snapshot.restrictions.blocks(
+        &checked.verified.user.username,
+        &checked.verified.user.login_id,
+        &grant.session_id,
+    ) {
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {

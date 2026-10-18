@@ -140,10 +140,11 @@ pub(crate) fn admit(
         .policy
         .fresh(now)
         .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
-    if let Some(why) = snapshot
-        .restrictions
-        .blocks(&verified.user.username, &grant.session_id)
-    {
+    if let Some(why) = snapshot.restrictions.blocks(
+        &verified.user.username,
+        &verified.user.login_id,
+        &grant.session_id,
+    ) {
         return Err(Status::permission_denied(why));
     }
     for group in &grant.groups {

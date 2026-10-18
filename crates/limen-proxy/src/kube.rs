@@ -168,6 +168,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
         let worker_upgrade = hyper::upgrade::on(&mut response);
         let proxy = proxy.clone();
         let username = user.username.clone();
+        let login_id = user.login_id.clone();
         let worker = worker_id.clone();
         tokio::spawn(async move {
             let _slot = slot;
@@ -176,7 +177,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
             };
             let (mut client, mut worker_side) = (TokioIo::new(client), TokioIo::new(worker_side));
             let sid = session_id.to_string();
-            let revoked = watch_revocation(&proxy, &username, &sid, &worker);
+            let revoked = watch_revocation(&proxy, &username, &login_id, &sid, &worker);
             tokio::select! {
                 _ = tokio::io::copy_bidirectional(&mut client, &mut worker_side) => {}
                 why = revoked => {
@@ -293,7 +294,10 @@ async fn open(
         .policy
         .fresh(now)
         .map_err(|e| sessions::failed(format!("access can't be decided right now ({e})")))?;
-    if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
+    if let Some(why) = snapshot
+        .restrictions
+        .blocks(&user.username, &user.login_id, "")
+    {
         return Err(sessions::denied(why));
     }
     let groups = snapshot.policy.kube_groups(&user.roles, cluster);
@@ -429,6 +433,7 @@ fn bridge(mut inbound: Inbound, outbound: Outbound) -> tokio::io::DuplexStream {
 async fn watch_revocation(
     proxy: &Proxy,
     username: &str,
+    login_id: &str,
     session_id: &str,
     worker_id: &str,
 ) -> &'static str {
@@ -436,7 +441,7 @@ async fn watch_revocation(
     loop {
         tick.tick().await;
         if let Some(snapshot) = proxy.policy.latest() {
-            if let Some(why) = snapshot.restrictions.blocks(username, session_id) {
+            if let Some(why) = snapshot.restrictions.blocks(username, login_id, session_id) {
                 return why;
             }
             if snapshot.restrictions.is_revoked(worker_id) {

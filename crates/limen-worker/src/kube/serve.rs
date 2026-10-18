@@ -97,9 +97,11 @@ async fn handle(ctx: Arc<Ctx>, mut req: Request<Incoming>) -> Response<Body> {
 
     // A lock or kill that arrived since the grant was signed.
     if let Some(snapshot) = ctx.worker.policy.latest()
-        && let Some(why) = snapshot
-            .restrictions
-            .blocks(&admitted.username, &admitted.session_id)
+        && let Some(why) = snapshot.restrictions.blocks(
+            &admitted.username,
+            &admitted.login_id,
+            &admitted.session_id,
+        )
     {
         return failure(StatusCode::FORBIDDEN, "Forbidden", why);
     }
@@ -504,7 +506,7 @@ fn must_stop(ctx: &Ctx) -> Option<&'static str> {
     ctx.worker.policy.latest().and_then(|snapshot| {
         snapshot
             .restrictions
-            .blocks(&admitted.username, &admitted.session_id)
+            .blocks(&admitted.username, &admitted.login_id, &admitted.session_id)
     })
 }
 

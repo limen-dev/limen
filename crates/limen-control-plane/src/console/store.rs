@@ -163,6 +163,8 @@ pub struct SessionRow {
     pub actor_type: String,
     /// The CI run, for a bot's session.
     pub ci: Option<serde_json::Value>,
+    /// When the login behind this session was ended by `limen logout`.
+    pub logged_out_at: Option<OffsetDateTime>,
 }
 
 /// Whether a `sessions` row is live, with the window in hours as `$1`. A
@@ -171,6 +173,7 @@ pub struct SessionRow {
 macro_rules! is_active {
     () => {
         "(CASE WHEN kind = 'kubectl' THEN ended_at > now() - interval '5 minutes'
+                 AND NOT EXISTS (SELECT 1 FROM login_revocations r WHERE r.login_id = sessions.login_id)
                ELSE ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1) END)"
     };
 }
@@ -180,7 +183,8 @@ macro_rules! session_select {
         concat!(
             "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
         started_at, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_uri, recording_sha256,
-        actor_type, ci, ",
+        actor_type, ci,
+        (SELECT r.revoked_at FROM login_revocations r WHERE r.login_id = sessions.login_id) AS logged_out_at, ",
             is_active!(),
             " AS active FROM sessions"
         )
@@ -208,6 +212,7 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
         active: r.try_get("active")?,
         actor_type: r.try_get("actor_type")?,
         ci: r.try_get("ci")?,
+        logged_out_at: r.try_get("logged_out_at")?,
     })
 }
 
@@ -644,8 +649,8 @@ async fn project_kube_request(
         // it, which is idempotent and order-independent.
         sqlx::query(
             "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
-                                   started_at, ended_at, duration_ms, actor_type, ci)
-             VALUES ($1, $2, 'kubectl', $3, 'kubectl', $4, $5, $6, $7, $7, 0, $8, $9)
+                                   started_at, ended_at, duration_ms, actor_type, ci, login_id)
+             VALUES ($1, $2, 'kubectl', $3, 'kubectl', $4, $5, $6, $7, $7, 0, $8, $9, $10)
              ON CONFLICT (session_id) DO UPDATE SET
                started_at = LEAST(sessions.started_at, EXCLUDED.started_at),
                ended_at = GREATEST(sessions.ended_at, EXCLUDED.ended_at),
@@ -661,6 +666,7 @@ async fn project_kube_request(
         .bind(e.time)
         .bind(text(&e.data, "actor_type").unwrap_or("user"))
         .bind(e.data.get("ci").filter(|c| c.is_object()))
+        .bind(text(&e.data, "login_id"))
         .execute(&mut **tx)
         .await?;
     }

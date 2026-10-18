@@ -345,7 +345,10 @@ async fn establish(
         .fresh(now)
         .map_err(|e| failed(format!("access can't be decided right now ({e})")))?;
     let policy = &snapshot.policy;
-    if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
+    if let Some(why) = snapshot
+        .restrictions
+        .blocks(&user.username, &user.login_id, "")
+    {
         return Err(denied(why));
     }
     let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
@@ -720,10 +723,11 @@ async fn relay(
         loop {
             tick.tick().await;
             if let Some(snapshot) = proxy.policy.latest() {
-                if let Some(why) = snapshot
-                    .restrictions
-                    .blocks(&user.username, &session_id.to_string())
-                {
+                if let Some(why) = snapshot.restrictions.blocks(
+                    &user.username,
+                    &user.login_id,
+                    &session_id.to_string(),
+                ) {
                     return why;
                 }
                 if snapshot.restrictions.is_revoked(worker_id) {

@@ -9,7 +9,8 @@ use common::{Env, connect, get, text};
 use http::StatusCode;
 use http_body_util::BodyExt as _;
 use limen_e2e::eventually;
-use limen_proto::v1::LockUserRequest;
+use limen_proto::v1::auth_client::AuthClient;
+use limen_proto::v1::{LockUserRequest, LogoutRequest};
 use limen_testkit::users::DEVELOPER;
 
 /// A `watch` is one long response. A lock must end it, as it ends an SSH
@@ -55,6 +56,101 @@ async fn a_lock_ends_a_streaming_response() {
         Duration::from_secs(5),
         "the API server sees the watch go",
         || async { env.api.watching.load(std::sync::atomic::Ordering::SeqCst) == 0 },
+    )
+    .await;
+}
+
+/// `limen logout` ends the login everywhere: the proxy and workers refuse its
+/// certificate, an open `watch` on it ends, the same user's other login is
+/// untouched, and the logout is in the trail.
+#[tokio::test(flavor = "multi_thread")]
+async fn logout_ends_that_login_only() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    let laptop = env
+        .d
+        .login(DEVELOPER, &["ops"])
+        .await
+        .expect("laptop login");
+    let ci_box = env
+        .d
+        .login(DEVELOPER, &["ops"])
+        .await
+        .expect("second login");
+
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(laptop.clone())).await;
+    let response = conn
+        .send_request(get("/k8s/eks-dev/api/v1/pods?watch=true"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    body.frame().await.expect("a frame").expect("ok");
+
+    let ended = AuthClient::new(env.d.proxy_channel(Some(laptop.clone())))
+        .logout(LogoutRequest {})
+        .await
+        .expect("logout")
+        .into_inner();
+    assert!(ended.revoked && !ended.login_id.is_empty());
+    // Idempotent: a second logout is not an error.
+    let again = AuthClient::new(env.d.proxy_channel(Some(laptop.clone())))
+        .logout(LogoutRequest {})
+        .await
+        .expect("logout again")
+        .into_inner();
+    assert!(!again.revoked);
+
+    // The open watch ends.
+    let cut = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            match body.frame().await {
+                None | Some(Err(_)) => return,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert!(cut.is_ok(), "the watch outlived the logout");
+
+    // New requests with the logged-out certificate are refused, and say why.
+    eventually(
+        Duration::from_secs(20),
+        "the proxy refuses the login",
+        || async {
+            let mut conn = connect(&env.d, env.d.proxy_addr, Some(laptop.clone())).await;
+            let (status, body) = text(
+                conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/pods"))
+                    .await
+                    .expect("response"),
+            )
+            .await;
+            status == StatusCode::FORBIDDEN && body.contains("logged out")
+        },
+    )
+    .await;
+
+    // The same user's other login carries on.
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(ci_box)).await;
+    let (status, body) = text(
+        conn.send_request(get("/k8s/eks-dev/api/v1/namespaces/dev/pods"))
+            .await
+            .expect("response"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    eventually(
+        Duration::from_secs(20),
+        "auth.logout is audited",
+        || async {
+            common::read_jsonl(&env.d).iter().any(|e| {
+                e["kind"] == "auth.logout"
+                    && e["user"] == DEVELOPER
+                    && e["data"]["login_id"] == ended.login_id
+            })
+        },
     )
     .await;
 }

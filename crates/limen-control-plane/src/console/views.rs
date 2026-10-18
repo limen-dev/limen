@@ -233,6 +233,7 @@ pub struct SessionView {
 
 impl From<&SessionRow> for SessionView {
     fn from(s: &SessionRow) -> Self {
+        // A login ended by `limen logout` ends its kubectl session at once.
         let (status, status_class) = if s.active {
             ("active", "live")
         } else if s.ended_at.is_some() {
@@ -251,13 +252,15 @@ impl From<&SessionRow> for SessionView {
             resource: dash(s.resource.as_deref()),
             login: dash(s.login.as_deref()),
             started: time_text(s.started_at),
-            ended: time_text(s.ended_at),
+            ended: time_text(s.logged_out_at.or(s.ended_at)),
             duration: duration_text(s.duration_ms),
             status,
             status_class,
             // "ended" says nothing the status doesn't.
             reason: if s.active {
                 String::new()
+            } else if s.logged_out_at.is_some() {
+                "logged out".to_owned()
             } else {
                 s.end_reason
                     .clone()

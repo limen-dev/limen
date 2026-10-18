@@ -368,7 +368,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ca_file,
             ..
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
-        Command::Logout => commands::logout(proxy),
+        Command::Logout => commands::logout(proxy).await,
         Command::Status => commands::status(proxy),
         Command::Ls { json } => commands::ls(proxy, json).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,

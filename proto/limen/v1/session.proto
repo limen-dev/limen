@@ -56,6 +56,9 @@ message PolicySnapshot {
   repeated string killed_sessions = 5;
   // Proxies and workers an admin revoked. Their certificates are no longer honoured.
   repeated string revoked_components = 6;
+  // Logins (the id in a user certificate) that were ended by `limen logout`.
+  // Kept for a day, longer than any certificate lives.
+  repeated string revoked_logins = 7;
 }
 
 // First message on a client session stream (ALPN limen-ssh/1 and friends),

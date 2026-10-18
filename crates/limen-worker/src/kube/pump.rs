@@ -167,9 +167,11 @@ pub(super) async fn run<C, U>(
                 return "max_session_ttl reached";
             }
             if let Some(snapshot) = worker.policy.latest()
-                && let Some(why) = snapshot
-                    .restrictions
-                    .blocks(&admitted.username, &admitted.session_id)
+                && let Some(why) = snapshot.restrictions.blocks(
+                    &admitted.username,
+                    &admitted.login_id,
+                    &admitted.session_id,
+                )
             {
                 return why;
             }

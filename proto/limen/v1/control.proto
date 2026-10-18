@@ -17,6 +17,9 @@ service Auth {
   rpc BotLogin(BotLoginRequest) returns (LoginResponse);
   // Identity and roles of the calling user certificate.
   rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+  // Ends the calling certificate's login: proxies and workers refuse it from
+  // then on, within one policy refresh. Idempotent.
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
 }
 
 service Resources {
@@ -104,6 +107,15 @@ message LoginResponse {
   int64 expires_at_unix = 7;
   // OpenSSH public key of the SSH host CA, for the CLI's known_hosts.
   string ssh_host_ca_public_key = 8;
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {
+  // The login that was ended.
+  string login_id = 1;
+  // False if it had already been ended.
+  bool revoked = 2;
 }
 
 message WhoAmIRequest {}

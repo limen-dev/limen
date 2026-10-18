@@ -541,3 +541,47 @@ async fn one_login_on_one_cluster_is_one_kubectl_session() {
     let verbs: Vec<_> = requests.iter().map(|r| r.verb.as_str()).collect();
     assert_eq!(verbs, ["list", "get", "delete"], "oldest first");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logging_out_ends_the_kubectl_session_at_once() {
+    let Some(db) = fresh_db().await else { return };
+    store::project_events(
+        &db,
+        &[
+            login_request("login-a", "eks-dev", "list", 200, 0),
+            login_request("login-b", "eks-dev", "list", 200, 0),
+        ],
+    )
+    .await
+    .expect("project");
+    let list = |db: &limen_control_plane::db::Db| {
+        let db = db.clone();
+        async move {
+            store::list_sessions(
+                &db,
+                &SessionFilter {
+                    limit: 50,
+                    ..SessionFilter::default()
+                },
+            )
+            .await
+            .expect("sessions")
+        }
+    };
+    let before = list(&db).await;
+    assert_eq!(before.len(), 2);
+    assert!(before.iter().all(|s| s.active && s.logged_out_at.is_none()));
+    assert_eq!(store::active_session_count(&db).await.expect("count"), 2);
+
+    assert!(
+        limen_control_plane::db::revoke_login(&db, "login-a", DEVELOPER)
+            .await
+            .expect("logout")
+    );
+    let after = list(&db).await;
+    let active: Vec<_> = after.iter().filter(|s| s.active).collect();
+    assert_eq!(active.len(), 1, "only the other login is live");
+    let ended = after.iter().find(|s| !s.active).expect("ended");
+    assert!(ended.logged_out_at.is_some());
+    assert_eq!(store::active_session_count(&db).await.expect("count"), 1);
+}

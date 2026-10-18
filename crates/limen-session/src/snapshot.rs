@@ -33,14 +33,19 @@ pub struct Restrictions {
     pub locked_users: BTreeSet<String>,
     pub killed_sessions: BTreeSet<String>,
     pub revoked_components: BTreeSet<String>,
+    /// Logins ended by `limen logout`.
+    pub revoked_logins: BTreeSet<String>,
 }
 
 impl Restrictions {
-    /// Why this session must not continue, if it must not.
+    /// Why this session must not continue, if it must not. `login_id` is the
+    /// one in the user's certificate, `session_id` may be empty before one exists.
     #[must_use]
-    pub fn blocks(&self, username: &str, session_id: &str) -> Option<&'static str> {
+    pub fn blocks(&self, username: &str, login_id: &str, session_id: &str) -> Option<&'static str> {
         if self.locked_users.contains(username) {
             Some("user locked")
+        } else if self.revoked_logins.contains(login_id) {
+            Some("logged out")
         } else if self.killed_sessions.contains(session_id) {
             Some("session killed")
         } else {
@@ -71,6 +76,7 @@ pub fn sign(
         locked_users: restrictions.locked_users.iter().cloned().collect(),
         killed_sessions: restrictions.killed_sessions.iter().cloned().collect(),
         revoked_components: restrictions.revoked_components.iter().cloned().collect(),
+        revoked_logins: restrictions.revoked_logins.iter().cloned().collect(),
     };
     signer.sign(Purpose::PolicySnapshot, snapshot.encode_to_vec())
 }
@@ -97,6 +103,7 @@ pub fn verify_snapshot(
             locked_users: snapshot.locked_users.into_iter().collect(),
             killed_sessions: snapshot.killed_sessions.into_iter().collect(),
             revoked_components: snapshot.revoked_components.into_iter().collect(),
+            revoked_logins: snapshot.revoked_logins.into_iter().collect(),
         }),
     })
 }
@@ -329,6 +336,7 @@ mod tests {
             locked_users: ["mallory@example.com".to_owned()].into(),
             killed_sessions: ["s-1".to_owned()].into(),
             revoked_components: ["worker-9".to_owned()].into(),
+            revoked_logins: ["login-7".to_owned()].into(),
         };
         let signed = sign(
             &cp,
@@ -341,9 +349,20 @@ mod tests {
         let snapshot = verify_snapshot(&signed, ca.cert_der()).expect("verify");
         assert_eq!(*snapshot.restrictions, restrictions);
         let r = &snapshot.restrictions;
-        assert_eq!(r.blocks("mallory@example.com", "s-9"), Some("user locked"));
-        assert_eq!(r.blocks("admin@example.com", "s-1"), Some("session killed"));
-        assert_eq!(r.blocks("admin@example.com", "s-2"), None);
+        assert_eq!(
+            r.blocks("mallory@example.com", "login-1", "s-9"),
+            Some("user locked")
+        );
+        assert_eq!(
+            r.blocks("admin@example.com", "login-1", "s-1"),
+            Some("session killed")
+        );
+        assert_eq!(r.blocks("admin@example.com", "login-1", "s-2"), None);
+        // One login ended; the same user's other logins carry on.
+        assert_eq!(
+            r.blocks("admin@example.com", "login-7", "s-2"),
+            Some("logged out")
+        );
         assert!(r.is_revoked("worker-9"));
         assert!(!r.is_revoked("worker-1"));
     }
