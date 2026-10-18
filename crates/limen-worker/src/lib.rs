@@ -4,6 +4,7 @@
 
 pub mod db;
 mod kube;
+pub mod mongo;
 pub mod recording;
 mod recordings;
 pub mod redis;

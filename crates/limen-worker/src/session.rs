@@ -158,6 +158,16 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Mongo(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::mongo::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
             }
         };
         let (reason, outcome) = match tokio::time::timeout(until, serving).await {
@@ -209,6 +219,7 @@ enum Admitted {
     Db(Box<crate::db::DbSessionConfig>),
     Redis(Box<redis::Prepared>),
     Kube(Box<crate::kube::Admitted>),
+    Mongo(Box<crate::mongo::Prepared>),
 }
 
 impl Admitted {
@@ -218,6 +229,7 @@ impl Admitted {
             Admitted::Db(c) => c.session_id.to_string(),
             Admitted::Redis(p) => p.session_id().to_owned(),
             Admitted::Kube(k) => k.session_id.clone(),
+            Admitted::Mongo(p) => p.session_id(),
         }
     }
 }
@@ -271,6 +283,9 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "kube" => {
             crate::kube::admit(worker, &checked.verified, now).map(|k| Admitted::Kube(Box::new(k)))
         }
+        "mongodb" => admit_mongo(worker, &checked)
+            .await
+            .map(|c| Admitted::Mongo(Box::new(c))),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -355,6 +370,88 @@ async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepar
             "couldn't connect to the Redis server; ask an admin to check the worker's log",
         )
     })
+}
+
+/// The longest a MongoDB session may take to open its connection to the server.
+const MONGO_PREPARE: std::time::Duration = std::time::Duration::from_secs(25);
+
+async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo::Prepared, Status> {
+    use limen_policy::model::MongoAuth;
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::MongoRole {
+            role: grant.principal.clone(),
+            database: grant.database.clone(),
+        },
+    )?;
+    if !limen_policy::valid_mongo_role(&grant.principal) {
+        return Err(Status::permission_denied("not a valid MongoDB role name"));
+    }
+    let spec = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.mongodb.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a MongoDB resource"))?;
+    // The detail names the server and the account: it stays in the log.
+    let unavailable = |what: &str, e: &dyn std::fmt::Display| {
+        tracing::warn!(error = %e, resource = %grant.resource, "{what}");
+        Status::unavailable(
+            "couldn't connect to the MongoDB server; ask an admin to check the worker's log",
+        )
+    };
+    let aws = if spec.auth == MongoAuth::Aws {
+        Some(
+            worker
+                .aws_credentials()
+                .await
+                .map_err(|e| unavailable("couldn't get AWS credentials for MONGODB-AWS", &e))?,
+        )
+    } else {
+        None
+    };
+    let (login, identity) = crate::mongo::credentials(&spec, &grant.principal, aws)
+        .await
+        .map_err(|e| {
+            tracing::error!(resource = %grant.resource, error = %e, "can't load the MongoDB role's credential");
+            Status::failed_precondition("the worker has no credential for this MongoDB role")
+        })?;
+    let target = crate::db::Target::from_mongo(&spec, worker.allow_insecure_db_targets(), identity)
+        .await
+        .map_err(Status::failed_precondition)?;
+    let auth_source = spec.auth_source.clone().unwrap_or_else(|| {
+        match spec.auth {
+            MongoAuth::Scram | MongoAuth::ScramSha1 => "admin",
+            MongoAuth::X509 | MongoAuth::Aws => "$external",
+        }
+        .to_owned()
+    });
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    let access = crate::mongo::Access::new(
+        std::sync::Arc::clone(&checked.snapshot.policy),
+        checked.verified.user.roles.clone(),
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = crate::mongo::SessionConfig::new(
+        session_id,
+        grant.username.clone(),
+        grant.resource.clone(),
+        grant.principal.clone(),
+        &spec,
+    );
+    tokio::time::timeout(
+        MONGO_PREPARE,
+        crate::mongo::prepare(config, &target, &login, &auth_source, access),
+    )
+    .await
+    .map_err(|_| unavailable("MongoDB connection timed out", &"timed out"))?
+    .map_err(|e| unavailable("couldn't open the MongoDB connection", &e))
 }
 
 async fn admit_db(
