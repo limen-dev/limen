@@ -38,7 +38,7 @@ A role grants MongoDB roles and the databases they may use (`docs/policy.md` has
 
 ## What is audited
 
-One `mongo.command` event per command, **before** it is forwarded (if it can't be written, the command is not run and the session ends). A second event, `mongo.command.end`, says how it ended: status (`ok`, `error`, `unacknowledged` for `w: 0` writes, `not_completed`), duration, documents returned or written, and the server's error code and name.
+One `mongo.command` event per command, **before** it is forwarded (if it can't be written, the command is not run and the session ends). A second event, `mongo.command.end`, says how it ended (every forwarded command gets exactly one, including `not_completed` when the session was cut off by a lock, a kill, a drain, or the TTL): status (`ok`, `error`, `unacknowledged` for `w: 0` writes, `not_completed`), duration, documents returned or written, and the server's error code and name.
 
 **Values are redacted by default.** The event keeps the command, database, collection, and the *shape* of the command:
 

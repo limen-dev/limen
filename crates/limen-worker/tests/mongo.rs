@@ -83,6 +83,8 @@ fn policy_for(spec: &serde_json::Value) -> Arc<Policy> {
 struct Harness {
     sink: Arc<MemorySink>,
     client: Client,
+    /// The relay's task, so a test can cancel the session from outside.
+    relay: tokio::task::JoinHandle<()>,
     _creds: tempfile::TempDir,
 }
 
@@ -180,11 +182,12 @@ async fn open(env: &Env, role: &str, auth: &str) -> Result<Harness, UpstreamErro
     let prepared: Prepared = prepare(config, &target, &login, source, access).await?;
     let (ours, theirs) = tokio::io::duplex(1024 * 1024);
     let emitter = Emitter::new("worker", "w1", sink.clone(), FailureMode::FailClosed);
-    tokio::spawn(async move {
+    let relay = tokio::spawn(async move {
         let _ = serve(theirs, prepared, emitter).await;
     });
     Ok(Harness {
         sink,
+        relay,
         client: Client { io: ours, next: 0 },
         _creds: creds,
     })
@@ -328,6 +331,7 @@ async fn commands_flow_and_every_command_is_audited() {
         .expect("end");
     assert_eq!(end["data"]["status"], "ok");
     assert_eq!(end["data"]["docs"], 2);
+    assert_every_command_has_one_end(&h).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -420,6 +424,7 @@ async fn values_never_reach_the_audit_trail_by_default() {
     let _ = admin
         .run(cmd("drop", "audit_test", "orders").finish())
         .await;
+    assert_every_command_has_one_end(&h).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -468,6 +473,7 @@ async fn a_database_policy_does_not_grant_is_refused_and_audited() {
     assert_eq!(refused[0]["data"]["database"], "billing");
     assert_eq!(refused[0]["data"]["reason"], "database_not_granted");
     assert_eq!(refused[1]["data"]["command"], "createUser");
+    assert_every_command_has_one_end(&h).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -501,6 +507,7 @@ async fn the_servers_own_grants_still_apply_inside_a_database() {
         ends[0]["data"].get("error").is_none(),
         "error text is kept only when the resource keeps values"
     );
+    assert_every_command_has_one_end(&h).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -683,6 +690,7 @@ async fn an_unacknowledged_write_gets_no_reply_and_the_session_goes_on() {
     let _ = admin
         .run(cmd("drop", "unack_test", "orders").finish())
         .await;
+    assert_every_command_has_one_end(&h).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -815,4 +823,109 @@ async fn pipelines_stay_in_the_granted_databases() {
     assert_eq!(refused.len(), 2);
     assert_eq!(refused[0]["data"]["reason"], "database_not_granted");
     assert_eq!(refused[0]["data"]["command"], "aggregate");
+}
+
+/// The invariant the audit trail promises: every command that was forwarded
+/// has exactly one end event, and every end event names a forwarded command.
+async fn assert_every_command_has_one_end(h: &Harness) {
+    // Ends are written just after the reply, and a cancelled command's from a task.
+    for _ in 0..100 {
+        let forwarded = events(h, "mongo.command")
+            .iter()
+            .filter(|e| e["data"]["phase"] == "forward")
+            .count();
+        if events(h, "mongo.command.end").len() >= forwarded {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let mut forwarded: Vec<_> = events(h, "mongo.command")
+        .iter()
+        .filter(|e| e["data"]["phase"] == "forward")
+        .map(|e| e["event_id"].to_string())
+        .collect();
+    let mut ended: Vec<_> = events(h, "mongo.command.end")
+        .iter()
+        .map(|e| e["data"]["command_id"].to_string())
+        .collect();
+    forwarded.sort();
+    ended.sort();
+    assert_eq!(forwarded, ended, "one end event per forwarded command");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_cancelled_mid_command_records_that_it_did_not_complete() {
+    let Some(env) = env() else { return };
+    let mut h = session(&env, "limen-read").await;
+    let ok_reply = h
+        .client
+        .run(cmd("find", "customers", "orders").finish())
+        .await;
+    assert!(ok(&ok_reply));
+
+    // A command the server holds for a few seconds, then the session is cut:
+    // what a lock, a kill, a drain, or the TTL does.
+    let slow = cmd("find", "customers", "orders")
+        .doc(
+            "filter",
+            &Builder::new().str("$where", "sleep(4000) || true"),
+        )
+        .finish();
+    h.client.send(wire::op_msg_body(&slow)).await;
+    for _ in 0..100 {
+        if events(&h, "mongo.command").len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    h.relay.abort();
+    let _ = (&mut h.relay).await;
+
+    assert_every_command_has_one_end(&h).await;
+    let ends = events(&h, "mongo.command.end");
+    assert_eq!(ends.len(), 2);
+    let statuses: Vec<_> = ends
+        .iter()
+        .map(|e| e["data"]["status"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert!(
+        statuses.contains(&"ok".to_owned()) && statuses.contains(&"not_completed".to_owned()),
+        "{statuses:?}"
+    );
+    // The shape of the cancelled command is in the trail, without its code.
+    let started = events(&h, "mongo.command");
+    assert!(
+        started
+            .iter()
+            .any(|e| e["data"]["summary"] == r#"{"filter":{"$where":"?"}}"#)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mixed_session_leaves_one_end_per_command() {
+    let Some(env) = env() else { return };
+    let mut h = session(&env, "limen-read").await;
+    let admin_ping = Builder::new().i32("ping", 1).str("$db", "admin").finish();
+    // ok, server error, refused (no end event), a cursor, and a bad command.
+    for command in [
+        cmd("find", "customers", "orders").finish(),
+        cmd("find", "ledger", "billing").finish(),
+        cmd("insert", "customers", "orders").finish(),
+        admin_ping,
+        cmd("find", "customers", "orders")
+            .i32("batchSize", 1)
+            .finish(),
+        Builder::new()
+            .str("nonsense", "x")
+            .str("$db", "orders")
+            .finish(),
+    ] {
+        let _ = h.client.run(command).await;
+    }
+    assert_every_command_has_one_end(&h).await;
+    let refused = events(&h, "mongo.command")
+        .iter()
+        .filter(|e| e["data"]["phase"] == "refused")
+        .count();
+    assert_eq!(refused, 1, "refusals have no end event");
 }

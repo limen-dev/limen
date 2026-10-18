@@ -186,6 +186,9 @@ assert all(e["data"]["redacted"] for e in forwarded), "values are redacted"
 assert {e["data"]["mongo_role"] for e in cmds} >= {"limen-read", "limen-rw"}
 reasons = {e["data"]["reason"] for e in refused}
 assert reasons >= {"database_not_granted", "auth_command", "command_denied"}, reasons
+end_ids = [e["data"]["command_id"] for e in events if e["kind"] == "mongo.command.end"]
+assert len(end_ids) == len(set(end_ids)), "a command has two end events"
+assert set(end_ids) == {e["event_id"] for e in forwarded}, "every forwarded command has exactly one end event (the lock step cut one off)"
 ends = {e["data"]["command_id"]: e for e in events if e["kind"] == "mongo.command.end"}
 assert any(ends.get(e["event_id"], {}).get("data", {}).get("status") == "ok" for e in forwarded), "end events link to commands"
 assert any(e["data"].get("error_code_name") == "Unauthorized" for e in ends.values()), "the server's refusal is recorded"

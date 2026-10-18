@@ -332,20 +332,63 @@ where
         .is_ok()
 }
 
-/// Write the end event. A failure means the session must end: the trail has
-/// a command with no outcome.
-async fn finish(
-    auditor: &Auditor,
+/// A command that was audited and is on its way to the server. It owes the
+/// trail an end event. [`InFlight::finish`] writes it; if the guard is dropped
+/// first because the session was cancelled from outside (a lock, a kill, a
+/// drain, the TTL) or a task panicked, it records `not_completed` itself, so
+/// every `mongo.command` that was forwarded has exactly one `mongo.command.end`.
+struct InFlight {
+    auditor: Auditor,
     id: uuid::Uuid,
     started: Instant,
-    status: Status,
-    info: Option<&reply::ReplyInfo>,
-) -> bool {
-    match auditor.finished(id, started, status, info).await {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::error!(error = %e, "audit write failed for a command's outcome; ending the session");
-            false
+    owed: bool,
+}
+
+impl InFlight {
+    fn new(auditor: &Auditor, id: uuid::Uuid) -> Self {
+        Self {
+            auditor: auditor.clone(),
+            id,
+            started: Instant::now(),
+            owed: true,
+        }
+    }
+
+    /// Write the end event. A failure means the session must end: the trail
+    /// has a command with no outcome.
+    async fn finish(mut self, status: Status, info: Option<&reply::ReplyInfo>) -> bool {
+        self.owed = false;
+        match self
+            .auditor
+            .finished(self.id, self.started, status, info)
+            .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!(error = %e, "audit write failed for a command's outcome; ending the session");
+                false
+            }
+        }
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if !self.owed {
+            return;
+        }
+        // Dropping can't await: hand the event to the runtime. (If there is no
+        // runtime the process is going down and the spool has the start event.)
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let (auditor, id, started) = (self.auditor.clone(), self.id, self.started);
+            runtime.spawn(async move {
+                if let Err(e) = auditor
+                    .finished(id, started, Status::NotCompleted, None)
+                    .await
+                {
+                    tracing::error!(error = %e, "couldn't record that a cancelled command did not complete");
+                }
+            });
         }
     }
 }
@@ -433,7 +476,7 @@ where
                         return false;
                     }
                 };
-                let started = Instant::now();
+                let flight = InFlight::new(self.auditor, command_id);
                 let header = Header {
                     request_id,
                     response_to: 0,
@@ -444,28 +487,13 @@ where
                     .await
                     .is_err()
                 {
-                    finish(
-                        self.auditor,
-                        command_id,
-                        started,
-                        Status::NotCompleted,
-                        None,
-                    )
-                    .await;
+                    flight.finish(Status::NotCompleted, None).await;
                     return false;
                 }
                 if unacknowledged {
-                    return finish(
-                        self.auditor,
-                        command_id,
-                        started,
-                        Status::Unacknowledged,
-                        None,
-                    )
-                    .await;
+                    return flight.finish(Status::Unacknowledged, None).await;
                 }
-                self.relay_reply(&command, request_id, command_id, started)
-                    .await
+                self.relay_reply(&command, request_id, flight).await
             }
         }
     }
@@ -497,8 +525,7 @@ where
         &mut self,
         command: &rules::Inspected<'_>,
         request_id: i32,
-        command_id: uuid::Uuid,
-        started: Instant,
+        flight: InFlight,
     ) -> bool {
         let answer = tokio::time::timeout(
             self.reply_timeout,
@@ -506,14 +533,7 @@ where
         )
         .await;
         let Ok(Ok(Some(answer))) = answer else {
-            finish(
-                self.auditor,
-                command_id,
-                started,
-                Status::NotCompleted,
-                None,
-            )
-            .await;
+            flight.finish(Status::NotCompleted, None).await;
             return false;
         };
         let well_formed = answer.header.opcode == OP_MSG && answer.header.response_to == request_id;
@@ -525,14 +545,7 @@ where
             // A reply that doesn't answer this command (or promises more we
             // didn't ask for) would desynchronize the stream.
             tracing::warn!("unexpected reply from the MongoDB server; ending the session");
-            finish(
-                self.auditor,
-                command_id,
-                started,
-                Status::NotCompleted,
-                None,
-            )
-            .await;
+            flight.finish(Status::NotCompleted, None).await;
             return false;
         };
         let info = reply::inspect(parsed.command);
@@ -541,14 +554,7 @@ where
             .await
             .is_err()
         {
-            finish(
-                self.auditor,
-                command_id,
-                started,
-                Status::NotCompleted,
-                Some(&info),
-            )
-            .await;
+            flight.finish(Status::NotCompleted, Some(&info)).await;
             return false;
         }
         let status = if info.failed() {
@@ -556,7 +562,7 @@ where
         } else {
             Status::Ok
         };
-        finish(self.auditor, command_id, started, status, Some(&info)).await
+        flight.finish(status, Some(&info)).await
     }
 
     /// Remember the cursors the server opened for this session, and forget the
