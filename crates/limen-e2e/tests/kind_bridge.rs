@@ -30,7 +30,7 @@ fn write_profile(home: &std::path::Path, proxy: &str, user: &str, cert: &str, ke
     std::fs::write(dir.join("key.pem"), key).expect("key");
     std::fs::write(dir.join("cert.pem"), cert).expect("cert");
     std::fs::write(dir.join("proxy-ca.pem"), ca).expect("ca");
-    let expires = time::OffsetDateTime::now_utc().unix_timestamp() + 3000;
+    let expires = time::OffsetDateTime::now_utc().unix_timestamp() + 4 * 3600 - 60;
     std::fs::write(
         dir.join("profile.json"),
         serde_json::json!({
@@ -65,6 +65,7 @@ kind: role
 version: v1
 metadata: {{ name: ops }}
 spec:
+  cert_ttl: 4h
   allow:
     - resources: {{ kind: [kubernetes] }}
       kube: {{ groups: ["limen:edit"] }}
@@ -73,6 +74,7 @@ kind: role
 version: v1
 metadata: {{ name: viewer }}
 spec:
+  cert_ttl: 4h
   allow:
     - resources: {{ kind: [kubernetes] }}
       kube: {{ groups: ["limen:view"] }}
@@ -81,6 +83,7 @@ kind: role
 version: v1
 metadata: {{ name: cluster-admin }}
 spec:
+  cert_ttl: 4h
   allow:
     - resources: {{ kind: [kubernetes] }}
       kube: {{ groups: ["limen:admin"] }}

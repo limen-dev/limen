@@ -116,15 +116,18 @@ pass "Limen is up on $(cat "$out/ready")"
 if $manual; then
   proxy="$(cat "$out/ready")"
   ca="$(echo "$out"/home-ops/profiles/*)/proxy-ca.pem"
+  # Everything below depends on this run's port and directories: write it once.
+  cat >"$out/env.sh" <<ENV
+export PATH="$root/target/debug:\$PATH"
+export LIMEN_HOME=$out/home-ops
+export KUBECONFIG=$out/kc-ops
+ENV
   cat <<EOF
 
 Limen is running. Try it by hand (nothing below is shared with other stacks).
 
-  export PATH="$root/target/debug:\$PATH"
-  export LIMEN_HOME=$out/home-ops          # logged in as developer@example.com (limen:edit)
+  source $out/env.sh                        # PATH, LIMEN_HOME (developer@example.com, limen:edit), KUBECONFIG
   limen ls                                  # the cluster appears as kind-dev
-  limen kube login kind-dev --kubeconfig /tmp/limen-kube.json
-  export KUBECONFIG=/tmp/limen-kube.json
   kubectl get pods -A
   kubectl auth whoami
   kubectl run web --image=busybox:1.37 --restart=Never -- sleep 3600
@@ -144,7 +147,7 @@ Console (on the proxy's port; signs in as admin@example.com):
   Pages: /console/sessions (exec recordings, playable) and /console/audit (kube.request, session.start/end).
   Raw audit file: $(cat "$out/audit-path")
 
-Logins last about 10 minutes (kubectl then says: run limen login); stop and rerun for fresh ones.
+Logins last 4 hours. Each run uses a new port, so source env.sh again after a restart (an old kubeconfig will not work).
 Ctrl-C stops Limen; the cluster ($cluster) is kept: kind delete cluster --name $cluster
 EOF
   trap 'exit 0' INT TERM
