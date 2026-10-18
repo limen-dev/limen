@@ -32,7 +32,7 @@ rm -rf "$work"; mkdir -p "$work/tls" "$work/mongo-tls"
 # postgres and mysql users).
 docker run --rm -v "$work/tls:/tls" -v "$here/config/targets/tls/gen.sh:/gen.sh:ro" "$ALPINE_IMAGE" /bin/sh /gen.sh >/dev/null
 
-docker run --rm -v "$work/mongo-tls:/tls" -v "$here/config/targets/mongo/gen-tls.sh:/gen.sh:ro" alpine:3.22 /bin/sh /gen.sh >/dev/null
+docker run --rm -v "$work/mongo-tls:/tls" -v "$here/config/targets/mongo/gen-tls.sh:/gen.sh:ro" "$ALPINE_IMAGE" /bin/sh /gen.sh >/dev/null
 
 # 127.0.0.1 only; the tests name the certificates' host (postgres-target,
 # mysql-target) with tls_server_name.
@@ -57,7 +57,7 @@ docker run -d --name "$mongo" -p 127.0.0.1:17017:27017 \
   -e MONGO_INITDB_ROOT_USERNAME=limen_admin -e MONGO_INITDB_ROOT_PASSWORD=limen-admin-dev-only \
   -v "$here/config/targets/mongo/init.js:/docker-entrypoint-initdb.d/10-init.js:ro" \
   -v "$work/mongo-tls:/tls:ro" \
-  mongo:8.0 mongod --auth --tlsMode requireTLS --tlsCertificateKeyFile /tls/mongo.pem \
+  "$MONGO_IMAGE" mongod --auth --tlsMode requireTLS --tlsCertificateKeyFile /tls/mongo.pem \
   --tlsCAFile /tls/ca.pem --tlsAllowConnectionsWithoutCertificates \
   --setParameter authenticationMechanisms=SCRAM-SHA-256,SCRAM-SHA-1,MONGODB-X509 \
   --wiredTigerCacheSizeGB 0.25 >/dev/null

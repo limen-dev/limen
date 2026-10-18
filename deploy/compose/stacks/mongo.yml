@@ -12,7 +12,7 @@ services:
   # Throwaway CA and certificates for the MongoDB target.
   mongo-tls:
     profiles: ["mongo"]
-    image: alpine:3.22
+    image: ${ALPINE_IMAGE}
     entrypoint: ["/bin/sh", "/gen.sh"]
     volumes:
       - ./config/targets/mongo/gen-tls.sh:/gen.sh:ro
@@ -21,7 +21,7 @@ services:
   # Lays out what the worker holds, from the certificates and the dev passwords.
   mongo-creds:
     profiles: ["mongo"]
-    image: alpine:3.22
+    image: ${ALPINE_IMAGE}
     entrypoint: ["/bin/sh", "/creds.sh"]
     depends_on:
       mongo-tls: { condition: service_completed_successfully }
@@ -33,7 +33,7 @@ services:
   mongo-target:
     container_name: mongo-catalog-${LIMEN_ENV:-dev}
     profiles: ["mongo"]
-    image: mongo:8.0
+    image: ${MONGO_IMAGE}
     command:
       - mongod
       - --auth
