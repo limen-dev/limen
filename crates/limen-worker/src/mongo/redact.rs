@@ -195,7 +195,10 @@ pub fn summarize(command: Doc<'_>, sequences: &[Sequence<'_>], full: bool) -> Su
             out.push("\"malformed\"");
             break;
         };
-        if index == 0 || SKIPPED.contains(&key) {
+        // The first element is the command name and, for most commands, its
+        // collection (shown elsewhere). `explain` is the exception: its value
+        // is the command being explained, which must not vanish from the trail.
+        if SKIPPED.contains(&key) || (index == 0 && !matches!(value, Value::Doc(_))) {
             continue;
         }
         field(&mut out, clip(key));
@@ -575,6 +578,26 @@ mod tests {
         assert!(text.contains(r#""from":"customers""#), "{text}");
         assert!(text.contains(r#""as":"?""#), "{text}");
         assert!(text.contains(r#""$out":"stolen""#), "{text}");
+    }
+
+    #[test]
+    fn explain_keeps_the_command_it_explains() {
+        let doc = Builder::new()
+            .doc(
+                "explain",
+                &Builder::new()
+                    .str("find", "customers")
+                    .doc("filter", &Builder::new().str("email", "ada@example.com")),
+            )
+            .str("verbosity", "queryPlanner")
+            .str("$db", "orders")
+            .finish();
+        let text = summary(&doc, false);
+        assert!(
+            text.starts_with(r#"{"explain":{"find":"#) && text.contains(r#""email":"?""#),
+            "{text}"
+        );
+        assert!(!text.contains("ada@example.com"));
     }
 
     #[test]
