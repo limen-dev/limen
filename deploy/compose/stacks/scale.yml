@@ -24,7 +24,7 @@ x-control-plane: &control-plane
   image: limen-control-plane:scale
   restart: unless-stopped
   env_file:
-    - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by stack.sh (datadog, bots, redis wiring)
+    - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh (observability, bots, redis wiring)
   # Longer than LIMEN_DRAIN_TIMEOUT, so a stop (SIGTERM) drains and hands
   # off instead of being cut short by Docker's SIGKILL.
   stop_grace_period: 40s
@@ -87,7 +87,7 @@ x-worker: &worker
   image: limen-worker:scale
   restart: unless-stopped
   env_file:
-    - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by stack.sh (datadog, bots, redis wiring)
+    - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh (observability, bots, redis wiring)
   # Longer than the workers' LIMEN_DRAIN_TIMEOUT_SECS (20 here) plus 18 s,
   # so a stop (SIGTERM) lets open sessions finish, ends the rest, and
   # uploads their recordings before Docker's SIGKILL.

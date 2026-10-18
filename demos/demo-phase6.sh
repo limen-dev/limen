@@ -21,7 +21,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 here="$root/deploy/compose"
 # shellcheck source=../deploy/compose/scripts/dev-users.sh
 source "$here/scripts/dev-users.sh"
-state="$here/.state-db"
+state="$here/.state/db-demo"
 export LIMEN_PROJECT=limen-dbdemo LIMEN_STATE_DIR="$state" LIMEN_IMAGE_TAG=dbdemo
 export LIMEN_PORT_PROXY=43443 LIMEN_PORT_HEALTH=43444 LIMEN_PORT_DEX=45556 LIMEN_PORT_CP=43081
 export LIMEN_PORT_S3=48333 LIMEN_PORT_POSTGRES=45432 LIMEN_PORT_KMS=48099

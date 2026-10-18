@@ -96,10 +96,10 @@ sleep 8
 # stack, signed with the dev identity in s3/s3.json).
 s3curl() { curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user dev:dev-only-secret "$@"; }
 rm -rf "$state/recordings"; mkdir -p "$state/recordings"
-for key in $(s3curl "http://localhost:8333/limen-audit?list-type=2&prefix=recordings/" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g'); do
+for key in $(s3curl "http://localhost:${LIMEN_PORT_S3:-8333}/limen-audit?list-type=2&prefix=recordings/" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g'); do
   echo "  s3://limen-audit/$key"
   # curl's SigV4 signs "=" in the path only when it's percent-encoded.
-  s3curl "http://localhost:8333/limen-audit/${key//=/%3D}" -o "$state/recordings/$(basename "$key")"
+  s3curl "http://localhost:${LIMEN_PORT_S3:-8333}/limen-audit/${key//=/%3D}" -o "$state/recordings/$(basename "$key")"
 done
 cast="$(grep -rl "tick 12" "$state/recordings" | head -1)"
 [ -n "$cast" ] || fail "no recording of the ticking session"

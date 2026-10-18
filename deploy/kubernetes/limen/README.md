@@ -1,6 +1,6 @@
 # Limen on Kubernetes: scale-out example
 
-Three control planes, three proxies, and three workers, laid out as [Running Limen at scale](../../../docs/scale-out.md) describes. **Unverified:** these manifests were parsed and checked for obvious mistakes (matching selectors, no duplicate variables) but never applied to a cluster, because none was available. The behaviour they rely on (stable ids, drain, handoff, rebalancing) is exercised by `demos/demo-phase5.sh` and the end-to-end tests on Docker. Read them as a starting point and test them on a cluster of yours.
+Three control planes, three proxies, and three workers, laid out as [Running Limen at scale](../../../docs/guides/scale-out.md) describes. **Unverified:** these manifests were parsed and checked for obvious mistakes (matching selectors, no duplicate variables) but never applied to a cluster, because none was available. The behaviour they rely on (stable ids, drain, handoff, rebalancing) is exercised by `demos/demo-phase5.sh` and the end-to-end tests on Docker. Read them as a starting point and test them on a cluster of yours.
 
 | File | What it runs | Why it looks that way |
 |---|---|---|

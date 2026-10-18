@@ -23,7 +23,7 @@ stack_setup() {
   if $scale; then
     files=(-f "$here/stacks/scale.yml")
     STACK_PROXY=localhost:23443 STACK_HEALTH=localhost:23444 STACK_DEX=http://localhost:25556
-    STACK_CP=control-plane-0 STACK_STATE="$here/.state-scale"
+    STACK_CP=control-plane-0 STACK_STATE="$here/.state/scale"
   else
     files=(-f "$here/docker-compose.yml")
     STACK_PROXY=localhost:${LIMEN_PORT_PROXY:-3443} STACK_HEALTH=localhost:${LIMEN_PORT_HEALTH:-3444}
@@ -276,12 +276,12 @@ stack_endpoints() {
   fi
   $has_ssh && printf '  %-18s %s\n' "SSH" "limen ssh web-staging-1        (target sshd-target:22)"
   if $has_db; then
-    printf '  %-18s %s\n' "PostgreSQL" "limen db connect orders-staging --listen 127.0.0.1:15432   then psql -h 127.0.0.1 -p 15432   (target postgres-target:5432)" \
-      "MySQL" "limen db connect orders-mysql-staging --listen 127.0.0.1:13306   then mysql -h 127.0.0.1 -P 13306   (target mysql-target:3306)"
+    printf '  %-18s %s\n' "PostgreSQL" "limen db connect orders-staging       (prints the psql command and its local port; target postgres-target:5432)" \
+      "MySQL" "limen db connect orders-mysql-staging   (prints the mysql command; target mysql-target:3306)"
   fi
   if $has_redis; then
-    printf '  %-18s %s\n' "Redis" "limen redis connect cache-staging --listen 127.0.0.1:16379   then redis-cli -p 16379   (target redis-target:6379)" \
-      "Valkey" "limen redis connect cache-valkey --listen 127.0.0.1:16380   then redis-cli -p 16380   (target valkey-target:6379)"
+    printf '  %-18s %s\n' "Redis" "limen redis connect cache-staging     (prints the redis-cli command; target redis-target:6379)" \
+      "Valkey" "limen redis connect cache-valkey       (prints the redis-cli command; target valkey-target:6379)"
   fi
   if $has_kube; then
     printf '  %-18s %s\n' "Kubernetes" "limen kube login eks-staging --kubeconfig $STACK_STATE/kubeconfig.json" \

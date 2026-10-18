@@ -1,4 +1,4 @@
-# Fake CI identity issuer for bots (profile `bots`, ADR-0019). stack.sh also
+# Fake CI identity issuer for bots (profile `bots`, ADR-0019). setup.sh also
 # lets the control plane trust plain-http issuers (LIMEN_BOT_ALLOW_INSECURE_ISSUERS).
 x-limen-image: &limen-build
   context: ../..

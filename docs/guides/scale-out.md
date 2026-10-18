@@ -1,6 +1,6 @@
 # Running Limen at scale
 
-Limen runs as several copies of each component: control planes, proxies, and workers. This guide says what each copy shares, what it keeps to itself, what happens when copies come and go, and what to watch. The decisions are in [ADR-0020](adr/0020-scale-out.md); the steps for an operator are in the [scale-out runbook](runbooks/scale-out.md).
+Limen runs as several copies of each component: control planes, proxies, and workers. This guide says what each copy shares, what it keeps to itself, what happens when copies come and go, and what to watch. The decisions are in [ADR-0020](../adr/0020-scale-out.md); the steps for an operator are in the [scale-out runbook](../runbooks/scale-out.md).
 
 Try it: `demos/demo-phase5.sh` runs three control planes, three proxies, and three workers, kills one control plane and rolling-restarts two others during a live SSH session, then checks that no audit event was lost.
 
@@ -43,7 +43,7 @@ If you cannot accept that loss window, run `durable`; if you must run `ephemeral
 
 **Scale-in.** On SIGTERM a worker stops taking sessions (pings say `draining`), waits for open sessions up to `--drain-timeout-secs` (default **600**, the previous default), then ends the rest and exits. Sessions it ends are recorded as `session.end` with `reason: worker_drain`; recordings are finished and uploaded first. Set the orchestrator's grace period to the drain timeout plus about 20 seconds, or lower the timeout if you cannot wait that long (sessions are then ended at the deadline). A proxy's `--drain-timeout-secs` (default 20) is the time its client connections get; it closes its worker tunnels at once (which ends the sessions on them, so workers reconnect through another proxy), and once its connections are gone it ships its audit spool to the control plane for up to 10 more seconds before it exits. What is still unshipped stays in the spool: it is lost if the proxy's disk goes with it (an `emptyDir`), so give a proxy a volume if you cannot accept that, and set the grace period to the drain timeout plus about 10 seconds.
 
-**Names.** Give proxies and workers readable names with `--name` (`LIMEN_NAME`), approved by the join token (exact or a pattern such as `prod-a-*`). Names show in the console, audit events, and logs; the id stays the identity, and policy never decides on a name. See the [worker enrollment runbook](runbooks/worker-enrollment.md).
+**Names.** Give proxies and workers readable names with `--name` (`LIMEN_NAME`), approved by the join token (exact or a pattern such as `prod-a-*`). Names show in the console, audit events, and logs; the id stays the identity, and policy never decides on a name. See the [worker enrollment runbook](../runbooks/worker-enrollment.md).
 
 ## What to watch (scale signals)
 

@@ -20,7 +20,7 @@ stack_setup ssh observability bots
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
 export LIMEN_PROXY=localhost:3443
-s3=http://localhost:8333/limen-audit
+s3=http://localhost:${LIMEN_PORT_S3:-8333}/limen-audit
 dd=http://localhost:8126
 limen() { "$LIMEN_BIN" "$@"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }

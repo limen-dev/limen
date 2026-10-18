@@ -27,7 +27,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 here="$root/deploy/compose"
 # shellcheck source=../deploy/compose/scripts/dev-users.sh
 source "$here/scripts/dev-users.sh"
-state="$here/.state-scale"
+state="$here/.state/scale"
 # shellcheck source=../deploy/compose/scripts/lib.sh
 source "$here/scripts/lib.sh"
 stack_setup --scale ssh

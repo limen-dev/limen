@@ -1,5 +1,5 @@
 # An SSH target that trusts only Limen per-session certificates (profile `ssh`).
-# Layered on the limen stack or the scale stack; stack.sh ssh does it.
+# Layered on the limen stack or the scale stack; setup.sh does it.
 services:
   # An SSH target that trusts only Limen per-session certificates.
   sshd-target:
