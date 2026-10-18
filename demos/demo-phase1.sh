@@ -58,7 +58,9 @@ pass "policy applied"
 step "Roles come from IdP groups at login: admin logs in again to pick up 'sre'"
 "$here/scripts/dev-login.sh" "$ADMIN"
 limen ls
-[ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = 5 ] || fail "admin should see 5 resources"
+# Every resource document in examples/policy, so the number follows the policy instead of a constant.
+expected="$(grep -h '^kind: resource' "$root"/examples/policy/*.yaml | wc -l | tr -d ' ')"
+[ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = "$expected" ] || fail "admin should see all $expected resources of examples/policy"
 pass "sre sees every resource"
 
 step "A developer sees only what policy allows"
