@@ -89,16 +89,16 @@ else
   ui_section "Limen"
   ui_note "Always on: Postgres (state), S3 (audit batches and recordings), Dex (login),"
   ui_note "the control plane, a proxy and a worker."
-  if ask "  Scale it (3 control planes, 3 proxies, 3 workers)?" n; then want_scale=true; scale_flag=(--scale); fi
-  echo
+  if ask "Scale it (3 control planes, 3 proxies, 3 workers)?" n; then want_scale=true; scale_flag=(--scale); fi
   ui_section "What should it connect to, and report to?"
   for s in "${STACK_NAMES[@]}"; do
-    ask "  $(printf '%-14s' "$s") $(stack_describe "$s")" y && stacks+=("$s")
+    ask "$(printf '%-14s' "$s") $(stack_describe "$s")" y && stacks+=("$s")
   done
 fi
 
 # ---- prerequisites --------------------------------------------------------------
 ui_section "Checking prerequisites"
+stack_autoport ${scale_flag[@]+"${scale_flag[@]}"}
 if ! stack_preflight ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}; then
   printf '\n  %sFix the items marked MISSING or BUSY above and run this again.%s\n' "$C_YELLOW" "$C_RESET" >&2
   exit 1

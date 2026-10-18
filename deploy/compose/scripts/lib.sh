@@ -155,6 +155,33 @@ PORTS
   done
 }
 
+# Is something listening on this host port? Which compose project publishes it (empty if none)?
+_port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+_port_project() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null | grep -E ":$1->" | head -1 | cut -d'|' -f1 || true
+}
+
+# Moves the host ports that only tests and health checks use (Postgres, S3, KMS, control plane
+# health) to a free port when the default is taken, unless you set the variable yourself.
+# A port held by this stack's own containers counts as free, so a re-run keeps its ports.
+stack_autoport() {
+  ui_init
+  [ "${1:-}" = --scale ] && return 0
+  local project="${LIMEN_PROJECT:-limen}" pair var def n
+  for pair in LIMEN_PORT_POSTGRES:5432 LIMEN_PORT_S3:8333 LIMEN_PORT_KMS:8099 LIMEN_PORT_CP:3081; do
+    var="${pair%%:*}"; def="${pair##*:}"
+    [ -n "${!var:-}" ] && continue
+    _port_busy "$def" || continue
+    [ "$(_port_project "$def")" = "$project" ] && continue
+    n=$((def + 40000))
+    while _port_busy "$n" && [ "$(_port_project "$n")" != "$project" ]; do n=$((n + 1)); done
+    export "$var=$n"
+    ui_note "port $def is busy: using $n for ${var#LIMEN_PORT_} (set $var to choose another)"
+  done
+  return 0
+}
+
 # Checks what the selection needs. Prints one line per check, returns 1 if any failed.
 stack_preflight() {
   ui_init
@@ -190,7 +217,7 @@ stack_preflight() {
   fi
 
   if $want_kube; then
-    if command -v kind >/dev/null 2>&1 || command -v mise >/dev/null 2>&1 && mise exec -- kind version >/dev/null 2>&1; then ok kind
+    if command -v kind >/dev/null 2>&1 || { command -v mise >/dev/null 2>&1 && mise exec -- kind version >/dev/null 2>&1; }; then ok kind
     else miss kind "$(_hint kind)"; fi
     if command -v kubectl >/dev/null 2>&1; then ok kubectl; else miss kubectl "$(_hint kubectl)"; fi
   fi
