@@ -36,7 +36,7 @@ wait_for() { local what="$1"; shift; for _ in $(seq 1 240); do "$@" >/dev/null 2
 step "Build and start the stack ($project)"
 # The image build caches cargo output across checkouts by file time; fresh times
 # keep it from reusing another worktree's stale build of these crates.
-find "$root/crates" -name '*.rs' -exec touch {} +
+[ -n "${LIMEN_NO_TOUCH:-}" ] || find "$root/crates" -name '*.rs' -exec touch {} +
 (cd "$root" && cargo build --release -q -p limen-cli)
 $keep || { echo "Resetting this demo's stack (project $project, down -v). Use --keep to skip."; "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }
 "${compose[@]}" up -d --build --quiet-pull >/dev/null

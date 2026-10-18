@@ -20,6 +20,8 @@ name: limen-mq
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
+  # Its own cargo cache, so another checkout's build can't leave stale crates behind.
+  args: { LIMEN_BUILD_CACHE: limen-mqdemo }
 
 x-dev-tokens:
   proxy: &proxy-token dev-only-proxy-join-token-7f3a9c1e5b2d4f60

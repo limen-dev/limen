@@ -1,6 +1,6 @@
 # ADR-0037: RabbitMQ, Amazon MQ, Kafka, and MSK access
 
-- Status: Proposed (the owner asked for the implementation on 2026-10-18; this ADR is the proposal, and the open questions are decided as the recommendations unless the review says otherwise)
+- Status: Accepted (the owner asked for the implementation on 2026-10-18; the open questions were settled as the recommendations below, see "As built")
 - Date: 2026-10-18
 
 ## Context
@@ -94,3 +94,16 @@ None new in the workspace: the codecs are ours, HMAC and SHA-2 come from `aws-lc
 - − Producing one message at a time is slower through Limen than directly (audit before forward).
 - Threat model: no new entry point beyond the loopback listeners already listed, and two new data-store connections; `docs/threat-model.md` gets the rows when the code lands.
 - *Unverified against real services:* Amazon MQ, MSK (IAM payload acceptance, session re-authentication, TLS with the AWS CA bundle), and MSK Serverless. Locally the SigV4 inputs are tested against fixtures.
+
+## As built (2026-10-18)
+Where this section and the text above differ, this section is right.
+
+1. **Credentials and TLS** are one pair of worker flags for both protocols: `--broker-credentials-file` (`LIMEN_BROKER_CREDENTIALS_FILE`) and `--broker-ca-file`. A broker user's entry is a password, or an object with a password and a client certificate and key for mutual TLS. A TLS target without a CA file is refused.
+2. **RabbitMQ names.** The reserved prefix is `amq.rabbitmq.` (the firehose tracer, direct reply-to handled separately), not all of `amq.*`: the standard exchanges (`amq.topic`, ...) are ordinary names, as in RabbitMQ's own permissions. A queue the broker names for the session (`amq.gen-...`) is the session's own and usable whatever the patterns say. The worker offers frame-max 131072 to the client and refuses a broker that allows less; the vhost is opened at the broker only after the client's `Connection.Open`.
+3. **RabbitMQ audit** has `connect`, `publish` (exchange, routing key, size), `consume`, `get`, and the declare, bind, purge, and delete operations. A publish is held until its content header gives the size. Acknowledgements, `Basic.qos`, and channel housekeeping are checked but not logged. `mq.summary` holds the publish and delivery counts and bytes.
+4. **Kafka table.** `DescribeGroups` and `ListGroups` were left out (they return other members' data and need response filtering); `SaslHandshake` v1 and `SaslAuthenticate` v0-1 were added, answered locally so a client configured for SASL still connects (its login is discarded). `Metadata` rewrites the request to switch off automatic topic creation unless the role has `admin`.
+5. **Kafka audit.** Dedupe is per (API, topic) with a 60 s window kept in memory per session; a window rollover logs the counts since. `Metadata` is deduped on its topic list. Fetch bytes are not counted (only Produce's, as the span size of the request); the session's `session.end` has the byte totals. An audit outage answers with `REQUEST_TIMED_OUT` (retriable), and ends the connection for `Metadata`.
+6. **Broker slots.** The slot table travels in the session request's `database` field and is validated by the proxy and the worker. A cluster with more brokers than listeners makes the worker end the session and write `auth.denied` with the `--brokers N` hint; the CLI prints it on the next refused connection only if the proxy refused it, so the reason is in the audit trail and the worker's log.
+7. **Not built:** MSK IAM re-authentication before `session_lifetime_ms` (the broker closes the connection and the client reconnects, which opens a new session), Amazon MQ IAM sign-in, SCRAM and `AWS_MSK_IAM` against real services (SCRAM is tested against a real Kafka 3.9; the SCRAM maths against RFC 7677 and an independent implementation), `OAUTHBEARER`, `GSSAPI`.
+8. **Tests.** Unit: 32 AMQP and 52 Kafka tests including whole sessions against fake brokers on loopback sockets (the multi-broker slot logic is tested with two of them). `deploy/compose/demo-phase11.sh` is the exit test and the scenario test in one: real RabbitMQ 4.0 with pika, and a real three-broker Apache Kafka 3.9 cluster with librdkafka.
+9. **Unverified against real services:** Amazon MQ for RabbitMQ (TLS on 5671 with the AWS bundle), Amazon MSK (IAM payload acceptance, TLS), MSK Serverless.
