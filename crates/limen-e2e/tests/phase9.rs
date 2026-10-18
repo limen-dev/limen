@@ -230,9 +230,21 @@ async fn mongodb_through_limen() {
     )
     .await;
     let _ = TcpStream::connect(other_addr).await;
+    // A MongoDB resource is not reachable over the SQL protocol's ALPN.
+    let (wrong_addr, wrong_refused) = db_client::listen(
+        &proxy_addr,
+        &ca_pem,
+        analyst.clone(),
+        "catalog-test",
+        "limen-read",
+        "orders",
+    )
+    .await;
+    let _ = TcpStream::connect(wrong_addr).await;
     eventually(Duration::from_secs(5), "refusals recorded", || async {
         !bad_refused.lock().expect("lock").is_empty()
             && !other_refused.lock().expect("lock").is_empty()
+            && !wrong_refused.lock().expect("lock").is_empty()
     })
     .await;
     assert!(bad_refused.lock().expect("lock")[0].contains("access denied"));
@@ -290,7 +302,23 @@ async fn mongodb_through_limen() {
         .iter()
         .filter(|e| e["kind"] == "auth.denied")
         .collect();
-    assert!(denials.iter().all(|e| e["data"]["action"] == "mongo"));
+    let action = |name: &str| {
+        denials
+            .iter()
+            .filter(|e| e["data"]["action"] == name)
+            .count()
+    };
+    assert_eq!(
+        action("mongo"),
+        2,
+        "the unlisted role and the ungranted database"
+    );
+    assert_eq!(
+        action("db"),
+        1,
+        "the MongoDB resource over the SQL protocol"
+    );
+    assert_eq!(denials.len(), 3);
     let everything = serde_json::to_string(&events).expect("json");
     assert!(!everything.contains("limen-read-dev-only"));
     assert!(

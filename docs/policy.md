@@ -96,7 +96,7 @@ With several roles granting the same user, the session may do whatever any one g
 
 ### Planned integrations
 
-These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH, the SQL databases (`postgres`, `mysql`, `redshift`), Redis, and MongoDB are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
+These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH, the SQL databases (`postgres`, `mysql`, `redshift`), Redis, Kubernetes, and MongoDB are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
 
 | Kind | Resource fields | Grant section | Command (planned) |
 |---|---|---|---|

@@ -39,7 +39,7 @@ Each ADR's status line gives its approval date.
 | [0032](0032-ai-agents-as-principals.md) | AI agents as principals: a bot flavour with accountable owners and per-action approval | Proposed |
 | [0033](0033-sql-database-access.md) | SQL database access: PostgreSQL, MySQL, Aurora, Redshift (Phase 6) | Accepted |
 | [0034](0034-redis-and-valkey-access.md) | Redis and Valkey access (Phase 7): RESP codec in the worker, ACL users, redacted values | Accepted |
-| [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
 | [0035](0035-mongodb-access.md) | MongoDB, Atlas, and DocumentDB access (Phase 9): BSON/OP_MSG relay in the worker, SCRAM/X.509/IAM, redacted command shapes | Proposed (built in the same PR) |
+| [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
