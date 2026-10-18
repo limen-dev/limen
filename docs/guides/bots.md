@@ -75,4 +75,4 @@ The CLI shows the control plane's reason. The audit trail has the details of the
 - **Removing a bot from policy** stops new logins but not a credential it already holds (at most an hour). Lock it to end its sessions at once.
 - **Signing keys** are fetched from the issuer's own address only: if its discovery document points the keys at another host, the login is refused.
 - **Real issuers are https.** The control plane refuses plain `http` issuers unless `LIMEN_BOT_ALLOW_INSECURE_ISSUERS` is set, which is for the development stack only.
-- **Not built yet:** the AWS IAM join (a signed `sts:GetCallerIdentity`) is planned with the IAM join for proxies and workers in Phase 13 (ADR-0016), and a GitHub Action that wraps `limen login --bot` comes later.
+- **Not built yet:** the AWS IAM join (a signed `sts:GetCallerIdentity`) is planned with the IAM join for proxies and workers in Phase 14 (ADR-0016), and a GitHub Action that wraps `limen login --bot` comes later.

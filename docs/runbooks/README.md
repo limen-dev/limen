@@ -16,4 +16,4 @@ Runbooks are added as each component ships. Planned:
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
 | [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |
 | Control plane outage | not scheduled |
-| Okta setup | 13 |
+| Okta setup | 14 |

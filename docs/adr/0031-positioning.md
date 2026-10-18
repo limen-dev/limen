@@ -39,10 +39,10 @@ The one-sentence version: *Limen makes access short-lived, justified, and provab
 - **Homepage and docs (ADR-0021):** lead with a receipt, not a feature grid: "Here is a session. Here is the proof. Verify it yourself with one command." A downloadable sample receipt and its verification command are on the landing page.
 - **The console:** a session page gets a "Receipt" button next to "Replay"; a denied user sees *why* and how to ask.
 - **README:** the tagline stays, the first paragraph gains the one-sentence version once receipts exist.
-- **Demos:** a new demo (with Phase 6.5) ends by verifying a receipt offline, on a machine with no connection to the stack.
+- **Demos:** a new demo (with Phase 13) ends by verifying a receipt offline, on a machine with no connection to the stack.
 
 ## Work this adds to the roadmap
-- **Phase 6.5 (epic #19):** access receipts and offline verification (builds on ADR-0026 and ADR-0029); the policy digest on session events; context sources for approvers as an extension point in ADR-0025.
+- **Phase 13 (epic #19):** access receipts and offline verification (builds on ADR-0026 and ADR-0029); the policy digest on session events; context sources for approvers as an extension point in ADR-0025.
 - **Phase 4:** the bot design gains an `agent` flavour; a short ADR before building.
 - **Docs site phase:** the receipt page and sample.
 Nothing here starts without the owner's approval of the phase it belongs to.
@@ -53,6 +53,6 @@ Nothing here starts without the owner's approval of the phase it belongs to.
 - **Positioning drift:** if the product starts to look like a feature checklist again, this ADR is the thing to reread.
 
 ## Consequences
-- Receipts, explanations, and approvals move up in priority within Phase 6.5; protocol breadth stays on its own phases.
+- Receipts, explanations, and approvals move up in priority within Phase 13; protocol breadth stays on its own phases.
 - Marketing copy is reviewed against this list of claims and the "will not claim" list.
 - The owner can replace the direction (for example, to lead with agents) by amending this ADR; the pillars are independent enough to reorder.

@@ -49,7 +49,7 @@ Policy keeps the grant from ADR-0018: `kube: { groups: [...] }`, plus `Policy::k
 A kube worker enrolls like any worker and is told its cluster: `--kube-cluster` (must equal `kubernetes.cluster_name`), and `--kube-api-server`, `--kube-ca-file`, `--kube-token-file`, which default to the pod's in-cluster values. The token file is re-read about once a minute so projected tokens can rotate. A missing or unreadable token, or a worker not configured for the cluster, is a `503` (an operator problem), never a `403` (which means "you may not"). The connection to the API server accepts TLS 1.2 as well as 1.3, since it is the one hop that is not between Limen components. `http://` API servers are refused.
 
 ## Out of scope
-Helm and Terraform for EKS (Phase 13), the AWS IAM join (Phase 13), EKS access-entry integration, verb-level Limen policy, long-running-controller workloads (one session per request), merging into an existing kubeconfig, and multi-cluster fan-out.
+Helm and Terraform for EKS (Phase 14), the AWS IAM join (Phase 14), EKS access-entry integration, verb-level Limen policy, long-running-controller workloads (one session per request), merging into an existing kubeconfig, and multi-cluster fan-out.
 
 ## Verification
 - **Verified** on a real **kind** cluster (Kubernetes 1.37, kubectl 1.35) by `deploy/compose/demo-phase8.sh`: `get`, `auth whoami` (user, groups, and session extra as the cluster sees them), RBAC for `limen:view` and `limen:edit`, forged `--as` ignored, `exec` over WebSocket and SPDY with exit codes and stdin, `attach`, `port-forward` over both transports, recordings uploaded and played, lock ending an open exec.

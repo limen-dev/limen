@@ -30,7 +30,7 @@ Resources (hosts, databases, clusters) are written by hand in policy YAML. That 
 - **Lifecycle:** seen, then missing for N cycles marks it *stale* (new sessions are refused, fail closed), then it is removed after a TTL. A resource with open sessions is never removed from under them.
 - **Console and CLI:** a "Discovered" tab on Resources (pending, accepted, stale) with accept and reject; `limen admin discovery status`. Dashboard panel: resources by state.
 - **Terraform:** a module for the worker's describe-only IAM role (least privilege, per source) in `deploy/terraform/modules/discovery`.
-- **Testing:** unit tests with recorded API responses and, in compose, a LocalStack stand-in for EC2 `DescribeInstances` (assumption to verify when the phase starts). Everything is labelled **unverified against real AWS** until Phase 13.
+- **Testing:** unit tests with recorded API responses and, in compose, a LocalStack stand-in for EC2 `DescribeInstances` (assumption to verify when the phase starts). Everything is labelled **unverified against real AWS** until Phase 14.
 
 ## Threats this design has to survive
 - **Tag injection / label steering:** see above (allow-listed keys, quarantine, audit, validator warning).
