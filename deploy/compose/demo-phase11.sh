@@ -47,8 +47,10 @@ wait_for "proxy readiness" curl -sf "http://localhost:$LIMEN_MQ_HEALTH_PORT/read
 export HOME_ADMIN="$state/home-admin" HOME_DEV="$state/home-dev"
 rm -rf "$HOME_ADMIN" "$HOME_DEV"
 LIMEN_HOME="$HOME_ADMIN" "$here/dev-login.sh" "$ADMIN" >/dev/null
-LIMEN_HOME="$HOME_DEV" "$here/dev-login.sh" "$DEVELOPER" >/dev/null
 LIMEN_HOME="$HOME_ADMIN" "$LIMEN_BIN" admin apply "$root/examples/policy" --source-ref demo-phase11 >/dev/null
+# Roles are mapped at login, so both sign in again now that the policy exists.
+LIMEN_HOME="$HOME_ADMIN" "$here/dev-login.sh" "$ADMIN" >/dev/null
+LIMEN_HOME="$HOME_DEV" "$here/dev-login.sh" "$DEVELOPER" >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:$LIMEN_MQ_HEALTH_PORT/tunnels | grep -q worker_id"
 sleep 11   # proxy and worker pick up the new policy within their 10s refresh
 pass "stack up, policy applied"

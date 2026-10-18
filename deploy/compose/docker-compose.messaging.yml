@@ -132,9 +132,9 @@ services:
       LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
       LIMEN_JOIN_TOKEN: *worker-token
       LIMEN_DATA_DIR: /var/lib/limen/worker
-      # The ACL passwords of the Redis users the roles name. The worker holds
-      # them; people never see them.
-      LIMEN_MQ_CREDENTIALS_FILE: /etc/limen/redis-credentials.json
+      # The broker users the roles name. The worker holds their passwords;
+      # people never see them.
+      LIMEN_BROKER_CREDENTIALS_FILE: /etc/limen/broker-credentials.json
     volumes:
       - worker-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
