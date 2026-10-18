@@ -18,6 +18,9 @@ name: limen-scale
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
+  args:
+    RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+    DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
 
 x-control-plane: &control-plane
   build: { <<: *limen-build, target: control-plane }

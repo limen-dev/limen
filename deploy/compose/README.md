@@ -81,7 +81,7 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 ## Versions
 
-Every container image the stack, the demos and the image builds use is listed in one file, [`.env`](.env) (Compose loads it by itself from this directory, and the demos and `scripts/ci-db-targets.sh` source it). Tool versions are in `mise.toml`. To change a version, edit `.env`, then run `scripts/check-versions.sh`. It fails when something drifts: a compose file that pins an image itself, a script that names one, or one of the few places that cannot read `.env` (the Dockerfiles' default build args, the CI service containers, the Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
+Every container image the stack, the demos and the image builds use is listed in one file, [`.env`](.env) (Compose loads it by itself from this directory, and the demos and `scripts/ci-db-targets.sh` source it). Tool versions are in `mise.toml`. To change a version, edit `.env`, then run `scripts/check-versions.sh`. It fails when something drifts: a compose file that pins an image itself, a script that names one, a Dockerfile that has a default for a base image instead of taking it as a build arg, a build of it that does not pass the arg, or one of the few places that cannot read `.env` (the CI service containers, the Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
 
 ## Layout
 

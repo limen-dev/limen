@@ -170,8 +170,10 @@ jobs:
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           mkdir -p digests
+          . deploy/compose/.env   # RUST_IMAGE and DISTROLESS_IMAGE: the Dockerfile has no default for them
           for target in control-plane proxy worker; do
             docker buildx build \
+              --build-arg RUST_IMAGE="$RUST_IMAGE" --build-arg DISTROLESS_IMAGE="$DISTROLESS_IMAGE" \
               --file deploy/docker/Dockerfile --target "$target" \
               --platform "linux/${ARCH}" \
               --provenance=false \

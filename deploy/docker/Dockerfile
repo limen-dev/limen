@@ -1,16 +1,18 @@
 # syntax=docker/dockerfile:1.7
 #
 # One Dockerfile for all Limen server images. Pick one with --target:
-#   docker build -f deploy/docker/Dockerfile --target control-plane -t limen-control-plane .
-#   docker build -f deploy/docker/Dockerfile --target proxy -t limen-proxy .
-#   docker build -f deploy/docker/Dockerfile --target worker -t limen-worker .
+#   . deploy/compose/.env    # RUST_IMAGE and DISTROLESS_IMAGE, which the Dockerfile has no default for
+#   docker build -f deploy/docker/Dockerfile --target control-plane -t limen-control-plane \
+#     --build-arg RUST_IMAGE --build-arg DISTROLESS_IMAGE .
 #
 # The builder stage is shared, so building all three compiles once.
 
-# These defaults must equal RUST_IMAGE and DISTROLESS_IMAGE in deploy/compose/.env
-# (scripts/check-versions.sh checks it); rust-toolchain.toml pins the same Rust version.
-ARG RUST_IMAGE=rust:1.99.0-trixie
-ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:nonroot
+# The base images come from deploy/compose/.env (RUST_IMAGE, DISTROLESS_IMAGE) and have no
+# default here: Compose passes them, and so do CI and the release (--build-arg), so there is
+# one place to change them. rust-toolchain.toml pins the same Rust version (scripts/check-versions.sh
+# checks it).
+ARG RUST_IMAGE
+ARG DISTROLESS_IMAGE
 
 FROM ${RUST_IMAGE} AS builder
 RUN apt-get update \

@@ -343,8 +343,11 @@ jobs:
       - name: Build and smoke test
         run: |
           set -euo pipefail
+          . deploy/compose/.env   # RUST_IMAGE and DISTROLESS_IMAGE: the Dockerfile has no default for them
           for target in control-plane proxy worker; do
-            docker build -f deploy/docker/Dockerfile --target "$target" -t "limen-${target}:ci" .
+            docker build -f deploy/docker/Dockerfile --target "$target" \
+              --build-arg RUST_IMAGE="$RUST_IMAGE" --build-arg DISTROLESS_IMAGE="$DISTROLESS_IMAGE" \
+              -t "limen-${target}:ci" .
             docker run --rm "limen-${target}:ci" --version
           done
 

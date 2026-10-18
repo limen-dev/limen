@@ -8,6 +8,9 @@
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
+  args:
+    RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+    DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
 
 x-dev-tokens:
   worker: &worker-token dev-only-worker-join-token-2c8e6a4b0d1f3e5a

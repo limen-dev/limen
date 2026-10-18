@@ -20,6 +20,9 @@ name: limen
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
+  args:
+    RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+    DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
 
 x-dev-tokens:
   # Multi-use tokens so `docker compose up` works unattended. Dev only.
