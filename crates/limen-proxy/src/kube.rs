@@ -101,6 +101,10 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
         );
     }
 
+    // Before a worker slot and a grant are spent on it.
+    let Ok(uri) = rest.parse::<http::Uri>() else {
+        return status(StatusCode::BAD_REQUEST, "BadRequest", "bad path");
+    };
     let opened = match open(proxy, &user, user_cert_der, &cluster).await {
         Ok(opened) => opened,
         Err(denial) => return refuse(proxy, &user, &cluster, client_addr, denial).await,
@@ -130,9 +134,6 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
 
     let client_upgrade = upgrading.then(|| hyper::upgrade::on(&mut req));
     let (mut parts, body) = req.into_parts();
-    let Ok(uri) = rest.parse::<http::Uri>() else {
-        return status(StatusCode::BAD_REQUEST, "BadRequest", "bad path");
-    };
     parts.uri = uri;
     parts.version = http::Version::HTTP_11;
     parts.extensions = http::Extensions::new();

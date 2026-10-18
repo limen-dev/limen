@@ -155,6 +155,45 @@ async fn logout_ends_that_login_only() {
     .await;
 }
 
+/// A worker that is shutting down gives its sessions until the drain timeout.
+/// An exec is a stream that outlives the request, so it needs its own end:
+/// the session's drain handling stops at the upgrade.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worker_drain_ends_open_exec_streams() {
+    let Some(env) = Env::start().await else {
+        return;
+    };
+    let dev = env.d.login(DEVELOPER, &["ops"]).await.expect("developer");
+    let mut conn = connect(&env.d, env.d.proxy_addr, Some(dev)).await;
+    let mut response = conn
+        .send_request(common::exec_upgrade(
+            "/k8s/eks-dev/api/v1/namespaces/dev/pods/web/exec?command=sh&stdout=true",
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let mut io =
+        hyper_util::rt::TokioIo::new(hyper::upgrade::on(&mut response).await.expect("upgrade"));
+    let mut buf = [0u8; 1024];
+    tokio::io::AsyncReadExt::read(&mut io, &mut buf)
+        .await
+        .expect("first frames");
+
+    // SIGTERM: the e2e worker drains for one second, then ends what is left.
+    // Without its own end the stream lingers well past that (about 15 s).
+    env.worker.begin_stop();
+    let ended = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            match tokio::io::AsyncReadExt::read(&mut io, &mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "the exec outlived the worker's drain");
+}
+
 /// Hanging up on an idle watch must close the worker's connection to the API
 /// server, even though the watch never sends a frame to notice it with.
 #[tokio::test(flavor = "multi_thread")]

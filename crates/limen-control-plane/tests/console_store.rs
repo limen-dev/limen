@@ -574,9 +574,14 @@ async fn logging_out_ends_the_kubectl_session_at_once() {
     assert_eq!(store::active_session_count(&db).await.expect("count"), 2);
 
     assert!(
-        limen_control_plane::db::revoke_login(&db, "login-a", DEVELOPER)
-            .await
-            .expect("logout")
+        limen_control_plane::db::revoke_login(
+            &db,
+            "login-a",
+            DEVELOPER,
+            time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        )
+        .await
+        .expect("logout")
     );
     let after = list(&db).await;
     let active: Vec<_> = after.iter().filter(|s| s.active).collect();
@@ -584,4 +589,31 @@ async fn logging_out_ends_the_kubectl_session_at_once() {
     let ended = after.iter().find(|s| !s.active).expect("ended");
     assert!(ended.logged_out_at.is_some());
     assert_eq!(store::active_session_count(&db).await.expect("count"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_logout_is_remembered_as_long_as_the_certificate_lives() {
+    let Some(db) = fresh_db().await else { return };
+    let now = time::OffsetDateTime::now_utc();
+    // A certificate with weeks left (a long configured lifetime) and one that
+    // expired days ago.
+    for (login, expires) in [
+        ("long-lived", now + time::Duration::days(20)),
+        ("long-gone", now - time::Duration::days(3)),
+    ] {
+        assert!(
+            limen_control_plane::db::revoke_login(&db, login, DEVELOPER, expires)
+                .await
+                .expect("logout")
+        );
+    }
+    // Backdate both logouts: a fixed window would have forgotten them.
+    sqlx::query("UPDATE login_revocations SET revoked_at = now() - interval '5 days'")
+        .execute(&db)
+        .await
+        .expect("backdate");
+    let remembered = limen_control_plane::db::recent_revoked_logins(&db)
+        .await
+        .expect("recent");
+    assert_eq!(remembered, ["long-lived"]);
 }

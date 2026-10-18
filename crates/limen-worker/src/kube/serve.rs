@@ -558,6 +558,20 @@ fn is_canonical(path: &str) -> bool {
     if path.contains('\\') || ["%2e", "%2f", "%5c"].iter().any(|bad| lower.contains(bad)) {
         return false;
     }
+    // No client encodes a letter, digit, or one of `-._~`; one that does is
+    // hiding the name (`%73ecrets`) from anything reading the raw path.
+    let bytes = path.as_bytes();
+    if bytes.iter().enumerate().any(|(i, &b)| {
+        b == b'%'
+            && path
+                .get(i + 1..i + 3)
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                .is_some_and(|d| {
+                    d.is_ascii_alphanumeric() || matches!(d, b'-' | b'.' | b'_' | b'~')
+                })
+    }) {
+        return false;
+    }
     let rest = rest.strip_suffix('/').unwrap_or(rest);
     rest.is_empty()
         || rest
@@ -699,6 +713,9 @@ mod tests {
             "/api/v1/namespaces/dev/pods/",
             "/apis/apps/v1/deployments",
             "/openapi/v3",
+            // Characters a client really encodes stay allowed.
+            "/api/v1/namespaces/dev/configmaps/a%20b",
+            "/api/v1/namespaces/dev/pods/web:80%3Aproxy",
         ] {
             assert!(is_canonical(ok), "{ok}");
         }
@@ -715,6 +732,11 @@ mod tests {
             "/api\\v1",
             "/api/v1/..",
             "/a//",
+            // An encoded name hides what is being asked for from the audit.
+            "/api/v1/namespaces/dev/%73ecrets/db",
+            "/%61pi/v1/pods",
+            "/api/v1/namespaces/dev/pods/web/%65xec",
+            "/api/v1/namespaces/dev/pods/a%2Db",
         ] {
             assert!(!is_canonical(bad), "{bad}");
         }

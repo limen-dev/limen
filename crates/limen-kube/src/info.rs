@@ -21,6 +21,44 @@ pub struct RequestInfo {
     pub path: String,
 }
 
+/// `%XX` decoded (invalid escapes are left as they are), as Go's
+/// `url.PathUnescape` does for a path segment.
+#[must_use]
+pub fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let Some(hex) = s.get(i + 1..i + 3)
+            && let Ok(b) = u8::from_str_radix(hex, 16)
+        {
+            out.push(b);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Whether the query turns the boolean parameter `name` on, the way the API
+/// server reads it: the first occurrence wins, keys and values are
+/// percent-decoded, and the value is Go's `strconv.ParseBool` (`1 t T TRUE
+/// true True`). A bare `?watch` counts as on.
+fn query_flag(query: &str, name: &str) -> bool {
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if percent_decode(&key.replace('+', " ")) == name {
+            let value = percent_decode(&value.replace('+', " "));
+            return value.is_empty()
+                || matches!(value.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True");
+        }
+    }
+    false
+}
+
 /// The long-lived stream subresources of pods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamSubresource {
@@ -39,7 +77,13 @@ impl RequestInfo {
             verb: method.to_ascii_lowercase(),
             ..Self::default()
         };
-        let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+        // The API server routes on the decoded path, so classify what it will see.
+        let decoded: Vec<String> = path
+            .split('/')
+            .filter(|p| !p.is_empty())
+            .map(percent_decode)
+            .collect();
+        let parts: Vec<&str> = decoded.iter().map(String::as_str).collect();
         let rest: &[&str] = match parts.as_slice() {
             ["api", version, rest @ ..] => {
                 (*version).clone_into(&mut info.api_version);
@@ -91,9 +135,7 @@ impl RequestInfo {
                 info.subresource = sub.join("/");
             }
         }
-        let watching = query
-            .split('&')
-            .any(|kv| matches!(kv, "watch=true" | "watch=1" | "watch"));
+        let watching = query_flag(query, "watch");
         if info.verb == "get" && watching {
             info.verb = "watch".into();
         } else if info.verb == "get" && info.name.is_empty() {
@@ -209,5 +251,55 @@ mod tests {
         assert_eq!(i.stream_subresource(), None);
         let i = parse("GET", "/api/v1/namespaces/a/pods/b/portforward");
         assert_eq!(i.stream_subresource(), Some(StreamSubresource::PortForward));
+    }
+
+    #[test]
+    fn classification_reads_what_the_api_server_reads() {
+        // An encoded name is the same name.
+        let i = parse("GET", "/api/v1/namespaces/dev/%73ecrets/db");
+        assert_eq!((i.resource.as_str(), i.name.as_str()), ("secrets", "db"));
+        let i = parse("GET", "/%61pi/v1/namespaces/dev/pods/web/%65xec");
+        assert_eq!(i.stream_subresource(), Some(StreamSubresource::Exec));
+        // Booleans are Go's ParseBool; keys and values may be encoded.
+        for q in [
+            "watch=true",
+            "watch=True",
+            "watch=TRUE",
+            "watch=t",
+            "watch=T",
+            "watch=1",
+            "watch",
+            "%77atch=%74rue",
+        ] {
+            let i = parse("GET", &format!("/api/v1/pods?{q}"));
+            assert_eq!(i.verb, "watch", "{q}");
+        }
+        for q in [
+            "watch=false",
+            "watch=0",
+            "watch=f",
+            "watch=no",
+            "wat=true",
+            "limit=5",
+        ] {
+            let i = parse("GET", &format!("/api/v1/pods?{q}"));
+            assert_eq!(i.verb, "list", "{q}");
+        }
+        // The first occurrence wins, as it does in the API server.
+        assert_eq!(
+            parse("GET", "/api/v1/pods?watch=false&watch=true").verb,
+            "list"
+        );
+        assert_eq!(
+            parse("GET", "/api/v1/pods?watch=true&watch=false").verb,
+            "watch"
+        );
+    }
+
+    #[test]
+    fn percent_decoding_leaves_bad_escapes_alone() {
+        assert_eq!(percent_decode("a%20b%2Fc"), "a b/c");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%4"), "%zz%4");
     }
 }

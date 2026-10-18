@@ -131,7 +131,7 @@ impl StreamDecoder {
             }
             Transport::Spdy { client, .. } => {
                 let frames = client.push(bytes)?;
-                self.spdy_client_frames(frames, &mut events)?;
+                self.spdy_client_frames(frames, &mut events);
             }
             Transport::SpdyTunnel {
                 ws_client, client, ..
@@ -142,7 +142,7 @@ impl StreamDecoder {
                         frames.extend(client.push(&payload)?);
                     }
                 }
-                self.spdy_client_frames(frames, &mut events)?;
+                self.spdy_client_frames(frames, &mut events);
             }
         }
         Ok(events)
@@ -200,11 +200,7 @@ impl StreamDecoder {
         Ok(events)
     }
 
-    fn spdy_client_frames(
-        &mut self,
-        frames: Vec<Frame>,
-        events: &mut Vec<Event>,
-    ) -> Result<(), Error> {
+    fn spdy_client_frames(&mut self, frames: Vec<Frame>, events: &mut Vec<Event>) {
         for frame in frames {
             match frame {
                 Frame::SynStream { stream_id, headers } => {
@@ -223,8 +219,13 @@ impl StreamDecoder {
                         Some("data") => SpdyStream::Data,
                         _ => SpdyStream::Other,
                     };
-                    if self.spdy_streams.len() >= 1024 {
-                        return Err(Error::Spdy("too many streams"));
+                    // A long port-forward opens two streams per forwarded
+                    // connection and never says when one is done. Forget the
+                    // oldest rather than fail a healthy forward.
+                    if self.spdy_streams.len() >= 1024
+                        && let Some(oldest) = self.spdy_streams.keys().next().copied()
+                    {
+                        self.spdy_streams.remove(&oldest);
                     }
                     self.spdy_streams.insert(stream_id, kind);
                     if let Some(port) = find("port").and_then(|p| p.parse::<u16>().ok())
@@ -245,7 +246,6 @@ impl StreamDecoder {
                 Frame::Other => {}
             }
         }
-        Ok(())
     }
 
     fn spdy_server_frames(&self, frames: Vec<Frame>, events: &mut Vec<Event>) {
@@ -354,6 +354,33 @@ mod tests {
                 .expect("server"),
             [Event::Exit(0)]
         );
+    }
+
+    /// A long port-forward opens two streams per forwarded connection and never
+    /// closes them from our point of view; it must not die at a fixed count.
+    #[test]
+    fn a_busy_spdy_port_forward_outlives_a_thousand_streams() {
+        let mut d = StreamDecoder::new(StreamKind::PortForwardSpdy);
+        let mut z = Compressor::default();
+        let mut ports = std::collections::BTreeSet::new();
+        for pair in 0..1500u32 {
+            let (data_id, error_id) = (2 * pair * 2 + 1, 2 * pair * 2 + 3);
+            let mut wire = z.syn_stream(
+                data_id,
+                &[
+                    ("streamtype", "data"),
+                    ("port", "8080"),
+                    ("requestid", &pair.to_string()),
+                ],
+            );
+            wire.extend(z.syn_stream(error_id, &[("streamtype", "error"), ("port", "8080")]));
+            let events = d.client(&wire).expect("no limit on forwarded connections");
+            ports.extend(events.into_iter().filter_map(|e| match e {
+                Event::Port(p) => Some(p),
+                _ => None,
+            }));
+        }
+        assert_eq!(ports.into_iter().collect::<Vec<_>>(), [8080]);
     }
 
     #[test]

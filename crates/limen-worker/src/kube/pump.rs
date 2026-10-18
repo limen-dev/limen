@@ -177,6 +177,9 @@ pub(super) async fn run<C, U>(
             }
         }
     };
+    // A drain that reaches its timeout ends streams too: they outlive the
+    // request the session's own drain handling covers.
+    let mut drain = worker.end_sessions();
     let mut to_cluster = Box::pin(to_cluster);
     let mut to_client = Box::pin(to_client);
     tokio::pin!(revoked);
@@ -184,6 +187,7 @@ pub(super) async fn run<C, U>(
         end = &mut to_cluster => (end, "client disconnected"),
         end = &mut to_client => (end, "cluster closed the stream"),
         why = &mut revoked => (End::Closed, why),
+        _ = drain.wait_for(|ended| *ended) => (End::Closed, crate::session::WORKER_DRAIN),
     };
     let (bytes_in, bytes_out) = (
         bytes_in.load(Ordering::Relaxed),

@@ -543,7 +543,7 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .await?
         .rows_affected();
     deleted +=
-        sqlx::query("DELETE FROM login_revocations WHERE revoked_at < now() - interval '2 days'")
+        sqlx::query("DELETE FROM login_revocations WHERE COALESCE(expires_at, revoked_at + interval '30 days') + interval '2 days' < now()")
             .execute(&mut *tx)
             .await?
             .rows_affected();
@@ -679,21 +679,29 @@ pub async fn recent_kills(db: &Db) -> Result<Vec<String>, sqlx::Error> {
 }
 
 /// End a login. `false` if it already was.
-pub async fn revoke_login(db: &Db, login_id: &str, username: &str) -> Result<bool, sqlx::Error> {
+pub async fn revoke_login(
+    db: &Db,
+    login_id: &str,
+    username: &str,
+    cert_expires: OffsetDateTime,
+) -> Result<bool, sqlx::Error> {
     let inserted = sqlx::query(
-        "INSERT INTO login_revocations (login_id, username) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        "INSERT INTO login_revocations (login_id, username, expires_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
     )
     .bind(login_id)
     .bind(username)
+    .bind(cert_expires)
     .execute(db)
     .await?;
     Ok(inserted.rows_affected() > 0)
 }
 
-/// Logins ended within the last day (no certificate lives longer).
+/// Logins ended whose certificate has not yet expired (a day of slack for
+/// clock skew; rows from before the expiry was recorded last a month).
 pub async fn recent_revoked_logins(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT login_id FROM login_revocations WHERE revoked_at > now() - interval '1 day'",
+        "SELECT login_id FROM login_revocations
+         WHERE COALESCE(expires_at, revoked_at + interval '30 days') + interval '1 day' > now()",
     )
     .fetch_all(db)
     .await

@@ -122,9 +122,10 @@ impl Auth for AuthService {
                     Status::unavailable("audit unavailable")
                 })?;
         }
-        let revoked = crate::db::revoke_login(&self.0.db, &user.login_id, &user.username)
-            .await
-            .map_err(|e| internal("ending a login", e))?;
+        let revoked =
+            crate::db::revoke_login(&self.0.db, &user.login_id, &user.username, user.not_after)
+                .await
+                .map_err(|e| internal("ending a login", e))?;
         if revoked {
             tracing::info!(user = %user.username, login = %user.login_id, "logout");
         }
