@@ -15,7 +15,7 @@
 # redis    Redis and Valkey with ACL users                      stacks/redis.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
-# kube     a kind cluster and a worker serving it (single Limen only)   stacks/kube.yml
+# kube     a kind cluster and a worker serving it               stacks/kube.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
 # the admin, applies examples/policy, and seeds the targets, so `limen ls` shows

@@ -42,8 +42,9 @@ stack_setup() {
       bots) files+=(-f "$here/stacks/bots.yml")
             env+=(LIMEN_BOT_ALLOW_INSECURE_ISSUERS=true) ;;
       kube) files+=(-f "$here/stacks/kube.yml")
-            KUBE_CLUSTER="${LIMEN_LOCAL_CLUSTER:-limen-local}"
-            export LIMEN_KIND_NODE="$KUBE_CLUSTER-control-plane" LIMEN_KUBE_DIR="$STACK_STATE/kube" ;;
+            KUBE_CLUSTER="${LIMEN_KIND_CLUSTER:-limen-dev}"
+            export LIMEN_KIND_NODE="$KUBE_CLUSTER-control-plane" LIMEN_KUBE_DIR="$STACK_STATE/kube"
+            export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
     profiles+=(--profile "$s")
@@ -156,7 +157,6 @@ stack_preflight() {
   fi
 
   if $want_kube; then
-    if [ ${#scale[@]} -gt 0 ]; then miss "the kube stack with --scale" "the kube stack runs with the single Limen; drop --scale or the kube stack"; fi
     if command -v kind >/dev/null 2>&1 || command -v mise >/dev/null 2>&1 && mise exec -- kind version >/dev/null 2>&1; then ok kind
     else miss kind "$(_hint kind)"; fi
     if command -v kubectl >/dev/null 2>&1; then ok kubectl; else miss kubectl "$(_hint kubectl)"; fi
@@ -230,12 +230,18 @@ stack_kind() { if command -v kind >/dev/null 2>&1; then kind "$@"; else mise exe
 # Creates the kind cluster, the worker's service account, and the files the kube worker
 # mounts ($LIMEN_KUBE_DIR). Needs stack_setup kube to have run, and $root.
 stack_kube_prepare() {
-  unset KUBECONFIG # a previous `limen kube login` may point it at Limen; this talks to kind
-  local ctx="kind-$KUBE_CLUSTER"
+  # The kind cluster's kubeconfig lives in the stack's state directory: the one
+  # in $KUBECONFIG or ~/.kube/config is never read or written.
+  unset KUBECONFIG
+  mkdir -p "$LIMEN_KUBE_DIR"
+  KIND_KUBECONFIG="$STACK_STATE/kind.kubeconfig"
   if ! stack_kind get clusters 2>/dev/null | grep -qx "$KUBE_CLUSTER"; then
-    stack_kind create cluster --name "$KUBE_CLUSTER" --wait 180s >/dev/null 2>&1 || fail "could not create the kind cluster $KUBE_CLUSTER"
+    stack_kind create cluster --name "$KUBE_CLUSTER" --kubeconfig "$KIND_KUBECONFIG" --wait 180s >/dev/null 2>&1 \
+      || fail "could not create the kind cluster $KUBE_CLUSTER"
   fi
-  local k=(kubectl --context "$ctx")
+  stack_kind export kubeconfig --name "$KUBE_CLUSTER" --kubeconfig "$KIND_KUBECONFIG" >/dev/null 2>&1 \
+    || fail "could not read the kubeconfig of the kind cluster $KUBE_CLUSTER"
+  local k=(kubectl --kubeconfig "$KIND_KUBECONFIG")
   "${k[@]}" apply -f "$root/deploy/kubernetes/access/limen-kube-worker.yaml" -f "$root/deploy/kubernetes/access/limen-groups.yaml" >/dev/null
   "${k[@]}" apply -f - >/dev/null <<'YAML'
 apiVersion: v1
@@ -246,8 +252,7 @@ metadata:
   annotations: { kubernetes.io/service-account.name: limen-kube-worker }
 type: kubernetes.io/service-account-token
 YAML
-  wait_for "the service account token" bash -c "kubectl --context $ctx -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' | grep -q ."
-  mkdir -p "$LIMEN_KUBE_DIR"
+  wait_for "the service account token" bash -c "kubectl --kubeconfig '$KIND_KUBECONFIG' -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' | grep -q ."
   "${k[@]}" -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.token}' | base64 -d >"$LIMEN_KUBE_DIR/token"
   "${k[@]}" config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$LIMEN_KUBE_DIR/ca.pem"
   # The worker runs as a different user in a container.

@@ -93,7 +93,7 @@ services:
       LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
       LIMEN_OIDC_CLIENT_ID: limen-cli
       LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
-      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev${LIMEN_EXTRA_JOIN_TOKENS:-}"
       LIMEN_PROXY_DNS_NAMES: localhost,proxy
       # Every component's audit events end up here and in S3 (and Datadog, with the datadog stack).
       LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl

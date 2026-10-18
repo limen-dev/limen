@@ -111,7 +111,7 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `redis` | `stacks/redis.yml` | `redis-target`, `valkey-target` (ACL users) |
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
-| `kube` | `stacks/kube.yml` | a kind cluster (created by `setup.sh`) and `kube-worker`, which serves it as `eks-staging`; single Limen only |
+| `kube` | `stacks/kube.yml` | a kind cluster (created by `setup.sh`) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
 
 `setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
 

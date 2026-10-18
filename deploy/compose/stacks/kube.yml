@@ -1,16 +1,14 @@
 # The kube stack (Phase 8, ADR-0038): one more worker, in its own pool, that
 # serves the kind cluster `staging`. setup.sh creates the cluster and exports
-# LIMEN_KIND_NODE and LIMEN_KUBE_DIR first; the single Limen only (not --scale).
+# LIMEN_KIND_NODE and LIMEN_KUBE_DIR first, and LIMEN_EXTRA_JOIN_TOKENS so the
+# control planes accept this worker's join token (pool kube). Works with the
+# single Limen and with --scale: both reach the proxies through the name `proxy`.
 #
 # The worker joins kind's Docker network, so it reaches the API server by the
 # node's name, which is in the API server's certificate. Dev only.
 x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f2058
 
 services:
-  control-plane:
-    environment:
-      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev,worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube"
-
   kube-worker:
     build:
       context: ../..
@@ -18,7 +16,6 @@ services:
       target: worker
     image: limen-worker:dev
     restart: unless-stopped
-    depends_on: [proxy]
     environment:
       RUST_LOG: info
       LIMEN_PROXY_ADDR: proxy:3443
