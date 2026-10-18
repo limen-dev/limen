@@ -147,6 +147,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
 | 6.5 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
 | 7 | Redis and Valkey | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/10) (ElastiCache IAM unverified) |
+| 11 | RabbitMQ, Amazon MQ, Kafka, MSK | 🚧 [ADR-0037](docs/adr/0037-messaging-access.md) (Amazon MQ and MSK unverified) |
 | 8 | Kubernetes (EKS) | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/11) |
 | 9 | MongoDB, Atlas, DocumentDB | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/12) |
 | 10 | OpenSearch and Elasticsearch | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/13) |

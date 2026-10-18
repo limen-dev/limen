@@ -79,6 +79,10 @@ spec:
 
 Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
 
+### RabbitMQ and Kafka grants
+
+`mq: { users, vhosts, classes, names }` (classes `read`, `write`, `configure`; default `read` and `write` on vhost `/`) and `kafka: { users, classes, topics, groups }` (classes `read`, `write`, `admin`; default `read`) are enforced by the worker on every operation (ADR-0037). Name patterns use `*` only. Each decision is made by one grant: grants don't combine. See [the messaging guide](guides/messaging.md).
+
 ### Redis grants
 
 `redis: { users: [...] }` names the Redis users a role may act as. Optional limits, enforced by the worker on every command (ADR-0034):
@@ -98,8 +102,8 @@ These kinds are accepted by policy, listed by `limen ls` and the console, and te
 |---|---|---|---|
 | `mongodb` | `endpoint`, `flavor: standard \| atlas \| documentdb` | `mongo: { roles, databases }` | `limen mongo connect` (Phase 9) |
 | `opensearch`, `elasticsearch` | `endpoint`, `region`, `aws` | `search: { roles }` | `limen search connect` (Phase 10) |
-| `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ) | `mq: { users }` | `limen mq connect` (Phase 11) |
-| `kafka` | `endpoint`, `region`, `aws` (MSK) | `kafka: { users }` | `limen kafka connect` (Phase 11) |
+| `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ), `tls` | `mq: { users, vhosts, classes, names }` | `limen mq connect` ([guide](guides/messaging.md)) |
+| `kafka` | `endpoint`, `region`, `aws` (MSK), `tls`, `sasl` | `kafka: { users, classes, topics, groups }` | `limen kafka connect` ([guide](guides/messaging.md)) |
 | `web` | `address`, `host`, `health_path` | `web: {}` | `limen web open` (Phase 12) |
 | `tcp` | `address` | `tcp: {}` | `limen tcp` (Phase 12) |
 

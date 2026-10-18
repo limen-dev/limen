@@ -216,6 +216,8 @@ pub struct SessionView {
     pub has_recording: bool,
     /// A Redis or Valkey session: no recording, but audited commands.
     pub is_redis: bool,
+    /// A RabbitMQ or Kafka session: no recording, but audited operations.
+    pub is_broker: bool,
     /// Either of the two: the page lists what was sent instead of a recording.
     pub has_statements: bool,
     pub recording_sha256: String,
@@ -265,9 +267,10 @@ impl From<&SessionRow> for SessionView {
             active: s.active,
             has_recording,
             is_redis: s.kind.as_deref() == Some("redis"),
+            is_broker: matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")),
             has_statements: matches!(
                 s.kind.as_deref(),
-                Some("postgres" | "mysql" | "redshift" | "redis")
+                Some("postgres" | "mysql" | "redshift" | "redis" | "rabbitmq" | "kafka")
             ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
@@ -278,6 +281,8 @@ impl From<&SessionRow> for SessionView {
                 "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
             } else if s.kind.as_deref() == Some("redis") {
                 "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
+            } else if matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")) {
+                "RabbitMQ and Kafka sessions have no terminal recording. Every operation is in the audit trail as mq.operation or kafka.request events that carry this session id (in S3 and Datadog). Message content is never recorded."
             } else {
                 "This session wasn't recorded."
             },

@@ -43,7 +43,9 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin kill-session <id> --reason …` | End one live session |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
-| `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `limen mq connect <resource> [--user U] [--vhost V] [--listen ADDR] [--idle-timeout 1h]` | Open a loopback listener for an AMQP 0-9-1 client; prints an `amqp://` URL with no real password (see [the messaging guide](messaging.md)) |
+| `limen kafka connect <resource> [--user U] [--listen ADDR] [--brokers 8] [--idle-timeout 1h]` | Open a bootstrap listener and one per broker slot for a Kafka client; prints the bootstrap address |
+| `kube login`, `mongo connect`, `search connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>

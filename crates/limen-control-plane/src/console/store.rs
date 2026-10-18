@@ -292,7 +292,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 16] = [
+const SUMMARY_KEYS: [&str; 18] = [
     "action",
     "target_user",
     "component_id",
@@ -302,6 +302,8 @@ const SUMMARY_KEYS: [&str; 16] = [
     "resource",
     "login",
     "redis_user",
+    "mq_user",
+    "kafka_user",
     "reason",
     "by",
     "via",
@@ -458,7 +460,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
+                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")).or_else(|| text(&e.data, "mq_user")).or_else(|| text(&e.data, "kafka_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(text(&e.data, "proxy_id"))
                 .bind(text(&e.data, "client_addr"))
@@ -485,7 +487,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
+                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")).or_else(|| text(&e.data, "mq_user")).or_else(|| text(&e.data, "kafka_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(e.time)
                 .bind(text(&e.data, "reason"))
@@ -536,6 +538,26 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             EventKind::AuthDenied if text(&e.data, "action") == Some("redis") => {
                 project_redis_command(&mut tx, e, session_id, "denied", text(&e.data, "reason"))
                     .await?;
+            }
+            // RabbitMQ and Kafka sessions are listed the same way (ADR-0037): the
+            // text holds names and sizes, never message content.
+            EventKind::MqOperation | EventKind::KafkaRequest => {
+                let (kind, statement) = broker_statement(e.kind, &e.data);
+                project_statement(&mut tx, e, session_id, "allowed", None, &kind, &statement)
+                    .await?;
+            }
+            EventKind::AuthDenied if matches!(text(&e.data, "action"), Some("mq" | "kafka")) => {
+                let (kind, statement) = broker_statement(e.kind, &e.data);
+                project_statement(
+                    &mut tx,
+                    e,
+                    session_id,
+                    "denied",
+                    text(&e.data, "reason"),
+                    &kind,
+                    &statement,
+                )
+                .await?;
             }
             EventKind::DbQueryEnd => {
                 let Some(query_id) = text(&e.data, "query_id").and_then(|q| q.parse::<Uuid>().ok())
@@ -603,6 +625,54 @@ fn redis_statement(data: &serde_json::Value) -> String {
     parts.join(" ")
 }
 
+/// `(type, text)` of a RabbitMQ or Kafka event, as the console lists it.
+fn broker_statement(kind: limen_audit::EventKind, data: &serde_json::Value) -> (String, String) {
+    let field = |k: &str| text(data, k).map(str::to_owned);
+    let strings = |k: &str| -> Vec<String> {
+        data.get(k)
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .or_else(|| text(v, "name").map(str::to_owned))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut parts: Vec<String> = Vec::new();
+    let name = if kind == limen_audit::EventKind::AuthDenied {
+        field("operation")
+    } else if text(data, "action").is_some() {
+        field("action")
+    } else {
+        field("api")
+    }
+    .unwrap_or_else(|| "operation".to_owned());
+    parts.push(name.clone());
+    for (label, key) in [
+        ("vhost", "vhost"),
+        ("exchange", "exchange"),
+        ("queue", "queue"),
+        ("key", "routing_key"),
+        ("group", "group"),
+    ] {
+        if let Some(v) = field(key) {
+            parts.push(format!("{label}={v}"));
+        }
+    }
+    let topics = strings("topics");
+    if !topics.is_empty() {
+        parts.push(format!("topics={}", topics.join(",")));
+    }
+    if let Some(size) = number(data, "size") {
+        parts.push(format!("{size} B"));
+    }
+    (name.to_lowercase(), parts.join(" "))
+}
+
 async fn project_redis_command(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     e: &limen_audit::Event,
@@ -610,8 +680,29 @@ async fn project_redis_command(
     status: &str,
     reason: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let statement = redis_statement(&e.data);
-    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    let kind = text(&e.data, "command").map_or_else(|| "redis".to_owned(), str::to_lowercase);
+    project_statement(
+        tx,
+        e,
+        session_id,
+        status,
+        reason,
+        &kind,
+        &redis_statement(&e.data),
+    )
+    .await
+}
+
+async fn project_statement(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+    status: &str,
+    reason: Option<&str>,
+    kind: &str,
+    statement: &str,
+) -> Result<(), sqlx::Error> {
+    let (statement, truncated) = cut(statement, MAX_STATEMENT_TEXT);
     sqlx::query(
         "INSERT INTO db_statements (event_id, session_id, at, statement_type, statement, truncated, status, error)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -622,7 +713,7 @@ async fn project_redis_command(
     .bind(e.event_id)
     .bind(session_id)
     .bind(e.time)
-    .bind(text(&e.data, "command").map_or_else(|| "redis".to_owned(), str::to_lowercase))
+    .bind(kind)
     .bind((!statement.is_empty()).then_some(statement))
     .bind(truncated)
     .bind(status)
