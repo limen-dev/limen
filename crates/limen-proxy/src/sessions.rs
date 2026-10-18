@@ -41,6 +41,8 @@ pub(crate) enum Protocol {
     Ssh,
     Db,
     Redis,
+    Mq,
+    Kafka,
 }
 
 impl Protocol {
@@ -49,6 +51,8 @@ impl Protocol {
             Protocol::Ssh => "ssh",
             Protocol::Db => "db",
             Protocol::Redis => "redis",
+            Protocol::Mq => "mq",
+            Protocol::Kafka => "kafka",
         }
     }
 
@@ -57,6 +61,8 @@ impl Protocol {
         match self {
             Protocol::Ssh | Protocol::Db => "login",
             Protocol::Redis => "redis_user",
+            Protocol::Mq => "mq_user",
+            Protocol::Kafka => "kafka_user",
         }
     }
 }
@@ -288,6 +294,22 @@ fn resolve_principal(
             "redis".to_owned(),
             String::new(),
         ),
+        Protocol::Mq => (
+            Principal::MqUser(request.principal.clone()),
+            "rabbitmq".to_owned(),
+            String::new(),
+        ),
+        Protocol::Kafka => {
+            // The session request carries the CLI's listener table in the
+            // database field (ADR-0037); the worker needs it, policy doesn't.
+            limen_core::broker::KafkaSlot::parse(&request.database)
+                .map_err(|e| failed(e.to_string()))?;
+            (
+                Principal::KafkaUser(request.principal.clone()),
+                "kafka".to_owned(),
+                request.database.clone(),
+            )
+        }
         Protocol::Db => {
             let refused = || {
                 denied(format!(
@@ -582,12 +604,15 @@ async fn relay(
 ) {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
-    // Redis sessions name the upstream identity `redis_user`, not `login`.
-    let principal_field = if kind == "redis" {
-        "redis_user"
-    } else {
-        "login"
+    // Redis and the brokers name the upstream identity for what it is, not `login`.
+    let principal_field = match kind {
+        "redis" => "redis_user",
+        "rabbitmq" => "mq_user",
+        "kafka" => "kafka_user",
+        _ => "login",
     };
+    // Kafka's database field is the CLI's listener table, not a database.
+    let database = if kind == "kafka" { "" } else { database };
     let ctx = Context {
         user: Some(user.username.clone()),
         session_id: Some(session_id),

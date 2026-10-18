@@ -16,7 +16,8 @@ use sha2::{Digest, Sha256};
 
 pub use model::Document;
 pub use model::{
-    KafkaClass, KafkaGrant, KafkaSasl, MqClass, MqGrant, RedisAudit, RedisGrant, RedisTarget,
+    BrokerTarget, KafkaClass, KafkaGrant, KafkaSasl, MqClass, MqGrant, RedisAudit, RedisGrant,
+    RedisTarget,
 };
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 

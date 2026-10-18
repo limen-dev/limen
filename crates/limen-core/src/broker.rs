@@ -66,7 +66,9 @@ impl KafkaSlot {
             .strip_prefix("slot=")
             .and_then(|rest| rest.split_once(";ports="))
             .ok_or(BadSlot("expected slot=N;ports=P,P,…"))?;
-        let slot: usize = slot.parse().map_err(|_| BadSlot("the slot is not a number"))?;
+        let slot: usize = slot
+            .parse()
+            .map_err(|_| BadSlot("the slot is not a number"))?;
         let ports = ports
             .split(',')
             .map(|p| match p.parse::<u16>() {
@@ -117,7 +119,10 @@ mod tests {
         }
         let many = format!(
             "slot=0;ports={}",
-            (1..=66).map(|p| p.to_string()).collect::<Vec<_>>().join(",")
+            (1..=66)
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         );
         assert!(KafkaSlot::parse(&many).is_err());
     }

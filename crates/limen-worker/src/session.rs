@@ -21,9 +21,9 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
-use crate::redis;
 use crate::ssh::{SshSessionConfig, serve};
 use crate::{SessionGuard, Worker};
+use crate::{amqp, redis};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
@@ -133,6 +133,16 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Mq(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = amqp::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 Admitted::Redis(prepared) => {
                     let mut end = end;
                     tokio::select! {
@@ -193,6 +203,7 @@ enum Admitted {
     Ssh(Box<SshSessionConfig>),
     Db(Box<crate::db::DbSessionConfig>),
     Redis(Box<redis::Prepared>),
+    Mq(Box<amqp::Prepared>),
 }
 
 impl Admitted {
@@ -201,6 +212,7 @@ impl Admitted {
             Admitted::Ssh(c) => c.session_id.clone(),
             Admitted::Db(c) => c.session_id.to_string(),
             Admitted::Redis(p) => p.session_id().to_owned(),
+            Admitted::Mq(p) => p.session_id().to_owned(),
         }
     }
 }
@@ -251,6 +263,7 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "redis" => admit_redis(worker, &checked)
             .await
             .map(|c| Admitted::Redis(Box::new(c))),
+        "rabbitmq" => admit_mq(worker, &checked).map(|c| Admitted::Mq(Box::new(c))),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -288,6 +301,36 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
         ));
     }
     Ok(())
+}
+
+fn admit_mq(worker: &Worker, checked: &Checked) -> Result<amqp::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(worker, checked, Principal::MqUser(grant.principal.clone()))?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.rabbitmq.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a RabbitMQ resource"))?;
+    let grants = checked.snapshot.policy.mq_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = amqp::SessionConfig {
+        session_id: grant.session_id.clone(),
+        username: grant.username.clone(),
+        mq_user: grant.principal.clone(),
+        resource: grant.resource.clone(),
+        target,
+    };
+    amqp::prepare(&worker.broker, grants, config).map_err(|e| {
+        // The detail names the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't prepare the RabbitMQ session");
+        Status::unavailable(
+            "couldn't prepare the RabbitMQ session; ask an admin to check the worker's log",
+        )
+    })
 }
 
 /// The longest a Redis session may take to open its connection to the target.
