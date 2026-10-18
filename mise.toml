@@ -1,10 +1,17 @@
+# Everything the project needs besides a container runtime (Docker or OrbStack,
+# which mise cannot install). `mise install` fetches all of it.
 [tools]
+# Build and lint
 rust = { version = "1.99.0", components = "rustfmt,clippy" }
 protoc = "36.2"
 cargo-deny = "0.20.2"
 "cargo:cargo-audit" = "0.22.2"
 actionlint = "1.7.12"
-terraform = "1.16.6"
 shellcheck = "0.11.0"
-kubectl = "1.35.4"
+# Dev stack, demos and scripts (deploy/compose/setup.sh, demos/)
+python = "3.13"
 kind = "0.33.0"
+kubectl = "1.35.4"
+# Releases and infrastructure
+gh = "2.102.0"
+terraform = "1.16.6"

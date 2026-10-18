@@ -1,0 +1,48 @@
+# Observability (profile `observability`): a fake Datadog Logs intake that the
+# control plane sends audit events to, and Trino and Grafana over the S3 audit
+# batches (Trino stands in for Athena). stack.sh sets LIMEN_DATADOG_LOGS_URL.
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+services:
+  # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
+  fake-datadog:
+    profiles: ["observability"]
+    build: { <<: *limen-build, target: fake-datadog }
+    image: limen-fake-datadog:dev
+    ports: ["127.0.0.1:8126:8126"]
+
+  # Trino stands in for Athena: it reads the audit batches in the S3 bucket.
+  trino:
+    profiles: ["observability"]
+    image: trinodb/trino:483
+    volumes: ["./config/trino/catalog:/etc/trino/catalog:ro"]
+    depends_on: [s3]
+
+  # Creates the audit table and keeps its partitions in sync.
+  trino-init:
+    profiles: ["observability"]
+    image: trinodb/trino:483
+    entrypoint: ["/init/sync.sh"]
+    volumes: ["./config/trino:/init:ro"]
+    depends_on: [trino]
+    restart: unless-stopped
+
+  # Audit dashboards and alerts: http://localhost:3000 (admin / limen-dev-only).
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:13.0.2
+    depends_on: [trino]
+    environment:
+      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
+      GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/limen/limen-audit.json
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./config/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./config/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../deploy/grafana/alerting/trino:/etc/grafana/provisioning/alerting:ro
+      - ../../deploy/grafana/dashboards/trino:/var/lib/grafana/dashboards/limen:ro

@@ -4,7 +4,7 @@
 //! Needs `LIMEN_TEST_DATABASE_URL`, `LIMEN_TEST_S3_ENDPOINT` (`SeaweedFS` from
 //! the dev stack: `http://localhost:8333`), and AWS credentials in the
 //! environment (the dev stack's `SeaweedFS` accepts `test` / `test`, see
-//! `deploy/compose/s3/s3.json`).
+//! `deploy/compose/config/s3/s3.json`).
 
 mod common;
 

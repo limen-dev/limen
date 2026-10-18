@@ -1,0 +1,32 @@
+# Adds a TLS-only Redis and the CA the worker trusts for it, for
+# demos/test-phase7-scenarios.sh (the script generates the certificates), layered
+# after the redis stack. LIMEN_REDIS_TLS_DIR holds ca.crt, server.crt and server.key.
+services:
+  redis-tls:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /tls/server.crt
+      - --tls-key-file
+      - /tls/server.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "no"
+      - --aclfile
+      - /etc/redis/users.acl
+    volumes:
+      - ${LIMEN_REDIS_TLS_DIR:?set LIMEN_REDIS_TLS_DIR}:/tls:ro
+      - ./config/targets/redis/users.acl:/etc/redis/users.acl:ro
+
+  worker:
+    depends_on: [proxy, redis-target, valkey-target, redis-tls]
+    environment:
+      LIMEN_REDIS_CA_FILE: /etc/limen/redis-tls-ca.pem
+    volumes:
+      - ${LIMEN_REDIS_TLS_DIR:?set LIMEN_REDIS_TLS_DIR}/ca.crt:/etc/limen/redis-tls-ca.pem:ro

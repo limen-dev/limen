@@ -53,7 +53,7 @@ The console's **Audit trail → Kubernetes** tab shows every request as kubectl 
    ```
 
    Groups may not start with `system:`, and neither may a user name (a user called `system:kube-scheduler` would inherit that identity's RBAC), so the worker refuses both. A user gets every group their roles grant on the cluster.
-2. **Cluster.** Apply [`deploy/kube/limen-kube-worker.yaml`](../../deploy/kube/limen-kube-worker.yaml) (a service account that can only impersonate) and bind your groups to roles, as in [`limen-groups.yaml`](../../deploy/kube/limen-groups.yaml).
+2. **Cluster.** Apply [`deploy/kubernetes/access/limen-kube-worker.yaml`](../../deploy/kubernetes/access/limen-kube-worker.yaml) (a service account that can only impersonate) and bind your groups to roles, as in [`limen-groups.yaml`](../../deploy/kubernetes/access/limen-groups.yaml).
 3. **Worker.** One kube worker per cluster, enrolled like any worker ([runbook](../runbooks/worker-enrollment.md)) with the cluster flags. In a pod, `--kube-cluster` is enough: the API server address, CA, and service account token come from the pod.
 
    ```sh
@@ -75,10 +75,10 @@ The console's **Audit trail → Kubernetes** tab shows every request as kubectl 
 - One request is one tunnel session, which suits `kubectl` but would be heavy for a controller issuing thousands of requests a second. Use a service account in the cluster for those.
 
 ## Try it by hand
-`deploy/compose/demo-phase8.sh --manual` builds a throwaway kind cluster and Postgres (named after `LIMEN_DEMO_CLUSTER`, default `limen-demo8`), runs Limen with the web console in front of it, and prints the commands to use: `limen kube login`, `kubectl get/exec/port-forward/logs`, a view-only user, and `limen admin lock`. The console is on the same port (`/console/sessions`, `/console/audit`) and signs in as `admin@example.com`; write `email group` to the printed `browser-user` file to sign in as someone else. Ctrl-C stops Limen and keeps the cluster.
+`demos/demo-phase8.sh --manual` builds a throwaway kind cluster and Postgres (named after `LIMEN_DEMO_CLUSTER`, default `limen-demo8`), runs Limen with the web console in front of it, and prints the commands to use: `limen kube login`, `kubectl get/exec/port-forward/logs`, a view-only user, and `limen admin lock`. The console is on the same port (`/console/sessions`, `/console/audit`) and signs in as `admin@example.com`; write `email group` to the printed `browser-user` file to sign in as someone else. Ctrl-C stops Limen and keeps the cluster.
 
 ### With the full local stack and a real sign-in
-`deploy/compose/local-kube.sh up` starts the dev stack (Compose project `limen-kube`), a kind cluster named `limen-local`, and a second worker that serves it as `eks-staging` (pool `kube`). You sign in with the real `limen login` against Dex and use the console at `https://localhost:3443/console/`:
+`deploy/compose/setup.sh --stacks kube` starts the dev stack (Compose project `limen`), a kind cluster named `limen-local`, and a second worker that serves it as `eks-staging` (pool `kube`). You sign in with the real `limen login` against Dex and use the console at `https://localhost:3443/console/`:
 
 ```sh
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # admin@example.com / password
@@ -87,4 +87,4 @@ export KUBECONFIG=/tmp/eks-staging.json
 kubectl get pods -A
 ```
 
-`admin@example.com` is in the `sre` group, which `examples/policy` grants `limen:edit` on Kubernetes resources labelled `env: staging`. Logins last 30 minutes. `down` stops the stack and keeps its data; `reset` deletes the data and the cluster. It uses the dev stack's fixed ports (3443, 3444, 3081, 5556) and refuses to start if another stack holds them.
+`admin@example.com` is in the `sre` group, which `examples/policy` grants `limen:edit` on Kubernetes resources labelled `env: staging`. Logins last 30 minutes. `deploy/compose/setup.sh down` stops the stack, deletes its data, and deletes the kind cluster. It uses the dev stack's ports (3443, 3444, 3081, 5556, and the others `setup.sh` lists) and refuses to start if another stack holds them.

@@ -2,8 +2,8 @@
 //! the real `kubectl` and the real `limen` binary can be pointed at it.
 //!
 //! Not a normal test: it is ignored, and it runs until a `stop` file appears.
-//! `deploy/compose/demo-phase8.sh` drives it. Needs a cluster (kind), the worker's
-//! service account (`deploy/kube/limen-kube-worker.yaml`), and these variables:
+//! `demos/demo-phase8.sh` drives it. Needs a cluster (kind), the worker's
+//! service account (`deploy/kubernetes/access/limen-kube-worker.yaml`), and these variables:
 //!
 //! - `KIND_API_SERVER`, `KIND_CA_FILE`, `KIND_TOKEN_FILE`: how to reach it
 //! - `KIND_CLUSTER`: the cluster's name in policy (default `kind`)
@@ -44,7 +44,7 @@ fn write_profile(home: &std::path::Path, proxy: &str, user: &str, cert: &str, ke
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs a real cluster; run by deploy/compose/demo-phase8.sh"]
+#[ignore = "needs a real cluster; run by demos/demo-phase8.sh"]
 #[allow(clippy::too_many_lines)]
 async fn serve_a_cluster_until_stopped() {
     // KIND_CONSOLE=1 also serves the web console on the proxy's port. The mock

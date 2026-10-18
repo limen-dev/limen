@@ -10,7 +10,7 @@ The `what changed` job reads the diff against the merge base and decides which j
 |---|---|
 | Only docs (`docs/`, `*.md`) | None. `ci` passes |
 | Rust code, `Cargo.*`, `proto/`, `deploy/docker/`, `.github/`, `mise.toml`, toolchain or lint config | fmt + clippy, tests (Linux x86_64 and arm64, macOS), cargo-deny and cargo-audit, images |
-| `deploy/terraform/`, `dashboards/`, dev-users files, `crates/` | terraform validate, dashboards and dev-users check |
+| `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` | terraform validate, dashboards and dev-users check |
 | `.github/` | actionlint (and everything under "Rust code" above) |
 | Manual runs (`workflow_dispatch`) and releases | Everything |
 

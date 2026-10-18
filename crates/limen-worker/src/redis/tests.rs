@@ -1,6 +1,6 @@
 //! Whole-session tests: a client, the worker's session code, and a fake
 //! Redis server, joined by in-memory pipes. The real servers are exercised
-//! by `deploy/compose/demo-phase7.sh`.
+//! by `demos/demo-phase7.sh`.
 
 use std::sync::{Arc, Mutex};
 

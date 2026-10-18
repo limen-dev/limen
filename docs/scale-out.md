@@ -2,7 +2,7 @@
 
 Limen runs as several copies of each component: control planes, proxies, and workers. This guide says what each copy shares, what it keeps to itself, what happens when copies come and go, and what to watch. The decisions are in [ADR-0020](adr/0020-scale-out.md); the steps for an operator are in the [scale-out runbook](runbooks/scale-out.md).
 
-Try it: `deploy/compose/demo-phase5.sh` runs three control planes, three proxies, and three workers, kills one control plane and rolling-restarts two others during a live SSH session, then checks that no audit event was lost.
+Try it: `demos/demo-phase5.sh` runs three control planes, three proxies, and three workers, kills one control plane and rolling-restarts two others during a live SSH session, then checks that no audit event was lost.
 
 ## What is shared, and what is not
 
@@ -86,4 +86,4 @@ The bundled Grafana dashboards read the audit data (Athena or Trino), not these 
 
 Verified by running it (`demo-phase5.sh` and the end-to-end tests, on a local Docker stack): three control planes on one database serving a live session while one is killed and two are rolling-restarted, with the audit chain intact for every writer and no gaps; handoff between replicas, including a receiver that dies mid-stream; connection rebalancing; load-aware choice, the session cap, and worker drain.
 
-**Unverified against a real service:** behaviour behind a cloud load balancer (NLB, ALB), Aurora and RDS Proxy limits, KMS-backed CA with three replicas, `limen-spool-adopt` against a running stack, orchestrator grace behaviour on Kubernetes and ECS (the example manifests in `deploy/kubernetes/` were checked offline, not applied to a cluster), and any run larger than the load test above.
+**Unverified against a real service:** behaviour behind a cloud load balancer (NLB, ALB), Aurora and RDS Proxy limits, KMS-backed CA with three replicas, `limen-spool-adopt` against a running stack, orchestrator grace behaviour on Kubernetes and ECS (the example manifests in `deploy/kubernetes/limen/` were checked offline, not applied to a cluster), and any run larger than the load test above.

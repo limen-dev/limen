@@ -30,16 +30,17 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 LIMEN_TES
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 \
 cargo test --workspace --all-features --locked          # without the env vars, integration tests print SKIPPED
 cargo deny --locked check && cargo audit; mise exec -- actionlint
-deploy/compose/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
+demos/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
 ```
 Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbStack.
 
 ## Layout
 - Binaries: `crates/limen-{control-plane,proxy,worker,cli}`.
 - Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component}`; tests in `limen-testkit` and `limen-e2e`.
+- Dev stack: `deploy/compose/` (`setup.sh` starts it; `stacks/`, `config/`, `scripts/`, `demos/`; see its README).
 - Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`). Terraform: `deploy/terraform`.
-- Generated dashboards: `python3 dashboards/grafana/generate.py`.
-- Dev users: only in `deploy/compose/dev-users.toml`; regenerate with `python3 deploy/compose/gen-dev-users.py`. Tests use `limen_testkit::users`.
+- Generated dashboards: `python3 deploy/grafana/generate.py`.
+- Dev users: only in `deploy/compose/config/dev-users.toml`; regenerate with `python3 deploy/compose/scripts/gen-dev-users.py`. Tests use `limen_testkit::users`.
 
 ## Gotchas
 - sqlx needs literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.

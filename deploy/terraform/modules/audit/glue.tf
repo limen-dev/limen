@@ -1,7 +1,7 @@
 # The event table. Batches are gzipped JSON Lines under
 # events/dt=YYYY-MM-DD/hour=HH/; partition projection means no crawler and
 # no partition maintenance. Keep the columns in step with the local Trino
-# table (deploy/compose/trino/init.sql). Fields not listed are ignored.
+# table (deploy/compose/config/trino/init.sql). Fields not listed are ignored.
 
 locals {
   data_struct = join(",", [

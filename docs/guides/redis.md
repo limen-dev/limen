@@ -71,7 +71,7 @@ spec:
 
 **IAM (ElastiCache)** needs Redis OSS 7.0+ or Valkey 7.2+ with in-transit encryption, a user created with `authentication-mode Type=iam` whose name equals its ID and which belongs to the replication group's user group, and an IAM policy on the worker's role allowing `elasticache:Connect` on the replication group and the user. The worker signs a 15-minute token with its AWS credentials (the SDK's usual chain) and logs in again at 11 hours, because ElastiCache drops IAM connections after 12. Limen does not create ElastiCache users: create them in Terraform. The ACL on those users is your first control.
 
-**Self-hosted** Redis or Valkey: create one ACL user per Redis user your roles name (`user limen-ro on >... ~* +@read +@connection +command`), and list their passwords in the credentials file. `+command` is needed (the worker reads `COMMAND INFO` once per session) and so is `+@connection` (`HELLO`, `CLIENT SETNAME`). The dev stack's ACL is in `deploy/compose/targets/redis/users.acl` (the default user is off; ACL files take no comments). `limen-ro` is read-only, and `limen-rw` has everything except the admin and dangerous categories.
+**Self-hosted** Redis or Valkey: create one ACL user per Redis user your roles name (`user limen-ro on >... ~* +@read +@connection +command`), and list their passwords in the credentials file. `+command` is needed (the worker reads `COMMAND INFO` once per session) and so is `+@connection` (`HELLO`, `CLIENT SETNAME`). The dev stack's ACL is in `deploy/compose/config/targets/redis/users.acl` (the default user is off; ACL files take no comments). `limen-ro` is read-only, and `limen-rw` has everything except the admin and dangerous categories.
 
 The server sees `limen-ro`, not the person. The worker names each connection `limen:<session id>` (`CLIENT LIST` and the slow log show it), so server-side logs join to Limen's audit.
 
@@ -85,4 +85,4 @@ The server sees `limen-ro`, not the person. The worker names each connection `li
 - **Large commands.** Each audit event lists at most 100 keys (with `keys_total`) and, with `log_values`, 100 arguments, so a large `DEL` or `MSET` is audited rather than refused.
 - A refused command inside `MULTI` makes the server answer `EXECABORT` to the `EXEC`, so the rest of the transaction does not run.
 - `limen redis connect` opens and closes one empty session first, to fail early on a bad login or an unreachable server. It shows up as a session with no commands.
-- **Unverified against real ElastiCache:** IAM token acceptance, the 12-hour re-login, TLS with the AWS bundle. Everything else was run against Redis 7.4 and Valkey 8.0 in `deploy/compose/demo-phase7.sh`.
+- **Unverified against real ElastiCache:** IAM token acceptance, the 12-hour re-login, TLS with the AWS bundle. Everything else was run against Redis 7.4 and Valkey 8.0 in `demos/demo-phase7.sh`.

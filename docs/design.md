@@ -192,7 +192,7 @@ Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user gui
   - `Impersonate-Group: <each group policy grants>`
   - `Impersonate-Extra-limen-session: <id>`
 
-  It strips every identity header that comes from the client (`Authorization`, `Impersonate-*`, `X-Remote-*`). Kubernetes RBAC, bound to those group names (we ship example bindings in `deploy/kube/`), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
+  It strips every identity header that comes from the client (`Authorization`, `Impersonate-*`, `X-Remote-*`). Kubernetes RBAC, bound to those group names (we ship example bindings in `deploy/kubernetes/access/`), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
 - **exec, attach, and port-forward.** Both transports are supported: WebSocket (`v4`/`v5.channel.k8s.io`) and SPDY/3.1, and the SPDY-inside-WebSocket form kubectl 1.31 and later use for port-forward. The worker copies the bytes untouched and decodes a copy. A stream in a protocol it cannot decode is refused. Exec and attach output is recorded as asciicast v3 (stdin is not recorded, since it can hold passwords), with resizes and the exit status. Port-forward is audited (pod, namespace, ports, bytes) but not recorded.
 - **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies and query strings are not recorded. A stream adds `session.start` and `session.end` (command, exit code, ports, recording). If the audit trail is unavailable the worker answers 503 instead of the response.
 - **Later hardening.** Constrained impersonation (beta and on by default since Kubernetes 1.36) can narrow the worker's impersonation rights.
@@ -277,7 +277,7 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - monitors are in `deploy/terraform/modules/datadog`
 - **Grafana** (self-hosted on ECS, ADR-0014):
   - the Athena data source reads the Glue table
-  - dashboards and alert rules are provisioned from `dashboards/grafana/`
+  - dashboards and alert rules are provisioned from `deploy/grafana/`
   - panels: who accessed what, failed and denied attempts, active sessions, privileged commands, top users, access by resource type, ingestion lag (event `time` vs. S3 object time), and producer `seq` gaps
 
 ## 9. Failure semantics (ADR-0011)
@@ -331,7 +331,7 @@ crates/
   limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, kube
   limen-cli/             # bin `limen`
 deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
-dashboards/grafana/{dashboards,alerting,provisioning}
+deploy/grafana/{dashboards,alerting,provisioning}
 docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
@@ -363,7 +363,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 
 ## 14. Assumptions and open items
 - **Phase 7 status (2026-10-17).**
-  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `deploy/compose/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
+  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `demos/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
   - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
 - **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
 - **Deferred to Phase 13:** the IAM join method for components.
@@ -373,7 +373,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
   - statement-level allow and deny (enforcement is the database's grants)
   - MySQL cursors, compression, and `LOCAL INFILE`; PostgreSQL protocol versions other than 3.0
   - fuzzing the MySQL codec and the PostgreSQL frame splitter with `cargo-fuzz`, promised in ADR-0012
-  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
+  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
 - **Unverified against real services (Phase 6):** RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; PostgreSQL `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login against a real Redshift server, and Redshift behavior in general.
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*

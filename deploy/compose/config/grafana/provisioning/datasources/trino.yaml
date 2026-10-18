@@ -1,0 +1,12 @@
+# Trino stands in for Athena locally (ADR-0014). Production provisions the
+# Athena data source instead; see deploy/grafana/README.md.
+apiVersion: 1
+datasources:
+  - name: Limen audit (Trino)
+    uid: limen-trino
+    type: trino-datasource
+    access: proxy
+    url: http://trino:8080
+    jsonData:
+      user: grafana
+    editable: false
