@@ -143,6 +143,9 @@ fn accessible_lists_resources_and_principals() {
     assert_eq!(
         summary,
         [
+            ("cache-staging", vec!["limen-ro"]),
+            ("cache-valkey", vec!["limen-ro"]),
+            ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
             ("web-staging-1", vec!["ubuntu"])
         ]
@@ -155,6 +158,8 @@ fn accessible_lists_resources_and_principals() {
         [
             "bastion-staging",
             "cache-staging",
+            "cache-valkey",
+            "orders-mysql-staging",
             "orders-prod",
             "orders-staging",
             "web-staging-1"
@@ -202,7 +207,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 5);
+    assert_eq!(diff.removed.len(), 7);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
@@ -742,4 +747,62 @@ spec:
         p.kube_groups(&roles(&["dev"]), "ghost"),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn redis_grants_come_from_matching_allow_rules() {
+    let docs = "kind: role\nversion: v1\nmetadata: {name: cachers}\nspec:\n  allow:\n    - resources: {kind: [redis], labels: {env: [staging]}}\n      redis: {users: [limen-ro], keys: ['session:*'], deny_commands: [KEYS]}\n    - resources: {kind: [redis], labels: {env: [prod]}}\n      redis: {users: [limen-ro]}";
+    let policy =
+        Policy::parse_yaml([("roles.yaml", docs), ("resources.yaml", RESOURCES)]).expect("valid");
+    let r = roles(&["cachers"]);
+    let grants = policy.redis_grants(&r, "cache-staging", "limen-ro");
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].keys, ["session:*"]);
+    assert_eq!(grants[0].deny_commands, ["KEYS"]);
+    let none = |roles: &[String], resource: &str, user: &str| {
+        policy.redis_grants(roles, resource, user).len()
+    };
+    assert_eq!(none(&r, "cache-staging", "limen-rw"), 0);
+    assert_eq!(none(&r, "nope", "limen-ro"), 0);
+    assert_eq!(none(&roles(&["ghost"]), "cache-staging", "limen-ro"), 0);
+}
+
+#[test]
+fn rejects_blank_redis_restrictions() {
+    let bad = "kind: role\nversion: v1\nmetadata: {name: a}\nspec:\n  allow:\n    - resources: {kind: [redis]}\n      redis: {users: [u], deny_commands: ['']}";
+    assert!(matches!(parse_err(bad), PolicyError::Invalid { .. }));
+}
+
+#[test]
+fn a_component_name_can_not_be_a_worker_selector() {
+    let err = Policy::parse_yaml([(
+        "p.yaml",
+        r#"
+kind: resource
+version: v1
+metadata: { name: by-name }
+spec:
+  ssh: { address: "10.0.0.1:22" }
+  worker_selector: { limen.io/name: prod-a-worker-1 }
+"#,
+    )])
+    .expect_err("names are display only");
+    assert!(err.to_string().contains("limen.io/name"), "{err}");
+}
+
+#[test]
+fn the_matcher_ignores_a_name_selector_even_if_one_gets_through() {
+    // Validation refuses such a selector; this is the second lock, for a
+    // policy stored before the rule existed.
+    let mut p = example();
+    let resource = p.resources.get_mut("web-staging-1").expect("resource");
+    resource.spec.worker_selector = limen_core::labels::Labels::default();
+    resource
+        .spec
+        .worker_selector
+        .insert("limen.io/name", "prod-a-worker-1")
+        .expect("a valid label");
+    let named: BTreeMap<String, String> =
+        [("limen.io/name".to_owned(), "prod-a-worker-1".to_owned())].into();
+    assert!(!p.worker_may_serve("web-staging-1", &named));
 }

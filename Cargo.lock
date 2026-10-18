@@ -2821,6 +2821,7 @@ dependencies = [
  "limen-core",
  "limen-testkit",
  "metrics",
+ "metrics-exporter-prometheus",
  "rand 0.10.3",
  "serde",
  "serde_json",
@@ -2881,9 +2882,11 @@ dependencies = [
  "rand 0.10.3",
  "rcgen",
  "reqwest",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "time",
  "tokio",
@@ -2994,6 +2997,7 @@ dependencies = [
  "limen-control-plane",
  "limen-core",
  "limen-kube",
+ "limen-policy",
  "limen-proto",
  "limen-proxy",
  "limen-testkit",
@@ -3056,6 +3060,7 @@ dependencies = [
  "futures",
  "governor",
  "http",
+ "http-body",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -3151,6 +3156,7 @@ dependencies = [
  "limen-core",
  "limen-proto",
  "prost",
+ "rand 0.10.3",
  "rcgen",
  "rustls",
  "rustls-pki-types",
@@ -3168,7 +3174,11 @@ name = "limen-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "aws-lc-rs",
  "axum",
+ "base64 0.23.1",
  "clap",
  "futures",
  "http",
@@ -3184,16 +3194,23 @@ dependencies = [
  "limen-proto",
  "limen-session",
  "limen-tunnel",
+ "md-5",
  "metrics",
  "prost",
  "rand 0.10.3",
+ "reqwest",
  "russh",
  "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sqlparser",
+ "sqlx",
  "ssh-key",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.21",
  "time",
  "tokio",
  "tokio-rustls",
@@ -5220,6 +5237,15 @@ name = "sponge-cursor"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
+
+[[package]]
+name = "sqlparser"
+version = "0.63.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3679862809bd1f92e563cf6fd820e28f39135303668001c10331d5027183e8b4"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "sqlx"

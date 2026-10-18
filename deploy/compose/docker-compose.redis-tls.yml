@@ -1,0 +1,34 @@
+# Adds a TLS-only Redis and the CA the worker trusts for it, for
+# test-phase7-scenarios.sh (the script generates the certificates).
+#
+#   LIMEN_REDIS_TLS_DIR=/path/with/ca.crt+server.crt+server.key \
+#     docker compose -p <name> -f docker-compose.redis.yml -f docker-compose.redis-tls.yml up -d
+services:
+  redis-tls:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /tls/server.crt
+      - --tls-key-file
+      - /tls/server.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "no"
+      - --aclfile
+      - /etc/redis/users.acl
+    volumes:
+      - ${LIMEN_REDIS_TLS_DIR:?set LIMEN_REDIS_TLS_DIR}:/tls:ro
+      - ./targets/redis/users.acl:/etc/redis/users.acl:ro
+
+  worker:
+    depends_on: [proxy, redis-target, valkey-target, redis-tls]
+    environment:
+      LIMEN_REDIS_CA_FILE: /etc/limen/redis-tls-ca.pem
+    volumes:
+      - ${LIMEN_REDIS_TLS_DIR:?set LIMEN_REDIS_TLS_DIR}/ca.crt:/etc/limen/redis-tls-ca.pem:ro

@@ -25,16 +25,25 @@ limen-proto.workspace = true
 limen-tunnel.workspace = true
 limen-kube.workspace = true
 anyhow.workspace = true
+aws-config.workspace = true
+aws-credential-types.workspace = true
+aws-lc-rs.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+sqlparser.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio-rustls.workspace = true
 axum.workspace = true
 clap.workspace = true
+md-5.workspace = true
 futures.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
-rustls.workspace = true
-rustls-pki-types.workspace = true
-tokio-rustls.workspace = true
 tower.workspace = true
 url.workspace = true
 rand.workspace = true
@@ -54,3 +63,7 @@ tracing.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+tempfile.workspace = true

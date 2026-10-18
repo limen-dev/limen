@@ -56,14 +56,55 @@ impl FileSigner {
         match std::fs::read_to_string(path) {
             Ok(pem) => Self::from_pem(&pem),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let signer = Self::generate()?;
-                write_private(path, &signer.key.serialize_pem())
-                    .map_err(|e| CaError::Internal(format!("writing {}: {e}", path.display())))?;
-                tracing::info!(path = %path.display(), "generated new CA key");
-                Ok(signer)
+                Self::create_with(path, |from, to| std::fs::hard_link(from, to))
             }
             Err(e) => Err(CaError::Internal(format!(
                 "reading {}: {e}",
+                path.display()
+            ))),
+        }
+    }
+
+    /// Create the key at `path` with `link` (a hard link in production; a
+    /// seam for tests).
+    fn create_with(
+        path: &Path,
+        mut link: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<Self, CaError> {
+        let signer = Self::generate()?;
+        let io = |e: std::io::Error| CaError::Internal(format!("writing {}: {e}", path.display()));
+        // Several replicas may share the key directory and start at
+        // once. Write a complete private temp file, then link it into
+        // place: linking fails if another process got there first, and
+        // then its key (already complete) is the one everyone uses.
+        let tmp = path.with_extension(format!(
+            "tmp-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        write_private(&tmp, &signer.key.serialize_pem()).map_err(io)?;
+        // Never fall back to anything that can replace an existing file: a
+        // second replica's key would silently win and the first would sign
+        // with a key that is no longer on disk.
+        let linked = link(&tmp, path);
+        let _ = std::fs::remove_file(&tmp);
+        match linked {
+            Ok(()) => {
+                if let Some(parent) = path.parent() {
+                    // Make the new directory entry durable.
+                    let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
+                }
+                tracing::info!(path = %path.display(), "generated new CA key");
+                Ok(signer)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let pem = std::fs::read_to_string(path)
+                    .map_err(|e| CaError::Internal(format!("reading {}: {e}", path.display())))?;
+                Self::from_pem(&pem)
+            }
+            Err(e) => Err(CaError::Internal(format!(
+                "creating {}: {e}; a CA key directory shared by replicas must support hard links \
+                 (or create the keys with one replica first)",
                 path.display()
             ))),
         }
@@ -150,5 +191,74 @@ mod tests {
         }
         let sig = a.sign(b"hello").await.expect("sign");
         assert_eq!(sig[0], 0x30, "ECDSA signature must be DER (SEQUENCE)");
+    }
+
+    /// Where hard links don't work, creation fails closed: it never falls
+    /// back to something that could replace a key another replica already
+    /// wrote (and maybe already uses).
+    #[test]
+    fn creation_never_overwrites_when_links_are_unsupported() {
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        let path = dir.path().join("ssh-user-ca.key");
+        let theirs = FileSigner::generate().expect("key").key.serialize_pem();
+        let mut first = true;
+        let err = FileSigner::create_with(&path, |_, final_path| {
+            // Another replica writes its key between our check and our link.
+            if first {
+                first = false;
+                std::fs::write(final_path, &theirs)?;
+            }
+            Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        })
+        .expect_err("fails closed");
+        assert!(err.to_string().contains("hard links"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            theirs,
+            "the other replica's key is untouched"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).expect("ls").count(),
+            1,
+            "no temp file left"
+        );
+    }
+
+    /// Replicas sharing a key directory start at the same moment: exactly one
+    /// key must win, and nobody may read a half-written file.
+    #[test]
+    fn concurrent_creators_agree_on_one_key() {
+        for _ in 0..20 {
+            let dir = limen_testkit::temp_dir().expect("tempdir");
+            let path = dir.path().join("ca/internal-ca.key");
+            let barrier = std::sync::Barrier::new(8);
+            let keys: Vec<Vec<u8>> = std::thread::scope(|s| {
+                let handles: Vec<_> = (0..8)
+                    .map(|_| {
+                        s.spawn(|| {
+                            barrier.wait();
+                            FileSigner::load_or_create(&path)
+                                .expect("load or create")
+                                .public_key_raw()
+                                .to_vec()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().expect("thread"))
+                    .collect()
+            });
+            assert!(
+                keys.windows(2).all(|w| w[0] == w[1]),
+                "every creator got the same key"
+            );
+            let on_disk = FileSigner::load_or_create(&path).expect("reload");
+            assert_eq!(on_disk.public_key_raw(), &keys[0][..]);
+            let leftovers = std::fs::read_dir(path.parent().expect("parent"))
+                .expect("ls")
+                .count();
+            assert_eq!(leftovers, 1, "no temporary files left behind");
+        }
     }
 }

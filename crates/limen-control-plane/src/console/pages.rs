@@ -9,6 +9,7 @@ use axum::extract::{Form, Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
+use limen_core::names::NAME_LABEL;
 use limen_policy::Document;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -16,10 +17,11 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, BotView, KubePage, KubeView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
-    PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage, ResourceRow, ResourceView,
-    ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage, Stats, TokenPage, UserPage,
-    UserView, UsersPage, WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
+    self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
+    KubePage, KubeView, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage,
+    ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage,
+    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers,
+    error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -255,6 +257,7 @@ fn matching_workers(
         })
         .map(|c| WorkerMatch {
             id: c.id.clone(),
+            name: c.name.clone(),
             tunnels: tunnels.iter().filter(|t| t.worker_id == c.id).count(),
             last_seen: time_text(Some(c.last_seen_at)),
         })
@@ -539,20 +542,60 @@ async fn visible_session(
     }
 }
 
+/// The most statements the session page lists.
+const STATEMENT_LIMIT: i64 = 500;
+
 pub async fn session_detail(
     State(state): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
 ) -> Response {
     match visible_session(&state, &auth, &id).await {
-        Ok(row) => html(
-            SessionPage {
-                chrome: chrome(&state, &auth, "sessions"),
-                s: SessionView::from(&row),
-            }
-            .render(),
-        ),
+        Ok(row) => {
+            let mut s = SessionView::from(&row);
+            // Names beside the ids, for the components that have one.
+            s.proxy = with_name(&state, row.proxy_id.as_deref(), s.proxy).await;
+            s.worker = with_name(&state, row.worker_id.as_deref(), s.worker).await;
+            // Best effort: the page still renders without the statements.
+            let (statements, statement_total, statement_errors) = if s.has_statements {
+                let list = store::db_statements(&state.db, row.session_id, STATEMENT_LIMIT)
+                    .await
+                    .unwrap_or_default();
+                let (total, errors) = store::db_session_counts(&state.db, row.session_id)
+                    .await
+                    .unwrap_or_default();
+                (
+                    list.iter().map(StatementView::from).collect(),
+                    total,
+                    errors,
+                )
+            } else {
+                (Vec::new(), 0, 0)
+            };
+            html(
+                SessionPage {
+                    chrome: chrome(&state, &auth, "sessions"),
+                    s,
+                    statements,
+                    statement_total,
+                    statement_errors,
+                }
+                .render(),
+            )
+        }
         Err(r) => r,
+    }
+}
+
+/// `text` (a component id) followed by the component's name, if it has one.
+/// Best effort: on a lookup error the id alone is shown.
+async fn with_name(state: &AppState, id: Option<&str>, text: String) -> String {
+    let Some(id) = id else { return text };
+    match db::component(&state.db, id).await {
+        Ok(Some(db::ComponentRow {
+            name: Some(name), ..
+        })) => format!("{text} ({name})"),
+        _ => text,
     }
 }
 
@@ -935,6 +978,8 @@ pub async fn workers(
                     .iter()
                     .filter(|t| t.worker_id == c.id || t.proxy_id == c.id)
                     .count(),
+                tunnel_peers: tunnel_peers(&tunnels, &c.id),
+                name: c.name,
                 path: path_segment(&c.id),
                 last_seen: time_text(Some(c.last_seen_at)),
                 cert_expires: time_text(c.cert_expires_at),
@@ -949,7 +994,12 @@ pub async fn workers(
                 } else {
                     "k-proxy"
                 },
-                label_list: labels.iter().map(|(k, v)| format!("{k}={v}")).collect(),
+                // The name has its own place.
+                label_list: labels
+                    .iter()
+                    .filter(|(k, _)| *k != NAME_LABEL)
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect(),
                 kind: c.kind,
                 id: c.id,
             }
@@ -963,6 +1013,7 @@ pub async fn workers(
                     serde_json::from_value(t.labels).unwrap_or_default();
                 let worker = t.kind == "worker";
                 PendingTokenView {
+                    name: t.name,
                     icon: if worker { "server" } else { "radio" },
                     kclass: if worker { "k-worker" } else { "k-proxy" },
                     label_list: labels.iter().map(|(k, v)| format!("{k}={v}")).collect(),
@@ -985,6 +1036,21 @@ pub async fn workers(
     )
 }
 
+/// The proxies holding `worker_id`'s tunnels, by name where they have one.
+fn tunnel_peers(tunnels: &[db::TunnelRow], worker_id: &str) -> String {
+    let mut proxies: Vec<&str> = tunnels
+        .iter()
+        .filter(|t| t.worker_id == worker_id)
+        .map(|t| t.proxy_name.as_deref().unwrap_or(&t.proxy_id))
+        .collect();
+    proxies.dedup();
+    if proxies.is_empty() {
+        String::new()
+    } else {
+        format!("via {}", proxies.join(", "))
+    }
+}
+
 #[derive(Deserialize)]
 pub struct TokenForm {
     csrf: String,
@@ -994,6 +1060,9 @@ pub struct TokenForm {
     ttl_minutes: u32,
     #[serde(default)]
     dns_names: String,
+    /// An exact name, or a pattern with one `*`. Empty: no name.
+    #[serde(default)]
+    name: String,
 }
 
 fn lines(text: &str) -> Vec<&str> {
@@ -1042,6 +1111,7 @@ pub async fn create_token(
         &labels,
         Some(ttl),
         &dns_names,
+        Some(form.name.trim()),
     )
     .await
     {
@@ -1231,7 +1301,10 @@ fn kube_view(r: &store::KubeRow) -> KubeView {
         name: r.name.clone(),
         status: r.status,
         tone: if r.status >= 400 { "bad" } else { "ok" },
-        latency: r.latency_ms.map(|ms| format!("{ms} ms")).unwrap_or_default(),
+        latency: r
+            .latency_ms
+            .map(|ms| format!("{ms} ms"))
+            .unwrap_or_default(),
         error: r.error.clone(),
     }
 }
@@ -1284,7 +1357,7 @@ pub async fn kube_requests(
             ("verb", &filter.verb),
         ] {
             if let Some(v) = value {
-                url.push_str(&format!("&{key}={}", path_segment(v)));
+                url.push_str(&["&", key, "=", &path_segment(v)].concat());
             }
         }
         if filter.problems_only {

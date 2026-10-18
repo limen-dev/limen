@@ -121,6 +121,7 @@ spec:
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")
@@ -131,10 +132,10 @@ spec:
             &token,
             "worker",
             &[
-                format!("--kube-cluster={cluster}"),
-                format!("--kube-api-server={}", var("KIND_API_SERVER")),
-                format!("--kube-ca-file={}", var("KIND_CA_FILE")),
-                format!("--kube-token-file={}", var("KIND_TOKEN_FILE")),
+                &format!("--kube-cluster={cluster}"),
+                &format!("--kube-api-server={}", var("KIND_API_SERVER")),
+                &format!("--kube-ca-file={}", var("KIND_CA_FILE")),
+                &format!("--kube-token-file={}", var("KIND_TOKEN_FILE")),
             ],
         )
         .await;

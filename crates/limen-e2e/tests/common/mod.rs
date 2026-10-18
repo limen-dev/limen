@@ -100,7 +100,12 @@ pub struct Env {
 impl Env {
     /// `None` without a test database.
     pub async fn start() -> Option<Self> {
-        let d = Deployment::start().await?;
+        // Boxed: the whole deployment's setup is a large future.
+        Box::pin(Self::boot()).await
+    }
+
+    async fn boot() -> Option<Self> {
+        let d = Box::pin(Deployment::start()).await?;
         let api = KubeApi::start(TOKEN).await;
         let ca_file = d.dir.path().join("kube-ca.pem");
         let token_file = d.dir.path().join("kube-token");
@@ -126,10 +131,10 @@ impl Env {
                 &join_token(&mut admin, "dev").await,
                 "worker",
                 &[
-                    "--kube-cluster=dev".into(),
-                    format!("--kube-api-server={}", api.url()),
-                    format!("--kube-ca-file={}", ca_file.display()),
-                    format!("--kube-token-file={}", token_file.display()),
+                    "--kube-cluster=dev",
+                    &format!("--kube-api-server={}", api.url()),
+                    &format!("--kube-ca-file={}", ca_file.display()),
+                    &format!("--kube-token-file={}", token_file.display()),
                 ],
             )
             .await;
@@ -171,6 +176,7 @@ pub async fn join_token(admin: &mut AdminClient<Channel>, pool: &str) -> String 
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), pool.to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")

@@ -122,6 +122,8 @@ message Resource {
   string kind = 2;
   map<string, string> labels = 3;
   repeated string principals = 4;
+  // SQL resources: the database used when the user names none. Empty if there is none.
+  string default_database = 5;
 }
 
 message ListResourcesResponse {
@@ -172,6 +174,10 @@ message CreateJoinTokenRequest {
   map<string, string> labels = 3;
   // DNS names or IPs the enrolled component may put in its certificate.
   repeated string dns_names = 4;
+  // Optional: the name the enrolled component may have, exactly, or a
+  // pattern with one `*` matching zero or more of [a-z0-9-]. An exact name
+  // is given to the component even if it asks for none.
+  string name = 5;
 }
 
 message CreateJoinTokenResponse {
@@ -185,6 +191,8 @@ message TunnelInfo {
   string proxy_id = 1;
   string tunnel_id = 2;
   int64 lease_expires_at_unix = 3;
+  // The proxy's name, if it has one.
+  string proxy_name = 4;
 }
 
 message Component {
@@ -195,6 +203,9 @@ message Component {
   int64 last_seen_at_unix = 5;
   int64 cert_expires_at_unix = 6;
   repeated TunnelInfo tunnels = 7;
+  // Display name approved at enrollment, if any. Empty: none. The id stays
+  // the identity.
+  string name = 8;
 }
 
 message ListComponentsResponse {
@@ -208,6 +219,9 @@ message EnrollRequest {
   string kind = 3;
   // Must be a subset of the names the token allows.
   repeated string dns_names = 4;
+  // Optional display name. Must be approved by the token. Empty: none (or
+  // the token's exact name, if it has one).
+  string name = 5;
 }
 
 message EnrollResponse {
@@ -217,6 +231,8 @@ message EnrollResponse {
   string user_ca_pem = 4;
   int64 expires_at_unix = 5;
   map<string, string> labels = 6;
+  // The name the component was given. Empty: none.
+  string name = 7;
 }
 
 message RenewCertificateRequest {
@@ -231,6 +247,10 @@ message RenewCertificateResponse {
 message TunnelReport {
   string worker_id = 1;
   string tunnel_id = 2;
+  // The reporting proxy's view of the worker's load (its last ping plus the
+  // sessions this proxy opened since). 0/0: unknown, no cap.
+  uint32 active_sessions = 3;
+  uint32 max_sessions = 4;
 }
 
 message ReportTunnelsRequest {
@@ -251,6 +271,12 @@ message PeerTunnel {
   string proxy_id = 3;
   // Where to reach the proxy holding the tunnel (its --peer-address).
   string peer_address = 4;
+  // The worker's load as that proxy last reported it. 0/0: unknown, no cap.
+  uint32 active_sessions = 5;
+  uint32 max_sessions = 6;
+  // Display names, if any. Empty: none.
+  string worker_name = 7;
+  string proxy_name = 8;
 }
 
 message ListTunnelsResponse {

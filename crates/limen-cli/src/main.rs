@@ -1,6 +1,6 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts and Kubernetes clusters, and (planned) databases, Redis, MongoDB,
-//! search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, Redis or Valkey, and Kubernetes clusters, and (planned)
+//! MongoDB, search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -148,12 +148,12 @@ enum Command {
     // The commands below are planned integrations (ADR-0018, ADR-0022). Their
     // arguments are settled so scripts and docs can be written now; each one
     // says plainly that it isn't available yet.
-    /// PostgreSQL, MySQL, Aurora, and Redshift (planned, Phase 6).
+    /// PostgreSQL, MySQL, Aurora, and Redshift.
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
-    /// Redis and Valkey (planned, Phase 7).
+    /// Redis and Valkey: `limen redis connect <resource>`.
     Redis {
         #[command(subcommand)]
         command: RedisCommand,
@@ -218,20 +218,31 @@ enum DbCommand {
         #[arg(long)]
         database: Option<String>,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.
-        #[arg(long, value_name = "ADDR")]
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a Unix socket (mode 0600) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<String>,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum RedisCommand {
-    /// Open a local listener for redis-cli.
+    /// Open a local listener that redis-cli (or any Redis or Valkey client) connects to without a password.
     Connect {
         resource: String,
+        /// The Redis ACL user to act as (Valkey has the same). Optional when policy allows only one.
         #[arg(long)]
         user: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -366,8 +377,46 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Ssh,
         } => commands::ssh::config(proxy),
-        Command::Db { .. } => not_yet("limen db connect", "database access", "Phase 6"),
-        Command::Redis { .. } => not_yet("limen redis connect", "Redis access", "Phase 7"),
+        Command::Db {
+            command:
+                DbCommand::Connect {
+                    resource,
+                    db_role,
+                    database,
+                    listen,
+                    socket,
+                },
+        } => {
+            commands::db::connect(
+                proxy,
+                &resource,
+                db_role.as_deref(),
+                database.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+            )
+            .await
+        }
+        Command::Redis {
+            command:
+                RedisCommand::Connect {
+                    resource,
+                    user,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::redis::connect(
+                proxy,
+                &resource,
+                user.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
         Command::Kube { command } => match command {
             KubeCommand::Login {
                 cluster,
@@ -454,6 +503,28 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn redis_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "redis", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["cache", "--user", "limen-ro", "--listen", "127.0.0.1:6380"]).is_ok());
+        assert!(
+            ok(&[
+                "cache",
+                "--socket",
+                "/tmp/limen/r.sock",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["cache", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["cache", "--idle-timeout", "soon"]).is_err());
     }
 
     #[test]

@@ -31,7 +31,24 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("shutdown signal received");
         let _ = tx.send(true);
     });
+    let once = args.config.db_bootstrap_once;
+    let check = args.config.db_bootstrap_check;
     let (worker, creds_tx) = Worker::start(args.config).await?;
+    if once {
+        // A one-shot task: enroll, fetch policy, reconcile, report, exit.
+        let version = worker.fetch_policy_once().await?;
+        tracing::info!(version, check, "reconciling database roles");
+        let (changes, failures) = worker.bootstrap_databases(!check).await;
+        tracing::info!(changes, failures, "database role bootstrap finished");
+        if !worker.drain_audit(std::time::Duration::from_secs(30)).await {
+            tracing::error!("the audit events of this run were not delivered to the control plane");
+            std::process::exit(1);
+        }
+        if failures > 0 || (check && changes > 0) {
+            std::process::exit(if failures > 0 { 1 } else { 2 });
+        }
+        return Ok(());
+    }
     limen_worker::run(worker, creds_tx, rx).await?;
     tracing::info!("worker stopped");
     Ok(())

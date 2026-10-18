@@ -224,6 +224,10 @@ body.plain { display: grid; place-items: center; min-height: 100vh; padding: 24p
 form.stack.wide { max-width: none; }
 table.facts tr:last-child th, table.facts tr:last-child td { border-bottom: 0; }
 .nowrap { white-space: nowrap; }
+/* A statement: keep its line breaks, wrap long lines, and don't let one
+   long statement stretch the table. */
+.stmt { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 260px; max-width: 560px; }
+.stmt-detail { margin-top: 4px; max-width: 360px; overflow-wrap: anywhere; }
 .w-120 { width: 120px; }
 td.actions form.inline { flex-wrap: nowrap; }
 

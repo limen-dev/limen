@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 The format is [MADR](https://adr.github.io/madr/). Each record has a status: `Proposed`, `Accepted`, `Superseded by ADR-NNNN`, or `Deprecated`.
-All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
+Each ADR's status line gives its approval date.
 
 | # | Title | Status |
 |---|---|---|
@@ -24,11 +24,11 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0017](0017-web-console.md) | Web console: read-mostly, server-rendered, built into the control plane | Accepted |
 | [0018](0018-data-store-protocols.md) | Search, document, and messaging protocols (OpenSearch/Elasticsearch, MongoDB/Atlas/DocumentDB, Redshift, RabbitMQ, Kafka) | Proposed |
 | [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Accepted |
-| [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Proposed |
+| [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Accepted |
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
-| [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Proposed |
+| [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Accepted |
 | [0025](0025-access-requests.md) | Access requests and just-in-time approval (with break-glass) | Proposed |
 | [0026](0026-audit-and-recording-search.md) | Searching audit events and recordings, and the auditor role | Proposed |
 | [0027](0027-resource-discovery.md) | Resource discovery by workers, with quarantine for tag-derived labels | Proposed |
@@ -37,6 +37,8 @@ All ADRs were approved by the owner on 2026-10-13, at the end of Phase 0.
 | [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Proposed |
 | [0031](0031-positioning.md) | Positioning: access you can prove (provable, explainable, justified, agent-ready, open) | Proposed |
 | [0032](0032-ai-agents-as-principals.md) | AI agents as principals: a bot flavour with accountable owners and per-action approval | Proposed |
-| [0033](0033-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec | Accepted |
+| [0033](0033-sql-database-access.md) | SQL database access: PostgreSQL, MySQL, Aurora, Redshift (Phase 6) | Accepted |
+| [0034](0034-redis-and-valkey-access.md) | Redis and Valkey access (Phase 7): RESP codec in the worker, ACL users, redacted values | Accepted |
+| [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
+pub use model::{RedisAudit, RedisGrant, RedisTarget};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
@@ -396,11 +397,19 @@ impl Policy {
         worker_labels: &BTreeMap<String, String>,
     ) -> bool {
         self.resources.get(resource).is_some_and(|r| {
-            r.spec
-                .worker_selector
-                .iter()
-                .all(|(k, v)| worker_labels.get(k).is_some_and(|actual| actual == v))
+            r.spec.worker_selector.iter().all(|(k, v)| {
+                // A component's name is display only (a token holder picks
+                // its value within the approved pattern), so no selector can
+                // match it, whatever the policy says.
+                k != limen_core::names::NAME_LABEL
+                    && worker_labels.get(k).is_some_and(|actual| actual == v)
+            })
         })
+    }
+
+    /// Every resource, in name order.
+    pub fn resources(&self) -> impl Iterator<Item = &ResourceDoc> {
+        self.resources.values()
     }
 
     #[must_use]
@@ -451,6 +460,25 @@ impl Policy {
         } else {
             Decision::Allow { matched_roles }
         }
+    }
+
+    /// The Redis grants that let `roles` act as `user` on `resource`. A session
+    /// may do whatever any one of them permits (ADR-0034). Call it only after
+    /// [`Policy::evaluate`] allowed the request, since deny rules aren't checked here.
+    #[must_use]
+    pub fn redis_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<RedisGrant> {
+        let Some(resource) = self.resources.get(resource) else {
+            return Vec::new();
+        };
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(|rule| selector_matches(&rule.resources, resource))
+            .filter_map(|rule| rule.redis.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
     }
 
     /// Resources the roles grant at least one principal on, with those
@@ -683,6 +711,46 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 }
             }
         }
+        if let Some(redis) = &rule.redis {
+            for (field, values) in [
+                ("redis.deny_commands", &redis.deny_commands),
+                ("redis.allow_commands", &redis.allow_commands),
+            ] {
+                if let Some(v) = values.iter().find(|v| {
+                    v.trim().is_empty() || v.len() > MAX_NAME_LEN || v.chars().any(char::is_control)
+                }) {
+                    return Err(invalid(
+                        "role",
+                        name,
+                        format!("invalid value {v:?} in {field}"),
+                    ));
+                }
+            }
+            if let Some(k) = redis
+                .keys
+                .iter()
+                .find(|k| k.is_empty() || k.len() > MAX_NAME_LEN || k.chars().any(char::is_control))
+            {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!("invalid value {k:?} in redis.keys"),
+                ));
+            }
+        }
+        if let Some(db) = &rule.db {
+            // The prefix is reserved: bootstrap never touches other roles, and
+            // the name goes into SQL (ADR-0015, ADR-0033).
+            if let Some(bad) = db.roles.iter().find(|r| !valid_db_role(r)) {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!(
+                        "db.roles entry {bad:?} must be limen_ followed by lowercase letters, digits, or underscores"
+                    ),
+                ));
+            }
+        }
         if let Some(kube) = &rule.kube
             && kube.groups.iter().any(|g| g.starts_with("system:"))
         {
@@ -703,6 +771,17 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
         }
     }
     Ok(())
+}
+
+/// `limen_` plus 1 to 40 of `[a-z0-9_]`.
+#[must_use]
+pub fn valid_db_role(role: &str) -> bool {
+    role.strip_prefix("limen_").is_some_and(|rest| {
+        (1..=40).contains(&rest.len())
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    })
 }
 
 fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError> {
@@ -731,6 +810,21 @@ fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError>
 fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     let name = &resource.metadata.name;
     validate_name("resource", name, name)?;
+    if resource
+        .spec
+        .worker_selector
+        .get(limen_core::names::NAME_LABEL)
+        .is_some()
+    {
+        return Err(invalid(
+            "resource",
+            name,
+            format!(
+                "worker_selector can't use {:?}: a component's name is for people, not for access decisions; select workers by the labels on their join token",
+                limen_core::names::NAME_LABEL
+            ),
+        ));
+    }
     let kinds = resource.spec.kinds();
     if kinds.len() != 1 {
         return Err(invalid(
@@ -762,6 +856,32 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
         ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
+    let db_target = resource
+        .spec
+        .postgres
+        .as_ref()
+        .or(resource.spec.mysql.as_ref())
+        .or(resource.spec.redshift.as_ref());
+    if let Some(target) = db_target {
+        for spec in &target.bootstrap {
+            if !valid_db_role(&spec.role) {
+                return Err(invalid(
+                    "resource",
+                    name,
+                    format!(
+                        "bootstrap role {:?} must be limen_ followed by lowercase letters, digits, or underscores",
+                        spec.role
+                    ),
+                ));
+            }
+        }
+        if !target.iam_auth
+            && let Some(dir) = &target.password_dir
+            && dir.is_empty()
+        {
+            return Err(invalid("resource", name, "password_dir must not be empty"));
+        }
+    }
     if let Some(address) = address {
         let valid = address.rsplit_once(':').is_some_and(|(host, port)| {
             !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0)

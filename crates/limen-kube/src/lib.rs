@@ -1,4 +1,4 @@
-//! Kubernetes protocol pieces for the Limen worker (ADR-0033).
+//! Kubernetes protocol pieces for the Limen worker (ADR-0038).
 //!
 //! - [`info`]: which verb, resource, namespace, and name an API request is for.
 //! - [`ws`] and [`spdy`]: passive decoders for the two stream protocols

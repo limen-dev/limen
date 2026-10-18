@@ -1,4 +1,4 @@
-//! `kubectl` through Limen: `https://<proxy>/k8s/<cluster>/...` (ADR-0005, ADR-0033).
+//! `kubectl` through Limen: `https://<proxy>/k8s/<cluster>/...` (ADR-0005, ADR-0038).
 //!
 //! 1. kubectl presents the user's Limen certificate (its exec plugin returns
 //!    it), verified by mTLS against the user CA.
@@ -32,7 +32,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_stream::StreamExt;
 
 use crate::Proxy;
-use crate::session::{self, Denial, Inbound, Outbound, Target};
+use crate::sessions::{self, Denial, Inbound, Outbound, SessionWorker, Slot, Target};
 
 /// URL prefix of every cluster.
 pub(crate) const PREFIX: &str = "/k8s/";
@@ -105,7 +105,10 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
         Ok(opened) => opened,
         Err(denial) => return refuse(proxy, &user, &cluster, client_addr, denial).await,
     };
-    let (session_id, worker_id, inbound, outbound) = opened;
+    // `slot` counts this request in the worker's load until the response (or
+    // the stream it upgrades to) is over.
+    let (session_id, worker, inbound, outbound, slot) = opened;
+    let worker_id = worker.id;
 
     let io = TokioIo::new(bridge(inbound, outbound));
     let (mut sender, connection) = match hyper::client::conn::http1::handshake(io).await {
@@ -167,6 +170,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
         let username = user.username.clone();
         let worker = worker_id.clone();
         tokio::spawn(async move {
+            let _slot = slot;
             let (Ok(client), Ok(worker_side)) = tokio::join!(client_upgrade, worker_upgrade) else {
                 return;
             };
@@ -190,7 +194,40 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
     for name in HOP_BY_HOP {
         parts.headers.remove(name);
     }
-    Response::from_parts(parts, Body::new(body))
+    Response::from_parts(
+        parts,
+        Body::new(Hold {
+            inner: body,
+            _slot: slot,
+        }),
+    )
+}
+
+/// A response body that keeps the worker's load slot until it is dropped, so
+/// a long `watch` or `logs -f` counts for as long as it runs.
+struct Hold<B> {
+    inner: B,
+    _slot: Slot,
+}
+
+impl<B: http_body::Body + Unpin> http_body::Body for Hold<B> {
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        std::pin::Pin::new(&mut self.inner).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 /// `/k8s/<cluster>/<rest>` → (`cluster`, `/<rest>` with its query string).
@@ -250,30 +287,32 @@ async fn open(
     user: &UserIdentity,
     user_cert_der: Vec<u8>,
     cluster: &str,
-) -> Result<(uuid::Uuid, String, Inbound, Outbound), Denial> {
+) -> Result<(uuid::Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
         .policy
         .fresh(now)
-        .map_err(|e| session::failed(format!("access can't be decided right now ({e})")))?;
+        .map_err(|e| sessions::failed(format!("access can't be decided right now ({e})")))?;
     if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
-        return Err(session::denied(why));
+        return Err(sessions::denied(why));
     }
     let groups = snapshot.policy.kube_groups(&user.roles, cluster);
     if groups.is_empty() {
-        return Err(session::denied(format!("access denied to {cluster}")));
+        return Err(sessions::denied(format!("access denied to {cluster}")));
     }
-    session::open(
+    sessions::open_session(
         proxy,
         &snapshot.policy,
         user,
-        user_cert_der,
-        Target {
+        &user_cert_der,
+        &Target {
             resource: cluster,
             kind: "kube",
             principal: "",
+            database: "",
             groups,
         },
+        now,
     )
     .await
 }
@@ -286,7 +325,12 @@ async fn refuse(
     denial: Denial,
 ) -> Response<Body> {
     if denial.audit {
-        let data = json!({ "action": "kube", "resource": cluster, "reason": denial.reason, "client_addr": client_addr });
+        let mut data = json!({ "action": "kube", "resource": cluster, "reason": denial.reason, "client_addr": client_addr });
+        if let Some(code) = denial.code {
+            // A machine-readable reason; the message stays for people.
+            data["reason"] = json!(code);
+            data["message"] = json!(denial.reason);
+        }
         if let Err(e) = proxy
             .audit
             .emit(
@@ -302,6 +346,14 @@ async fn refuse(
             tracing::error!(error = %e, "failed to audit a denied kube request");
         }
         tracing::info!(user = %user.username, %cluster, reason = %denial.reason, "kube request refused");
+        // Capacity is the pool's state, not the user's access.
+        if denial.code.is_some() {
+            return status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                &denial.reason,
+            );
+        }
         status(StatusCode::FORBIDDEN, "Forbidden", &denial.reason)
     } else {
         tracing::warn!(user = %user.username, %cluster, reason = %denial.reason, "kube request failed");

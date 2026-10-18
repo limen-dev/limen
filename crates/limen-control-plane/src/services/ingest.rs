@@ -34,6 +34,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let component = caller.component()?.clone();
         let events = request.into_inner().events;
@@ -56,11 +57,16 @@ impl AuditIngest for IngestService {
                 )));
             }
         }
-        for raw in &events {
-            self.0.pipeline.spool.append(raw).await.map_err(|e| {
-                tracing::error!(error = %e, "audit spool append failed; refusing the batch");
-                Status::unavailable(format!("audit spool: {e}"))
-            })?;
+        // Appended together, in order: each append writes at once and then
+        // waits for the spool's group fsync, so a batch costs one fsync
+        // instead of one per event (a busy Redis session ships thousands).
+        // A failure refuses the batch; events already appended are
+        // idempotent by id when the sender retries.
+        let spool = &self.0.pipeline.spool;
+        let appended = futures::future::join_all(events.iter().map(|raw| spool.append(raw))).await;
+        if let Some(e) = appended.into_iter().find_map(Result::err) {
+            tracing::error!(error = %e, "audit spool append failed; refusing the batch");
+            return Err(Status::unavailable(format!("audit spool: {e}")));
         }
         Ok(Response::new(IngestResponse {
             accepted: u32::try_from(events.len()).unwrap_or(u32::MAX),
@@ -71,6 +77,7 @@ impl AuditIngest for IngestService {
         &self,
         request: Request<Streaming<RecordingChunk>>,
     ) -> Result<Response<UploadRecordingResponse>, Status> {
+        self.0.refuse_if_draining()?;
         let caller = caller::resolve(&request, &self.0.cas)?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
@@ -145,7 +152,10 @@ impl AuditIngest for IngestService {
             user: None,
             session_id: uuid::Uuid::parse_str(&session_id).ok(),
         };
-        let data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        let mut data = json!({ "recording_uri": uri, "sha256": digest, "bytes": bytes, "worker_id": worker.id });
+        if let Some(name) = limen_core::names::from_labels(&worker.labels) {
+            data["worker_name"] = json!(name);
+        }
         self.0
             .audit
             .emit(EventKind::SessionRecording, ctx, data)

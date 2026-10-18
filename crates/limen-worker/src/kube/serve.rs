@@ -456,10 +456,8 @@ async fn start_stream(
     let upstream_upgrade = hyper::upgrade::on(&mut *response);
     let worker = ctx.worker.clone();
     let admitted = Arc::clone(admitted);
-    let guard = worker.session_started();
     let expires = admitted.expires;
     tokio::spawn(async move {
-        let _guard = guard;
         let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) else {
             // The stream never ran: close what session.start opened.
             metrics::gauge!("limen_sessions_active", "kind" => "kube").decrement(1.0);

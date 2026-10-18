@@ -2,8 +2,10 @@
 
 pub mod admin;
 pub mod bot;
+pub mod db;
 pub mod kube;
 pub mod login;
+pub mod redis;
 pub mod ssh;
 
 use limen_proto::v1::ListResourcesRequest;

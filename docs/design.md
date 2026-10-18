@@ -2,7 +2,7 @@
 
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-14 (Phase 2 complete).
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-17 (Phase 5 complete). Phase status is in §13 only.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -14,7 +14,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 
 **Goals (v1)**
 - Log in with OIDC (Okta first) and turn IdP groups into roles. Credentials last 10 minutes by default.
-- Access, end to end: SSH (EC2 and any SSH host), RDS PostgreSQL and MySQL, Aurora (both engines), ElastiCache Redis, and EKS.
+- Access, end to end: SSH (EC2 and any SSH host), RDS PostgreSQL and MySQL, Aurora (both engines), ElastiCache for Redis and Valkey (and self-managed servers), and EKS.
 - Policy as YAML, deny by default, with resources selected by label.
 - Audit everything: a versioned JSON event schema, delivered at least once to S3 and Datadog, with Grafana over Athena.
 - Workers connect outbound only. No inbound ports into private networks.
@@ -112,6 +112,7 @@ The proxy still owns session start and end and the authorization decision.
 
 ### 4.2 Service identity, enrollment, and rotation
 - An admin creates a **join token** (`limen admin token create --kind worker --label k=v`). It is single use, has a TTL (default 15 min), and only its SHA-256 hash is stored in Aurora. It is bound to the component kind, labels, and (for proxies) DNS names. Static and AWS IAM join methods are covered in ADR-0016.
+- **Names (Phase 5).** A token may also approve a display name: exact, or a pattern with one `*` (`--name 'prod-a-*'`; static tokens: `limen.io/name=<pattern>`, patterns only). The component asks for one at first enrollment (`--name` / `LIMEN_NAME`); a single-use token's exact name is given without asking. The control plane validates it (`[a-z0-9-]`, 1 to 63, no leading or trailing `-`), refuses one the token doesn't approve (`permission_denied`, `auth.denied`), and keeps names unique among unrevoked components with a partial unique index; the name claim and the token's consumption share one transaction, so a conflict (`already_exists`) leaves the token unused. The name is certified as the label `limen.io/name` and kept on renewal. It is for display (console, audit `worker_name` / `proxy_name` / `component_name`, logs, `/tunnels`): the id remains the identity for certificates, policy, revocation, and audit attribution. Policy never decides on a name: a `worker_selector` on `limen.io/name` is refused when the policy is loaded (and ignored by the matcher), because whoever holds a pattern token chooses the value. A conflict on a live name is audited like any other refused enrollment (`auth.denied`, reason `name already in use`).
 - The worker generates its key locally and sends `EnrollWorker{join_token, CSR}` (TLS with server authentication only, relayed by the proxy). The control plane consumes the token atomically (`UPDATE ... WHERE used_at IS NULL RETURNING`) and issues a worker cert from the internal CA, valid for 24 hours. It emits `worker.enroll`.
 - Rotation: a service cert is renewed at 50% of its lifetime, so a control plane outage of 12 hours or less doesn't break workers. During **CA rotation**, the old and new CA are trusted at the same time for at least the longest cert TTL (ADR-0007).
 
@@ -125,7 +126,7 @@ Every session follows the same skeleton:
 1. The CLI connects to the proxy over mTLS with the user cert, using the right ALPN. It sends a `SessionRequest`: resource name, requested login/DB role/database, and client metadata.
 2. The proxy checks that the user cert is valid, evaluates policy (its cached signed snapshot, §7.3), and on deny emits `auth.denied` and closes.
 3. On allow, the proxy builds a **session grant**: session ID (UUIDv7), user, matched roles, resource, the upstream principal that policy chose (Unix login, DB role, Redis user, kube groups), expiry ≤ user cert expiry, and a nonce. It signs the grant with its own key and emits `session.start`.
-4. The proxy finds a healthy worker serving that resource, using the tunnel registry (§6). It opens `WorkerTunnel.OpenSession` either on the local tunnel or through a peer proxy.
+4. The proxy finds a healthy worker serving that resource, using the tunnel registry (§6). It opens `WorkerTunnel.OpenSession` either on the local tunnel or through a peer proxy. Among the eligible workers it takes the less loaded of two picked at random (power of two choices on `active/max`): each worker reports `active_sessions` and `max_sessions` (`--max-sessions`, default 200, 0 for no cap) in its ping reply, the proxy adds the sessions it opened since, and peers see the load in the registry. Full workers are skipped; a worker that reports 0/0 (older than Phase 5, or uncapped) counts as half loaded and is never full. If every eligible worker is full, the user gets a `no capacity` error and the proxy emits `auth.denied` with `data.reason = "capacity"`. The worker enforces its cap itself too (`resource_exhausted`).
 5. The worker verifies:
    - the grant signature: the proxy's cert chains to the internal CA and carries the proxy role
    - grant expiry, plus nonce replay (an LRU cache)
@@ -154,27 +155,33 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
 - **Audit.** The proxy emits `session.start`, `session.end` (duration, bytes, end reason, recording), and `auth.denied`. The worker emits `ssh.exec` for every exec and subsystem request, *before* forwarding it, and refuses the command if the event can't be written.
 - **Limits.** Sessions end at `max_session_ttl` from the role (default 8 hours). Port forwarding through Limen is not supported yet.
 
-### 5.2 PostgreSQL, MySQL, and Aurora (Phase 6)
-- `limen db connect <resource> [--db-role R] [--database D]` opens `127.0.0.1:<port>` (or a unix socket with mode 0600, `--socket`). It prints a ready-to-run `psql` or `mysql` command with no password. Each accepted local connection becomes one Limen session.
-- The worker terminates the client protocol. PostgreSQL uses pgwire. MySQL uses its own codec built on `mysql_common` packet types (ADR-0012). The worker answers PostgreSQL `SSLRequest` with `N` because the outer hop is already mTLS, then opens TLS to RDS (`verify-full` against the RDS CA bundle) and authenticates with an **IAM auth token** (SigV4, valid for 15 minutes, used only at connect time):
-  - PostgreSQL: the token is sent as a cleartext password over TLS
-  - MySQL: `mysql_clear_password` over TLS, against a user `IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'` and `REQUIRE SSL`
-- **DB roles (ADR-0015).** Each policy role that grants DB access names a database role, for example `limen_readonly`. The worker's **bootstrap** reconciler runs at startup and every 10 minutes. It reads the admin secret from Secrets Manager, makes sure the role exists with `rds_iam` (PostgreSQL) or `AWSAuthenticationPlugin` (MySQL), and applies the declared grants. Drift is reported as an event. **End users never see DB credentials.**
-- **Audit.** One `db.query` event per statement:
-  - the user, roles, DB role, database, statement text, statement type (from `sqlparser` when it can be parsed, `unknown` otherwise), start time, duration, rows affected, and error
-  - PostgreSQL extended protocol (Parse/Bind/Execute): the statement is logged at Parse with the name, and execution at Execute with parameters **redacted** unless `audit.log_parameters: true`
-  - `COPY`, multi-statement simple queries, and `CALL` and `DO` blocks are logged as written
-  - per-resource `audit.normalize_literals: true` replaces literals with `?`. Full text is the default (clarified with the owner)
+### 5.2 PostgreSQL, MySQL, Aurora, and Redshift (Phase 6, ADR-0033)
+- `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR | --socket PATH]` opens `127.0.0.1:<port>` (or a unix socket with mode 0600) and prints a ready-to-run `psql` or `mysql` command with no password. Each accepted local connection becomes one Limen session of kind `db`, over the proxy's `limen-db/1` ALPN. The proxy authorizes (resource, database role, database) exactly as for SSH and relays bytes; it never parses SQL.
+- **The worker is a message-aware relay** (ADR-0033). It plays the server toward the client (no password: the stream is already authenticated by mTLS and authorized by the grant), logs in to the target itself as a `limen_*` role, and relays frames, reading in full only the ones it audits or guards. Result sets are streamed and never inspected beyond the completion frame.
+  - *PostgreSQL / Redshift*: `SSLRequest` and `GSSENCRequest` are answered `N` (the outer hop is mTLS); the startup `user` and `database` must be the granted ones; `options` and `replication` are refused; the client gets a random cancel key, and `CancelRequest` is forwarded only for the same user. Login to the target: SCRAM-SHA-256, cleartext password (IAM tokens), or MD5 (Redshift).
+  - *MySQL*: the worker offers no TLS, compression, `LOCAL INFILE`, `DEPRECATE_EOF`, or query attributes. The command loop is half duplex. `COM_CHANGE_USER`, replication, `COM_FIELD_LIST`, `USE`, and cursors are refused; `KILL [QUERY] <id>` is translated from the connection id shown to the client to the real thread id, for the same user only. Login to the target: `caching_sha2_password`, `mysql_native_password`, or `mysql_clear_password` (IAM), the clear-text one only over TLS.
+  - *To the target*: TLS is mandatory with `verify-full` against the resource's `tls_ca_file` (`tls_server_name` when the certificate carries another name). `insecure_dev` plus the worker flag `--allow-insecure-db-targets` is the local-only escape.
+- **Credentials.** *Secret mode* (any server): the role's password is the file `password_dir/<role>` on the worker. *IAM mode* (RDS, Aurora): a 15-minute **IAM auth token** (SigV4, `rds-db`), sent as the password over TLS at connect time (PostgreSQL: cleartext password; MySQL: `mysql_clear_password` against `AWSAuthenticationPlugin`). *Redshift IAM*: `GetClusterCredentials` or Serverless `GetCredentials`. The user never sees any of them.
+- **DB roles (ADR-0015).** Each policy role that grants DB access names a database role, for example `limen_readonly` (the `limen_` prefix is validated and reserved). The **bootstrap** reconciler is a module of the worker with two entry points: `limen-worker --db-bootstrap-once [--db-bootstrap-check]` (a separate task with its own admin secret) and an opt-in loop (`--db-bootstrap-interval`, off by default). It reads the admin login from a file, creates the role, sets its password or `rds_iam`/`AWSAuthenticationPlugin`, and applies exactly the declared grants. It is idempotent, audits every change (`db.bootstrap`) before making it, and repairs drift (attributes, role membership, privileges, passwords). **End users never see DB credentials.**
+- **Audit.** `db.query` per statement, written **before** the statement is forwarded (fail closed), and `db.query.end` with status, duration, rows, and error:
+  - the user, DB role, database, statement text, statement type (first keyword from the `sqlparser` tokenizer, `unknown` if it can't be tokenized), phase, and for prepared statements the `Parse` event id
+  - extended protocol: the statement is logged at Parse, and each Execute is logged with its name. **Parameter values are never logged** (the earlier `audit.log_parameters` option is not built)
+  - `COPY`, multi-statement messages (one event each), and `CALL` and `DO` blocks are logged as written; row data never is
+  - per-resource `normalize_literals: true` replaces literals with `?`. Full text is the default (clarified with the owner)
+  - the console projects these events into `db_statements` and lists them on the session page (database sessions have no recording)
 - **Aurora**: the same code. The cluster writer and reader endpoints are separate resources.
-- **IAM auth limitations to keep in mind** (from the AWS docs): IAM auth needs 300–1000 MiB of extra DB memory; IAM conditions don't support `aws:SourceIp` or `aws:SourceVpc`; tokens are at least about 1 KB.
+- **Limits.** Enforcement inside a session is the database's grants for the role; there is no statement-level allow or deny. Sessions end at `max_session_ttl`, or after an hour with no client activity. A frame the worker must read in full is capped at 64 MiB.
+- **IAM auth limitations to keep in mind** (from the AWS docs): IAM auth needs 300–1000 MiB of extra DB memory; IAM conditions don't support `aws:SourceIp` or `aws:SourceVpc`; tokens are at least about 1 KB. **The IAM paths and Redshift are unverified against the real services.**
 
-### 5.3 ElastiCache Redis (Phase 7)
-- `limen redis connect <resource>` opens a loopback listener for `redis-cli`.
-- The worker terminates RESP2 and RESP3 with its own codec (ADR-0012) and connects to ElastiCache over **TLS**. The preferred auth is **IAM**, which requires Redis OSS 7.0+ or Valkey 7.2+ and in-transit encryption: the worker sends a 15-minute SigV4 token through `AUTH`/`HELLO` as a user created with `authentication-mode Type=iam`, where user name = user ID. The fallback is **ACL users managed by the worker**, with passwords rotated by the worker and stored in Secrets Manager.
-- **Connection lifetime.** ElastiCache drops IAM connections after 12 hours unless re-AUTHed. The worker re-authenticates proactively, and never inside `MULTI` or Lua, where it isn't allowed.
-- **Audit.** One `redis.command` per command: the command name and key names. **Values are redacted by default.** This is configurable per resource and per command. `AUTH`, `HELLO` credentials, and `CONFIG SET requirepass` are always redacted. Policy can block commands (for example `FLUSHALL`, `CONFIG`, `MONITOR`, `DEBUG`) with ACL categories applied at the ElastiCache user level and checked again in the worker.
+### 5.3 Redis, Valkey, and ElastiCache (Phase 7)
+Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user guide is `docs/guides/redis.md`.
+- `limen redis connect <resource>` opens a loopback listener (or a private unix socket) for `redis-cli`. Each accepted connection is one Limen session over the proxy's `limen-redis/1` ALPN, with the same grant, worker, lock, and kill machinery as SSH.
+- The worker terminates RESP2 and RESP3 with its own codec (ADR-0012), drops the client's `AUTH`, and logs in to the server itself over TLS (optional for self-hosted) as the Redis user the role names. The credential is an **ElastiCache IAM token** (SigV4, 15 minutes; Redis OSS 7.0+ or Valkey 7.2+), or an **ACL password** the worker holds. The worker re-logs in at 11 hours, because ElastiCache drops IAM connections after 12, and never inside `MULTI`, a subscription, or with commands in flight.
+- **Policy at the worker.** Every command is checked against the role's grant (a default deny list, `allow_commands`, `deny_commands`, key patterns, databases) before it is forwarded; the server's ACL is the second layer. Key positions come from the server's `COMMAND INFO`.
+- **Audit.** One `redis.command` event per command, written before it is forwarded: command, subcommand, key names, argument count. **Values are not logged** unless the target opts in, and credential commands never are. A refused command is `auth.denied`. Key names can be hashed per resource.
+- Not supported yet: cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap. IAM, the 12-hour re-login, and TLS with the AWS bundle are unverified against real ElastiCache.
 
-### 5.4 EKS (Phase 8, built: ADR-0033)
+### 5.4 EKS (Phase 8, built: ADR-0038)
 - `limen kube login <cluster>` writes a kubeconfig (a file of its own, by default in the profile directory, or `--kubeconfig FILE`; `--print` writes it to standard output):
   - server `https://<proxy>/k8s/<cluster>`
   - CA = the CA pinned for the proxy
@@ -195,7 +202,7 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
 - Each worker keeps **N ≥ 2 tunnels** (default 2) and reconnects with exponential backoff and full jitter (base 1 s, cap 60 s). Health checks use both HTTP/2 PING and `Ping` RPCs (every 15 s, with a 45 s dead-peer timeout).
 - **Tunnel registry.** Proxies report `(worker_id, proxy_id, tunnel_id)` to the control plane, which keeps it in Aurora with a lease, and proxies cache it. A session that lands on proxy A for a worker tunnelled only to proxy B is relayed **A → B over `limen-peer/1`** (proxy-to-proxy mTLS inside the VPC). *Implemented in Phase 2:* A asks the control plane for live tunnels (`Registry.ListTunnels`, cached for 5 s), picks a worker whose labels match, and calls `WorkerTunnel.OpenSession` on B, naming the worker in metadata. B forwards the stream into its tunnel. A pins B's identity (`proxy` kind and ID from its internal-CA certificate) instead of checking a host name. Each proxy advertises its peer address with `--peer-address`.
 - **Worker selection.** A resource's `worker_selector` must match the worker's labels exactly. Labels are signed into the worker's certificate at enrollment, so a worker can't claim labels it wasn't given.
-- **Drain.** On SIGTERM a worker sends `draining=true`, stops accepting new sessions, and lets the current ones finish (up to `drain_timeout`, default 10 minutes) before it closes the tunnels. A proxy stops accepting, closes its worker tunnels right away (so workers move to another proxy), waits up to its drain timeout for API connections, then cuts what's left. The control plane does the same. NLB deregistration delay is set to match.
+- **Drain.** On SIGTERM a worker sends `draining=true`, stops accepting new sessions, and lets the current ones finish, up to `--drain-timeout-secs` (`LIMEN_DRAIN_TIMEOUT_SECS`, default 600, i.e. 10 minutes). It exits as soon as none is left. At the timeout it ends the rest; each gets a `session.end` (emitted by the proxy, as for every session) with `data.reason = "worker_drain"`, and its recording is finished and uploaded as usual. Then it closes the tunnels gracefully, uploads the last recordings and audit events (what doesn't make it stays on disk for the next start), and exits. That takes up to 18 s after the timeout, so the orchestrator's grace period (Kubernetes `terminationGracePeriodSeconds`, ECS `stopTimeout`, an Auto Scaling lifecycle hook's timeout) must be longer than the drain timeout plus 18 s. Operators who can't wait that long lower the drain timeout and accept that sessions still open at it are ended. The older `--drain-timeout` / `LIMEN_DRAIN_TIMEOUT` (a duration such as `10m`) is still read when the new setting is unset, with a deprecation warning at startup; when both are set, the new one wins. A drain refusal is marked (`limen-refusal: draining` in the status metadata) and comes before the worker reads the grant, so a proxy that hasn't seen the `draining` ping yet tries another worker, within the same three-attempt limit as a full worker. A proxy stops accepting, closes its worker tunnels right away (so workers move to another proxy), waits up to its drain timeout for API connections, then cuts what's left. The control plane does the same. NLB deregistration delay is set to match.
 
 ## 7. Policy (ADR-0008)
 
@@ -297,10 +304,9 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 ## 11. Deployment
 - **Images:** multi-stage builds (`rust:1.99-bookworm` builder) on `gcr.io/distroless/cc-debian12:nonroot`.
 - **Terraform:**
-  - `modules/ecs`: VPC wiring, NLB, Fargate services (control plane, proxy, Grafana), Aurora PostgreSQL, KMS keys, S3, Glue, Athena workgroup, Secrets Manager, IAM, and worker services for target VPCs
-  - `modules/ec2`: ASG and systemd
-  - `modules/datadog`: monitors
-  - `examples/complete`: a single `terraform apply`
+  - `modules/audit` and `modules/datadog`: built
+  - `modules/ecs` and `modules/ec2`: planned for Phase 13 (not yet in the repo)
+  - `examples/complete`: planned for Phase 13; `deploy/terraform/examples/audit` exists
 - **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
@@ -315,15 +321,18 @@ crates/
   limen-auth/            # OIDC (PKCE, device), group→role mapping, IdP trait
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
+  limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
+  limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
+  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
   limen-testkit/         # fixtures, in-process cluster harness
   limen-control-plane/   # bin
   limen-proxy/           # bin
   limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, kube
   limen-cli/             # bin `limen`
-deploy/{docker,compose,terraform/{modules/{ecs,ec2,datadog},examples}}
+deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
 dashboards/grafana/{dashboards,alerting,provisioning}
-docs/{design.md,threat-model.md,adr/,runbooks/,audit-schema/}
+docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
 When a protocol module in the worker grows big enough, it moves to its own crate (`limen-proto-pg`, …) so it can be fuzzed in isolation.
@@ -340,12 +349,12 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 3 ✅ | Audit to S3 (SeaweedFS) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally Trino reads the same S3 files and Grafana runs the same SQL*) |
 | 3.5 ✅ | Web console (ADR-0017): users, sessions, workers, policy browsing and dry run, tokens, lock and session kill, worker revoke, recording playback, light and dark themes | An admin sees users, workers, and live sessions in a browser, plays a recording, locks a user, and the user's open SSH session ends. A normal user sees only their resources. CSRF, CSP, and cookie tests |
 | 4 ✅ | **Machine identities** (ADR-0019): `bot` principals that join with GitHub Actions, GitLab CI, or any OIDC provider (Kubernetes service account tokens work through generic OIDC; **the AWS IAM join moved to Phase 13** with the IAM join for components); the run (repository, workflow, commit, trigger) is in every audit event | A GitHub Actions-shaped token logs in as a bot and runs an SSH command; a bot that matches too broadly is rejected by policy validation; the audit trail and console show bots apart from people; lock works on bots |
-| 5 | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
+| 5 ✅ | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits; optional names for proxies and workers. The Kubernetes example is unverified on a cluster; the ECS and EC2 examples move to Phase 13 | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
 | Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host |
-| 6 | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
+| 6 ✅ | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018, ADR-0033) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
 | 6.5 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
-| 7 | Redis and Valkey | `redis-cli` through `limen redis connect`. Values are redacted |
-| 8 ✅ | **EKS** (ADR-0033) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
+| 7 ✅ | Redis and Valkey (ADR-0034) | `redis-cli` through `limen redis connect`. Values are redacted |
+| 8 ✅ | **EKS** (ADR-0038) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
 | 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
 | 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
 | 11 | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
@@ -353,25 +362,19 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 13 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
-- **Phase 2 status (2026-10-14).**
-  - Implemented and tested:
-    - SSH through proxy and worker, with per-session user and host certificates and recording
-    - signed grants and policy snapshots, with the grace period
-    - proxy peering
-    - static-token labels
-    - the outage semantics of §9: the in-process tests and the demo stop the control plane in the middle of a session
-  - *Deferred:*
-    - port forwarding through Limen
-    - recording upload to S3 (Phase 3)
-    - an IAM join method (Phase 13)
-- **Phase 1 status (2026-10-14).**
-  - Implemented and tested: OIDC login (PKCE with key-bound nonce, and device flow), user and component certificates, the policy engine, versioned policy administration, single-use and static join tokens, the reverse tunnel with proxy health checks and the control plane registry, proxy relaying with forwarded-certificate verification, renewal at half-life, the KMS signer (against local-kms), and the stub audit sink.
-  - Deferred to the phase that needs them:
-    - SSH user certificates at login (Phase 2)
-    - signed policy snapshots for proxies and workers, and the outage grace period (Phase 2, when the proxy first authorizes sessions)
-    - proxy peering (Phase 2)
-    - the disk spool and audit shipping (Phase 3)
-    - IAM join and a revocation CLI (Phase 13)
+- **Phase 7 status (2026-10-17).**
+  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `deploy/compose/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
+  - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
+- **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
+- **Deferred to Phase 13:** the IAM join method for components.
+- **Deferred from Phase 6, not yet scheduled in §13:**
+  - Secrets Manager for the bootstrap admin (`admin_secret_arn`); the admin password is a file
+  - `audit.log_parameters`: query parameters are never logged
+  - statement-level allow and deny (enforcement is the database's grants)
+  - MySQL cursors, compression, and `LOCAL INFILE`; PostgreSQL protocol versions other than 3.0
+  - fuzzing the MySQL codec and the PostgreSQL frame splitter with `cargo-fuzz`, promised in ADR-0012
+  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
+- **Unverified against real services (Phase 6):** RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; PostgreSQL `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login against a real Redshift server, and Redshift behavior in general.
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.

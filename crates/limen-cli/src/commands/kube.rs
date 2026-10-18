@@ -1,4 +1,4 @@
-//! `limen kube login` and `limen kube credentials` (ADR-0033).
+//! `limen kube login` and `limen kube credentials` (ADR-0038).
 //!
 //! `login` writes a kubeconfig whose only credential is an exec plugin that
 //! runs `limen kube credentials`. That prints the user's short-lived Limen

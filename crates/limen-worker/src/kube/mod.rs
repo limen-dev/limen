@@ -1,4 +1,4 @@
-//! Kubernetes access (ADR-0033): `kubectl` through Limen by impersonation.
+//! Kubernetes access (ADR-0038): `kubectl` through Limen by impersonation.
 //!
 //! A kube worker serves one cluster. It holds a service account whose only
 //! power is to impersonate (`users`, `groups`, and the `limen-session` extra),

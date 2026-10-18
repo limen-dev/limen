@@ -70,7 +70,16 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
         .expect("ls")
         .into_inner();
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["orders-staging", "web-staging-1"]);
+    assert_eq!(
+        names,
+        [
+            "cache-staging",
+            "cache-valkey",
+            "orders-mysql-staging",
+            "orders-staging",
+            "web-staging-1"
+        ]
+    );
 
     // A user with no mapped roles can't log in.
     let err = d
@@ -86,6 +95,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             ttl_seconds: 600,
             labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect("token")
@@ -138,6 +148,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             csr_der: vec![],
             kind: "worker".into(),
             dns_names: vec![],
+            name: String::new(),
         })
         .await
         .expect_err("reuse");

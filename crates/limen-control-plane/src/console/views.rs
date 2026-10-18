@@ -88,7 +88,7 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
 /// only the data side exists.
 pub struct Connect {
     pub command: String,
-    /// `Some("Phase 6")` until the kind is served.
+    /// `Some("Phase 7")` and so on until the kind is served.
     pub planned: Option<&'static str>,
 }
 
@@ -196,6 +196,7 @@ pub fn path_segment(s: &str) -> String {
 
 // ---- sessions --------------------------------------------------------------------
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct SessionView {
     pub id: String,
     pub user: String,
@@ -213,6 +214,10 @@ pub struct SessionView {
     pub reason: String,
     pub active: bool,
     pub has_recording: bool,
+    /// A Redis or Valkey session: no recording, but audited commands.
+    pub is_redis: bool,
+    /// Either of the two: the page lists what was sent instead of a recording.
+    pub has_statements: bool,
     pub recording_sha256: String,
     pub recording_note: &'static str,
     pub bytes: String,
@@ -259,11 +264,20 @@ impl From<&SessionRow> for SessionView {
             },
             active: s.active,
             has_recording,
+            is_redis: s.kind.as_deref() == Some("redis"),
+            has_statements: matches!(
+                s.kind.as_deref(),
+                Some("postgres" | "mysql" | "redshift" | "redis")
+            ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
                 "The recording is uploaded when the session ends."
             } else if s.recording_sha256.is_some() {
                 "The recording was made but hasn't reached the control plane yet. Check again shortly."
+            } else if matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")) {
+                "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
+            } else if s.kind.as_deref() == Some("redis") {
+                "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
             } else {
                 "This session wasn't recorded."
             },
@@ -470,6 +484,75 @@ pub struct SessionsPage {
 pub struct SessionPage {
     pub chrome: Chrome,
     pub s: SessionView,
+    /// Database sessions: the statements sent, oldest first.
+    pub statements: Vec<StatementView>,
+    pub statement_total: i64,
+    pub statement_errors: i64,
+}
+
+/// One statement of a database session, ready to show.
+#[derive(Debug)]
+pub struct StatementView {
+    pub time: String,
+    pub kind: String,
+    pub text: String,
+    pub outcome: String,
+    pub outcome_class: &'static str,
+    pub detail: String,
+}
+
+impl From<&super::store::DbStatementRow> for StatementView {
+    fn from(r: &super::store::DbStatementRow) -> Self {
+        let failed = matches!(r.status.as_deref(), Some("error" | "denied"));
+        let outcome = match r.status.as_deref() {
+            Some("ok") => "ok",
+            // Redis: policy allowed it and the audit event was written before it
+            // was forwarded. ("sent" is what earlier versions stored.)
+            Some("allowed" | "sent") => "allowed",
+            Some("denied") => "refused",
+            Some("error") => "error",
+            Some(_) => "not completed",
+            None => "…",
+        };
+        let mut detail = Vec::new();
+        if let Some(n) = r.rows {
+            detail.push(format!("{n} row{}", if n == 1 { "" } else { "s" }));
+        }
+        if let Some(ms) = r.duration_ms {
+            detail.push(format!("{ms} ms"));
+        }
+        if failed {
+            detail.push(
+                [r.error_code.as_deref(), r.error.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(": "),
+            );
+        }
+        let kind = r.statement_type.clone().unwrap_or_default();
+        Self {
+            time: time_text(Some(r.at)),
+            text: match (&r.statement, r.phase.as_deref()) {
+                (Some(t), _) if r.truncated => format!("{t} … (cut)"),
+                (Some(t), _) => t.clone(),
+                (None, Some("execute")) => "(prepared statement; see its parse)".to_owned(),
+                (None, _) => String::new(),
+            },
+            kind: match r.phase.as_deref() {
+                Some("parse") => format!("{kind} (prepare)"),
+                Some("execute") => format!("{kind} (run)"),
+                _ => kind,
+            },
+            outcome: outcome.to_owned(),
+            outcome_class: match r.status.as_deref() {
+                Some("ok" | "allowed" | "sent") => "ok",
+                Some("error" | "denied") => "bad",
+                _ => "warn",
+            },
+            detail: detail.join(" · "),
+        }
+    }
 }
 
 /// One bot from policy, with what the control plane has seen of it.
@@ -522,6 +605,10 @@ pub struct UserPage {
 
 pub struct ComponentView {
     pub id: String,
+    /// Display name approved at enrollment, if any.
+    pub name: Option<String>,
+    /// For a worker: the proxies holding its tunnels (names, else ids).
+    pub tunnel_peers: String,
     pub path: String,
     pub kind: String,
     pub label_list: Vec<String>,
@@ -535,6 +622,8 @@ pub struct ComponentView {
 
 pub struct PendingTokenView {
     pub kind: String,
+    /// The name or pattern it approves, if any.
+    pub name: Option<String>,
     pub kclass: &'static str,
     pub icon: &'static str,
     pub label_list: Vec<String>,
@@ -656,6 +745,7 @@ pub struct RoleAccess {
 
 pub struct WorkerMatch {
     pub id: String,
+    pub name: Option<String>,
     pub tunnels: usize,
     pub last_seen: String,
 }

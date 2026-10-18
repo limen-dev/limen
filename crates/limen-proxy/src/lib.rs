@@ -6,8 +6,7 @@ pub mod config;
 mod kube;
 mod peer;
 pub mod relay;
-mod session;
-mod ssh;
+mod sessions;
 pub mod tunnels;
 
 use std::net::{IpAddr, SocketAddr};
@@ -26,7 +25,7 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
 use limen_proto::v1::{PingRequest, ReportTunnelsRequest, TunnelReport};
-use limen_tunnel::connect::{SharedClientConfig, channel};
+use limen_tunnel::connect::{SharedClientConfig, channel, retry_if_went_away};
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::tls::{ClientAuth, client_config, server_config};
 use limen_tunnel::tunnel::TunnelChannel;
@@ -41,10 +40,11 @@ pub use config::Config;
 use tunnels::{Tunnel, Tunnels};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const PING_INTERVAL: Duration = Duration::from_secs(15);
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
-const REPORT_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_CONNECTIONS: usize = 20_000;
+/// After the last connection is gone, how long the proxy may spend shipping
+/// its audit spool to the control plane before it exits.
+const FINAL_FLUSH: Duration = Duration::from_secs(10);
 
 /// State shared by every connection.
 #[derive(Debug, Clone)]
@@ -79,11 +79,13 @@ impl Proxy {
         };
         let cp_addr = config.control_plane_addr.clone();
         let cp_name = config.control_plane_name.clone();
+        let own_name = limen_component::parse_name(config.name.as_deref())?;
         let creds = limen_component::load_or_enroll(
             &config.data_dir,
             "proxy",
             config.join_token.as_ref(),
             &config.dns_names,
+            own_name.as_deref(),
             || {
                 let ca = bootstrap_ca
                     .as_deref()
@@ -110,8 +112,10 @@ impl Proxy {
             config.audit_failure_mode,
         )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
-        let quota = Quota::per_second(NonZeroU32::new(50).unwrap_or(NonZeroU32::MIN))
-            .allow_burst(NonZeroU32::new(200).unwrap_or(NonZeroU32::MIN));
+        let quota = Quota::per_second(
+            NonZeroU32::new(config.accept_rate_per_second).unwrap_or(NonZeroU32::MIN),
+        )
+        .allow_burst(NonZeroU32::new(config.accept_burst).unwrap_or(NonZeroU32::MIN));
         Ok((
             Self {
                 config: Arc::new(config),
@@ -152,6 +156,12 @@ impl Proxy {
         self.creds.borrow().id.clone()
     }
 
+    /// The name given at enrollment, if any.
+    #[must_use]
+    pub fn name(&self) -> Option<String> {
+        self.creds.borrow().name.clone()
+    }
+
     /// Current channel to the control plane, presenting this proxy's cert.
     #[must_use]
     pub fn cp_channel(&self) -> Channel {
@@ -185,7 +195,15 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
         identity,
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
-        &[alpn::TUNNEL, alpn::PEER, alpn::SSH, alpn::H2, alpn::HTTP1],
+        &[
+            alpn::TUNNEL,
+            alpn::PEER,
+            alpn::SSH,
+            alpn::DB,
+            alpn::REDIS,
+            alpn::H2,
+            alpn::HTTP1,
+        ],
     )?)
 }
 
@@ -222,25 +240,35 @@ pub async fn run(
     listener: TcpListener,
     mut shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    tokio::spawn(apply_renewals(proxy.clone()));
+    // Background jobs hold clones of the proxy (and so of its audit spool,
+    // whose lock must be free once `run` returns): stopped at the end.
+    let mut background = tokio::task::JoinSet::new();
+    background.spawn(apply_renewals(proxy.clone()));
     let data_dir = proxy.config.data_dir.clone();
     let renew_proxy = proxy.clone();
-    tokio::spawn(limen_component::renewal_loop(
+    background.spawn(limen_component::renewal_loop(
         data_dir,
         creds_tx,
         move |creds| build_cp_channel(&renew_proxy.config, creds),
     ));
-    tokio::spawn(report_tunnels(proxy.clone(), shutdown.clone()));
-    tokio::spawn(policy_refresh(proxy.clone(), shutdown.clone()));
+    background.spawn(report_tunnels(proxy.clone(), shutdown.clone()));
+    background.spawn(policy_refresh(proxy.clone(), shutdown.clone()));
+    // Sessions go on writing audit events (their `session.end`) until the
+    // drain is over, so the shipper outlives the shutdown signal: `flush`
+    // (ship what is left, then stop) once the connections are done, and
+    // `deadline` (stop now; the rest stays in the spool) if that takes too long.
+    let (flush_tx, flush) = watch::channel(false);
+    let (deadline_tx, deadline) = watch::channel(false);
     let shipper = proxy.clone();
-    tokio::spawn(limen_component::audit::ship(
+    let audit = tokio::spawn(limen_component::audit::ship_until(
         proxy.audit_spool.clone(),
         move || Ok(shipper.cp_channel()),
-        shutdown.clone(),
+        flush,
+        deadline,
     ));
     let admin = tokio::spawn(serve_admin(proxy.clone(), shutdown.clone()));
 
-    tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), "proxy listening");
+    tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), name = proxy.name().as_deref(), "proxy listening");
     let mut connections = tokio::task::JoinSet::new();
     loop {
         let (tcp, remote) = tokio::select! {
@@ -265,7 +293,8 @@ pub async fn run(
         // Reap finished connections so the set doesn't grow forever.
         while connections.try_join_next().is_some() {}
         connections.spawn(async move {
-            handle_connection(&proxy, tcp, remote, conn_shutdown).await;
+            // Boxed: the connection's state is large and lives as long as it does.
+            Box::pin(handle_connection(&proxy, tcp, remote, conn_shutdown)).await;
             proxy.active.fetch_sub(1, Ordering::SeqCst);
         });
     }
@@ -281,7 +310,28 @@ pub async fn run(
     // Whatever is still open after the drain period is cut off.
     connections.abort_all();
     while connections.join_next().await.is_some() {}
+    // No more events can be written: ship what is spooled, within a bound.
+    // What does not make it stays in the spool for the next start (and is
+    // lost if the proxy's disk goes with it, as on an emptyDir).
+    let _ = flush_tx.send(true);
+    let mut audit = audit;
+    if tokio::time::timeout(FINAL_FLUSH, &mut audit).await.is_err() {
+        tracing::warn!(
+            pending = proxy
+                .audit_spool
+                .pending(limen_component::audit::TO_CONTROL_PLANE),
+            "audit events still unshipped after the final flush"
+        );
+        let _ = deadline_tx.send(true);
+        audit.abort();
+        // A completed handle must not be awaited again (it panics): only
+        // here, after the abort, is the second await needed.
+        let _ = audit.await;
+    }
     admin.abort();
+    let _ = admin.await;
+    background.abort_all();
+    while background.join_next().await.is_some() {}
     Ok(())
 }
 
@@ -306,7 +356,15 @@ async fn handle_connection(
     let protocol = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
     match protocol.as_deref() {
         Some(p) if p == alpn::TUNNEL => accept_tunnel(proxy, tls, peer, shutdown).await,
-        Some(p) if p == alpn::SSH => ssh::handle(proxy, tls, peer).await,
+        Some(p) if p == alpn::SSH => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Ssh).await;
+        }
+        Some(p) if p == alpn::DB => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Db).await;
+        }
+        Some(p) if p == alpn::REDIS => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Redis).await;
+        }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {
             let mut shutdown = shutdown;
@@ -392,14 +450,14 @@ async fn accept_tunnel(
 
     // The tunnel must answer a ping before it is used.
     let mut client = WorkerTunnelClient::new(channel.clone());
-    match tokio::time::timeout(PING_TIMEOUT, client.ping(PingRequest {})).await {
-        Ok(Ok(pong)) if pong.get_ref().worker_id == worker.id => {}
+    let first = match tokio::time::timeout(PING_TIMEOUT, client.ping(PingRequest {})).await {
+        Ok(Ok(pong)) if pong.get_ref().worker_id == worker.id => pong.into_inner(),
         result => {
             tracing::warn!(worker = %worker.id, ?result, "tunnel failed its first ping");
             connection.abort();
             return;
         }
-    }
+    };
     proxy.tunnels.insert(Tunnel {
         worker_id: worker.id.clone(),
         labels: worker.labels.clone(),
@@ -407,9 +465,12 @@ async fn accept_tunnel(
         connected_at: time::OffsetDateTime::now_utc(),
         channel,
     });
-    tracing::info!(worker = %worker.id, tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
+    proxy
+        .tunnels
+        .record_ping(&worker.id, first.active_sessions, first.max_sessions);
+    tracing::info!(worker = %worker.id, worker_name = limen_core::names::from_labels(&worker.labels), tunnel = %tunnel_id, remote = ?peer.remote_addr, "tunnel up");
 
-    let mut tick = tokio::time::interval(PING_INTERVAL);
+    let mut tick = tokio::time::interval(Duration::from_secs(proxy.config.ping_interval_secs));
     tick.tick().await;
     // Revocation arrives with the policy snapshot; check the cached copy.
     let mut revocation = tokio::time::interval(Duration::from_secs(1));
@@ -428,7 +489,11 @@ async fn accept_tunnel(
                         // Leave the tunnel up for in-flight sessions, but stop advertising it.
                         proxy.tunnels.remove(&tunnel_id);
                     }
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(pong)) => {
+                        // Load for worker selection (old workers report 0/0: unknown).
+                        let pong = pong.get_ref();
+                        proxy.tunnels.record_ping(&worker.id, pong.active_sessions, pong.max_sessions);
+                    }
                     other => break format!("ping failed: {other:?}"),
                 }
             }
@@ -481,12 +546,17 @@ async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         let result = async {
-            let mut client =
-                limen_proto::v1::policy_sync_client::PolicySyncClient::new(proxy.cp_channel());
-            let signed = client
-                .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
-                .await?
-                .into_inner();
+            let signed = retry_if_went_away("policy snapshot", || {
+                let mut client =
+                    limen_proto::v1::policy_sync_client::PolicySyncClient::new(proxy.cp_channel());
+                async move {
+                    client
+                        .get_policy_snapshot(limen_proto::v1::GetPolicySnapshotRequest {})
+                        .await
+                }
+            })
+            .await?
+            .into_inner();
             proxy
                 .policy
                 .update(&signed, &proxy.credentials().internal_ca()?)?;
@@ -510,7 +580,7 @@ async fn policy_refresh(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
 
 /// Tell the control plane which tunnels this proxy holds (ADR-0004).
 async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
-    let mut tick = tokio::time::interval(REPORT_INTERVAL);
+    let mut tick = tokio::time::interval(Duration::from_secs(proxy.config.report_interval_secs));
     loop {
         tokio::select! {
             _ = tick.tick() => {}
@@ -526,16 +596,21 @@ async fn report_tunnels(proxy: Proxy, mut shutdown: watch::Receiver<bool>) {
             .map(|t| TunnelReport {
                 worker_id: t.worker_id,
                 tunnel_id: t.tunnel_id,
+                active_sessions: t.active_sessions,
+                max_sessions: t.max_sessions,
             })
             .collect();
         let req = ReportTunnelsRequest {
             tunnels,
             peer_address: proxy.config.peer_address.clone().unwrap_or_default(),
         };
-        match RegistryClient::new(proxy.cp_channel())
-            .report_tunnels(req)
-            .await
-        {
+        let result = retry_if_went_away("report tunnels", || {
+            let mut client = RegistryClient::new(proxy.cp_channel());
+            let req = req.clone();
+            async move { client.report_tunnels(req).await }
+        })
+        .await;
+        match result {
             Ok(_) => proxy.last_report_ok.store(
                 time::OffsetDateTime::now_utc().unix_timestamp(),
                 Ordering::SeqCst,

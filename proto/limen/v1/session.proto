@@ -36,9 +36,11 @@ message SessionGrant {
   bytes user_cert_der = 12;
   string proxy_id = 13;
   string worker_id = 14;
+  // The database the session may use (SQL kinds). Empty for other kinds.
+  string database = 15;
   // Kubernetes only: every group the policy lets the user assume on this
   // cluster. The worker impersonates the user with exactly these groups.
-  repeated string groups = 15;
+  repeated string groups = 16;
 }
 
 // The policy as of `issued_at` (ADR-0008). Proxies and workers use it for up
@@ -62,6 +64,8 @@ message PolicySnapshot {
 message SessionRequest {
   string resource = 1;
   string principal = 2;
+  // SQL sessions: the database to use. Empty means the resource's default.
+  string database = 3;
 }
 
 message SessionResponse {

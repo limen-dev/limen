@@ -1,4 +1,4 @@
-# ADR-0033: Kubernetes (EKS) access through impersonation
+# ADR-0038: Kubernetes (EKS) access through impersonation
 
 - Status: Accepted and built (Phase 8). The owner asked for the implementation on 2026-10-17 after seeing the proposal; the three open questions below were settled with the defaults proposed.
 - Date: 2026-10-17

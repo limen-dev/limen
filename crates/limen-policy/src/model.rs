@@ -150,6 +150,19 @@ pub struct KubeGrant {
 #[serde(deny_unknown_fields)]
 pub struct RedisGrant {
     pub users: Vec<String>,
+    /// Commands refused for this grant on top of the built-in deny list
+    /// (ADR-0034). `NAME` or `NAME SUBCOMMAND`, case-insensitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_commands: Vec<String>,
+    /// Commands from the built-in deny list this grant opens up again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_commands: Vec<String>,
+    /// Key patterns (`*` and `?`) the session may touch. Empty means any key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<String>,
+    /// Logical databases the session may `SELECT`. Empty means only 0.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub databases: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,6 +350,73 @@ pub struct DbTarget {
     /// Secrets Manager ARN holding the admin credentials used for role bootstrap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_secret_arn: Option<String>,
+    /// Redshift (provisioned): the cluster to ask for temporary credentials
+    /// (`GetClusterCredentials`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_identifier: Option<String>,
+    /// Redshift Serverless: the workgroup to ask for credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workgroup: Option<String>,
+    /// The database to use when the user doesn't name one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_database: Option<String>,
+    /// Secret mode (ADR-0033): a directory on the worker with one file per DB
+    /// role, named for the role, holding its password. Used when `iam_auth` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_dir: Option<String>,
+    /// PEM bundle on the worker that signs the target's certificate (for
+    /// example the RDS bundle). Without it the system roots are used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<String>,
+    /// The name the target's certificate must carry, when it differs from the
+    /// host in `endpoint` (an IP address, a `PrivateLink` name, a tunnel).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
+    /// Talk to the target without TLS. Refused unless the worker was started
+    /// with `--allow-insecure-db-targets` (the local compose profile).
+    #[serde(default)]
+    pub insecure_dev: bool,
+    /// Replace literals in logged statement text with `?` (`audit.normalize_literals`).
+    #[serde(default)]
+    pub normalize_literals: bool,
+    /// Role bootstrap (ADR-0015, ADR-0033): a dedicated admin login and the
+    /// file on the worker that holds its password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_password_file: Option<String>,
+    /// Roles to create and the grants they get (bootstrap).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bootstrap: Vec<DbRoleSpec>,
+}
+
+/// A database login role Limen creates and maintains (ADR-0015).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbRoleSpec {
+    /// Must start with `limen_`.
+    pub role: String,
+    /// Each entry is a database and the privileges the role gets in it.
+    #[serde(default)]
+    pub grants: Vec<DbGrantSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbGrantSpec {
+    pub database: String,
+    /// `read` (SELECT) or `write` (SELECT, INSERT, UPDATE, DELETE), on every
+    /// table in the listed schemas (default `public` for PostgreSQL).
+    pub access: DbAccess,
+    #[serde(default)]
+    pub schemas: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DbAccess {
+    Read,
+    Write,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,8 +427,39 @@ pub struct RedisTarget {
     pub region: Option<String>,
     #[serde(default = "yes")]
     pub iam_auth: bool,
+    /// The `ElastiCache` replication group ID, which names the IAM token's host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_name: Option<String>,
+    /// TLS toward the target. On by default; `false` is for local servers only.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub tls: bool,
+    /// Left out of the snapshot when default, so components from before
+    /// Phase 7 (which reject unknown fields) still read it during an upgrade.
+    #[serde(default, skip_serializing_if = "RedisAudit::is_default")]
+    pub audit: RedisAudit,
+}
+
+impl RedisAudit {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// What a `redis.command` event may contain (ADR-0034). Values are never
+/// logged unless `log_values` is set, and credential commands never are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RedisAudit {
+    #[serde(default)]
+    pub log_values: bool,
+    /// Replace key names with a hash, so the trail holds no ids or emails.
+    #[serde(default)]
+    pub redact_keys: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

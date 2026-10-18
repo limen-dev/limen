@@ -1,0 +1,163 @@
+# Limen database demo stack (Phase 6, ADR-0033): control plane, proxy, one
+# worker, Dex, and the PostgreSQL and MySQL targets (docker-compose.db-targets.yml).
+#
+#   deploy/compose/demo-phase6.sh          # the exit test for Phase 6
+#
+# A separate project (`limen-dbdemo`) with its own volumes and host ports, so it
+# runs next to the dev stack (docker-compose.yml) without touching it. Without
+# S3 and Datadog: audit events land in the control plane's JSONL file.
+# Development only: static tokens, Dex static passwords, file-backed CA keys.
+#
+# Host ports (all on 127.0.0.1):  43443/43444 proxy (API / health)   45556 Dex
+name: limen-dbdemo
+
+include:
+  - docker-compose.db-targets.yml
+
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+  # Its own compiler cache: see the note in the Dockerfile.
+  args: { LIMEN_BUILD_CACHE: limen-dbdemo }
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: limen
+      POSTGRES_PASSWORD: limen-dev-only
+      POSTGRES_DB: limen
+    volumes: [postgres:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U limen -d limen"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The dev stack's Dex configuration, with this stack's host ports.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sed -e 's#localhost:5556#localhost:45556#' -e 's#localhost:3443#localhost:43443#'
+        /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./dex/theme:/srv/dex/web/themes/limen:ro
+    ports: ["127.0.0.1:45556:5556"]
+
+  control-plane:
+    build: { <<: *limen-build, target: control-plane }
+    image: limen-control-plane:dbdemo
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      dex: { condition: service_started }
+    environment:
+      RUST_LOG: info
+      LIMEN_ID: control-plane-1
+      LIMEN_DATABASE_URL: postgres://limen:limen-dev-only@postgres:5432/limen
+      LIMEN_DNS_NAMES: control-plane,localhost
+      LIMEN_CA_DIR: /var/lib/limen/ca
+      LIMEN_CA_EXPORT_DIR: /var/lib/limen/ca-public
+      LIMEN_OIDC_ISSUER: http://localhost:45556/dex
+      LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
+      LIMEN_OIDC_CLIENT_ID: limen-cli
+      LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+      LIMEN_PROXY_DNS_NAMES: localhost,proxy
+      LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
+      LIMEN_ENVIRONMENT: dev
+      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:43443
+      LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
+    volumes:
+      - cp-ca:/var/lib/limen/ca
+      - ca-public:/var/lib/limen/ca-public
+      - audit:/var/lib/limen/audit
+      - cp-spool:/var/lib/limen/spool
+      - recordings:/var/lib/limen/recordings
+
+  proxy:
+    build: { <<: *limen-build, target: proxy }
+    image: limen-proxy:dbdemo
+    restart: unless-stopped
+    depends_on: [control-plane]
+    environment:
+      RUST_LOG: info
+      LIMEN_CONTROL_PLANE_ADDR: control-plane:3080
+      LIMEN_CONTROL_PLANE_NAME: control-plane
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: dev-only-proxy-join-token-7f3a9c1e5b2d4f60
+      LIMEN_DNS_NAMES: localhost,proxy
+      LIMEN_PEER_ADDRESS: proxy:3443
+      LIMEN_DATA_DIR: /var/lib/limen/proxy
+    ports: ["127.0.0.1:43443:3443", "127.0.0.1:43444:3444"]
+    volumes:
+      - proxy-data:/var/lib/limen/proxy
+      - ca-public:/var/lib/limen/ca-public:ro
+
+  worker:
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:dbdemo
+    restart: unless-stopped
+    depends_on: [proxy]
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: dev-only-worker-join-token-2c8e6a4b0d1f3e5a
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+    volumes:
+      - worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
+
+  # The admin login the role bootstrap uses (ADR-0033). Dev only.
+  db-secrets-init:
+    profiles: ["db"]
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        printf 'limen-admin-dev-only' > /s/.admin && mkdir -p /s/postgres /s/mysql &&
+        chown -R 65532:65532 /s && chmod 700 /s /s/postgres /s/mysql && chmod 600 /s/.admin
+    volumes: [db-secrets:/s]
+
+  # Create and repair the limen_* database roles, then exit.
+  db-bootstrap:
+    profiles: ["tools"]
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:dbdemo
+    command: ["--db-bootstrap-once"]
+    depends_on:
+      proxy: { condition: service_started }
+      db-secrets-init: { condition: service_completed_successfully }
+      postgres-target: { condition: service_healthy }
+      mysql-target: { condition: service_healthy }
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: dev-only-worker-join-token-2c8e6a4b0d1f3e5a
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+    volumes:
+      - bootstrap-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - db-tls:/var/lib/limen/db-tls:ro
+      - db-secrets:/var/lib/limen/db-secrets
+
+volumes:
+  postgres: {}
+  cp-ca: {}
+  ca-public: {}
+  audit: {}
+  proxy-data: {}
+  worker-data: {}
+  cp-spool: {}
+  recordings: {}
+  db-secrets: {}
+  bootstrap-data: {}

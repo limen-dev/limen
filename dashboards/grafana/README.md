@@ -64,4 +64,4 @@ Mount `dashboards/athena` as a dashboard provider and `alerting/athena` under `p
 
 ## Branding
 
-Grafana OSS can't replace its login-page logo. Custom branding (`[white_labeling]`) is a Grafana Enterprise and Grafana Cloud Pro feature. The only OSS options are patching the image's static assets or rewriting responses in a reverse proxy, and both break on upgrade, so we use stock Grafana. When the web console (ADR-0017) lands, it will link to the dashboards with Limen's own branding (`assets/logo-mark.svg`).
+Grafana OSS can't replace its login-page logo. Custom branding (`[white_labeling]`) is a Grafana Enterprise and Grafana Cloud Pro feature. The only OSS options are patching the image's static assets or rewriting responses in a reverse proxy, and both break on upgrade, so we use stock Grafana. The web console (ADR-0017) has its own built-in dashboards, covering the last 30 days from its tables. These Grafana dashboards are the optional extra for full history.

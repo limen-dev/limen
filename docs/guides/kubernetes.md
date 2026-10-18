@@ -1,4 +1,4 @@
-`kubectl` through Limen: sign in once, get a short-lived certificate, and work in the clusters policy lets you reach. Everything is audited, and `exec` sessions are recorded. How it works is in [ADR-0033](../adr/0033-kubernetes-access.md).
+`kubectl` through Limen: sign in once, get a short-lived certificate, and work in the clusters policy lets you reach. Everything is audited, and `exec` sessions are recorded. How it works is in [ADR-0038](../adr/0038-kubernetes-access.md).
 
 # Using Kubernetes with Limen
 
@@ -20,6 +20,8 @@ kubectl port-forward svc/db 5432:5432    # audited
 - `--as`, `--as-group`, and a token in your kubeconfig are ignored. You are always yourself.
 
 ## What gets recorded and audited
+The console's **Audit trail → Kubernetes** tab shows every request as kubectl would say it (`get pods default/web 200`), with filters for cluster, verb, namespace, user, and refused or failed requests. Exec and attach sessions also appear under Sessions, with their recordings.
+
 
 | Action | Audit | Recording |
 |---|---|---|

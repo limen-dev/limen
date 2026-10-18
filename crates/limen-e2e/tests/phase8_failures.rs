@@ -1,5 +1,5 @@
 //! Phase 8: what goes wrong, and what must not. Each test is one failure the
-//! review of ADR-0033 looked for, against the stand-in API server.
+//! review of ADR-0038 looked for, against the stand-in API server.
 
 mod common;
 

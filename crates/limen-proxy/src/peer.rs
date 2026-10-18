@@ -32,6 +32,7 @@ use tonic::transport::Channel;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::Proxy;
+use crate::tunnels::{Load, NoWorker, p2c};
 
 /// Metadata naming the worker a peered session is for.
 pub const WORKER_ID: &str = "x-limen-worker-id";
@@ -83,18 +84,44 @@ impl WorkerTunnel for Forwarder {
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| Status::invalid_argument("missing worker id"))?
             .to_owned();
-        let channel = self
+        // This proxy's view of the worker's load is the freshest: it counts
+        // every session through its tunnels, peered ones included.
+        let (channel, slot) = self
             .proxy
             .tunnels
-            .channel_for(&worker_id)
-            .ok_or_else(|| Status::unavailable(format!("no tunnel to {worker_id} here")))?;
+            .reserve(&worker_id)
+            .map_err(|why| match why {
+                NoWorker::Full => {
+                    Status::resource_exhausted(format!("no capacity: {worker_id} is full"))
+                }
+                NoWorker::None => Status::unavailable(format!("no tunnel to {worker_id} here")),
+            })?;
         // The worker verifies the grant inside the stream; this proxy only relays.
         let inbound = request.into_inner().map_while(Result::ok);
-        let response = WorkerTunnelClient::new(channel)
-            .open_session(inbound)
-            .await?;
+        let response = match WorkerTunnelClient::new(channel).open_session(inbound).await {
+            Ok(response) => response,
+            Err(s) => {
+                if s.code() == tonic::Code::ResourceExhausted {
+                    // Our figure was stale; the peer tries another worker.
+                    // Give back this slot first so it isn't counted.
+                    drop(slot);
+                    self.proxy.tunnels.mark_full(&worker_id);
+                } else if limen_tunnel::refusal::is_draining(&s) {
+                    // The peer tries another worker (the status, with its
+                    // marker, goes back as is); stop choosing this one here.
+                    drop(slot);
+                    self.proxy.tunnels.remove_worker(&worker_id);
+                }
+                return Err(s);
+            }
+        };
         tracing::info!(worker = %worker_id, "relaying a peered session");
-        Ok(Response::new(Box::pin(response.into_inner())))
+        // The slot lives as long as the stream back to the peer.
+        let outbound = response.into_inner().map(move |frame| {
+            let _ = &slot;
+            frame
+        });
+        Ok(Response::new(Box::pin(outbound)))
     }
 
     async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
@@ -110,23 +137,30 @@ pub(crate) struct PeerState {
     channels: Mutex<HashMap<String, Channel>>,
 }
 
-/// A worker reachable through another proxy.
+/// A worker reachable through another proxy. Its load is counted by the
+/// proxy holding the tunnel, while the session lasts.
 pub(crate) struct Remote {
     pub worker_id: String,
+    /// From the registry (the worker's certified name), if it has one.
+    pub worker_name: Option<String>,
     pub proxy_id: String,
     pub channel: Channel,
 }
 
-/// Find a worker whose labels satisfy `accept`, held by another proxy.
+/// Find a worker whose labels satisfy `accept` and that is not in
+/// `exclude`, held by another proxy, chosen by [`p2c`] on the load the
+/// holding proxies last reported.
 pub(crate) async fn find(
     proxy: &Proxy,
     accept: impl Fn(&std::collections::BTreeMap<String, String>) -> bool,
-) -> Result<Option<Remote>, Status> {
+    exclude: &[String],
+) -> Result<Result<Remote, NoWorker>, Status> {
     let tunnels = registry(proxy).await?;
     let candidates: Vec<&PeerTunnel> = tunnels
         .iter()
         .filter(|t| {
             !t.peer_address.is_empty()
+                && !exclude.contains(&t.worker_id)
                 && accept(
                     &t.worker_labels
                         .iter()
@@ -136,16 +170,35 @@ pub(crate) async fn find(
         })
         .collect();
     if candidates.is_empty() {
-        return Ok(None);
+        return Ok(Err(NoWorker::None));
     }
-    let pick = candidates[rand::random_range(0..candidates.len())];
+    let Some(pick) = p2c(&candidates, |t| peer_load(t).ratio(), &mut rand::rng()) else {
+        return Ok(Err(NoWorker::Full));
+    };
     let channel = peer_channel(proxy, &pick.proxy_id, &pick.peer_address)
         .map_err(|e| Status::internal(e.to_string()))?;
-    Ok(Some(Remote {
+    // Control planes before names send none; the certified label has it too.
+    let worker_name = Some(pick.worker_name.as_str())
+        .filter(|n| !n.is_empty())
+        .or_else(|| {
+            pick.worker_labels
+                .get(limen_core::names::NAME_LABEL)
+                .map(String::as_str)
+        })
+        .map(str::to_owned);
+    Ok(Ok(Remote {
         worker_id: pick.worker_id.clone(),
+        worker_name,
         proxy_id: pick.proxy_id.clone(),
         channel,
     }))
+}
+
+fn peer_load(t: &PeerTunnel) -> Load {
+    Load {
+        active: t.active_sessions,
+        max: t.max_sessions,
+    }
 }
 
 async fn registry(proxy: &Proxy) -> Result<Vec<PeerTunnel>, Status> {

@@ -39,6 +39,21 @@ pub async fn ship<F>(spool: Spool, channel: F, shutdown: watch::Receiver<bool>)
 where
     F: Fn() -> anyhow::Result<Channel> + Send + Sync + 'static,
 {
+    // Proxies stop at once; the deadline is the shutdown.
+    ship_until(spool, channel, shutdown.clone(), shutdown).await;
+}
+
+/// Like [`ship`], but when `drain` flips it goes on until the spool is
+/// empty, and stops at once only when `deadline` flips (what is left stays
+/// in the spool, for the next start).
+pub async fn ship_until<F>(
+    spool: Spool,
+    channel: F,
+    drain: watch::Receiver<bool>,
+    deadline: watch::Receiver<bool>,
+) where
+    F: Fn() -> anyhow::Result<Channel> + Send + Sync + 'static,
+{
     let channel = Arc::new(channel);
     let consumer = ConsumerConfig {
         name: TO_CONTROL_PLANE.into(),
@@ -52,15 +67,22 @@ where
             let channel = Arc::clone(&channel);
             async move {
                 let ch = channel().map_err(|e| ShipError::Retry(e.to_string()))?;
-                let events = batch.into_iter().map(|(_, e)| e).collect();
-                AuditIngestClient::new(ch)
-                    .ingest(IngestRequest { events })
-                    .await
-                    .map(|_| ())
-                    .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
+                let events: Vec<_> = batch.into_iter().map(|(_, e)| e).collect();
+                // Delivery is at least once (events keep their ids, and the console and
+                // the verifier count each once), so a call that
+                // crossed a graceful close is simply sent again.
+                limen_tunnel::connect::retry_if_went_away("audit ingest", || {
+                    let mut client = AuditIngestClient::new(ch.clone());
+                    let events = events.clone();
+                    async move { client.ingest(IngestRequest { events }).await }
+                })
+                .await
+                .map(|_| ())
+                .map_err(|s| ShipError::Retry(format!("{:?}: {}", s.code(), s.message())))
             }
         },
-        shutdown,
+        drain,
+        deadline,
     )
     .await;
 }

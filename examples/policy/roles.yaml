@@ -11,6 +11,10 @@ spec:
       db: { roles: [limen_readonly] }
     - resources: { kind: [ssh], labels: { env: [staging] } }
       ssh: { logins: [ubuntu] }
+    # Read the app's keys on staging caches. The server's own ACL for limen-ro
+    # is the second layer (ADR-0034).
+    - resources: { kind: [redis], labels: { env: [staging] } }
+      redis: { users: [limen-ro], keys: ["app:*"] }
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }
 ---

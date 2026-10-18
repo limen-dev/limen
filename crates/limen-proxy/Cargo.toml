@@ -30,6 +30,7 @@ clap.workspace = true
 futures.workspace = true
 governor.workspace = true
 http.workspace = true
+http-body.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -50,7 +51,12 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+http-body-util.workspace = true
 limen-testkit.workspace = true
+
+[features]
+# Test builds only (limen-e2e): report intervals past the release cap.
+test-hooks = []
 
 [lints]
 workspace = true

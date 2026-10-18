@@ -3,7 +3,7 @@
 //! The first frame carries the proxy's signed grant. The worker checks it
 //! independently (defense in depth: both proxy and worker must allow), gets
 //! per-session SSH certificates from the control plane, then bridges the
-//! frame stream to its SSH server.
+//! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
 
@@ -21,16 +21,26 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
-use crate::Worker;
+use crate::redis;
 use crate::ssh::{SshSessionConfig, serve};
+use crate::{SessionGuard, Worker};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
 
 const FRAME_CHUNK: usize = 32 * 1024;
 
+/// How long a session cut short (drain, TTL) waits for its output pump.
+pub(crate) const PUMP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Why a session ended when the worker ended it at its drain timeout.
+pub(crate) const WORKER_DRAIN: &str = "worker_drain";
+
+/// `guard` holds the session's slot under the worker's cap: dropped on any
+/// early return, otherwise moved into the session task.
 pub(crate) async fn open(
     worker: Worker,
+    guard: SessionGuard,
     mut inbound: Streaming<TunnelFrame>,
 ) -> Result<Response<FrameStream>, Status> {
     let first = tokio::time::timeout(std::time::Duration::from_secs(10), inbound.message())
@@ -52,79 +62,16 @@ pub(crate) async fn open(
         e
     })?;
 
-    let guard = worker.session_started();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<TunnelFrame, Status>>(64);
     let _ = tx
         .send(Ok(TunnelFrame {
             frame: Some(Frame::Opened(SessionOpened {})),
         }))
         .await;
-    let (ours, pump) = bridge(inbound, tx.clone());
-
-    let expires = config_expiry(&signed);
-    let until = move || {
-        (expires - OffsetDateTime::now_utc())
-            .max(time::Duration::ZERO)
-            .unsigned_abs()
-    };
-    match admitted {
-        Admitted::Ssh(config) => {
-            let session_id = config.session_id.clone();
-            let audit = worker.audit.clone();
-            tokio::spawn(async move {
-                let _guard = guard;
-                let (reason, outcome) =
-                    match tokio::time::timeout(until(), serve(ours, *config, audit)).await {
-                        Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
-                        Ok(Err(e)) => {
-                            (format!("error: {e}"), crate::ssh::SessionOutcome::default())
-                        }
-                        Err(_) => (
-                            "max_session_ttl reached".to_owned(),
-                            crate::ssh::SessionOutcome::default(),
-                        ),
-                    };
-                let _ = pump.await;
-                tracing::info!(session = %session_id, %reason, recording = %outcome.recording_uri, "session ended");
-                let _ = tx
-                    .send(Ok(TunnelFrame {
-                        frame: Some(Frame::Close(SessionClose {
-                            reason,
-                            recording_uri: outcome.recording_uri,
-                            recording_sha256: outcome.recording_sha256,
-                        })),
-                    }))
-                    .await;
-            });
-        }
-        Admitted::Kube(request) => {
-            let worker = worker.clone();
-            tokio::spawn(async move {
-                let _guard = guard;
-                crate::kube::serve(worker, *request, ours).await;
-                let _ = pump.await;
-                let _ = tx
-                    .send(Ok(TunnelFrame {
-                        frame: Some(Frame::Close(SessionClose::default())),
-                    }))
-                    .await;
-            });
-        }
-    }
-    Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
-}
-
-/// Bridge the tunnel frames to a byte stream: what the proxy sends comes out
-/// of the returned stream, and what is written to it goes back as frames. The
-/// handle finishes when everything the session wrote has been sent.
-fn bridge(
-    mut inbound: Streaming<TunnelFrame>,
-    tx: tokio::sync::mpsc::Sender<Result<TunnelFrame, Status>>,
-) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
     let (ours, theirs) = tokio::io::duplex(256 * 1024);
     let (mut theirs_read, mut theirs_write) = tokio::io::split(theirs);
 
-    // Proxy → session.
+    // Proxy → SSH server.
     tokio::spawn(async move {
         while let Some(Ok(frame)) = inbound.next().await {
             match frame.frame {
@@ -140,27 +87,112 @@ fn bridge(
         let _ = theirs_write.shutdown().await;
     });
 
-    // Session → proxy.
-    let pump = tokio::spawn(async move {
-        let mut buf = vec![0u8; FRAME_CHUNK];
-        loop {
-            match theirs_read.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx
-                        .send(Ok(TunnelFrame {
-                            frame: Some(Frame::Data(buf[..n].to_vec())),
-                        }))
-                        .await
-                        .is_err()
-                    {
-                        break;
+    // SSH server → proxy, then the closing frame with the recording.
+    let session_id = admitted.session_id();
+    let expires = config_expiry(&signed);
+    let audit = worker.audit.clone();
+    let end = worker.end_sessions();
+    let kube_worker = worker.clone();
+    tokio::spawn(async move {
+        let _guard = guard;
+        let pump_tx = tx.clone();
+        let pump = tokio::spawn(async move {
+            let mut buf = vec![0u8; FRAME_CHUNK];
+            loop {
+                match theirs_read.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if pump_tx
+                            .send(Ok(TunnelFrame {
+                                frame: Some(Frame::Data(buf[..n].to_vec())),
+                            }))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                 }
             }
+        });
+        let until = (expires - OffsetDateTime::now_utc())
+            .max(time::Duration::ZERO)
+            .unsigned_abs();
+        let serving = async {
+            match admitted {
+                Admitted::Ssh(config) => serve(ours, *config, audit, end).await,
+                Admitted::Db(config) => {
+                    // A drain that reaches its timeout ends database sessions too.
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::db::serve(ours, *config, audit) => {
+                            r.map(|()| crate::ssh::SessionOutcome::default())
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Redis(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = redis::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Kube(request) => {
+                    // One HTTP request (and any stream it upgrades to). A
+                    // drain that reaches its timeout ends it too.
+                    let mut end = end;
+                    tokio::select! {
+                        () = crate::kube::serve(kube_worker, *request, ours) => {
+                            Ok(crate::ssh::SessionOutcome::default())
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+            }
+        };
+        let (reason, outcome) = match tokio::time::timeout(until, serving).await {
+            // The proxy's session.end carries this reason (`data.reason`).
+            Ok(Ok(outcome)) if outcome.ended_by_drain => (WORKER_DRAIN.to_owned(), outcome),
+            Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
+            Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
+            Err(_) => (
+                "max_session_ttl reached".to_owned(),
+                crate::ssh::SessionOutcome::default(),
+            ),
+        };
+        // The pump ends when the SSH server lets go of its stream. A session
+        // that was cut short (drain, TTL) may not have let go: don't wait
+        // for it forever.
+        if reason == "ended" {
+            let _ = pump.await;
+        } else {
+            let stop_pump = pump.abort_handle();
+            if tokio::time::timeout(PUMP_WAIT, pump).await.is_err() {
+                stop_pump.abort();
+            }
         }
+        tracing::info!(session = %session_id, %reason, recording = %outcome.recording_uri, "session ended");
+        let _ = tx
+            .send(Ok(TunnelFrame {
+                frame: Some(Frame::Close(SessionClose {
+                    reason,
+                    recording_uri: outcome.recording_uri,
+                    recording_sha256: outcome.recording_sha256,
+                })),
+            }))
+            .await;
     });
-    (ours, pump)
+    Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
 }
 
 fn config_expiry(signed: &Signed) -> OffsetDateTime {
@@ -171,9 +203,29 @@ fn config_expiry(signed: &Signed) -> OffsetDateTime {
         .unwrap_or_else(OffsetDateTime::now_utc)
 }
 
+/// A session the worker agreed to serve.
 enum Admitted {
     Ssh(Box<SshSessionConfig>),
+    Db(Box<crate::db::DbSessionConfig>),
+    Redis(Box<redis::Prepared>),
     Kube(Box<crate::kube::Admitted>),
+}
+
+impl Admitted {
+    fn session_id(&self) -> String {
+        match self {
+            Admitted::Ssh(c) => c.session_id.clone(),
+            Admitted::Db(c) => c.session_id.to_string(),
+            Admitted::Redis(p) => p.session_id().to_owned(),
+            Admitted::Kube(k) => k.session_id.clone(),
+        }
+    }
+}
+
+/// What the grant check established, shared by every protocol.
+struct Checked {
+    verified: limen_session::grant::VerifiedGrant,
+    snapshot: limen_session::snapshot::Snapshot,
 }
 
 /// Every check a session must pass before the worker touches the target.
@@ -199,40 +251,48 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
     {
         return Err(Status::permission_denied("grant already used"));
     }
-    match grant.kind.as_str() {
-        "ssh" => admit_ssh(worker, signed, &verified, now)
+    let kind = grant.kind.clone();
+    // Our own policy decision, from our own snapshot.
+    let snapshot = worker
+        .policy
+        .fresh(now)
+        .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
+    let checked = Checked { verified, snapshot };
+    match kind.as_str() {
+        "ssh" => admit_ssh(worker, signed, &checked)
             .await
             .map(|c| Admitted::Ssh(Box::new(c))),
-        "kube" => crate::kube::admit(worker, &verified, now).map(|k| Admitted::Kube(Box::new(k))),
+        "postgres" | "redshift" | "mysql" => admit_db(worker, &checked)
+            .await
+            .map(|c| Admitted::Db(Box::new(c))),
+        "redis" => admit_redis(worker, &checked)
+            .await
+            .map(|c| Admitted::Redis(Box::new(c))),
+        "kube" => {
+            crate::kube::admit(worker, &checked.verified, now).map(|k| Admitted::Kube(Box::new(k)))
+        }
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
     }
 }
 
-async fn admit_ssh(
-    worker: &Worker,
-    signed: &Signed,
-    verified: &limen_session::grant::VerifiedGrant,
-    now: OffsetDateTime,
-) -> Result<SshSessionConfig, Status> {
+/// The policy checks every kind shares: locks, the principal, and whether
+/// this worker's labels may serve the resource.
+fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Result<(), Status> {
     let creds = worker.credentials();
-    let grant = &verified.grant;
-    // Our own policy decision, from our own snapshot.
-    let snapshot = worker
-        .policy
-        .fresh(now)
-        .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
+    let grant = &checked.verified.grant;
+    let snapshot = &checked.snapshot;
     if let Some(why) = snapshot
         .restrictions
-        .blocks(&verified.user.username, &grant.session_id)
+        .blocks(&checked.verified.user.username, &grant.session_id)
     {
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {
-        roles: &verified.user.roles,
+        roles: &checked.verified.user.roles,
         resource: &grant.resource,
-        principal: Principal::SshLogin(grant.principal.clone()),
+        principal,
     });
     if !decision.is_allowed() {
         return Err(Status::permission_denied(format!(
@@ -247,6 +307,182 @@ async fn admit_ssh(
             "this worker may not serve the resource",
         ));
     }
+    Ok(())
+}
+
+/// The longest a Redis session may take to open its connection to the target.
+const REDIS_PREPARE: std::time::Duration = std::time::Duration::from_secs(25);
+
+async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::RedisUser(grant.principal.clone()),
+    )?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.redis.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a Redis resource"))?;
+    let grants = checked.snapshot.policy.redis_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = redis::SessionConfig::new(
+        grant.session_id.clone(),
+        grant.username.clone(),
+        grant.principal.clone(),
+        grant.resource.clone(),
+        target,
+    );
+    // Connect, TLS, login, and the command table each have their own limit;
+    // this one bounds them together so the proxy isn't kept waiting.
+    tokio::time::timeout(
+        REDIS_PREPARE,
+        redis::prepare(&worker.redis, grants, config),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out"))
+    .and_then(|r| r)
+    .map_err(|e| {
+        // The detail names the server and the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't open the Redis connection");
+        Status::unavailable(
+            "couldn't connect to the Redis server; ask an admin to check the worker's log",
+        )
+    })
+}
+
+async fn admit_db(
+    worker: &Worker,
+    checked: &Checked,
+) -> Result<crate::db::DbSessionConfig, Status> {
+    use crate::db::{DbSessionConfig, Engine, Target, secret};
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::DbRole {
+            role: grant.principal.clone(),
+            database: grant.database.clone(),
+        },
+    )?;
+    let resource = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .ok_or_else(|| Status::failed_precondition("unknown resource"))?;
+    let (engine, spec) = match grant.kind.as_str() {
+        "postgres" => (Engine::Postgres, resource.spec.postgres.as_ref()),
+        "redshift" => (Engine::Redshift, resource.spec.redshift.as_ref()),
+        _ => (Engine::Mysql, resource.spec.mysql.as_ref()),
+    };
+    let spec = spec.ok_or_else(|| Status::failed_precondition("resource is not a database"))?;
+    if !limen_policy::valid_db_role(&grant.principal) {
+        return Err(Status::permission_denied("not a limen_* role"));
+    }
+    let target = Target::from_spec(spec, worker.allow_insecure_db_targets())
+        .await
+        .map_err(Status::failed_precondition)?;
+    let (login_user, password) = if spec.iam_auth {
+        iam_login(worker, engine, spec, grant).await?
+    } else {
+        let dir = spec.password_dir.as_deref().ok_or_else(|| {
+            Status::failed_precondition("the resource has no password_dir (secret mode)")
+        })?;
+        let password = secret::role_password(dir, &grant.principal)
+            .await
+            .map_err(|e| {
+                tracing::error!(resource = %grant.resource, error = %e, "can't load the database role's password");
+                Status::failed_precondition("the worker has no credential for this database role")
+            })?;
+        (grant.principal.clone(), password)
+    };
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    Ok(DbSessionConfig {
+        session_id,
+        username: checked.verified.user.username.clone(),
+        resource: grant.resource.clone(),
+        engine,
+        role: grant.principal.clone(),
+        login_user,
+        database: grant.database.clone(),
+        target,
+        password,
+        normalize_literals: spec.normalize_literals,
+        registry: Arc::clone(&worker.db_registry),
+    })
+}
+
+/// The login for an IAM-authenticated database: `(user, password)`.
+/// Unverified against the real AWS services (ADR-0033).
+async fn iam_login(
+    worker: &Worker,
+    engine: crate::db::Engine,
+    spec: &limen_policy::model::DbTarget,
+    grant: &limen_proto::v1::SessionGrant,
+) -> Result<(String, limen_core::secret::Secret<String>), Status> {
+    use crate::db::iam;
+    let region = spec.region.as_deref().ok_or_else(|| {
+        Status::failed_precondition("IAM authentication needs the resource's region")
+    })?;
+    let unavailable = |e: String| {
+        tracing::error!(resource = %grant.resource, error = %e, "IAM database authentication failed");
+        Status::unavailable("couldn't get AWS credentials for the database")
+    };
+    let creds = worker.aws_credentials().await.map_err(unavailable)?;
+    let now = OffsetDateTime::now_utc();
+    match engine {
+        crate::db::Engine::Postgres | crate::db::Engine::Mysql => Ok((
+            grant.principal.clone(),
+            iam::rds_auth_token(&creds, region, &spec.endpoint, &grant.principal, now),
+        )),
+        crate::db::Engine::Redshift => {
+            let kind = match (&spec.workgroup, &spec.cluster_identifier) {
+                (Some(workgroup), _) => iam::RedshiftKind::Serverless { workgroup },
+                (None, Some(cluster_identifier)) => {
+                    iam::RedshiftKind::Provisioned { cluster_identifier }
+                }
+                (None, None) => {
+                    return Err(Status::failed_precondition(
+                        "a Redshift resource with IAM needs cluster_identifier or workgroup",
+                    ));
+                }
+            };
+            let login = iam::redshift_login(
+                &iam::Endpoints::from_env(),
+                &creds,
+                region,
+                kind,
+                &grant.principal,
+                &grant.database,
+                now,
+            )
+            .await
+            .map_err(unavailable)?;
+            Ok((login.user, login.password))
+        }
+    }
+}
+
+async fn admit_ssh(
+    worker: &Worker,
+    signed: &Signed,
+    checked: &Checked,
+) -> Result<SshSessionConfig, Status> {
+    let grant = &checked.verified.grant;
+    let snapshot = &checked.snapshot;
+    check_policy(
+        worker,
+        checked,
+        Principal::SshLogin(grant.principal.clone()),
+    )?;
     let target = snapshot
         .policy
         .resource(&grant.resource)

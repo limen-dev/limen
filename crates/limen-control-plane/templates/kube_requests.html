@@ -7,7 +7,7 @@
     <p class="sub">Every Kubernetes API request through Limen, newest first, in kubectl's terms. Bodies and query strings are not kept here; the complete, signed events are in your audit sinks.</p>
   </div>
 </div>
-<nav class="tabs" aria-label="Audit views"><a href="/console/audit">All events</a><a href="/console/audit/kubernetes" aria-current="page">Kubernetes</a></nav>
+<nav class="tabs" aria-label="Audit views"><a href="/console/audit">All events</a><a href="/console/audit/kubernetes" aria-current="true">Kubernetes</a></nav>
 <form method="get" action="/console/audit/kubernetes" class="filters">
   <label><span>Cluster</span>
     <select name="cluster"><option value="">All clusters</option>{% for c in clusters %}<option value="{{ c }}"{% if cluster_filter.as_deref() == Some(c.as_str()) %} selected{% endif %}>{{ c }}</option>{% endfor %}</select>

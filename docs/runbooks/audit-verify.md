@@ -19,6 +19,8 @@ Needs the `verifier_policy_json` permissions (read-only on the bucket, `kms:Decr
 | `sequence N found where M was expected` | A batch or manifest was deleted. |
 | `chain broken` | A manifest was changed or removed. |
 | `signature` | The manifest isn't signed by a control plane certificate from this CA (wrong `--ca-file`, or a forged manifest). |
+| `GAP` (a producer's sequence numbers are missing) | Events that were acknowledged and never shipped: an `ephemeral` control plane replica killed without warning, a spool lost with its disk (a proxy on an `emptyDir`), or events dropped in `degrade` failure mode. A gap names the producer and the missing numbers. It is part of the history, so **every later run reports it again**: record it in your incident notes rather than trying to clear it. A producer whose first number is not 0 has lost its first events. |
+| `CONFLICT` (one sequence number on two different events) | Two producers sharing an instance id, or a tampered event. Treat as a security incident. |
 
 A recovered original from a prior version restores the chain. Otherwise treat it as a security incident: the Datadog copy and the control plane's local spool may still hold the events.
 

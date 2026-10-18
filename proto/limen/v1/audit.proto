@@ -31,3 +31,26 @@ message RecordingChunk {
 message UploadRecordingResponse {
   string uri = 1;
 }
+
+// Served by the control plane, called only by a peer control plane (a live
+// replica in the registry). An ephemeral replica that is shutting down hands
+// the audit records its sinks have not shipped to a peer, which appends them
+// to its own spool. Events keep their event_id, so a batch sent twice (the
+// receiver died before acking) is removed downstream by the same idempotency
+// key the sinks already use.
+service AuditHandoff {
+  rpc Handoff(stream HandoffBatch) returns (stream HandoffAck);
+}
+
+message HandoffBatch {
+  // JSON-encoded audit events (limen_audit::Event), from any producer.
+  repeated bytes events = 1;
+  // The sender's spool index of the last event in this batch.
+  uint64 last_index = 2;
+}
+
+// Sent once per batch, after the batch is durable in the receiver's spool.
+message HandoffAck {
+  // The batch's last_index: everything up to and including it is durable.
+  uint64 durable_upto = 1;
+}

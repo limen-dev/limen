@@ -185,3 +185,268 @@ async fn login_state_is_single_use_and_expires() {
         None
     );
 }
+
+/// A database session has no recording; the console lists its statements and
+/// how each ended, from the audit events, in any order of arrival.
+#[tokio::test(flavor = "multi_thread")]
+async fn database_sessions_list_their_statements() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let query = |text: &str| {
+        event(
+            EventKind::DbQuery,
+            s,
+            DEVELOPER,
+            json!({ "protocol": "mysql", "phase": "simple", "statement_type": "select", "statement": text, "db_role": "limen_rw", "database": "orders" }),
+        )
+    };
+    let end_of = |q: &Event, status: &str, rows: i64| {
+        let mut data = json!({ "protocol": "mysql", "status": status, "rows": rows, "duration_ms": 7, "query_id": q.event_id });
+        if status == "error" {
+            data["error_code"] = json!("42S02");
+            data["error"] = json!("Table 'orders.nope' doesn't exist");
+        }
+        event(EventKind::DbQueryEnd, s, DEVELOPER, data)
+    };
+    let (q1, q2, q3) = (
+        query("select 1"),
+        query("select * from nope"),
+        query("select 2"),
+    );
+    // The second statement's end arrives before the statement itself.
+    store::project_events(
+        &db,
+        &[q1.clone(), end_of(&q1, "ok", 1), end_of(&q2, "error", 0)],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[q2.clone(), q3.clone(), end_of(&q3, "ok", 1)])
+        .await
+        .expect("second batch");
+    // Redelivery changes nothing.
+    store::project_events(&db, &[q1, end_of(&q2, "error", 0)])
+        .await
+        .expect("redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("statements");
+    let texts: Vec<_> = list
+        .iter()
+        .map(|r| r.statement.as_deref().unwrap_or_default())
+        .collect();
+    assert_eq!(texts, ["select 1", "select * from nope", "select 2"]);
+    assert_eq!(list[1].status.as_deref(), Some("error"));
+    assert_eq!(list[1].error_code.as_deref(), Some("42S02"));
+    assert_eq!(list[0].rows, Some(1));
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 1)
+    );
+
+    // The audit trail table keeps no statement text.
+    let leaked: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE summary LIKE '%select%'")
+            .fetch_one(&db)
+            .await
+            .expect("scan");
+    assert_eq!(leaked, 0);
+    // Statement text expires with the audit events: after 30 days it is deleted.
+    let old = Uuid::now_v7();
+    let mut stale = event(
+        EventKind::DbQuery,
+        old,
+        DEVELOPER,
+        json!({ "phase": "simple", "statement_type": "select", "statement": "select 'old'" }),
+    );
+    stale.time = time::OffsetDateTime::now_utc() - time::Duration::days(31);
+    store::project_events(&db, &[stale]).await.expect("old");
+    assert_eq!(
+        store::db_statements(&db, old, 10).await.expect("old").len(),
+        1
+    );
+    limen_control_plane::db::cleanup(&db)
+        .await
+        .expect("cleanup");
+    assert!(
+        store::db_statements(&db, old, 10)
+            .await
+            .expect("gone")
+            .is_empty()
+    );
+    assert_eq!(
+        store::db_statements(&db, s, 10)
+            .await
+            .expect("recent")
+            .len(),
+        3
+    );
+    // A session that never ran anything has nothing.
+    let none = Uuid::now_v7();
+    assert!(
+        store::db_statements(&db, none, 10)
+            .await
+            .expect("none")
+            .is_empty()
+    );
+}
+
+/// A Redis session has no recording; the console lists its commands (keys,
+/// never values) and the ones policy refused, whatever order they arrive in.
+#[tokio::test(flavor = "multi_thread")]
+async fn redis_sessions_list_their_commands() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let get = event(
+        EventKind::RedisCommand,
+        s,
+        DEVELOPER,
+        json!({ "command": "GET", "subcommand": null, "keys": ["app:greeting"], "keys_total": 1, "keys_known": true, "arity": 2, "resource": "cache-staging", "redis_user": "limen-ro" }),
+    );
+    let del = event(
+        EventKind::RedisCommand,
+        s,
+        DEVELOPER,
+        json!({ "command": "DEL", "keys": ["a", "b"], "keys_total": 250, "keys_known": true, "arity": 251 }),
+    );
+    let refused = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "redis", "resource": "cache-staging", "redis_user": "limen-ro", "command": "FLUSHALL", "subcommand": null, "reason": "FLUSHALL is denied unless the role lists it in redis.allow_commands" }),
+    );
+    // An auth.denied that is not about Redis is not a command.
+    let other = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "ssh", "resource": "web", "login": "root", "reason": "no" }),
+    );
+    store::project_events(&db, &[refused.clone(), get.clone()])
+        .await
+        .expect("first batch");
+    store::project_events(&db, &[del, other, get, refused])
+        .await
+        .expect("second batch and redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("commands");
+    let texts: Vec<_> = list
+        .iter()
+        .map(|r| r.statement.as_deref().unwrap_or_default())
+        .collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(texts.contains(&"GET app:greeting"));
+    assert!(texts.contains(&"FLUSHALL"));
+    assert!(texts.contains(&"DEL a b … (+248 more keys)"), "{texts:?}");
+    let flush = list
+        .iter()
+        .find(|r| r.statement.as_deref() == Some("FLUSHALL"))
+        .expect("refused command");
+    assert_eq!(flush.status.as_deref(), Some("denied"));
+    let allowed = list
+        .iter()
+        .find(|r| r.statement.as_deref() == Some("GET app:greeting"))
+        .expect("allowed command");
+    assert_eq!(allowed.status.as_deref(), Some("allowed"));
+    assert!(
+        flush
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("denied")
+    );
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 1)
+    );
+}
+
+fn kube_request(
+    user: &str,
+    cluster: &str,
+    verb: &str,
+    resource: &str,
+    name: &str,
+    status: u16,
+) -> Event {
+    let mut e = event(
+        EventKind::KubeRequest,
+        Uuid::now_v7(),
+        user,
+        json!({
+            "kind": "kube", "resource": cluster, "verb": verb, "k8s_resource": resource,
+            "k8s_group": "", "subresource": "", "namespace": "default", "name": name,
+            "method": "GET", "status": status, "latency_ms": 12,
+            // Not part of the view, and must not be kept.
+            "path": "/api/v1/namespaces/default/pods?labelSelector=secret=1", "groups": ["limen:edit"],
+        }),
+    );
+    e.session_id = Some(Uuid::now_v7());
+    e
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kubernetes_requests_are_listed_in_kubectls_terms() {
+    let Some(db) = fresh_db().await else { return };
+    let events = [
+        kube_request(DEVELOPER, "eks-dev", "list", "pods", "", 200),
+        kube_request(DEVELOPER, "eks-dev", "delete", "pods", "web", 403),
+        kube_request(GUEST, "eks-prod", "get", "secrets", "db", 200),
+    ];
+    // Delivered twice: the projection is idempotent.
+    store::project_events(&db, &events).await.expect("first");
+    store::project_events(&db, &events).await.expect("again");
+
+    let all = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("list");
+    assert_eq!(all.len(), 3);
+
+    let problems = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            problems_only: true,
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("problems");
+    assert_eq!(problems.len(), 1);
+    assert_eq!(
+        (problems[0].verb.as_str(), problems[0].name.as_str()),
+        ("delete", "web")
+    );
+    assert_eq!(problems[0].status, 403);
+
+    let prod = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            cluster: Some("eks-prod".into()),
+            username: Some(GUEST.into()),
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("prod");
+    assert_eq!(prod.len(), 1);
+    assert_eq!(prod[0].resource, "secrets");
+
+    let (clusters, verbs) = store::kube_filter_options(&db).await.expect("options");
+    assert_eq!(clusters, ["eks-dev", "eks-prod"]);
+    assert_eq!(verbs, ["delete", "get", "list"]);
+
+    // Only the request's shape is kept, never the query string.
+    let kept: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kube_requests WHERE row_to_json(kube_requests)::text LIKE '%secret=1%'",
+    )
+    .fetch_one(&db)
+    .await
+    .expect("count");
+    assert_eq!(kept, 0);
+}

@@ -1,4 +1,4 @@
-# What a Limen kube worker needs in the cluster it serves (ADR-0033): a service
+# What a Limen kube worker needs in the cluster it serves (ADR-0038): a service
 # account that can impersonate users, the Limen groups, and the session extra.
 # It can do nothing else: what a user may do is decided by the RoleBindings in
 # limen-groups.yaml, evaluated by the API server for the impersonated identity.
