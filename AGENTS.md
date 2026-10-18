@@ -9,6 +9,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 - **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
 - **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
 - **Commits.** Conventional, small, focused. Stage specific files, never `git add -A`. Don't push or tag unless asked.
+- **Pull requests.** Always open them as drafts (`gh pr create --draft`). CI doesn't run on a draft; it starts when the PR is marked ready for review.
 - **Certificates.** Don't bypass browser warnings or touch trust stores. Dev CA: `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Agent use (cost)

@@ -11,7 +11,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # Pull requests are opened as drafts and run nothing until they are marked
+  # ready for review (the ready_for_review type starts the run then).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # The release workflow runs the whole suite before it builds anything, and
   # dispatches it for the release pull request (whose commits are pushed with
   # the workflow token, which doesn't start workflows by itself).
@@ -44,6 +47,8 @@ jobs:
   # Releases and manual runs (workflow_dispatch) always run everything.
   changes:
     name: what changed
+    # Every other job needs this one, so a draft pull request runs nothing.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 10
     outputs:
@@ -417,7 +422,7 @@ jobs:
   ci:
     name: ci
     needs: [changes, lint, test-linux, test-macos, supply-chain, images, actionlint, terraform-and-dashboards]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     timeout-minutes: 5
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     env:

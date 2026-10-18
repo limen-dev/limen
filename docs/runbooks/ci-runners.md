@@ -4,6 +4,8 @@ CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted min
 
 ## What runs for a change
 
+**Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review (and again on every push after that). Pushes to `main`, releases and manual runs are unaffected.
+
 The `what changed` job reads the diff against the merge base and decides which jobs run. Skipped jobs count as passing in the `ci` summary.
 
 | Change touches | Jobs |
