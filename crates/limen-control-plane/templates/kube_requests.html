@@ -40,7 +40,7 @@
       <td class="mono">{% if r.name.is_empty() %}—{% else %}{{ r.name }}{% endif %}</td>
       <td class="nowrap"><span class="pill {{ r.tone }}">{{ r.status }}</span>{% if let Some(e) = r.error %} <span class="sub">{{ e }}</span>{% endif %}</td>
       <td class="nowrap">{{ r.latency }}</td>
-      <td class="nowrap">{% if let Some(s) = r.session_path %}<a href="/console/sessions/{{ s }}">session</a>{% endif %}</td>
+      <td class="nowrap">{% if let Some(s) = r.session_path %}<a href="/console/sessions/{{ s }}">session</a>{% endif %}{% if let Some(t) = r.stream_path %} · <a href="/console/sessions/{{ t }}">recording</a>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="10" class="empty">No Kubernetes requests match.</td></tr>

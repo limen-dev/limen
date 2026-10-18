@@ -464,3 +464,80 @@ async fn kubernetes_requests_are_listed_in_kubectls_terms() {
     .expect("count");
     assert_eq!(kept, 0);
 }
+
+fn login_request(login: &str, cluster: &str, verb: &str, status: u16, seconds: i64) -> Event {
+    let mut e = kube_request(DEVELOPER, cluster, verb, "pods", "web", status);
+    e.data["login_id"] = json!(login);
+    e.data["worker_id"] = json!("w1");
+    e.data["proxy_id"] = json!("p1");
+    e.time += time::Duration::seconds(seconds);
+    e
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_login_on_one_cluster_is_one_kubectl_session() {
+    let Some(db) = fresh_db().await else { return };
+    let (a0, a1, a2) = (
+        login_request("login-a", "eks-dev", "list", 200, 0),
+        login_request("login-a", "eks-dev", "get", 200, 30),
+        login_request("login-a", "eks-dev", "delete", 403, 90),
+    );
+    let other_login = login_request("login-b", "eks-dev", "get", 200, 10);
+    let other_cluster = login_request("login-a", "eks-prod", "get", 200, 20);
+    let no_login = kube_request(DEVELOPER, "eks-dev", "get", "pods", "web", 200);
+
+    // Out of order, and some delivered twice.
+    store::project_events(
+        &db,
+        &[a2.clone(), a0.clone(), other_login, other_cluster, no_login],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[a1, a0, a2])
+        .await
+        .expect("second batch");
+
+    let sessions = store::list_sessions(
+        &db,
+        &SessionFilter {
+            limit: 50,
+            ..SessionFilter::default()
+        },
+    )
+    .await
+    .expect("sessions");
+    // login-a/eks-dev, login-b/eks-dev, login-a/eks-prod. The event without a
+    // login (from before workers named it) belongs to no session.
+    assert_eq!(sessions.len(), 3, "{sessions:#?}");
+    assert!(
+        sessions
+            .iter()
+            .all(|s| s.kind.as_deref() == Some("kubectl"))
+    );
+
+    let main = sessions
+        .iter()
+        .find(|s| s.duration_ms == Some(90_000))
+        .expect("the 90 second session");
+    assert_eq!(main.resource.as_deref(), Some("eks-dev"));
+    assert_eq!(main.username.as_deref(), Some(DEVELOPER));
+    // The events are from just now, so the session is live.
+    assert!(main.active);
+
+    let (total, problems) = store::kube_session_counts(&db, main.session_id)
+        .await
+        .expect("counts");
+    assert_eq!((total, problems), (3, 1));
+    let requests = store::list_kube_requests(
+        &db,
+        &store::KubeFilter {
+            login_session: Some(main.session_id),
+            limit: 50,
+            ..store::KubeFilter::default()
+        },
+    )
+    .await
+    .expect("requests");
+    let verbs: Vec<_> = requests.iter().map(|r| r.verb.as_str()).collect();
+    assert_eq!(verbs, ["list", "get", "delete"], "oldest first");
+}

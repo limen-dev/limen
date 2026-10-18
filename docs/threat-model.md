@@ -131,7 +131,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | D: sign-in flooding | Separate per-IP limiter for console login; login state rows expire in 10 minutes and are cleaned up |
 | R: unattributed console changes | Every change is audited as the signed-in admin with `via=console` |
 | I: sensitive data in the console's audit trail | The `audit_events` table stores only a fixed list of summary fields (never statements, claims, or payloads), is readable by admins only, and is trimmed after 30 days. The sinks remain the record |
-| I: Kubernetes request details in the console's Kubernetes tab (ADR-0038) | The `kube_requests` table keeps only the request's shape: user, cluster, verb, resource, namespace, name, status, latency. Never a body, query string, header, or the exec command. Readable by admins only, trimmed after 30 days, and a convenience copy: the signed events are in the sinks |
+| I: Kubernetes request details in the console's Kubernetes tab (ADR-0038) | The `kube_requests` table keeps only the request's shape: user, cluster, verb, resource, namespace, name, status, latency. Never a body, query string, header, or the exec command. Each request is also grouped into a per-login console session (a row in `sessions`, derived from the login and cluster), readable by admins and by that user. Trimmed after 30 days, and a convenience copy: the signed events are in the sinks |
 | S: a stolen cookie lives longer now that sign-ins last 8 hours (A-console) | Lock, kill and every-request lock checks still end it at once; the lifetime is configurable (`LIMEN_CONSOLE_SESSION_TTL`) and capped by the maximum certificate lifetime. Limit: no device binding |
 
 ### TB8: CI platform ↔ control plane (bot login, ADR-0019)

@@ -557,6 +557,27 @@ pub async fn session_detail(
             s.proxy = with_name(&state, row.proxy_id.as_deref(), s.proxy).await;
             s.worker = with_name(&state, row.worker_id.as_deref(), s.worker).await;
             // Best effort: the page still renders without the statements.
+            let (requests, request_total, request_problems) = if s.is_kubectl {
+                let filter = store::KubeFilter {
+                    login_session: Some(row.session_id),
+                    limit: STATEMENT_LIMIT,
+                    ..store::KubeFilter::default()
+                };
+                let list = store::list_kube_requests(&state.db, &filter)
+                    .await
+                    .unwrap_or_default();
+                let (total, problems) = store::kube_session_counts(&state.db, row.session_id)
+                    .await
+                    .unwrap_or_default();
+                let shown = usize::try_from(STATEMENT_LIMIT).unwrap_or(500);
+                (
+                    list.iter().take(shown).map(kube_view).collect(),
+                    total,
+                    problems,
+                )
+            } else {
+                (Vec::new(), 0, 0)
+            };
             let (statements, statement_total, statement_errors) = if s.has_statements {
                 let list = store::db_statements(&state.db, row.session_id, STATEMENT_LIMIT)
                     .await
@@ -577,6 +598,9 @@ pub async fn session_detail(
                     chrome: chrome(&state, &auth, "sessions"),
                     s,
                     statements,
+                    requests,
+                    request_total,
+                    request_problems,
                     statement_total,
                     statement_errors,
                 }
@@ -1298,7 +1322,11 @@ fn kube_view(r: &store::KubeRow) -> KubeView {
         at: time_text(Some(r.at)),
         user_path: r.username.as_deref().map(path_segment),
         user: r.username.clone(),
-        session_path: r.session_id.map(|id| id.to_string()),
+        session_path: r.login_session.map(|id| id.to_string()),
+        stream_path: r
+            .session_id
+            .filter(|_| matches!(r.subresource.as_str(), "exec" | "attach" | "portforward"))
+            .map(|id| id.to_string()),
         cluster: r.cluster.clone(),
         verb: r.verb.clone(),
         resource,
@@ -1341,6 +1369,7 @@ pub async fn kube_requests(
         namespace: pick(&q.namespace),
         verb: pick(&q.verb),
         problems_only: q.problems.is_some_and(|p| p == "1"),
+        login_session: None,
         limit: PAGE_SIZE,
         offset,
     };

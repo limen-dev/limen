@@ -94,6 +94,8 @@ impl KubeConfig {
 pub(crate) struct Admitted {
     pub session_id: String,
     pub username: String,
+    /// The user's login, which groups their requests into one console session.
+    pub login_id: String,
     pub actor_type: &'static str,
     pub groups: Vec<String>,
     pub resource: String,
@@ -180,6 +182,7 @@ pub(crate) fn admit(
     Ok(Admitted {
         session_id: grant.session_id.clone(),
         username: grant.username.clone(),
+        login_id: grant.login_id.clone(),
         actor_type: limen_core::identity::actor_type(&grant.username),
         groups: grant.groups.clone(),
         resource: grant.resource.clone(),

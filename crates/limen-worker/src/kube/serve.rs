@@ -297,6 +297,7 @@ impl Record<'_> {
             "kind": "kube",
             "actor_type": admitted.actor_type,
             "resource": admitted.resource,
+            "login_id": admitted.login_id,
             "groups": admitted.groups,
             "worker_id": ctx.worker.id(),
             "proxy_id": admitted.proxy_id,
