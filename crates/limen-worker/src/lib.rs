@@ -1,10 +1,11 @@
 //! Limen worker: runs inside target networks, dials proxies outbound, and
 //! serves sessions over reverse tunnels (ADR-0003). Protocol handlers
-//! (SSH, PostgreSQL, MySQL, Redis, Kubernetes) arrive in Phases 2 to 6.
+//! (SSH in Phase 2, Redis in Phase 7; databases and Kubernetes later).
 
 pub mod db;
 pub mod recording;
 mod recordings;
+pub mod redis;
 mod session;
 pub mod ssh;
 
@@ -109,6 +110,15 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_FAILURE_MODE", default_value = "fail_closed")]
     pub audit_failure_mode: limen_audit::FailureMode,
 
+    /// CA bundle for TLS to Redis targets (for `ElastiCache`, the AWS bundle).
+    #[arg(long, env = "LIMEN_REDIS_CA_FILE")]
+    pub redis_ca_file: Option<PathBuf>,
+
+    /// JSON file of Redis ACL passwords: `{"<resource>": {"<user>": "<password>"}}`.
+    /// Used for targets that don't use IAM. The file is read at start-up.
+    #[arg(long, env = "LIMEN_REDIS_CREDENTIALS_FILE")]
+    pub redis_credentials_file: Option<PathBuf>,
+
     /// Most sessions this worker serves at once. Over it, new sessions are
     /// refused (`resource_exhausted`), and proxies stop choosing this worker
     /// until it has room. 0: no cap.
@@ -199,6 +209,7 @@ pub struct Worker {
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
+    pub(crate) redis: Arc<redis::target::Settings>,
     pub(crate) db_registry: Arc<db::Registry>,
     aws: Arc<tokio::sync::OnceCell<Result<db::iam::CredentialSource, String>>>,
     audit_spool: limen_audit::spool::Spool,
@@ -250,6 +261,10 @@ impl Worker {
             &creds.id,
             config.audit_failure_mode,
         )?;
+        let redis = redis::target::Settings::load(
+            config.redis_ca_file.as_deref(),
+            config.redis_credentials_file.as_deref(),
+        )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
         let sessions = SessionSlots::new(config.max_sessions);
         Ok((
@@ -264,6 +279,7 @@ impl Worker {
                 policy,
                 nonces: Arc::default(),
                 audit,
+                redis: Arc::new(redis),
                 db_registry: Arc::default(),
                 aws: Arc::default(),
                 audit_spool,

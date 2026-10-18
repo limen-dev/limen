@@ -1,6 +1,6 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts today, and (planned) databases, Redis, Kubernetes, MongoDB,
-//! search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, and Redis or Valkey today, and (planned)
+//! Kubernetes, MongoDB, search, message brokers, web apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -153,7 +153,7 @@ enum Command {
         #[command(subcommand)]
         command: DbCommand,
     },
-    /// Redis and Valkey (planned, Phase 7).
+    /// Redis and Valkey: `limen redis connect <resource>`.
     Redis {
         #[command(subcommand)]
         command: RedisCommand,
@@ -228,13 +228,21 @@ enum DbCommand {
 
 #[derive(Debug, Subcommand)]
 enum RedisCommand {
-    /// Open a local listener for redis-cli.
+    /// Open a local listener that redis-cli (or any Redis or Valkey client) connects to without a password.
     Connect {
         resource: String,
+        /// The Redis ACL user to act as (Valkey has the same). Optional when policy allows only one.
         #[arg(long)]
         user: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -379,7 +387,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Redis { .. } => not_yet("limen redis connect", "Redis access", "Phase 7"),
+        Command::Redis {
+            command:
+                RedisCommand::Connect {
+                    resource,
+                    user,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::redis::connect(
+                proxy,
+                &resource,
+                user.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
         Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
         Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
         Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
@@ -421,7 +448,6 @@ mod tests {
                 "--listen",
                 "127.0.0.1:5433",
             ][..],
-            &["redis", "connect", "r", "--user", "u"],
             &["kube", "login", "c"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
             &["search", "connect", "r", "--role", "x"],
@@ -434,6 +460,28 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn redis_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "redis", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["cache", "--user", "limen-ro", "--listen", "127.0.0.1:6380"]).is_ok());
+        assert!(
+            ok(&[
+                "cache",
+                "--socket",
+                "/tmp/limen/r.sock",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["cache", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["cache", "--idle-timeout", "soon"]).is_err());
     }
 
     #[test]

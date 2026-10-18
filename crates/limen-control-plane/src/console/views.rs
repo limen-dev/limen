@@ -214,8 +214,10 @@ pub struct SessionView {
     pub reason: String,
     pub active: bool,
     pub has_recording: bool,
-    /// A SQL database session: no recording, but audited statements.
-    pub is_db: bool,
+    /// A Redis or Valkey session: no recording, but audited commands.
+    pub is_redis: bool,
+    /// Either of the two: the page lists what was sent instead of a recording.
+    pub has_statements: bool,
     pub recording_sha256: String,
     pub recording_note: &'static str,
     pub bytes: String,
@@ -262,7 +264,11 @@ impl From<&SessionRow> for SessionView {
             },
             active: s.active,
             has_recording,
-            is_db: matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")),
+            is_redis: s.kind.as_deref() == Some("redis"),
+            has_statements: matches!(
+                s.kind.as_deref(),
+                Some("postgres" | "mysql" | "redshift" | "redis")
+            ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
                 "The recording is uploaded when the session ends."
@@ -270,6 +276,8 @@ impl From<&SessionRow> for SessionView {
                 "The recording was made but hasn't reached the control plane yet. Check again shortly."
             } else if matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")) {
                 "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
+            } else if s.kind.as_deref() == Some("redis") {
+                "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
             } else {
                 "This session wasn't recorded."
             },
@@ -495,9 +503,13 @@ pub struct StatementView {
 
 impl From<&super::store::DbStatementRow> for StatementView {
     fn from(r: &super::store::DbStatementRow) -> Self {
-        let failed = r.status.as_deref() == Some("error");
+        let failed = matches!(r.status.as_deref(), Some("error" | "denied"));
         let outcome = match r.status.as_deref() {
             Some("ok") => "ok",
+            // Redis: policy allowed it and the audit event was written before it
+            // was forwarded. ("sent" is what earlier versions stored.)
+            Some("allowed" | "sent") => "allowed",
+            Some("denied") => "refused",
             Some("error") => "error",
             Some(_) => "not completed",
             None => "…",
@@ -534,8 +546,8 @@ impl From<&super::store::DbStatementRow> for StatementView {
             },
             outcome: outcome.to_owned(),
             outcome_class: match r.status.as_deref() {
-                Some("ok") => "ok",
-                Some("error") => "bad",
+                Some("ok" | "allowed" | "sent") => "ok",
+                Some("error" | "denied") => "bad",
                 _ => "warn",
             },
             detail: detail.join(" · "),

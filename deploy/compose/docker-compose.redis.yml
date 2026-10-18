@@ -1,0 +1,162 @@
+# Limen Redis and Valkey stack (Phase 7, ADR-0034): the control plane, a
+# proxy, and a worker, with a Redis and a Valkey server as targets.
+#
+#   docker compose -f deploy/compose/docker-compose.redis.yml up -d --build
+#   deploy/compose/demo-phase7.sh          # the exit test for Phase 7
+#
+# A separate project (`limen-redis`) with its own volumes and host ports, so
+# it runs next to the dev stack (docker-compose.yml) without touching it.
+# Development only: static tokens, Dex static passwords, file-backed CA keys,
+# fixed Redis passwords.
+#
+# Host ports (all on 127.0.0.1), with the variables that move them so a second
+# copy can run under another project name (`docker compose -p <name>`):
+#   33443 / 33444  proxy API / health   LIMEN_REDIS_PROXY_PORT / LIMEN_REDIS_HEALTH_PORT
+#   35556  Dex                          LIMEN_REDIS_DEX_PORT
+#   33081  control plane health         LIMEN_REDIS_CP_PORT
+#   38333  S3 (SeaweedFS)               LIMEN_REDIS_S3_PORT
+name: limen-redis
+
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+x-dev-tokens:
+  proxy: &proxy-token dev-only-proxy-join-token-7f3a9c1e5b2d4f60
+  worker: &worker-token dev-only-worker-join-token-2c8e6a4b0d1f3e5a
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: limen
+      POSTGRES_PASSWORD: limen-dev-only
+      POSTGRES_DB: limen
+    volumes: [postgres:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U limen -d limen"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The dev stack's Dex configuration, with this stack's host ports.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sed -e 's#localhost:5556#localhost:${LIMEN_REDIS_DEX_PORT:-35556}#' -e 's#localhost:3443#localhost:${LIMEN_REDIS_PROXY_PORT:-33443}#'
+        /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./dex/theme:/srv/dex/web/themes/limen:ro
+    ports: ["127.0.0.1:${LIMEN_REDIS_DEX_PORT:-35556}:5556"]
+
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
+    ports: ["127.0.0.1:${LIMEN_REDIS_S3_PORT:-38333}:8333"]
+    volumes: [s3-data:/data, "./s3/s3.json:/etc/seaweedfs/s3.json:ro"]
+
+  control-plane:
+    build: { <<: *limen-build, target: control-plane }
+    image: limen-control-plane:redis
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      dex: { condition: service_started }
+      s3: { condition: service_started }
+    environment:
+      RUST_LOG: info
+      LIMEN_ID: control-plane-1
+      LIMEN_DATABASE_URL: postgres://limen:limen-dev-only@postgres:5432/limen
+      LIMEN_DNS_NAMES: control-plane,localhost
+      LIMEN_CA_DIR: /var/lib/limen/ca
+      LIMEN_CA_EXPORT_DIR: /var/lib/limen/ca-public
+      LIMEN_OIDC_ISSUER: http://localhost:${LIMEN_REDIS_DEX_PORT:-35556}/dex
+      LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
+      LIMEN_OIDC_CLIENT_ID: limen-cli
+      LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+      LIMEN_PROXY_DNS_NAMES: localhost,proxy
+      LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
+      LIMEN_AUDIT_S3_BUCKET: limen-audit
+      LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
+      LIMEN_AUDIT_S3_PATH_STYLE: "true"
+      LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
+      LIMEN_AUDIT_S3_FLUSH: 10s
+      AWS_ACCESS_KEY_ID: dev
+      AWS_SECRET_ACCESS_KEY: dev-only-secret
+      AWS_REGION: us-east-1
+      LIMEN_ENVIRONMENT: dev
+      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:${LIMEN_REDIS_PROXY_PORT:-33443}
+      LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
+    ports: ["127.0.0.1:${LIMEN_REDIS_CP_PORT:-33081}:3081"]
+    volumes:
+      - cp-ca:/var/lib/limen/ca
+      - ca-public:/var/lib/limen/ca-public
+      - audit:/var/lib/limen/audit
+      - cp-spool:/var/lib/limen/spool
+      - recordings:/var/lib/limen/recordings
+
+  proxy:
+    build: { <<: *limen-build, target: proxy }
+    image: limen-proxy:redis
+    restart: unless-stopped
+    depends_on: [control-plane]
+    environment:
+      RUST_LOG: info
+      LIMEN_CONTROL_PLANE_ADDR: control-plane:3080
+      LIMEN_CONTROL_PLANE_NAME: control-plane
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *proxy-token
+      LIMEN_DNS_NAMES: localhost,proxy
+      LIMEN_PEER_ADDRESS: proxy:3443
+      LIMEN_DATA_DIR: /var/lib/limen/proxy
+    ports: ["127.0.0.1:${LIMEN_REDIS_PROXY_PORT:-33443}:3443", "127.0.0.1:${LIMEN_REDIS_HEALTH_PORT:-33444}:3444"]
+    volumes:
+      - proxy-data:/var/lib/limen/proxy
+      - ca-public:/var/lib/limen/ca-public:ro
+
+  worker:
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:redis
+    restart: unless-stopped
+    depends_on: [proxy, redis-target, valkey-target]
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+      # The ACL passwords of the Redis users the roles name. The worker holds
+      # them; people never see them.
+      LIMEN_REDIS_CREDENTIALS_FILE: /etc/limen/redis-credentials.json
+    volumes:
+      - worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - ./targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+
+  # Redis and Valkey targets with the same ACL file. No TLS here: the target
+  # network is local. The ElastiCache path (TLS, IAM) is unverified.
+  redis-target:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--aclfile", "/etc/redis/users.acl"]
+    volumes: ["./targets/redis/users.acl:/etc/redis/users.acl:ro"]
+
+  valkey-target:
+    image: valkey/valkey:8.0-alpine
+    command: ["valkey-server", "--aclfile", "/etc/valkey/users.acl"]
+    volumes: ["./targets/redis/users.acl:/etc/valkey/users.acl:ro"]
+
+volumes:
+  postgres: {}
+  cp-ca: {}
+  ca-public: {}
+  audit: {}
+  proxy-data: {}
+  worker-data: {}
+  cp-spool: {}
+  s3-data: {}
+  recordings: {}

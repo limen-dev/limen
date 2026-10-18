@@ -21,18 +21,27 @@
 </form>
 {% endif %}
 
-{% if s.is_db %}
+{% if s.has_statements %}
+{% if s.is_redis %}
+<h2>Commands</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> command{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
+  "Allowed" means policy let the command through to the server; the server's own answer is not recorded. Redis sessions have no terminal recording; this is the audited record of what was sent. Key names are shown (hashed if the resource asks for it); values are never kept.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
+{% else %}
 <h2>Statements</h2>
 <p class="hint">
   <strong>{{ statement_total }}</strong> statement{% if statement_total != 1 %}s{% endif %}{% if statement_errors != 0 %}, <strong>{{ statement_errors }}</strong> with an error{% endif %}.
   Database sessions have no terminal recording; this is the audited record of what was sent.
   {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
 </p>
+{% endif %}
 {% if statements.is_empty() %}
-<div class="card empty"><div>No statements yet. They appear here within a few seconds of being sent.</div></div>
+<div class="card empty"><div>{% if s.is_redis %}No commands yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Time</th><th>Type</th><th>Statement</th><th>Outcome</th></tr></thead>
+  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_redis %}Command{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
   <tbody>
   {% for st in statements %}
   <tr>

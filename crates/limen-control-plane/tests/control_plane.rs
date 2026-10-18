@@ -220,7 +220,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("dry run")
         .into_inner();
     assert!(!dry.applied);
-    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 9);
+    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 10);
     assert_eq!(dry.version, 0);
 
     let applied = admin
@@ -275,7 +275,13 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
         names,
-        ["orders-mysql-staging", "orders-staging", "web-staging-1"]
+        [
+            "cache-staging",
+            "cache-valkey",
+            "orders-mysql-staging",
+            "orders-staging",
+            "web-staging-1"
+        ]
     );
     // SQL resources say which database `limen db connect` uses by default.
     let default_of = |name: &str| {

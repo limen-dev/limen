@@ -557,7 +557,7 @@ pub async fn session_detail(
             s.proxy = with_name(&state, row.proxy_id.as_deref(), s.proxy).await;
             s.worker = with_name(&state, row.worker_id.as_deref(), s.worker).await;
             // Best effort: the page still renders without the statements.
-            let (statements, statement_total, statement_errors) = if s.is_db {
+            let (statements, statement_total, statement_errors) = if s.has_statements {
                 let list = store::db_statements(&state.db, row.session_id, STATEMENT_LIMIT)
                     .await
                     .unwrap_or_default();

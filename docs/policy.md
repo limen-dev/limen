@@ -33,7 +33,7 @@ spec:
     - resources: { kind: [kubernetes], labels: { env: [staging] } }
       kube: { groups: ["limen:view"] }
     - resources: { kind: [redis], labels: { env: [staging] } }
-      redis: { users: [limen-ro] }
+      redis: { users: [limen-ro], keys: ["app:*"], deny_commands: [KEYS] }
     # Planned integrations (nothing serves them yet; see below):
     - resources: { kind: [mongodb], labels: { env: [staging] } }
       mongo: { roles: [limen-read], databases: ["*"] }
@@ -77,7 +77,18 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+
+### Redis grants
+
+`redis: { users: [...] }` names the Redis users a role may act as. Optional limits, enforced by the worker on every command (ADR-0034):
+
+- `keys: [patterns]`: only keys matching a pattern (`*`, `?`). Also refuses `KEYS`, `SCAN`, `RANDOMKEY`, and scripts.
+- `deny_commands: [NAME or "NAME SUB"]`: refuse these as well as the built-in deny list. Wins over `allow_commands`.
+- `allow_commands: [...]`: open commands from the built-in deny list (`FLUSHALL`, `CONFIG`, `EVAL`, ...). `MONITOR`, `SYNC`, `PSYNC`, `REPLCONF`, `RESET`, and `CLIENT REPLY` can't be opened.
+- `databases: [0, 3]`: logical databases `SELECT` may name (default: only 0).
+
+With several roles granting the same user, the session may do whatever any one grant allows. [The Redis guide](guides/redis.md) lists the defaults.
 
 ### Planned integrations
 

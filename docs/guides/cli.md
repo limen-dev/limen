@@ -8,6 +8,7 @@ limen status                 # who am I, which roles, when does it expire?
 limen ls                     # what can I reach?   add --json for scripts
 limen ssh web-staging-1      # connect; the login is picked from policy when there's only one
 limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
+limen redis connect cache-staging          # a local listener for redis-cli, no password
 limen logout                 # delete local credentials
 ```
 
@@ -32,6 +33,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen status` | Show your identity, roles, and the time left on your credentials |
 | `limen ls [--json]` | List the resources you can access |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
+| `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
 | `limen admin apply <files or dirs> [--dry-run] [--source-ref SHA]` | Validate and apply policy YAML; shows a coloured diff |
 | `limen admin policy` | Show the active policy version, digest, and author |
@@ -41,7 +43,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin kill-session <id> --reason …` | End one live session |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
-| `redis connect`, `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `kube login`, `mongo connect`, `search connect`, `mq connect`, `kafka connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>

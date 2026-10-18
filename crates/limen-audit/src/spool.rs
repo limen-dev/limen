@@ -8,8 +8,9 @@
 //! ```
 //!
 //! `append` returns only once the record is on disk: appends are written
-//! immediately and fsynced in groups (every `fsync_interval`), so many
-//! concurrent appends share one fsync. Each consumer (a shipper to the
+//! immediately and fsynced in groups (an append starts a sync at once, and
+//! appends that arrive during it share the next; `fsync_interval` is a
+//! backstop), so many concurrent appends share one fsync. Each consumer (a shipper to the
 //! control plane, S3, or Datadog) has a durable offset. A segment is deleted
 //! once every consumer has moved past it.
 //!
@@ -110,6 +111,9 @@ pub struct Spool {
     synced: watch::Sender<u64>,
     /// Woken on every durable append, for consumers tailing the spool.
     pub(crate) appended: Arc<Notify>,
+    /// Woken by an append, so the flusher syncs at once instead of at the
+    /// next tick.
+    dirty: Arc<Notify>,
 }
 
 fn segment_name(first: u64) -> String {
@@ -293,6 +297,7 @@ impl Spool {
             dir_lock: Some(Arc::new(lock)),
             synced,
             appended: Arc::new(Notify::new()),
+            dirty: Arc::new(Notify::new()),
         };
         Ok(spool)
     }
@@ -312,10 +317,17 @@ impl Spool {
         let mut spool = self.clone();
         spool.dir_lock = None;
         tokio::spawn(async move {
+            // An append wakes the flusher, which syncs right away; appends
+            // that land during that sync form the next group. So a lone
+            // append waits for one fsync, not for a timer, and a burst still
+            // shares fsyncs. The tick is a backstop.
             let mut tick = tokio::time::interval(spool.config.fsync_interval);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
-                tick.tick().await;
+                tokio::select! {
+                    () = spool.dirty.notified() => {}
+                    _ = tick.tick() => {}
+                }
                 if let Err(e) = spool.flush().await {
                     tracing::error!(error = %e, "spool fsync failed");
                 }
@@ -379,6 +391,7 @@ impl Spool {
             }
             index
         };
+        self.dirty.notify_one();
         let mut rx = self.synced.subscribe();
         rx.wait_for(|synced| *synced > index)
             .await
@@ -704,6 +717,25 @@ mod tests {
         );
         drop(clone);
         Spool::open(config(dir.path())).expect("free again");
+    }
+
+    #[tokio::test]
+    async fn a_lone_append_does_not_wait_for_the_timer() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut c = config(dir.path());
+        c.fsync_interval = Duration::from_secs(30);
+        let spool = Spool::open(c).expect("open");
+        spool.start();
+        // The first tick of the backstop fires at once; skip past it.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let started = std::time::Instant::now();
+        spool.append(b"one").await.expect("append");
+        spool.append(b"two").await.expect("append");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "appends waited for the timer: {:?}",
+            started.elapsed()
+        );
     }
 
     #[tokio::test]

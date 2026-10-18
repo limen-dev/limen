@@ -150,6 +150,19 @@ pub struct KubeGrant {
 #[serde(deny_unknown_fields)]
 pub struct RedisGrant {
     pub users: Vec<String>,
+    /// Commands refused for this grant on top of the built-in deny list
+    /// (ADR-0034). `NAME` or `NAME SUBCOMMAND`, case-insensitive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_commands: Vec<String>,
+    /// Commands from the built-in deny list this grant opens up again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_commands: Vec<String>,
+    /// Key patterns (`*` and `?`) the session may touch. Empty means any key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<String>,
+    /// Logical databases the session may `SELECT`. Empty means only 0.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub databases: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -414,8 +427,39 @@ pub struct RedisTarget {
     pub region: Option<String>,
     #[serde(default = "yes")]
     pub iam_auth: bool,
+    /// The `ElastiCache` replication group ID, which names the IAM token's host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_name: Option<String>,
+    /// TLS toward the target. On by default; `false` is for local servers only.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub tls: bool,
+    /// Left out of the snapshot when default, so components from before
+    /// Phase 7 (which reject unknown fields) still read it during an upgrade.
+    #[serde(default, skip_serializing_if = "RedisAudit::is_default")]
+    pub audit: RedisAudit,
+}
+
+impl RedisAudit {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// What a `redis.command` event may contain (ADR-0034). Values are never
+/// logged unless `log_values` is set, and credential commands never are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RedisAudit {
+    #[serde(default)]
+    pub log_values: bool,
+    /// Replace key names with a hash, so the trail holds no ids or emails.
+    #[serde(default)]
+    pub redact_keys: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

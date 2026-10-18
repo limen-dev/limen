@@ -288,3 +288,73 @@ async fn database_sessions_list_their_statements() {
             .is_empty()
     );
 }
+
+/// A Redis session has no recording; the console lists its commands (keys,
+/// never values) and the ones policy refused, whatever order they arrive in.
+#[tokio::test(flavor = "multi_thread")]
+async fn redis_sessions_list_their_commands() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let get = event(
+        EventKind::RedisCommand,
+        s,
+        DEVELOPER,
+        json!({ "command": "GET", "subcommand": null, "keys": ["app:greeting"], "keys_total": 1, "keys_known": true, "arity": 2, "resource": "cache-staging", "redis_user": "limen-ro" }),
+    );
+    let del = event(
+        EventKind::RedisCommand,
+        s,
+        DEVELOPER,
+        json!({ "command": "DEL", "keys": ["a", "b"], "keys_total": 250, "keys_known": true, "arity": 251 }),
+    );
+    let refused = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "redis", "resource": "cache-staging", "redis_user": "limen-ro", "command": "FLUSHALL", "subcommand": null, "reason": "FLUSHALL is denied unless the role lists it in redis.allow_commands" }),
+    );
+    // An auth.denied that is not about Redis is not a command.
+    let other = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "ssh", "resource": "web", "login": "root", "reason": "no" }),
+    );
+    store::project_events(&db, &[refused.clone(), get.clone()])
+        .await
+        .expect("first batch");
+    store::project_events(&db, &[del, other, get, refused])
+        .await
+        .expect("second batch and redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("commands");
+    let texts: Vec<_> = list
+        .iter()
+        .map(|r| r.statement.as_deref().unwrap_or_default())
+        .collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(texts.contains(&"GET app:greeting"));
+    assert!(texts.contains(&"FLUSHALL"));
+    assert!(texts.contains(&"DEL a b … (+248 more keys)"), "{texts:?}");
+    let flush = list
+        .iter()
+        .find(|r| r.statement.as_deref() == Some("FLUSHALL"))
+        .expect("refused command");
+    assert_eq!(flush.status.as_deref(), Some("denied"));
+    let allowed = list
+        .iter()
+        .find(|r| r.statement.as_deref() == Some("GET app:greeting"))
+        .expect("allowed command");
+    assert_eq!(allowed.status.as_deref(), Some("allowed"));
+    assert!(
+        flush
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("denied")
+    );
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 1)
+    );
+}
