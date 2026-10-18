@@ -15,6 +15,10 @@ spec:
     # is the second layer (ADR-0034).
     - resources: { kind: [redis], labels: { env: [staging] } }
       redis: { users: [limen-ro], keys: ["app:*"] }
+    # Read the orders database on staging MongoDB. The server's own grants for
+    # limen-read are the second layer (ADR-0035).
+    - resources: { kind: [mongodb], labels: { env: [staging] } }
+      mongo: { roles: [limen-read], databases: [orders] }
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }
 ---
@@ -31,5 +35,7 @@ spec:
     - resources: { kind: [postgres, mysql, redis], labels: { "*": ["*"] } }
       db: { roles: [limen_readonly, limen_rw] }
       redis: { users: [limen-rw] }
+    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
+      mongo: { roles: [limen-read, limen-rw], databases: ["*"], deny_commands: [dropDatabase] }
     - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
       kube: { groups: ["limen:edit"] }

@@ -48,6 +48,15 @@ pub enum EventKind {
     DbBootstrap,
     #[serde(rename = "redis.command")]
     RedisCommand,
+    /// A command sent to a MongoDB-compatible server, or one the worker
+    /// refused (`data.phase`). Written before the command is forwarded
+    /// (ADR-0035).
+    #[serde(rename = "mongo.command")]
+    MongoCommand,
+    /// How a `mongo.command` ended: status, duration, error code.
+    /// `data.command_id` is its event id.
+    #[serde(rename = "mongo.command.end")]
+    MongoCommandEnd,
     #[serde(rename = "kube.request")]
     KubeRequest,
     #[serde(rename = "policy.change")]

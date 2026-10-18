@@ -1,8 +1,9 @@
 # Resources and roles for integrations that are planned but not built yet
 # (ADR-0018, ADR-0022). Policy accepts them and the console and `limen ls` list
 # them, so the shape of the product is visible today. Nothing serves these
-# kinds yet: `limen mongo connect` and the others say so. (The SQL kinds in this
-# file, `mysql` and `redshift`, are served since Phase 6; see docs/guides/databases.md.)
+# kinds yet: `limen search connect` and the others say so. (The SQL kinds in this
+# file, `mysql` and `redshift`, are served since Phase 6; MongoDB is served since
+# Phase 9 and its examples are in resources.yaml and roles.yaml.)
 # The addresses are placeholders.
 kind: resource
 version: v1
@@ -26,27 +27,6 @@ spec:
   # its own pool so the SSH and database workers are never asked to serve it.
   kubernetes: { cluster_name: staging }
   worker_selector: { pool: kube }
----
-kind: resource
-version: v1
-metadata: { name: catalog-staging, labels: { env: staging, team: catalog } }
-spec:
-  mongodb: { endpoint: "mongo-target:27017" }
-  worker_selector: { pool: dev }
----
-kind: resource
-version: v1
-metadata: { name: catalog-atlas, labels: { env: prod, team: catalog } }
-spec:
-  mongodb: { endpoint: "catalog-shard-00-00.example.mongodb.net:27017", flavor: atlas }
-  worker_selector: { pool: prod }
----
-kind: resource
-version: v1
-metadata: { name: reviews-docdb, labels: { env: prod, team: catalog } }
-spec:
-  mongodb: { endpoint: "reviews.cluster-example.eu-west-1.docdb.amazonaws.com:27017", flavor: documentdb }
-  worker_selector: { pool: prod }
 ---
 kind: resource
 version: v1
@@ -114,8 +94,6 @@ spec:
   allow:
     - resources: { kind: [mysql, redshift], labels: { env: [staging] } }
       db: { roles: [limen_readonly] }
-    - resources: { kind: [mongodb], labels: { env: [staging] } }
-      mongo: { roles: [limen-read], databases: ["*"] }
     - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
       search: { roles: [limen-read] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
@@ -136,8 +114,6 @@ spec:
   allow:
     - resources: { kind: [mysql, redshift], labels: { "*": ["*"] } }
       db: { roles: [limen_readonly, limen_rw] }
-    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read, limen-rw], databases: ["*"] }
     - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
       search: { roles: [limen-read, limen-write] }
     - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }

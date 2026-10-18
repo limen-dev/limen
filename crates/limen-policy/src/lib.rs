@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
-pub use model::{RedisAudit, RedisGrant, RedisTarget};
+pub use model::{MongoGrant, RedisAudit, RedisGrant, RedisTarget};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
@@ -481,6 +481,25 @@ impl Policy {
             .collect()
     }
 
+    /// The MongoDB grants that let `roles` act as `role` on `resource`. Call it
+    /// only after [`Policy::evaluate`] allowed the request, since deny rules
+    /// aren't checked here (ADR-0035).
+    #[must_use]
+    pub fn mongo_grants(&self, roles: &[String], resource: &str, role: &str) -> Vec<MongoGrant> {
+        let Some(resource) = self.resources.get(resource) else {
+            return Vec::new();
+        };
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(|rule| selector_matches(&rule.resources, resource))
+            .filter_map(|rule| rule.mongo.as_ref())
+            .filter(|g| g.roles.iter().any(|r| r == role))
+            .cloned()
+            .collect()
+    }
+
     /// Resources the roles grant at least one principal on, with those
     /// principals (minus any explicitly denied). Sorted by name.
     #[must_use]
@@ -751,6 +770,41 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 ));
             }
         }
+        if let Some(mongo) = &rule.mongo {
+            if let Some(bad) = mongo.roles.iter().find(|r| !valid_mongo_role(r)) {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!(
+                        "mongo.roles entry {bad:?} must be 1 to 64 letters, digits, '_', '.', or '-'"
+                    ),
+                ));
+            }
+            if let Some(bad) = mongo
+                .databases
+                .iter()
+                .find(|d| *d != "*" && !valid_mongo_database(d))
+            {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!(
+                        "mongo.databases entry {bad:?} is not a MongoDB database name (or '*')"
+                    ),
+                ));
+            }
+            if let Some(bad) = mongo.deny_commands.iter().find(|c| {
+                c.is_empty()
+                    || c.len() > 64
+                    || !c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            }) {
+                return Err(invalid(
+                    "role",
+                    name,
+                    format!("invalid value {bad:?} in mongo.deny_commands"),
+                ));
+            }
+        }
         if let Some(kube) = &rule.kube
             && kube.groups.iter().any(|g| g.starts_with("system:"))
         {
@@ -784,6 +838,42 @@ pub fn valid_db_role(role: &str) -> bool {
     })
 }
 
+/// A MongoDB role name: 1 to 64 of `[A-Za-z0-9_.-]`, not starting with a dot.
+/// It names a file in `credentials_dir`, so nothing that could climb out of it.
+#[must_use]
+pub fn valid_mongo_role(role: &str) -> bool {
+    (1..=64).contains(&role.len())
+        && !role.starts_with('.')
+        && role
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+}
+
+/// A MongoDB database name as the server accepts it: 1 to 63 bytes, none of
+/// `/\. "$*<>:|?` or NUL.
+#[must_use]
+pub fn valid_mongo_database(name: &str) -> bool {
+    (1..=63).contains(&name.len())
+        && !name.bytes().any(|b| {
+            b == 0
+                || b.is_ascii_control()
+                || matches!(
+                    b,
+                    b'/' | b'\\'
+                        | b'.'
+                        | b' '
+                        | b'"'
+                        | b'$'
+                        | b'*'
+                        | b'<'
+                        | b'>'
+                        | b':'
+                        | b'|'
+                        | b'?'
+                )
+        })
+}
+
 fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError> {
     if selector.kind.is_empty() {
         return Err(invalid("role", role, "resources.kind must not be empty"));
@@ -803,6 +893,40 @@ fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError>
                 "label key \"*\" only accepts the value \"*\"",
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_mongo_target(name: &str, t: &model::MongoTarget) -> Result<(), PolicyError> {
+    use model::{MongoAuth, MongoFlavor};
+    let bad = |why: &str| Err(invalid("resource", name, why.to_owned()));
+    if let Some(db) = &t.default_database
+        && !valid_mongo_database(db)
+    {
+        return bad("default_database is not a MongoDB database name");
+    }
+    if let Some(source) = &t.auth_source
+        && source != "$external"
+        && !valid_mongo_database(source)
+    {
+        return bad("auth_source must be a database name or $external");
+    }
+    if t.insecure_dev && t.flavor != MongoFlavor::Standard {
+        return bad("insecure_dev is only for standard servers: Atlas and DocumentDB require TLS");
+    }
+    if t.auth == MongoAuth::X509 && t.flavor == MongoFlavor::Documentdb {
+        return bad("DocumentDB doesn't support X.509 login; use scram, scram_sha1, or aws");
+    }
+    if t.auth == MongoAuth::Aws && t.flavor == MongoFlavor::Standard {
+        return bad("auth: aws is for Atlas and DocumentDB (MONGODB-AWS)");
+    }
+    if t.auth != MongoAuth::Aws && t.credentials_dir.as_deref().is_none_or(str::is_empty) {
+        return bad(
+            "credentials_dir is required: the worker needs a password or certificate per role",
+        );
+    }
+    if t.auth == MongoAuth::Aws && t.auth_source.as_deref().is_some_and(|s| s != "$external") {
+        return bad("auth: aws logs in against $external");
     }
     Ok(())
 }
@@ -881,6 +1005,9 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         {
             return Err(invalid("resource", name, "password_dir must not be empty"));
         }
+    }
+    if let Some(target) = &resource.spec.mongodb {
+        validate_mongo_target(name, target)?;
     }
     if let Some(address) = address {
         let valid = address.rsplit_once(':').is_some_and(|(host, port)| {
