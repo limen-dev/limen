@@ -107,13 +107,13 @@ stack_ports() {
 PORTS
   else
     printf '%s\n' \
-      "${LIMEN_PORT_PROXY:-3443}|proxy API|CLI, console and tunnels enter here (mTLS)" \
-      "${LIMEN_PORT_HEALTH:-3444}|proxy health|/readyz, /tunnels (admin and debug)" \
-      "${LIMEN_PORT_CP:-3081}|control plane health|" \
-      "${LIMEN_PORT_DEX:-5556}|Dex|OIDC login (admin@example.com / password)" \
-      "${LIMEN_PORT_POSTGRES:-5432}|Postgres|control plane state" \
-      "${LIMEN_PORT_S3:-8333}|S3 (SeaweedFS)|audit batches and recordings" \
-      "${LIMEN_PORT_KMS:-8099}|KMS emulator|used by tests"
+      "${LIMEN_PORT_PROXY:-3443}|proxy API|CLI, console and tunnels enter here (mTLS)|LIMEN_PORT_PROXY" \
+      "${LIMEN_PORT_HEALTH:-3444}|proxy health|/readyz, /tunnels (admin and debug)|LIMEN_PORT_HEALTH" \
+      "${LIMEN_PORT_CP:-3081}|control plane health||LIMEN_PORT_CP" \
+      "${LIMEN_PORT_DEX:-5556}|Dex|OIDC login (admin@example.com / password)|LIMEN_PORT_DEX" \
+      "${LIMEN_PORT_POSTGRES:-5432}|Postgres|control plane state|LIMEN_PORT_POSTGRES" \
+      "${LIMEN_PORT_S3:-8333}|S3 (SeaweedFS)|audit batches and recordings|LIMEN_PORT_S3" \
+      "${LIMEN_PORT_KMS:-8099}|KMS emulator|used by tests|LIMEN_PORT_KMS"
   fi
   for s in "$@"; do
     case "$s" in
@@ -162,9 +162,10 @@ stack_preflight() {
     if command -v kubectl >/dev/null 2>&1; then ok kubectl; else miss kubectl "$(_hint kubectl)"; fi
   fi
 
-  local project=limen port name what holder proj row
+  local project=limen port name what holder proj row hint
   [ ${#scale[@]} -gt 0 ] && project=limen-scale
-  while IFS='|' read -r port name what; do
+  local var
+  while IFS='|' read -r port name what var; do
     [ -z "$port" ] && continue
     if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
       holder=""; proj=""
@@ -179,7 +180,12 @@ stack_preflight() {
       if [ "$proj" = "$project" ]; then
         ok "port $port ($name) is in use by this stack; it will be updated"
       else
-        miss "port $port ($name) is in use${holder:+ by $holder}" "stop what holds it, then run this again" BUSY
+        hint="stop what holds it, then run this again"
+        [ -n "$var" ] && hint="$hint, or move this port: export $var=<a free port>"
+        case "$holder" in
+          *OrbStack*) hint="$hint. OrbStack forwards ports listening inside its Linux machines (see: orb list; orb -m <machine> sudo docker ps)" ;;
+        esac
+        miss "port $port ($name) is in use${holder:+ by $holder}" "$hint" BUSY
       fi
     fi
   done < <(stack_ports ${scale[@]+"${scale[@]}"} "$@")
@@ -196,7 +202,7 @@ stack_summary() {
   proxy="${LIMEN_PORT_PROXY:-3443}"
   [ ${#scale[@]} -gt 0 ] && proxy=23443
   printf '\n\033[1mPorts (all on 127.0.0.1)\033[0m\n'
-  while IFS='|' read -r port name what; do
+  while IFS='|' read -r port name what _; do
     [ -n "$port" ] && printf '  %-6s %-24s %s\n' "$port" "$name" "$what"
   done < <(stack_ports ${scale[@]+"${scale[@]}"} "$@")
   echo "  (databases, Redis, the SSH host, Trino and the Datadog intake are reached through Limen, not published)"
