@@ -252,42 +252,16 @@ stack_preflight() {
   [ "$bad" = 0 ]
 }
 
-# Ports, and how the services connect, for what is running.
+# The ports in use, for what is running.
 stack_summary() {
   ui_init
-  local scale=() port name what proxy s has_ssh=false has_db=false has_redis=false has_obs=false has_bots=false
+  local scale=() port name what
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
-  for s in "$@"; do
-    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; observability) has_obs=true ;; bots) has_bots=true ;; esac
-  done
-  proxy="${LIMEN_PORT_PROXY:-3443}"
-  [ ${#scale[@]} -gt 0 ] && proxy=23443
-  ui_section "Ports (all on 127.0.0.1)"
+  ui_section "Ports (127.0.0.1)"
   while IFS='|' read -r port name what _; do
     [ -n "$port" ] && printf "  ${C_BOLD}%-6s${C_RESET} %-24s ${C_DIM}%s${C_RESET}\n" "$port" "$name" "$what"
   done < <(stack_ports ${scale[@]+"${scale[@]}"} "$@")
-  ui_note "(databases, Redis, the SSH host, Trino and the Datadog intake are reached through Limen, not published)"
-
-  ui_section "How it is connected"
-  cat <<SUMMARY
-  you (limen CLI, browser) --mTLS--> proxy :$proxy --> worker --> target
-  1. Login: the CLI sends you to Dex (OIDC). The control plane checks the token, maps your
-     groups to roles with examples/policy, and its CA signs a short-lived certificate for you.
-  2. The proxy and the worker enrol with the control plane using join tokens and get their own
-     certificates. The control plane keeps state in Postgres and writes audit events to S3.
-  3. The worker dials OUT to the proxy and holds a reverse tunnel, so targets need no inbound
-     path from you. For each session the proxy picks a worker, and the worker connects to the
-     target. Every session is audited (and recorded for SSH).
-SUMMARY
-  if [ ${#scale[@]} -gt 0 ]; then
-    echo "  Scaled: three control planes share one Postgres and one CA key volume (any can serve any"
-    echo "     call); three proxies share the name 'proxy' and three workers dial whichever answers."
-  fi
-  if $has_ssh; then echo "  ssh:   worker -> sshd-target:22, which trusts only Limen's SSH user CA. limen ssh web-staging-1"; fi
-  if $has_db; then echo "  db:    worker -> postgres-target / mysql-target over TLS, as limen_* roles whose passwords only the worker holds. limen db connect orders-staging"; fi
-  if $has_redis; then echo "  redis: worker -> redis-target / valkey-target as ACL users from the worker's credentials file. limen redis connect cache-staging"; fi
-  if $has_obs; then echo "  observability: the control plane also sends audit events to the fake Datadog intake; Trino reads the S3 audit batches and Grafana queries Trino."; fi
-  if $has_bots; then echo "  bots:  the fake CI issuer mints identity tokens; policy (bots.yaml) maps them to roles, no human login."; fi
+  ui_note "Databases, Redis, the SSH host and the kind cluster are reached through Limen, not published."
   return 0
 }
 
@@ -327,7 +301,7 @@ YAML
   docker network inspect kind >/dev/null 2>&1 || fail "no Docker network named kind"
 }
 
-# What to connect to, once it is running. Needs stack_setup to have run.
+# Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
 stack_endpoints() {
   ui_init
   local scale=() s has_ssh=false has_db=false has_redis=false has_obs=false has_bots=false has_kube=false
@@ -335,36 +309,22 @@ stack_endpoints() {
   for s in "$@"; do
     case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; esac
   done
-  local ca="$STACK_STATE/internal-ca.pem"
-  ui_section "Connect"
-  printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "CA certificate" "$ca" \
-    "Limen proxy" "$STACK_PROXY" \
-    "Console" "https://$STACK_PROXY/console/" \
-    "Sign-in (OIDC)" "$STACK_DEX   admin@example.com / password (developer@example.com, guest@example.com)"
-  ui_note "The proxy's certificate is signed by Limen's dev CA. Pass the file to the CLI; import it into a browser only if you choose to."
-  echo "  CLI sign-in:  limen --proxy $STACK_PROXY login --ca-file $ca"
-  echo "  Then:         limen ls"
+  local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
   if $has_ssh || $has_db || $has_redis || $has_kube; then
-    ui_section "Resources (reached through the proxy; the listeners below are local)"
+    ui_section "Resources"
+    $has_ssh && printf "$row" "SSH" "limen ssh web-staging-1"
+    $has_db && printf "$row" "PostgreSQL" "limen db connect orders-staging" "MySQL" "limen db connect orders-mysql-staging"
+    $has_redis && printf "$row" "Redis" "limen redis connect cache-staging" "Valkey" "limen redis connect cache-valkey"
+    $has_kube && printf "$row" "Kubernetes" "limen kube login eks-staging --kubeconfig $kc && kubectl --kubeconfig $kc get pods -A"
   fi
-  $has_ssh && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "SSH" "limen ssh web-staging-1  (target sshd-target:22)"
-  if $has_db; then
-    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "PostgreSQL" "limen db connect orders-staging  (prints the psql command and its local port; target postgres-target:5432)" \
-      "MySQL" "limen db connect orders-mysql-staging  (prints the mysql command; target mysql-target:3306)"
+  if $has_obs || $has_bots; then
+    ui_section "Other"
+    $has_obs && printf "$row" "Grafana" "http://localhost:3000   admin / limen-dev-only" "Datadog stub" "http://localhost:8126/fake/received"
+    $has_bots && printf "$row" "CI issuer" "http://localhost:8130"
   fi
-  if $has_redis; then
-    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Redis" "limen redis connect cache-staging  (prints the redis-cli command; target redis-target:6379)" \
-      "Valkey" "limen redis connect cache-valkey  (prints the redis-cli command; target valkey-target:6379)"
-  fi
-  if $has_kube; then
-    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Kubernetes" "limen kube login eks-staging --kubeconfig $STACK_STATE/kubeconfig.json" \
-      "" "export KUBECONFIG=$STACK_STATE/kubeconfig.json; kubectl get pods -A" \
-      "" "API server behind the worker: https://$LIMEN_KIND_NODE:6443 (kind cluster $KUBE_CLUSTER, reached only through Limen)"
-  fi
-  if $has_obs || $has_bots; then ui_section "Other"; fi
-  $has_obs && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Grafana" "http://localhost:3000   admin / limen-dev-only" \
-    "Fake Datadog" "http://localhost:8126/fake/received"
-  $has_bots && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Fake CI issuer" "http://localhost:8130"
-  printf '\n  %sStop it:%s deploy/compose/setup.sh%s down\n' "$C_BOLD" "$C_RESET" "${scale[*]:+ --scale}"
+  ui_section "Connect"
+  printf "$row" "CLI" "limen --proxy $STACK_PROXY login --ca-file $ca" "" "limen ls"
+  printf "$row" "Console" "https://$STACK_PROXY/console/" "Sign in" "admin@example.com / password"
+  ui_note "Browsers warn about the dev CA; that is expected. Stop it with: deploy/compose/setup.sh${scale[*]:+ --scale} down"
   return 0
 }

@@ -112,7 +112,7 @@ You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`
 ```sh
 # 1. One script: checks what you need, asks what to enable (SSH host, databases, Redis,
 #    Kubernetes, observability...), starts Limen, applies the example policy, and prints
-#    the CA certificate path, the proxy port, the console URL and each endpoint.
+#    the ports, a command for each resource, and the CLI and console sign-in.
 deploy/compose/setup.sh
 
 # 2. Install the CLI (once; re-run after pulling to upgrade)

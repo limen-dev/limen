@@ -148,7 +148,5 @@ if has redis; then
 fi
 
 ui_done "Limen is ready"
-echo
-"$LIMEN_BIN" ls | sed 's/^/  /'
-stack_endpoints ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
 stack_summary ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
+stack_endpoints ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}

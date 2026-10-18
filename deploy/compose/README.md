@@ -26,7 +26,7 @@ The scripts are plain bash, written for macOS (tested) and Linux (untested). On 
 deploy/compose/setup.sh
 ```
 
-It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with what to connect to: the CA certificate path, the proxy port, the console URL, the endpoints of each enabled resource (SSH, PostgreSQL, MySQL, Redis, Kubernetes), then every port and how the services are connected. `setup.sh --yes` enables everything without asking, and `--scale --stacks ssh,redis` picks explicitly. Stop it with `deploy/compose/setup.sh down` (add `--scale` for a scaled one).
+It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with the ports in use, the command for each enabled resource (SSH, PostgreSQL, MySQL, Redis, Kubernetes), and the CLI sign-in and console URL.
 
 Then log in as the developer and try a resource:
 
