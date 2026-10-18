@@ -10,7 +10,7 @@ x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f205
 services:
   kubernetes:
     container_name: kubernetes-${LIMEN_ENV:-dev}
-    image: rancher/k3s:v1.35.4-k3s1
+    image: ${K3S_IMAGE}
     command:
       - server
       - --disable=traefik
@@ -34,6 +34,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+      args:
+        RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+        DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
       target: worker
     image: limen-worker:dev
     restart: unless-stopped

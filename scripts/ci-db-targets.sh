@@ -11,6 +11,8 @@
 # printed as `export` lines.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/../deploy/compose" && pwd)"
+# shellcheck source=../deploy/compose/.env
+set -a; source "$here/.env"; set +a # image versions
 work="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/limen-db-targets"
 pg=limen-ci-pg-target
 my=limen-ci-mysql-target
@@ -27,7 +29,7 @@ stop
 rm -rf "$work"; mkdir -p "$work/tls"
 # A throwaway CA and server certificates (the script chowns the keys for the
 # postgres and mysql users).
-docker run --rm -v "$work/tls:/tls" -v "$here/config/targets/tls/gen.sh:/gen.sh:ro" alpine:3.22 /bin/sh /gen.sh >/dev/null
+docker run --rm -v "$work/tls:/tls" -v "$here/config/targets/tls/gen.sh:/gen.sh:ro" "$ALPINE_IMAGE" /bin/sh /gen.sh >/dev/null
 
 # 127.0.0.1 only; the tests name the certificates' host (postgres-target,
 # mysql-target) with tls_server_name.
@@ -36,7 +38,7 @@ docker run -d --name "$pg" -p 127.0.0.1:15432:5432 \
   -v "$here/config/targets/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro" \
   -v "$here/config/targets/postgres/pg_hba.conf:/etc/limen/pg_hba.conf:ro" \
   -v "$work/tls:/tls:ro" \
-  postgres:18-alpine postgres -c ssl=on -c ssl_cert_file=/tls/pg.crt -c ssl_key_file=/tls/pg.key \
+  "$POSTGRES_IMAGE" postgres -c ssl=on -c ssl_cert_file=/tls/pg.crt -c ssl_key_file=/tls/pg.key \
   -c hba_file=/etc/limen/pg_hba.conf >/dev/null
 
 # Small on purpose: the self-hosted runners have 8 GiB, shared with the build.
@@ -44,7 +46,7 @@ docker run -d --name "$my" -p 127.0.0.1:13306:3306 \
   -e MYSQL_ROOT_PASSWORD=mysql-target-dev-only \
   -v "$here/config/targets/mysql/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro" \
   -v "$work/tls:/tls:ro" \
-  mysql:8.4 mysqld --ssl-ca=/tls/ca.pem --ssl-cert=/tls/my.crt --ssl-key=/tls/my.key \
+  "$MYSQL_IMAGE" mysqld --ssl-ca=/tls/ca.pem --ssl-cert=/tls/my.crt --ssl-key=/tls/my.key \
   --performance-schema=OFF --innodb-buffer-pool-size=64M >/dev/null
 
 # The image's init runs a temporary server first, so wait for the real one to

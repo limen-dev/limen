@@ -1,5 +1,23 @@
+# Build output and local state
 target/
 .git/
+.claude/
 deploy/compose/.state/
 **/*.tfstate*
 .terraform/
+
+# Not read by the image build, which compiles crates/ with proto/ and assets/ (the console and
+# logo files are compiled in). Listing them keeps an edit to docs, demos, compose files and the
+# like from invalidating the cached build layers. examples/ is only read by tests, which
+# `cargo build --bin` does not compile.
+.github/
+demos/
+docs/
+examples/
+scripts/
+deploy/cli/
+deploy/compose/
+deploy/grafana/
+deploy/kubernetes/
+deploy/terraform/
+**/*.md

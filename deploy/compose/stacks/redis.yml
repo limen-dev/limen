@@ -5,13 +5,13 @@ services:
   redis-target:
     container_name: redis-cache-${LIMEN_ENV:-dev}
     profiles: ["redis"]
-    image: redis:7.4-alpine
+    image: ${REDIS_IMAGE}
     command: ["redis-server", "--aclfile", "/etc/redis/users.acl"]
     volumes: ["./config/targets/redis/users.acl:/etc/redis/users.acl:ro"]
 
   valkey-target:
     container_name: valkey-cache-${LIMEN_ENV:-dev}
     profiles: ["redis"]
-    image: valkey/valkey:8.0-alpine
+    image: ${VALKEY_IMAGE}
     command: ["valkey-server", "--aclfile", "/etc/valkey/users.acl"]
     volumes: ["./config/targets/redis/users.acl:/etc/valkey/users.acl:ro"]

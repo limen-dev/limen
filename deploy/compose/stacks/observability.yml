@@ -4,6 +4,9 @@
 x-limen-image: &limen-build
   context: ../..
   dockerfile: deploy/docker/Dockerfile
+  args:
+    RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+    DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
 
 services:
   # Stands in for Datadog's Logs intake. GET http://localhost:8126/fake/received
@@ -18,7 +21,7 @@ services:
   trino:
     container_name: trino-${LIMEN_ENV:-dev}
     profiles: ["observability"]
-    image: trinodb/trino:483
+    image: ${TRINO_IMAGE}
     volumes: ["./config/trino/catalog:/etc/trino/catalog:ro"]
     depends_on: [s3]
 
@@ -26,7 +29,7 @@ services:
   trino-init:
     container_name: trino-init-${LIMEN_ENV:-dev}
     profiles: ["observability"]
-    image: trinodb/trino:483
+    image: ${TRINO_IMAGE}
     entrypoint: ["/init/sync.sh"]
     volumes: ["./config/trino:/init:ro"]
     depends_on: [trino]
@@ -36,10 +39,10 @@ services:
   grafana:
     container_name: grafana-${LIMEN_ENV:-dev}
     profiles: ["observability"]
-    image: grafana/grafana:13.0.2
+    image: ${GRAFANA_IMAGE}
     depends_on: [trino]
     environment:
-      GF_PLUGINS_PREINSTALL_SYNC: trino-datasource@1.2.0
+      GF_PLUGINS_PREINSTALL_SYNC: ${GRAFANA_TRINO_PLUGIN}
       GF_SECURITY_ADMIN_PASSWORD: limen-dev-only
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer

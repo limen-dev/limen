@@ -7,6 +7,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 - **Phase by phase.** Status is in `docs/design.md` §13 (✅ = done). Several phases are already implemented, so check there before any change. Only work on a phase the owner has approved; don't build ahead, even partially (planned integrations are data-only stubs). Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
 - **Verify before claiming.** Run it before saying it works. Anything tested only against a local stand-in is labelled `unverified`.
 - **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
+- **Image versions.** Container images are pinned only in `deploy/compose/.env`; edit it and run `scripts/check-versions.sh` (CI runs it). Tool versions are in `mise.toml`.
 - **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
 - **Commits.** Conventional, small, focused. Stage specific files, never `git add -A`. Don't push or tag unless asked.
 - **Pull requests.** Always open them as drafts (`gh pr create --draft`). CI doesn't run on a draft; it starts when the PR is marked ready for review.

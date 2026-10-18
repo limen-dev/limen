@@ -79,6 +79,10 @@ limen admin components                 # the proxy, the worker, and its tunnels
 - `limen login --device` uses the device flow. Open the printed URL anywhere and enter the code.
 - `deploy/compose/scripts/dev-login.sh developer@example.com` automates Dex's password form. It's for scripts and tests only.
 
+## Versions
+
+Every container image the stack, the demos and the image builds use is listed in one file, [`.env`](.env) (Compose loads it by itself from this directory, and the demos and `scripts/ci-db-targets.sh` source it). Tool versions are in `mise.toml`. To change a version, edit `.env`, then run `scripts/check-versions.sh`. It fails when something drifts: a compose file that pins an image itself, a script that names one, a Dockerfile that has a default for a base image instead of taking it as a build arg, a build of it that does not pass the arg, or one of the few places that cannot read `.env` (the CI service containers, the Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
+
 ## Layout
 
 ```
@@ -265,4 +269,4 @@ It asserts that the long session outlasted all of this without a stall, every ne
 
 The demo runs its own project (`limen-redis`, the core plus `stacks/redis.yml`) with its own volumes and host ports (proxy 33443/33444, Dex 35556, control plane health 33081, S3 38333), so it runs next to the dev stack. The stack adds a Redis 7.4 and a Valkey 8.0 target with the ACL in `config/targets/redis/users.acl`, and gives the worker the matching passwords from `config/targets/redis/credentials.json` (dev only). `demos/demo-phase7.sh` builds and starts it, seeds keys, and checks the exit criteria with `redis-cli` (or `config/targets/redis/resp-client.py` when `redis-cli` isn't installed). Stop it with `docker compose -p limen-redis down -v`. `scripts/dev-login.sh` takes `LIMEN_DEX_URL` (default `http://localhost:5556`) for a stack whose Dex has another port.
 
-`demos/test-phase7-scenarios.sh` runs 26 more scenarios against the same targets plus a TLS Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). It is project `limen-redis-scn` on ports 36xxx; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.
+`demos/demo-phase7.sh --scenarios` runs 26 more scenarios on the same stack, after the walkthrough, against the same targets plus a TLS-only Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). Give scenario names after `--scenarios` to run only those whose name contains them; add `--down` to remove the stack afterwards. It is the same project (`limen-redis`) and ports as the demo; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.

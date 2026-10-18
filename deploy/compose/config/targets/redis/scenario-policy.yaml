@@ -1,4 +1,4 @@
-# Extra policy for test-phase7-scenarios.sh, applied on top of examples/policy.
+# Extra policy for `demos/demo-phase7.sh --scenarios`, applied on top of examples/policy.
 kind: resource
 version: v1
 metadata: { name: cache-tls, labels: { env: staging } }
