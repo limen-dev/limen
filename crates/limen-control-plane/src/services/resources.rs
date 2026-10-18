@@ -35,6 +35,13 @@ impl Resources for ResourcesService {
                             .or(s.redshift.as_ref())
                     })
                     .and_then(|t| t.default_database.clone())
+                    .or_else(|| {
+                        loaded
+                            .policy
+                            .resource(&r.name)
+                            .and_then(|doc| doc.spec.mongodb.as_ref())
+                            .and_then(|t| t.default_database.clone())
+                    })
                     .unwrap_or_default();
                 Resource {
                     name: r.name,

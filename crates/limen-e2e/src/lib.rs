@@ -714,11 +714,33 @@ pub mod db_client {
         role: &str,
         database: &str,
     ) -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
+        listen_on(
+            proxy_addr,
+            ca_pem,
+            identity,
+            limen_tunnel::alpn::DB,
+            resource,
+            role,
+            database,
+        )
+        .await
+    }
+
+    /// The same for another protocol's ALPN (`limen-mongo/1`).
+    pub async fn listen_on(
+        proxy_addr: &str,
+        ca_pem: &str,
+        identity: Identity,
+        alpn: &[u8],
+        resource: &str,
+        role: &str,
+        database: &str,
+    ) -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
         let tls = Arc::new(
             client_config(
                 &certs_from_pem(ca_pem).expect("ca"),
                 Some(identity),
-                &[limen_tunnel::alpn::DB],
+                &[alpn],
             )
             .expect("tls"),
         );

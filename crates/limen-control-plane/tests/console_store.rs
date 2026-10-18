@@ -617,3 +617,73 @@ async fn a_logout_is_remembered_as_long_as_the_certificate_lives() {
         .expect("recent");
     assert_eq!(remembered, ["long-lived"]);
 }
+
+/// A MongoDB session has no recording; the console lists its commands (their
+/// shape, never values), how each ended, and the ones the worker refused,
+/// whatever order the events arrive in.
+#[tokio::test(flavor = "multi_thread")]
+async fn mongodb_sessions_list_their_commands() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let find = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "forward", "resource": "catalog", "mongo_role": "limen-read", "command": "find", "database": "orders", "collection": "customers", "summary": "{\"filter\":{\"email\":\"?\"}}", "redacted": true }),
+    );
+    let find_end = event(
+        EventKind::MongoCommandEnd,
+        s,
+        DEVELOPER,
+        json!({ "command_id": find.event_id, "status": "ok", "duration_ms": 12, "docs": 3 }),
+    );
+    let insert = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "forward", "command": "insert", "database": "orders", "collection": "customers", "summary": "{\"documents\":{\"count\":1}}" }),
+    );
+    let insert_end = event(
+        EventKind::MongoCommandEnd,
+        s,
+        DEVELOPER,
+        json!({ "command_id": insert.event_id, "status": "error", "duration_ms": 3, "error_code": 13, "error_code_name": "Unauthorized" }),
+    );
+    let refused = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "refused", "command": "find", "database": "billing", "reason": "database_not_granted", "error_code": 13 }),
+    );
+    // The end events arrive first, the batch is redelivered.
+    store::project_events(
+        &db,
+        &[find_end.clone(), insert_end.clone(), refused.clone()],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[find, insert, refused, find_end, insert_end])
+        .await
+        .expect("second batch and redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("commands");
+    assert_eq!(list.len(), 3);
+    let by = |text: &str| {
+        list.iter()
+            .find(|r| r.statement.as_deref() == Some(text))
+            .unwrap_or_else(|| panic!("no row {text:?} in {list:?}"))
+    };
+    let found = by(r#"orders.customers {"filter":{"email":"?"}}"#);
+    assert_eq!(found.status.as_deref(), Some("ok"));
+    assert_eq!((found.rows, found.duration_ms), (Some(3), Some(12)));
+    assert_eq!(found.statement_type.as_deref(), Some("find"));
+    let failed = by(r#"orders.customers {"documents":{"count":1}}"#);
+    assert_eq!(failed.status.as_deref(), Some("error"));
+    assert_eq!(failed.error_code.as_deref(), Some("Unauthorized"));
+    let denied = by("billing");
+    assert_eq!(denied.status.as_deref(), Some("denied"));
+    assert_eq!(denied.error.as_deref(), Some("database_not_granted"));
+
+    let (total, errors) = store::db_session_counts(&db, s).await.expect("counts");
+    assert_eq!((total, errors), (3, 2), "an error and a refusal");
+}

@@ -312,7 +312,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 20] = [
+const SUMMARY_KEYS: [&str; 21] = [
     "action",
     "target_user",
     "component_id",
@@ -322,6 +322,7 @@ const SUMMARY_KEYS: [&str; 20] = [
     "resource",
     "login",
     "redis_user",
+    "mongo_role",
     "reason",
     "by",
     "via",
@@ -486,7 +487,9 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
+                .bind(text(&e.data, "login")
+                    .or_else(|| text(&e.data, "redis_user"))
+                    .or_else(|| text(&e.data, "mongo_role")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(text(&e.data, "proxy_id"))
                 .bind(text(&e.data, "client_addr"))
@@ -513,7 +516,9 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")))
+                .bind(text(&e.data, "login")
+                    .or_else(|| text(&e.data, "redis_user"))
+                    .or_else(|| text(&e.data, "mongo_role")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(e.time)
                 .bind(text(&e.data, "reason"))
@@ -526,34 +531,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .await?;
             }
             EventKind::DbQuery => {
-                let (statement, truncated) = cut(
-                    e.data
-                        .get("statement")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default(),
-                    MAX_STATEMENT_TEXT,
-                );
-                let truncated = truncated
-                    || e.data
-                        .get("truncated")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false);
-                sqlx::query(
-                    "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                     ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
-                       phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
-                       statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
-                )
-                .bind(e.event_id)
-                .bind(session_id)
-                .bind(e.time)
-                .bind(text(&e.data, "phase"))
-                .bind(text(&e.data, "statement_type"))
-                .bind((!statement.is_empty()).then_some(statement))
-                .bind(truncated)
-                .execute(&mut *tx)
-                .await?;
+                project_db_query(&mut tx, e, session_id).await?;
             }
             // Redis sessions have no recording either; their commands share the
             // statements table (ADR-0034). The text holds key names (hashed if
@@ -564,6 +542,15 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             EventKind::AuthDenied if text(&e.data, "action") == Some("redis") => {
                 project_redis_command(&mut tx, e, session_id, "denied", text(&e.data, "reason"))
                     .await?;
+            }
+            // MongoDB sessions have no recording either (ADR-0035). The commands
+            // share the statements table; the text is the command's shape with
+            // every value replaced (or the values, if the resource keeps them).
+            EventKind::MongoCommand => {
+                project_mongo_command(&mut tx, e, session_id).await?;
+            }
+            EventKind::MongoCommandEnd => {
+                project_mongo_end(&mut tx, e, session_id).await?;
             }
             EventKind::DbQueryEnd => {
                 let Some(query_id) = text(&e.data, "query_id").and_then(|q| q.parse::<Uuid>().ok())
@@ -683,6 +670,125 @@ fn kube_login_session(data: &serde_json::Value) -> Option<Uuid> {
         &Uuid::NAMESPACE_OID,
         format!("limen/kubectl/{login}/{cluster}").as_bytes(),
     ))
+}
+
+/// A statement sent to a SQL database, as the console shows it.
+async fn project_db_query(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let (statement, truncated) = cut(
+        e.data
+            .get("statement")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        MAX_STATEMENT_TEXT,
+    );
+    let truncated = truncated
+        || e.data
+            .get("truncated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    sqlx::query(
+            "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+               phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+               statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
+        )
+        .bind(e.event_id)
+        .bind(session_id)
+        .bind(e.time)
+        .bind(text(&e.data, "phase"))
+        .bind(text(&e.data, "statement_type"))
+        .bind((!statement.is_empty()).then_some(statement))
+        .bind(truncated)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// How a MongoDB command ended, onto the row of the command itself.
+async fn project_mongo_end(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(command_id) = text(&e.data, "command_id").and_then(|q| q.parse::<Uuid>().ok()) else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, status, \"rows\", duration_ms, error_code, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (event_id) DO UPDATE SET status = EXCLUDED.status, \"rows\" = EXCLUDED.\"rows\",
+           duration_ms = EXCLUDED.duration_ms, error_code = EXCLUDED.error_code, error = EXCLUDED.error",
+    )
+    .bind(command_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "status"))
+    .bind(number(&e.data, "docs"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(
+        text(&e.data, "error_code_name")
+            .map(str::to_owned)
+            .or_else(|| number(&e.data, "error_code").map(|c| c.to_string())),
+    )
+    .bind(text(&e.data, "error"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// The command a MongoDB event names, as the console shows it: namespace,
+/// then the redacted shape.
+fn mongo_statement(data: &serde_json::Value) -> String {
+    let db = text(data, "database").unwrap_or_default();
+    let namespace = match text(data, "collection") {
+        Some(c) => format!("{db}.{c}"),
+        None => db.to_owned(),
+    };
+    let summary = text(data, "summary")
+        .filter(|s| *s != "{}")
+        .unwrap_or_default();
+    format!("{namespace} {summary}").trim().to_owned()
+}
+
+async fn project_mongo_command(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let refused = text(&e.data, "phase") == Some("refused");
+    let statement = mongo_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    let truncated = truncated
+        || e.data
+            .get("summary_truncated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    // A forwarded command has no status until its end event arrives.
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated, status, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+           statement = EXCLUDED.statement, truncated = EXCLUDED.truncated,
+           status = COALESCE(db_statements.status, EXCLUDED.status), error = COALESCE(db_statements.error, EXCLUDED.error)",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "phase"))
+    .bind(text(&e.data, "command").map_or_else(|| "mongo".to_owned(), str::to_owned))
+    .bind((!statement.is_empty()).then_some(statement))
+    .bind(truncated)
+    .bind(refused.then_some("denied"))
+    .bind(if refused { text(&e.data, "reason") } else { None })
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// The command a Redis event names, as the console shows it: the command,

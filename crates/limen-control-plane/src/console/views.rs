@@ -216,6 +216,8 @@ pub struct SessionView {
     pub has_recording: bool,
     /// A Redis or Valkey session: no recording, but audited commands.
     pub is_redis: bool,
+    /// A MongoDB session: no recording, but audited commands.
+    pub is_mongo: bool,
     /// Either of the two: the page lists what was sent instead of a recording.
     pub has_statements: bool,
     /// One login's kubectl requests on a cluster: the page lists them.
@@ -271,9 +273,10 @@ impl From<&SessionRow> for SessionView {
             has_recording,
             is_redis: s.kind.as_deref() == Some("redis"),
             is_kubectl: s.kind.as_deref() == Some("kubectl"),
+            is_mongo: s.kind.as_deref() == Some("mongodb"),
             has_statements: matches!(
                 s.kind.as_deref(),
-                Some("postgres" | "mysql" | "redshift" | "redis")
+                Some("postgres" | "mysql" | "redshift" | "redis" | "mongodb")
             ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
@@ -282,6 +285,8 @@ impl From<&SessionRow> for SessionView {
                 "The recording was made but hasn't reached the control plane yet. Check again shortly."
             } else if matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")) {
                 "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
+            } else if s.kind.as_deref() == Some("mongodb") {
+                "MongoDB sessions have no terminal recording. Every command is in the audit trail as mongo.command events that carry this session id (in S3 and Datadog)."
             } else if s.kind.as_deref() == Some("redis") {
                 "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
             } else {
@@ -519,6 +524,8 @@ impl From<&super::store::DbStatementRow> for StatementView {
             // Redis: policy allowed it and the audit event was written before it
             // was forwarded. ("sent" is what earlier versions stored.)
             Some("allowed" | "sent") => "allowed",
+            // MongoDB: the client asked for no answer (`w: 0`).
+            Some("unacknowledged") => "sent, no reply",
             Some("denied") => "refused",
             Some("error") => "error",
             Some(_) => "not completed",
@@ -556,7 +563,7 @@ impl From<&super::store::DbStatementRow> for StatementView {
             },
             outcome: outcome.to_owned(),
             outcome_class: match r.status.as_deref() {
-                Some("ok" | "allowed" | "sent") => "ok",
+                Some("ok" | "allowed" | "sent" | "unacknowledged") => "ok",
                 Some("error" | "denied") => "bad",
                 _ => "warn",
             },

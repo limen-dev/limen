@@ -152,13 +152,24 @@ pub async fn ssh(proxy: Option<&str>, target: &str, command: &[String]) -> anyho
 }
 
 /// Open a session stream to the proxy on `alpn` for `principal` on `resource`
-/// (`limen-ssh/1` or `limen-redis/1`). On success the stream carries the
+/// (`limen-ssh/1`, `limen-redis/1`, or `limen-mongo/1`). On success the stream carries the
 /// protocol's own bytes. A refusal is returned as an error with the proxy's reason.
 pub(crate) async fn open_session(
     proxy: Option<&str>,
     alpn: &[u8],
     resource: &str,
     principal: &str,
+) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
+    open_session_in(proxy, alpn, resource, principal, "").await
+}
+
+/// The same, for protocols whose session names a database (MongoDB).
+pub(crate) async fn open_session_in(
+    proxy: Option<&str>,
+    alpn: &[u8],
+    resource: &str,
+    principal: &str,
+    database: &str,
 ) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let profile = Profile::load(&proxy_addr)?
@@ -182,7 +193,7 @@ pub(crate) async fn open_session(
         &SessionRequest {
             resource: resource.to_owned(),
             principal: principal.to_owned(),
-            database: String::new(),
+            database: database.to_owned(),
         },
     )
     .await?;
