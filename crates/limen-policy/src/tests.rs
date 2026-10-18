@@ -857,6 +857,34 @@ mod mongodb {
     }
 
     #[test]
+    fn command_pacing_defaults_to_500_a_second_and_zero_is_unlimited() {
+        let policy = resource("endpoint: \"m:27017\", credentials_dir: /c").expect("policy");
+        let target = policy
+            .resource("m")
+            .expect("resource")
+            .spec
+            .mongodb
+            .clone()
+            .expect("mongodb");
+        assert_eq!(target.max_commands_per_second, 500);
+        let policy =
+            resource("endpoint: \"m:27017\", credentials_dir: /c, max_commands_per_second: 0")
+                .expect("policy");
+        let target = policy
+            .resource("m")
+            .expect("resource")
+            .spec
+            .mongodb
+            .clone()
+            .expect("mongodb");
+        assert_eq!(target.max_commands_per_second, 0);
+        assert!(
+            resource("endpoint: \"m:27017\", credentials_dir: /c, max_commands_per_second: -1")
+                .is_err()
+        );
+    }
+
+    #[test]
     fn insecure_dev_is_only_for_standard_servers() {
         assert!(resource("endpoint: \"m:27017\", credentials_dir: /c, insecure_dev: true").is_ok());
         assert!(

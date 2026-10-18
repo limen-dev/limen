@@ -74,6 +74,7 @@ spec:
     tls_ca_file: /etc/limen/mongo/ca.pem
     # tls_server_name: mongo.internal        # if the certificate carries another name
     # full_commands: true                    # keep values in the audit trail
+    # max_commands_per_second: 500           # pacing per session; 0 for no limit
   worker_selector: { pool: prod }
 ```
 
@@ -87,11 +88,15 @@ spec:
 
 **IAM (`auth: aws`).** The worker signs an STS `GetCallerIdentity` request with its IAM identity (the default AWS credential chain: task role, instance profile, environment). The MongoDB user must be mapped to that IAM role ARN (`$external` user in Atlas, an IAM user in DocumentDB). *Unverified against the real services.*
 
+**Pacing.** Each command is a durable audit write, so a session may send at most `max_commands_per_second` (default 500; 0 for no limit) after a burst of 100: a client in a tight loop is slowed, never refused, and adds no extra events.
+
 **Limits and behavior to know**
 - **No transactions or retryable writes.** The worker presents itself as a standalone server, so drivers don't start transactions or retry writes through Limen.
 - A failover ends the session with an error; reconnect and the worker finds the new primary. Sharded clusters (`mongos`) and `mongodb+srv://` are not supported yet.
 - A session ends at the role's `max_session_ttl`, or after an hour with no client activity. A command that is running when the client leaves keeps running on the server until it finishes (set `maxTimeMS`); the worker closes its own connection.
 - Messages up to the server's 48 MB limit pass; the worker holds one message in memory at a time per session.
 - The client's `OP_COMPRESSED` compression is not offered, so drivers use none.
+
+**Metrics** (worker, Prometheus): `limen_mongo_commands_total{status}` (`ok`, `error`, `unacknowledged`, `not_completed`), `limen_mongo_command_seconds`, `limen_mongo_refused_total{reason}`, `limen_mongo_connect_failures_total`, and `limen_mongo_paced_total` (commands that had to wait). A rising `connect_failures` is a credential, TLS, network, or primary problem; a rising `not_completed` is sessions being cut off mid-command.
 
 **Observing it.** The server's log and `db.currentOp()` show `appName: limen:<session id>` for each Limen connection, which ties them to the session in the console. In the audit trail, group `mongo.command.end` by `error_code_name` to see what the server refuses, and by `status: not_completed` to see commands cut short.

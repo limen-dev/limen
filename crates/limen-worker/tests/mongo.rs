@@ -157,11 +157,23 @@ fn code(reply: &[u8]) -> Option<i64> {
 }
 
 async fn open(env: &Env, role: &str, auth: &str) -> Result<Harness, UpstreamError> {
+    open_with(env, role, auth, serde_json::json!({})).await
+}
+
+async fn open_with(
+    env: &Env,
+    role: &str,
+    auth: &str,
+    extra: serde_json::Value,
+) -> Result<Harness, UpstreamError> {
     let creds = tempfile::tempdir().expect("dir");
     std::fs::write(creds.path().join("limen-read"), "limen-read-dev-only\n").expect("secret");
     std::fs::write(creds.path().join("limen-rw"), "limen-rw-dev-only\n").expect("secret");
     std::fs::copy(&env.client_pem, creds.path().join("limen-x509.pem")).expect("pem");
-    let spec_value = spec_json(env, creds.path(), auth);
+    let mut spec_value = spec_json(env, creds.path(), auth);
+    if let (Some(m), Some(e)) = (spec_value.as_object_mut(), extra.as_object()) {
+        m.extend(e.clone());
+    }
     let spec: MongoTarget = serde_json::from_value(spec_value.clone()).expect("spec");
     let policy = policy_for(&spec_value);
     let aws = None;
@@ -928,4 +940,40 @@ async fn a_mixed_session_leaves_one_end_per_command() {
         .filter(|e| e["data"]["phase"] == "refused")
         .count();
     assert_eq!(refused, 1, "refusals have no end event");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_in_a_loop_is_paced_instead_of_flooding_the_trail() {
+    let Some(env) = env() else { return };
+    // 20 commands a second after a burst of 100.
+    let mut h = open_with(
+        &env,
+        "limen-read",
+        "scram",
+        serde_json::json!({ "max_commands_per_second": 20 }),
+    )
+    .await
+    .expect("open");
+    let ping = || Builder::new().i32("ping", 1).str("$db", "admin").finish();
+    let started = std::time::Instant::now();
+    for _ in 0..100 {
+        assert!(ok(&h.client.run(ping()).await));
+    }
+    let burst = started.elapsed();
+    let after = std::time::Instant::now();
+    for _ in 0..40 {
+        assert!(ok(&h.client.run(ping()).await));
+    }
+    // 40 more at 20 a second take about two seconds; none is refused or lost.
+    assert!(
+        after.elapsed() >= Duration::from_millis(1_800),
+        "{:?}",
+        after.elapsed()
+    );
+    assert!(
+        burst < after.elapsed() * 3,
+        "the burst was not paced: {burst:?}"
+    );
+    assert_every_command_has_one_end(&h).await;
+    assert_eq!(events(&h, "mongo.command").len(), 140);
 }

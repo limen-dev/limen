@@ -11,6 +11,8 @@ mod audit;
 pub mod bson;
 mod redact;
 mod reply;
+#[cfg(test)]
+mod robustness;
 mod rules;
 pub mod upstream;
 pub mod wire;
@@ -50,6 +52,8 @@ pub struct SessionConfig {
     pub flavor: MongoFlavor,
     /// `full_commands` on the resource.
     pub full_commands: bool,
+    /// Commands per second one session may send (0: no limit).
+    pub max_commands_per_second: u32,
     /// Fields so tests can shorten them.
     pub idle: Duration,
     pub reply_timeout: Duration,
@@ -71,6 +75,7 @@ impl SessionConfig {
             role,
             flavor: target.flavor,
             full_commands: target.full_commands,
+            max_commands_per_second: target.max_commands_per_second,
             idle: IDLE,
             reply_timeout: REPLY,
         }
@@ -255,6 +260,7 @@ where
         i32::from_le_bytes(config.session_id.as_bytes()[12..16].try_into()?) & i32::MAX;
     let mut cursors: HashSet<i64> = HashSet::new();
     let mut next_id: i32 = 1;
+    let mut pacer = Pacer::new(config.max_commands_per_second);
 
     loop {
         let message = match tokio::time::timeout(config.idle, wire::read_message(&mut client)).await
@@ -283,6 +289,7 @@ where
                     reply_timeout: config.reply_timeout,
                     connection_id,
                     next_id: &mut next_id,
+                    pacer: &mut pacer,
                 };
                 ctx.command(&message).await
             }
@@ -332,6 +339,55 @@ where
         .is_ok()
 }
 
+/// Commands that pass at once before pacing starts.
+const BURST: u32 = 100;
+
+/// Spaces a session's commands so a client in a loop can't flood the audit
+/// trail (every command is a durable write): past a burst, each waits for its
+/// turn. It delays; it never refuses, so it adds no events of its own.
+struct Pacer {
+    interval: Duration,
+    next: tokio::time::Instant,
+}
+
+impl Pacer {
+    fn new(max_per_second: u32) -> Self {
+        let interval = if max_per_second == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs(1) / max_per_second
+        };
+        let now = tokio::time::Instant::now();
+        Self {
+            interval,
+            // A new session starts with its burst in hand.
+            next: now.checked_sub(interval * BURST).unwrap_or(now),
+        }
+    }
+
+    async fn wait(&mut self) {
+        if self.interval.is_zero() {
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        // Idle time earns up to a burst of credit, no more.
+        if let Some(earliest) = now.checked_sub(self.interval * BURST) {
+            self.next = self.next.max(earliest);
+        }
+        if self.next > now {
+            metrics::counter!("limen_mongo_paced_total").increment(1);
+            tokio::time::sleep_until(self.next).await;
+        }
+        self.next += self.interval;
+    }
+}
+
+/// Counts a command's outcome and how long it took, for the worker's metrics.
+fn record_outcome(status: Status, took: Duration) {
+    metrics::counter!("limen_mongo_commands_total", "status" => status.as_str()).increment(1);
+    metrics::histogram!("limen_mongo_command_seconds").record(took.as_secs_f64());
+}
+
 /// A command that was audited and is on its way to the server. It owes the
 /// trail an end event. [`InFlight::finish`] writes it; if the guard is dropped
 /// first because the session was cancelled from outside (a lock, a kill, a
@@ -358,6 +414,7 @@ impl InFlight {
     /// has a command with no outcome.
     async fn finish(mut self, status: Status, info: Option<&reply::ReplyInfo>) -> bool {
         self.owed = false;
+        record_outcome(status, self.started.elapsed());
         match self
             .auditor
             .finished(self.id, self.started, status, info)
@@ -381,6 +438,7 @@ impl Drop for InFlight {
         // runtime the process is going down and the spool has the start event.)
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let (auditor, id, started) = (self.auditor.clone(), self.id, self.started);
+            record_outcome(Status::NotCompleted, started.elapsed());
             runtime.spawn(async move {
                 if let Err(e) = auditor
                     .finished(id, started, Status::NotCompleted, None)
@@ -403,6 +461,7 @@ struct Ctx<'a, S> {
     reply_timeout: Duration,
     connection_id: i32,
     next_id: &'a mut i32,
+    pacer: &'a mut Pacer,
 }
 
 impl<S> Ctx<'_, S>
@@ -431,12 +490,18 @@ where
         let command = match rules::inspect(parsed.command) {
             Ok(c) => c,
             Err(refusal) => {
+                self.pacer.wait().await;
                 return self
                     .refuse("", "", &refusal, request_id, unacknowledged)
                     .await;
             }
         };
-        match judge(&command, self.access, self.cursors) {
+        let verdict = judge(&command, self.access, self.cursors);
+        // Every command but the handshake is a durable audit write: pace them.
+        if !matches!(verdict, Verdict::Hello) {
+            self.pacer.wait().await;
+        }
+        match verdict {
             Verdict::Hello => {
                 let hello_ok = matches!(command.body.get("helloOk"), Ok(Some(v)) if v.is_truthy());
                 let doc = hello_reply(&self.upstream.info, hello_ok, self.connection_id);
@@ -506,6 +571,7 @@ where
         request_id: i32,
         unacknowledged: bool,
     ) -> bool {
+        metrics::counter!("limen_mongo_refused_total", "reason" => refusal.reason).increment(1);
         if let Err(e) = self
             .auditor
             .refused(name, database, refusal, request_id)
@@ -598,5 +664,44 @@ where
                 tracing::warn!("too many open cursors in one MongoDB session; not tracking more");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_burst_passes_then_commands_wait_their_turn() {
+        let mut pacer = Pacer::new(200); // 5 ms apart after a burst of 100
+        let first = Instant::now();
+        for _ in 0..BURST {
+            pacer.wait().await;
+        }
+        assert!(
+            first.elapsed() < Duration::from_millis(100),
+            "{:?}",
+            first.elapsed()
+        );
+        let after = Instant::now();
+        for _ in 0..20 {
+            pacer.wait().await;
+        }
+        // 20 more at 200/s take about 100 ms.
+        assert!(
+            after.elapsed() >= Duration::from_millis(80),
+            "{:?}",
+            after.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_means_no_limit() {
+        let mut pacer = Pacer::new(0);
+        let started = Instant::now();
+        for _ in 0..10_000 {
+            pacer.wait().await;
+        }
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 }

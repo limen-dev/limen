@@ -397,6 +397,7 @@ async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo:
         .ok_or_else(|| Status::failed_precondition("resource is not a MongoDB resource"))?;
     // The detail names the server and the account: it stays in the log.
     let unavailable = |what: &str, e: &dyn std::fmt::Display| {
+        metrics::counter!("limen_mongo_connect_failures_total").increment(1);
         tracing::warn!(error = %e, resource = %grant.resource, "{what}");
         Status::unavailable(
             "couldn't connect to the MongoDB server; ask an admin to check the worker's log",
@@ -415,6 +416,7 @@ async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo:
     let (login, identity) = crate::mongo::credentials(&spec, &grant.principal, aws)
         .await
         .map_err(|e| {
+            metrics::counter!("limen_mongo_connect_failures_total").increment(1);
             tracing::error!(resource = %grant.resource, error = %e, "can't load the MongoDB role's credential");
             Status::failed_precondition("the worker has no credential for this MongoDB role")
         })?;

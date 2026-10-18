@@ -542,6 +542,15 @@ pub struct MongoTarget {
     /// with `?` and keeps the shape.
     #[serde(default)]
     pub full_commands: bool,
+    /// Most commands per second one session may send. Over it, commands wait
+    /// their turn (a burst of 100 passes at once), so a client in a loop can't
+    /// flood the audit trail. 0 is no limit.
+    #[serde(default = "default_commands_per_second")]
+    pub max_commands_per_second: u32,
+}
+
+fn default_commands_per_second() -> u32 {
+    500
 }
 
 /// `OpenSearch` or `Elasticsearch` over HTTP(S).
