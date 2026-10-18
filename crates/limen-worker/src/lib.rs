@@ -5,6 +5,7 @@
 pub mod amqp;
 pub mod broker;
 pub mod db;
+pub mod kafka;
 pub mod recording;
 mod recordings;
 pub mod redis;

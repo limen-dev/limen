@@ -3,10 +3,10 @@
 //! credentials it holds for the broker users a role names, and the name
 //! patterns grants are written in. The person never sees any of it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use limen_core::secret::Secret;
@@ -59,6 +59,9 @@ pub struct Settings {
     roots: Option<rustls::RootCertStore>,
     /// By resource name, then broker user.
     credentials: BTreeMap<String, BTreeMap<String, Credential>>,
+    /// The brokers of Kafka clusters, as last asked, so that opening a
+    /// session for a broker slot doesn't ask the bootstrap every time.
+    clusters: Arc<std::sync::Mutex<HashMap<String, (Instant, Vec<(i32, String, i32)>)>>>,
 }
 
 impl Settings {
@@ -80,7 +83,29 @@ impl Settings {
             }
             None => BTreeMap::new(),
         };
-        Ok(Self { roots, credentials })
+        Ok(Self {
+            roots,
+            credentials,
+            clusters: Arc::default(),
+        })
+    }
+
+    /// The brokers of `key`'s cluster, if they were asked for less than `max_age` ago.
+    #[must_use]
+    pub fn cached_brokers(&self, key: &str, max_age: Duration) -> Option<Vec<(i32, String, i32)>> {
+        let clusters = self
+            .clusters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (at, brokers) = clusters.get(key)?;
+        (at.elapsed() < max_age).then(|| brokers.clone())
+    }
+
+    pub fn cache_brokers(&self, key: String, brokers: Vec<(i32, String, i32)>) {
+        self.clusters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, (Instant::now(), brokers));
     }
 
     #[must_use]
