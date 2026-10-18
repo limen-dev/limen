@@ -1,0 +1,210 @@
+# Limen messaging stack (Phase 11, ADR-0037): the control plane, a proxy, and
+# a worker, with RabbitMQ and a three-broker Kafka cluster as targets.
+#
+#   docker compose -f deploy/compose/docker-compose.messaging.yml up -d --build
+#   deploy/compose/demo-phase11.sh         # the exit test for Phase 11
+#
+# A separate project (`limen-mq`) with its own volumes and host ports, so it
+# runs next to the dev stack (docker-compose.yml) without touching it.
+# Development only: static tokens, Dex static passwords, file-backed CA keys,
+# fixed broker passwords.
+#
+# Host ports (all on 127.0.0.1), with the variables that move them so a second
+# copy can run under another project name (`docker compose -p <name>`):
+#   39443 / 39444  proxy API / health   LIMEN_MQ_PROXY_PORT / LIMEN_MQ_HEALTH_PORT
+#   39556  Dex                          LIMEN_MQ_DEX_PORT
+#   39081  control plane health         LIMEN_MQ_CP_PORT
+#   39333  S3 (SeaweedFS)               LIMEN_MQ_S3_PORT
+name: limen-mq
+
+x-limen-image: &limen-build
+  context: ../..
+  dockerfile: deploy/docker/Dockerfile
+
+x-dev-tokens:
+  proxy: &proxy-token dev-only-proxy-join-token-7f3a9c1e5b2d4f60
+  worker: &worker-token dev-only-worker-join-token-2c8e6a4b0d1f3e5a
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: limen
+      POSTGRES_PASSWORD: limen-dev-only
+      POSTGRES_DB: limen
+    volumes: [postgres:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U limen -d limen"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The dev stack's Dex configuration, with this stack's host ports.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sed -e 's#localhost:5556#localhost:${LIMEN_MQ_DEX_PORT:-39556}#' -e 's#localhost:3443#localhost:${LIMEN_MQ_PROXY_PORT:-39443}#'
+        /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./dex/theme:/srv/dex/web/themes/limen:ro
+    ports: ["127.0.0.1:${LIMEN_MQ_DEX_PORT:-39556}:5556"]
+
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
+    ports: ["127.0.0.1:${LIMEN_MQ_S3_PORT:-39333}:8333"]
+    volumes: [s3-data:/data, "./s3/s3.json:/etc/seaweedfs/s3.json:ro"]
+
+  control-plane:
+    build: { <<: *limen-build, target: control-plane }
+    image: limen-control-plane:mq
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      dex: { condition: service_started }
+      s3: { condition: service_started }
+    environment:
+      RUST_LOG: info
+      LIMEN_ID: control-plane-1
+      LIMEN_DATABASE_URL: postgres://limen:limen-dev-only@postgres:5432/limen
+      LIMEN_DNS_NAMES: control-plane,localhost
+      LIMEN_CA_DIR: /var/lib/limen/ca
+      LIMEN_CA_EXPORT_DIR: /var/lib/limen/ca-public
+      LIMEN_OIDC_ISSUER: http://localhost:${LIMEN_MQ_DEX_PORT:-39556}/dex
+      LIMEN_OIDC_INTERNAL_URL: http://dex:5556/dex
+      LIMEN_OIDC_CLIENT_ID: limen-cli
+      LIMEN_BOOTSTRAP_ADMIN_GROUPS: limen-admins
+      LIMEN_STATIC_JOIN_TOKENS: "proxy:dev-only-proxy-join-token-7f3a9c1e5b2d4f60,worker:dev-only-worker-join-token-2c8e6a4b0d1f3e5a:pool=dev"
+      LIMEN_PROXY_DNS_NAMES: localhost,proxy
+      LIMEN_AUDIT_FILE: /var/lib/limen/audit/control-plane.jsonl
+      LIMEN_AUDIT_S3_BUCKET: limen-audit
+      LIMEN_AUDIT_S3_ENDPOINT: http://s3:8333
+      LIMEN_AUDIT_S3_PATH_STYLE: "true"
+      LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
+      LIMEN_AUDIT_S3_FLUSH: 10s
+      AWS_ACCESS_KEY_ID: dev
+      AWS_SECRET_ACCESS_KEY: dev-only-secret
+      AWS_REGION: us-east-1
+      LIMEN_ENVIRONMENT: dev
+      LIMEN_CONSOLE_PUBLIC_URL: https://localhost:${LIMEN_MQ_PROXY_PORT:-39443}
+      LIMEN_CONSOLE_OIDC_CLIENT_SECRET: dev-only-console-client-secret
+    ports: ["127.0.0.1:${LIMEN_MQ_CP_PORT:-39081}:3081"]
+    volumes:
+      - cp-ca:/var/lib/limen/ca
+      - ca-public:/var/lib/limen/ca-public
+      - audit:/var/lib/limen/audit
+      - cp-spool:/var/lib/limen/spool
+      - recordings:/var/lib/limen/recordings
+
+  proxy:
+    build: { <<: *limen-build, target: proxy }
+    image: limen-proxy:mq
+    restart: unless-stopped
+    depends_on: [control-plane]
+    environment:
+      RUST_LOG: info
+      LIMEN_CONTROL_PLANE_ADDR: control-plane:3080
+      LIMEN_CONTROL_PLANE_NAME: control-plane
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *proxy-token
+      LIMEN_DNS_NAMES: localhost,proxy
+      LIMEN_PEER_ADDRESS: proxy:3443
+      LIMEN_DATA_DIR: /var/lib/limen/proxy
+    ports: ["127.0.0.1:${LIMEN_MQ_PROXY_PORT:-39443}:3443", "127.0.0.1:${LIMEN_MQ_HEALTH_PORT:-39444}:3444"]
+    volumes:
+      - proxy-data:/var/lib/limen/proxy
+      - ca-public:/var/lib/limen/ca-public:ro
+
+  worker:
+    build: { <<: *limen-build, target: worker }
+    image: limen-worker:mq
+    restart: unless-stopped
+    depends_on: [proxy, rabbitmq-target, kafka-1, kafka-2, kafka-3]
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+      # The ACL passwords of the Redis users the roles name. The worker holds
+      # them; people never see them.
+      LIMEN_MQ_CREDENTIALS_FILE: /etc/limen/redis-credentials.json
+    volumes:
+      - worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - ./targets/messaging/credentials.json:/etc/limen/broker-credentials.json:ro
+
+  # RabbitMQ with two users and three vhosts from a definitions file. The
+  # consumer's broker permissions are read-only: the second layer under Limen's.
+  rabbitmq-target:
+    image: rabbitmq:4.0-alpine
+    volumes:
+      - ./targets/messaging/rabbitmq.conf:/etc/rabbitmq/conf.d/90-limen.conf:ro
+      - ./targets/messaging/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 40
+
+  # Three Kafka brokers (KRaft, combined mode). Clients are told to reach each
+  # at kafka-N:9092, which only exists on this network: through Limen they use
+  # the CLI's loopback listeners instead (the multi-broker design, ADR-0037).
+  # SASL_PLAINTEXT with PLAIN, and SCRAM added by the demo; the authorizer is on.
+  kafka-1: &kafka
+    image: apache/kafka:3.9.0
+    hostname: kafka-1
+    environment: &kafka-env
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CLIENT://:9092,INTER://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-1:9092,INTER://kafka-1:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTER:PLAINTEXT,CLIENT:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN,SCRAM-SHA-256,SCRAM-SHA-512
+      KAFKA_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        user_limen-admin="admin-dev-only" user_limen-consumer="consumer-dev-only";
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___256_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required;
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___512_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required;
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_SUPER_USERS: User:limen-admin;User:limen-scram-admin;User:ANONYMOUS
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xmx400m -Xms200m
+  kafka-2:
+    <<: *kafka
+    hostname: kafka-2
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-2:9092,INTER://kafka-2:9094
+  kafka-3:
+    <<: *kafka
+    hostname: kafka-3
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-3:9092,INTER://kafka-3:9094
+
+volumes:
+  postgres: {}
+  cp-ca: {}
+  ca-public: {}
+  audit: {}
+  proxy-data: {}
+  worker-data: {}
+  cp-spool: {}
+  s3-data: {}
+  recordings: {}
