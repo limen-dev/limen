@@ -16,6 +16,38 @@
 STACK_NAMES=(ssh db redis observability bots kube)
 compose=() STACK_FLAGS=() # set by stack_setup
 
+# ---- terminal output -----------------------------------------------------------
+# Colours and symbols; plain text when stdout is not a terminal or NO_COLOR is set.
+ui_init() {
+  [ -n "${UI_READY:-}" ] && return 0
+  UI_READY=1
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+    C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m' C_RED=$'\033[31m' C_GREEN=$'\033[32m'
+    C_YELLOW=$'\033[33m' C_BLUE=$'\033[34m' C_CYAN=$'\033[36m'
+  else
+    C_RESET='' C_BOLD='' C_DIM='' C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_CYAN=''
+  fi
+  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *UTF-8*|*utf8*|*UTF8*) G_OK='✓' G_BAD='✗' G_ARROW='▸' G_HINT='→' G_RULE='─' ;;
+    *) G_OK='+' G_BAD='x' G_ARROW='>' G_HINT='->' G_RULE='-' ;;
+  esac
+}
+ui_banner() { # ui_banner TITLE SUBTITLE
+  ui_init
+  local rule='' i
+  for i in $(seq 1 $((${#1} + ${#2} + 3))); do rule="$rule$G_RULE"; done
+  printf '\n  %s%s%s %s·%s %s\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET" "$C_DIM" "$C_RESET" "$2" "$C_DIM" "$rule" "$C_RESET"
+}
+ui_section() { ui_init; printf '\n%s%s %s%s\n' "$C_BOLD$C_BLUE" "$G_ARROW" "$*" "$C_RESET"; }
+ui_ok() { ui_init; printf '  %s%s%s %s\n' "$C_GREEN" "$G_OK" "$C_RESET" "$*"; }
+ui_note() { ui_init; printf '  %s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+ui_bad() { # ui_bad LABEL MESSAGE HINT
+  ui_init; printf '  %s%s %s%s %s\n' "$C_RED" "$G_BAD" "$1" "$C_RESET" "$2"
+  [ -n "${3:-}" ] && printf '      %s%s %s%s\n' "$C_DIM" "$G_HINT" "$3" "$C_RESET"
+  return 0
+}
+ui_done() { ui_init; printf '\n%s%s %s%s\n' "$C_BOLD$C_GREEN" "$G_OK" "$*" "$C_RESET"; }
+
 stack_setup() {
   local scale=false
   if [ "${1:-}" = --scale ]; then scale=true; shift; fi
@@ -125,14 +157,15 @@ PORTS
 
 # Checks what the selection needs. Prints one line per check, returns 1 if any failed.
 stack_preflight() {
+  ui_init
   local scale=() s bad=0 want_ssh=false want_kube=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
     [ "$s" = ssh ] && want_ssh=true
     [ "$s" = kube ] && want_kube=true
   done
-  ok() { printf '  \033[32mok\033[0m       %s\n' "$*"; }
-  miss() { printf '  \033[31m%-7s\033[0m  %s\n            -> %s\n' "${3:-MISSING}" "$1" "$2"; bad=1; }
+  ok() { ui_ok "$*"; }
+  miss() { ui_bad "${3:-MISSING}" "$1" "$2"; bad=1; }
 
   if ! command -v docker >/dev/null 2>&1; then
     miss "docker" "$(_hint docker)"
@@ -194,6 +227,7 @@ stack_preflight() {
 
 # Ports, and how the services connect, for what is running.
 stack_summary() {
+  ui_init
   local scale=() port name what proxy s has_ssh=false has_db=false has_redis=false has_obs=false has_bots=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
@@ -201,13 +235,13 @@ stack_summary() {
   done
   proxy="${LIMEN_PORT_PROXY:-3443}"
   [ ${#scale[@]} -gt 0 ] && proxy=23443
-  printf '\n\033[1mPorts (all on 127.0.0.1)\033[0m\n'
+  ui_section "Ports (all on 127.0.0.1)"
   while IFS='|' read -r port name what _; do
-    [ -n "$port" ] && printf '  %-6s %-24s %s\n' "$port" "$name" "$what"
+    [ -n "$port" ] && printf "  ${C_BOLD}%-6s${C_RESET} %-24s ${C_DIM}%s${C_RESET}\n" "$port" "$name" "$what"
   done < <(stack_ports ${scale[@]+"${scale[@]}"} "$@")
-  echo "  (databases, Redis, the SSH host, Trino and the Datadog intake are reached through Limen, not published)"
+  ui_note "(databases, Redis, the SSH host, Trino and the Datadog intake are reached through Limen, not published)"
 
-  printf '\n\033[1mHow it is connected\033[0m\n'
+  ui_section "How it is connected"
   cat <<SUMMARY
   you (limen CLI, browser) --mTLS--> proxy :$proxy --> worker --> target
   1. Login: the CLI sends you to Dex (OIDC). The control plane checks the token, maps your
@@ -268,41 +302,42 @@ YAML
 
 # What to connect to, once it is running. Needs stack_setup to have run.
 stack_endpoints() {
+  ui_init
   local scale=() s has_ssh=false has_db=false has_redis=false has_obs=false has_bots=false has_kube=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
     case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; esac
   done
   local ca="$STACK_STATE/internal-ca.pem"
-  printf '\n\033[1mConnect\033[0m\n'
-  printf '  %-18s %s\n' "CA certificate" "$ca" \
+  ui_section "Connect"
+  printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "CA certificate" "$ca" \
     "Limen proxy" "$STACK_PROXY" \
     "Console" "https://$STACK_PROXY/console/" \
     "Sign-in (OIDC)" "$STACK_DEX   admin@example.com / password (developer@example.com, guest@example.com)"
-  echo "  The proxy's certificate is signed by Limen's dev CA. Pass the file to the CLI; import it into a browser only if you choose to."
+  ui_note "The proxy's certificate is signed by Limen's dev CA. Pass the file to the CLI; import it into a browser only if you choose to."
   echo "  CLI sign-in:  limen --proxy $STACK_PROXY login --ca-file $ca"
   echo "  Then:         limen ls"
   if $has_ssh || $has_db || $has_redis || $has_kube; then
-    printf '\n\033[1mResources\033[0m (reached through the proxy; the listeners below are local)\n'
+    ui_section "Resources (reached through the proxy; the listeners below are local)"
   fi
-  $has_ssh && printf '  %-18s %s\n' "SSH" "limen ssh web-staging-1        (target sshd-target:22)"
+  $has_ssh && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "SSH" "limen ssh web-staging-1  (target sshd-target:22)"
   if $has_db; then
-    printf '  %-18s %s\n' "PostgreSQL" "limen db connect orders-staging       (prints the psql command and its local port; target postgres-target:5432)" \
-      "MySQL" "limen db connect orders-mysql-staging   (prints the mysql command; target mysql-target:3306)"
+    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "PostgreSQL" "limen db connect orders-staging  (prints the psql command and its local port; target postgres-target:5432)" \
+      "MySQL" "limen db connect orders-mysql-staging  (prints the mysql command; target mysql-target:3306)"
   fi
   if $has_redis; then
-    printf '  %-18s %s\n' "Redis" "limen redis connect cache-staging     (prints the redis-cli command; target redis-target:6379)" \
-      "Valkey" "limen redis connect cache-valkey       (prints the redis-cli command; target valkey-target:6379)"
+    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Redis" "limen redis connect cache-staging  (prints the redis-cli command; target redis-target:6379)" \
+      "Valkey" "limen redis connect cache-valkey  (prints the redis-cli command; target valkey-target:6379)"
   fi
   if $has_kube; then
-    printf '  %-18s %s\n' "Kubernetes" "limen kube login eks-staging --kubeconfig $STACK_STATE/kubeconfig.json" \
+    printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Kubernetes" "limen kube login eks-staging --kubeconfig $STACK_STATE/kubeconfig.json" \
       "" "export KUBECONFIG=$STACK_STATE/kubeconfig.json; kubectl get pods -A" \
       "" "API server behind the worker: https://$LIMEN_KIND_NODE:6443 (kind cluster $KUBE_CLUSTER, reached only through Limen)"
   fi
-  if $has_obs || $has_bots; then printf '\n\033[1mOther\033[0m\n'; fi
-  $has_obs && printf '  %-18s %s\n' "Grafana" "http://localhost:3000   admin / limen-dev-only" \
+  if $has_obs || $has_bots; then ui_section "Other"; fi
+  $has_obs && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Grafana" "http://localhost:3000   admin / limen-dev-only" \
     "Fake Datadog" "http://localhost:8126/fake/received"
-  $has_bots && printf '  %-18s %s\n' "Fake CI issuer" "http://localhost:8130"
-  printf '\n  Stop it: deploy/compose/setup.sh%s down\n' "${scale[*]:+ --scale}"
+  $has_bots && printf "  ${C_CYAN}%-18s${C_RESET} %s\n" "Fake CI issuer" "http://localhost:8130"
+  printf '\n  %sStop it:%s deploy/compose/setup.sh%s down\n' "$C_BOLD" "$C_RESET" "${scale[*]:+ --scale}"
   return 0
 }

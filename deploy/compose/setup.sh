@@ -44,9 +44,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-bold() { printf '\033[1m%s\033[0m\n' "$*"; }
-step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
-fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
+ui_init
+step() { ui_section "$*"; }
+fail() { ui_bad FAILED "$*"; exit 1; }
 wait_for() {
   local what="$1"; shift
   for _ in $(seq 1 240); do "$@" >/dev/null 2>&1 && return 0; sleep 0.5; done
@@ -56,13 +56,15 @@ ask() { # ask "question" default(y|n) -> 0 for yes
   local q="$1" def="$2" hint reply
   [ "$def" = y ] && hint="Y/n" || hint="y/N"
   $yes && { [ "$def" = y ]; return; }
-  read -r -p "$q [$hint] " reply || reply=""
+  printf '%s?%s %s %s[%s]%s ' "$C_CYAN$C_BOLD" "$C_RESET" "$q" "$C_DIM" "$hint" "$C_RESET"
+  read -r reply || reply=""
   reply="${reply:-$def}"
   case "$reply" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
 scale_flag=()
 $want_scale && scale_flag=(--scale)
+if [ "$cmd" = up ]; then ui_banner "Limen" "local development stack"; fi
 
 # ---- down and status act on everything ------------------------------------------
 if [ "$cmd" != up ]; then
@@ -71,7 +73,7 @@ if [ "$cmd" != up ]; then
   "${compose[@]}" down -v --remove-orphans
   rm -f "$STACK_STATE/stack.env"
   if [ -n "${KUBE_CLUSTER:-}" ] && stack_kind get clusters 2>/dev/null | grep -qx "$KUBE_CLUSTER"; then
-    stack_kind delete cluster --name "$KUBE_CLUSTER" >/dev/null 2>&1 && echo "Deleted the kind cluster $KUBE_CLUSTER."
+    stack_kind delete cluster --name "$KUBE_CLUSTER" >/dev/null 2>&1 && ui_ok "Deleted the kind cluster $KUBE_CLUSTER"
   fi
   exit 0
 fi
@@ -82,33 +84,30 @@ if [ -n "$picked" ]; then
   if [ "$picked" != none ]; then IFS=, read -r -a stacks <<<"$picked"; fi
 elif $yes || [ ! -t 0 ]; then
   stacks=("${STACK_NAMES[@]}")
-  [ -t 0 ] || echo "(no terminal: enabling everything; pass --stacks to choose)"
+  [ -t 0 ] || ui_note "(no terminal: enabling everything; pass --stacks to choose)"
 else
-  bold "Limen"
-  echo "  Always on: Postgres (state), S3 (audit batches and recordings), Dex (login),"
-  echo "  the control plane, a proxy and a worker."
+  ui_section "Limen"
+  ui_note "Always on: Postgres (state), S3 (audit batches and recordings), Dex (login),"
+  ui_note "the control plane, a proxy and a worker."
   if ask "  Scale it (3 control planes, 3 proxies, 3 workers)?" n; then want_scale=true; scale_flag=(--scale); fi
   echo
-  bold "What should it connect to, and report to?"
+  ui_section "What should it connect to, and report to?"
   for s in "${STACK_NAMES[@]}"; do
     ask "  $(printf '%-14s' "$s") $(stack_describe "$s")" y && stacks+=("$s")
   done
 fi
 
 # ---- prerequisites --------------------------------------------------------------
-echo
-bold "Checking prerequisites"
+ui_section "Checking prerequisites"
 if ! stack_preflight ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}; then
-  echo
-  echo "Fix the items marked MISSING or BUSY above and run this again." >&2
+  printf '\n  %sFix the items marked MISSING or BUSY above and run this again.%s\n' "$C_YELLOW" "$C_RESET" >&2
   exit 1
 fi
 $check && exit 0
 
-echo
-bold "Starting Limen$($want_scale && echo ' (scaled)') with: ${stacks[*]:-no extra stacks}"
-echo "The first run builds the images and the CLI, which takes several minutes."
-if ! $yes && [ -t 0 ]; then ask "Go?" y || { echo "Cancelled."; exit 0; }; fi
+ui_section "Starting Limen$($want_scale && echo ' (scaled)') with: ${stacks[*]:-no extra stacks}"
+ui_note "The first run builds the images and the CLI, which takes several minutes."
+if ! $yes && [ -t 0 ]; then echo; ask "Go?" y || { ui_note "Cancelled."; exit 0; }; fi
 has() { case " ${stacks[*]:-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # ---- start ----------------------------------------------------------------------
@@ -148,7 +147,8 @@ if has redis; then
   "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning SET app:greeting hello-from-valkey >/dev/null
 fi
 
-step "Ready"
+ui_done "Limen is ready"
+echo
 "$LIMEN_BIN" ls | sed 's/^/  /'
 stack_endpoints ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
 stack_summary ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
