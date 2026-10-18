@@ -76,3 +76,15 @@ The console's **Audit trail → Kubernetes** tab shows every request as kubectl 
 
 ## Try it by hand
 `deploy/compose/demo-phase8.sh --manual` builds a throwaway kind cluster and Postgres (named after `LIMEN_DEMO_CLUSTER`, default `limen-demo8`), runs Limen with the web console in front of it, and prints the commands to use: `limen kube login`, `kubectl get/exec/port-forward/logs`, a view-only user, and `limen admin lock`. The console is on the same port (`/console/sessions`, `/console/audit`) and signs in as `admin@example.com`; write `email group` to the printed `browser-user` file to sign in as someone else. Ctrl-C stops Limen and keeps the cluster.
+
+### With the full local stack and a real sign-in
+`deploy/compose/local-kube.sh up` starts the dev stack (Compose project `limen-kube`), a kind cluster named `limen-local`, and a second worker that serves it as `eks-staging` (pool `kube`). You sign in with the real `limen login` against Dex and use the console at `https://localhost:3443/console/`:
+
+```sh
+limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # admin@example.com / password
+limen kube login eks-staging --kubeconfig /tmp/eks-staging.json
+export KUBECONFIG=/tmp/eks-staging.json
+kubectl get pods -A
+```
+
+`admin@example.com` is in the `sre` group, which `examples/policy` grants `limen:edit` on Kubernetes resources labelled `env: staging`. Logins last 30 minutes. `down` stops the stack and keeps its data; `reset` deletes the data and the cluster. It uses the dev stack's fixed ports (3443, 3444, 3081, 5556) and refuses to start if another stack holds them.
