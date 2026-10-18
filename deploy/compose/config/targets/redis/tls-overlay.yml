@@ -1,5 +1,5 @@
 # Adds a TLS-only Redis and the CA the worker trusts for it, for
-# demos/test-phase7-scenarios.sh (the script generates the certificates), layered
+# demos/demo-phase7.sh --scenarios (the script generates the certificates), layered
 # after the redis stack. LIMEN_REDIS_TLS_DIR holds ca.crt, server.crt and server.key.
 services:
   redis-tls:

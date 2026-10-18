@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 7 scenario tests (driven by ../../test-phase7-scenarios.sh).
+"""Phase 7 scenario tests (run by `demos/demo-phase7.sh --scenarios`).
 
 Each scenario opens real `limen redis connect` listeners against the compose
 stack and talks RESP to them. They run independently: a failure is reported

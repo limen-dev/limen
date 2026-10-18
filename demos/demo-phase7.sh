@@ -4,15 +4,35 @@
 # ACL user, every command is checked and audited, and values stay out of the
 # audit trail.
 #
-#   demos/demo-phase7.sh          # resets this demo's stack first (down -v)
-#   demos/demo-phase7.sh --keep   # reuse the running stack
+#   demos/demo-phase7.sh                          # resets this demo's stack first (down -v)
+#   demos/demo-phase7.sh --keep                   # reuse the running stack
+#   demos/demo-phase7.sh --scenarios              # then also run the 26 scenarios (below)
+#   demos/demo-phase7.sh --scenarios NAME ...     # only the scenarios whose name contains NAME
+#   demos/demo-phase7.sh --scenarios --down       # ... and remove the stack afterwards
+#
+# The scenarios are many ways to use, abuse and break Redis access through Limen, against
+# Redis 7.4 and Valkey 8.0 and a TLS-only Redis (RESP3, 20 MiB values, 60,000-command
+# pipelines, refusals inside pipelines and MULTI, Pub/Sub, key-limit escapes, malformed input,
+# 16 parallel sessions, a target dying mid-session, a lock ending a session, a control plane
+# outage, unix sockets, the idle timeout, secrets in logs and audit). They run on this same
+# stack, after the walkthrough, with the TLS Redis, a second policy and one login profile per
+# person added (config/targets/redis/).
 #
 # Runs as its own compose project (limen-redis) on its own ports, so it can
 # sit next to the dev stack. redis-cli is used when installed; otherwise a
-# small RESP client (targets/redis/resp-client.py) stands in for it.
+# small RESP client (config/targets/redis/resp-client.py) stands in for it.
 set -euo pipefail
-keep=false
-[ "${1:-}" = "--keep" ] && keep=true
+keep=false; down=false; scenarios=false; scn_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --keep) keep=true ;;
+    --down) down=true ;;
+    --scenarios) scenarios=true ;;
+    -*) echo "usage: $0 [--keep] [--down] [--scenarios [NAME ...]]" >&2; exit 2 ;;
+    *) scn_args+=("$1") ;;   # scenario names
+  esac
+  shift
+done
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 here="$root/deploy/compose"
@@ -181,4 +201,49 @@ PY
 pass "redis.command (keys, no values), auth.denied, session.start/end; no secret value in the trail"
 
 printf '\n\033[32mPhase 7 demo passed.\033[0m\n'
-echo "Stop it with: docker compose -p $project down -v"
+
+status=0
+if $scenarios; then
+  step "Scenarios: a TLS-only Redis, a second policy, and a login profile per person"
+  # The TLS Redis and the CA the worker trusts for it; the certificates are made here.
+  mkdir -p "$state/tls"
+  if [ ! -f "$state/tls/server.crt" ]; then
+    (cd "$state/tls" \
+      && openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj "/CN=limen-scenario-ca" 2>/dev/null \
+      && openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=redis-tls" 2>/dev/null \
+      && printf 'subjectAltName=DNS:redis-tls\n' > san.cnf \
+      && openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 2 -extfile san.cnf 2>/dev/null \
+      && chmod 644 ./*.crt ./*.key)
+  fi
+  export LIMEN_REDIS_TLS_DIR="$state/tls"
+  STACK_FLAGS+=(-f "$here/config/targets/redis/tls-overlay.yml")
+  compose=(docker compose --progress=quiet "${STACK_FLAGS[@]}")
+  "${compose[@]}" up -d --build --quiet-pull >/dev/null   # adds redis-tls, restarts the worker with its CA
+  # Two profiles: LIMEN_HOME is per person.
+  export HOME_ADMIN="$state/home-admin" HOME_DEV="$state/home-dev"
+  rm -rf "$HOME_ADMIN" "$HOME_DEV"
+  LIMEN_HOME="$HOME_ADMIN" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
+  LIMEN_HOME="$HOME_ADMIN" "$LIMEN_BIN" admin apply "$root/examples/policy" "$here/config/targets/redis/scenario-policy.yaml" --source-ref scenarios >/dev/null
+  # Roles are fixed at login, so log in again now that policy maps groups to roles.
+  LIMEN_HOME="$HOME_ADMIN" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
+  LIMEN_HOME="$HOME_DEV" "$here/scripts/dev-login.sh" "$DEVELOPER" >/dev/null
+  wait_for "worker tunnels" sh -c "curl -sf http://localhost:$LIMEN_REDIS_HEALTH_PORT/tunnels | grep -q worker_id"
+  sleep 11 # policy refresh
+  for svc in "redis-target redis-cli" "valkey-target valkey-cli" "redis-tls redis-cli"; do
+    read -r name cli <<<"$svc"
+    extra=(); [ "$name" = redis-tls ] && extra=(--tls --cacert /tls/ca.crt)
+    wait_for "$name" "${compose[@]}" exec -T "$name" "$cli" ${extra[@]+"${extra[@]}"} --user limen-rw --pass rw-dev-only --no-auth-warning ping
+  done
+
+  step "Scenarios"
+  export SCN_STATE="$state" SCN_ROOT="$root" SCN_PROJECT="$project" SCN_FILES="${STACK_FLAGS[*]}"
+  python3 -I "$here/config/targets/redis/scenarios.py" ${scn_args[@]+"${scn_args[@]}"} || status=$?
+fi
+
+if $down; then
+  "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
+  echo "Removed the stack (project $project)."
+else
+  echo "Stop it with: docker compose -p $project down -v"
+fi
+exit "$status"
