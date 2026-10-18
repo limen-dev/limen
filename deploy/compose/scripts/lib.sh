@@ -165,10 +165,21 @@ PORTS
 
 # Is something listening on this host port? Which compose project publishes it (empty if none)?
 _port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-_port_project() {
+# Prints "project|container|ports" of the first running container that publishes host port $1.
+# Docker prints consecutive ports as a range (127.0.0.1:3443-3444->3443-3444/tcp), so a range
+# counts too.
+_port_row() {
   command -v docker >/dev/null 2>&1 || return 0
-  docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null | grep -E ":$1->" | head -1 | cut -d'|' -f1 || true
+  local port="$1" row spec lo hi
+  while IFS= read -r row; do
+    for spec in $(printf '%s' "${row##*|}" | grep -oE ':[0-9]+(-[0-9]+)?->' | sed -E 's/^://; s/->$//'); do
+      lo="${spec%-*}"; hi="${spec#*-}"
+      if [ "$port" -ge "$lo" ] && [ "$port" -le "$hi" ]; then printf '%s\n' "$row"; return 0; fi
+    done
+  done < <(docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Names}}|{{.Ports}}' 2>/dev/null)
+  return 0
 }
+_port_project() { _port_row "$1" | cut -d'|' -f1; }
 
 # Moves the host ports that only tests and health checks use (Postgres, S3, KMS, control plane
 # health) to a free port when the default is taken, unless you set the variable yourself.
@@ -237,7 +248,7 @@ stack_preflight() {
     if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
       holder=""; proj=""
       if command -v docker >/dev/null 2>&1; then
-        row="$(docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Names}}|{{.Ports}}' 2>/dev/null | grep -E ":$port->" | head -1 || true)"
+        row="$(_port_row "$port")"
         proj="${row%%|*}"; holder="${row#*|}"; holder="${holder%%|*}"
         [ -n "$row" ] && holder="container $holder"
       fi
