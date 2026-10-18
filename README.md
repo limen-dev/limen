@@ -139,7 +139,11 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 
 | Phase | What | Status |
 |---|---|---|
-| 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
+| 0 | Design, ADRs, threat model, skeleton, CI | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/1) |
+| 1 | Control plane, OIDC login, worker enrollment and reverse tunnels | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/2) |
+| 2 | SSH with session recording | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/3) |
+| 3 | Audit pipeline: S3 and Datadog, hash chain, Grafana dashboards | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/4) |
+| 3.5 | Web console | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
 | 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
