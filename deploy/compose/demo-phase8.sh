@@ -125,6 +125,8 @@ if $manual; then
 export PATH="$root/target/debug:\$PATH"
 export LIMEN_HOME=$out/home-ops
 export KUBECONFIG=$out/kc-ops
+# Sign everyone in again, for example after \`limen logout\`: waits until it is done.
+relogin() { touch $out/relogin; while [ -e $out/relogin ]; do sleep 0.3; done; echo "signed in again"; }
 ENV
   cat <<EOF
 
@@ -141,6 +143,9 @@ Limen is running. Try it by hand (nothing below is shared with other stacks).
   LIMEN_HOME=$out/home-viewer limen kube login kind-dev --kubeconfig /tmp/limen-viewer.json   # guest: limen:view only
   kubectl --kubeconfig /tmp/limen-viewer.json delete pod web          # Forbidden, by the cluster's RBAC
   LIMEN_HOME=$out/home-admin limen admin lock developer@example.com   # ends their open exec/logs/watch
+  limen logout                              # ends this login at the proxy; then:
+  relogin                                   # sign in again (there is no browser sign-in in this stack)
+  limen status                              # who you are, and when the login expires
 
 Console (on the proxy's port; signs in as admin@example.com):
   https://$proxy/console/
@@ -151,7 +156,7 @@ Console (on the proxy's port; signs in as admin@example.com):
   Pages: /console/sessions (exec recordings, playable) and /console/audit (kube.request, session.start/end).
   Raw audit file: $(cat "$out/audit-path")
 
-Logins last 4 hours. Each run uses a new port, so source env.sh again after a restart (an old kubeconfig will not work).
+Logins last 4 hours; \`relogin\` issues new ones at any time. Each run uses a new port, so source env.sh again after a restart.
 Ctrl-C stops Limen; the cluster ($cluster) is kept: kind delete cluster --name $cluster
 EOF
   trap 'exit 0' INT TERM

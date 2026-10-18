@@ -2,7 +2,7 @@
 //! the real `kubectl` and the real `limen` binary can be pointed at it.
 //!
 //! Not a normal test: it is ignored, and it runs until a `stop` file appears.
-//! `deploy/kube/verify-kind.sh` drives it. Needs a cluster (kind), the worker's
+//! `deploy/compose/demo-phase8.sh` drives it. Needs a cluster (kind), the worker's
 //! service account (`deploy/kube/limen-kube-worker.yaml`), and these variables:
 //!
 //! - `KIND_API_SERVER`, `KIND_CA_FILE`, `KIND_TOKEN_FILE`: how to reach it
@@ -44,7 +44,8 @@ fn write_profile(home: &std::path::Path, proxy: &str, user: &str, cert: &str, ke
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs a real cluster; run by deploy/kube/verify-kind.sh"]
+#[ignore = "needs a real cluster; run by deploy/compose/demo-phase8.sh"]
+#[allow(clippy::too_many_lines)]
 async fn serve_a_cluster_until_stopped() {
     // KIND_CONSOLE=1 also serves the web console on the proxy's port. The mock
     // IdP signs the browser in as whoever `browser-user` names (see below).
@@ -151,12 +152,15 @@ spec:
 
     let proxy = format!("localhost:{}", d.proxy_addr.port());
     let ca = std::fs::read_to_string(d.ca_file()).expect("ca");
-    for (home, user, groups) in [
+    // Three users, signed in like `limen login` would. `touch relogin` in the
+    // output directory signs all three in again (after a `limen logout`, say).
+    let users = [
         ("home-ops", DEVELOPER, ["ops"]),
         ("home-viewer", GUEST, ["viewers"]),
         ("home-admin", ADMIN, ["admins"]),
-    ] {
-        let (cert, key) = d.login_pem(user, &groups).await.expect("login");
+    ];
+    for (home, user, groups) in &users {
+        let (cert, key) = d.login_pem(user, groups).await.expect("login");
         write_profile(&out.join(home), &proxy, user, &cert, &key, &ca);
     }
     std::fs::write(
@@ -183,8 +187,18 @@ spec:
         std::fs::write(&browser_user, format!("{ADMIN} admins")).expect("browser user");
     }
     let stop = out.join("stop");
+    let relogin = out.join("relogin");
     let mut last = String::new();
     while !stop.exists() {
+        if relogin.exists() {
+            for (home, user, groups) in &users {
+                let (cert, key) = d.login_pem(user, groups).await.expect("login");
+                write_profile(&out.join(home), &proxy, user, &cert, &key, &ca);
+            }
+            // Removed last: whoever touched it waits for this.
+            let _ = std::fs::remove_file(&relogin);
+            eprintln!("kind bridge: signed everyone in again");
+        }
         if console
             && let Ok(text) = std::fs::read_to_string(&browser_user)
             && text != last
