@@ -232,8 +232,10 @@ step "The audit trail"
 audit="$(cat "$out/audit-path")"
 wait_for "stream audit events" bash -c "grep -c '\"session.end\"' '$audit' | grep -qv '^[0-3]$'"
 python3 - "$audit" <<'PY'
-import json, sys
-events = [json.loads(l) for l in open(sys.argv[1])]
+import json, re, sys, time
+from datetime import datetime
+path = sys.argv[1]
+events = [json.loads(l) for l in open(path)]
 req = [e for e in events if e["kind"] == "kube.request"]
 assert any(e["data"]["verb"] == "list" and e["data"]["k8s_resource"] == "namespaces" for e in req), "kube.request for the list"
 assert all(e["user"] for e in req), "every request names the user"
@@ -244,8 +246,31 @@ assert any(e["exit_code"] == 3 and e.get("recording_sha256") for _, e in execs),
 assert any(e["exit_code"] == 4 and e.get("recording_sha256") for _, e in execs), "spdy exec with exit code and recording"
 pfs = [e for s, e in ends.items() if e["login"] == "portforward"]
 assert len(pfs) >= 2 and all(8080 in e["ports"] for e in pfs), f"port-forward ports: {pfs}"
-assert any("locked" in e["reason"] for e in ends.values()), "the lock ended a stream"
+
+# The lock must be in the trail, and a stream must have ended after it. Why the stream ended is
+# decided by a race in the worker between its lock check (once a second) and the proxy closing the
+# client side, so the reason is "user locked" or "client disconnected" (or "cluster closed the
+# stream", when the cluster side noticed first). All of them mean the lock ended it.
+def when(e):
+    return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", e["time"]).replace("Z", "+00:00"))
+allowed = {"user locked", "client disconnected", "cluster closed the stream"}
+deadline = time.time() + 60
+while True:
+    events = [json.loads(l) for l in open(path)]
+    locks = [e for e in events if e["kind"] == "user.lock"]
+    after = []
+    if locks:
+        locked_at = when(locks[-1])
+        after = [e for e in events if e["kind"] == "session.end" and e["data"].get("kind") == "kube" and when(e) >= locked_at]
+    if after or time.time() > deadline:
+        break
+    time.sleep(1)
+assert locks, "the lock is in the audit trail (user.lock)"
+assert after, "a stream ended after the lock"
+reasons = sorted({e["data"]["reason"] for e in after})
+assert set(reasons) <= allowed, f"unexpected end reasons after the lock: {reasons}"
 print(f"  {len(req)} kube.request events, {len(starts)} streams (exec, port-forward), all linked to a user and a session")
+print(f"  the lock ended {len(after)} stream(s); recorded as: {', '.join(reasons)}")
 PY
 pass "kube.request, session.start/end, exit codes, ports, recordings, and the lock are in the trail"
 
