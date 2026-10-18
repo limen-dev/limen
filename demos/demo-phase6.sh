@@ -19,6 +19,8 @@ keep=false
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 here="$root/deploy/compose"
+# shellcheck source=../deploy/compose/.env
+set -a; source "$here/.env"; set +a # image versions
 # shellcheck source=../deploy/compose/scripts/dev-users.sh
 source "$here/scripts/dev-users.sh"
 state="$here/.state/db-demo"
@@ -44,10 +46,10 @@ wait_for() {
   for _ in $(seq 1 240); do "$@" >/dev/null 2>&1 && return 0; sleep 0.5; done
   fail "timed out waiting for $what"
 }
-psql_in() { docker run --rm postgres:18-alpine psql "host=host.docker.internal port=$pg_port user=${1} dbname=${2} sslmode=disable" "${@:3}"; }
+psql_in() { docker run --rm "$POSTGRES_IMAGE" psql "host=host.docker.internal port=$pg_port user=${1} dbname=${2} sslmode=disable" "${@:3}"; }
 # A named client container, so a signal can be sent to exactly this one.
-psql_named() { local name="$1"; shift; docker run --rm --name "$name" postgres:18-alpine psql "host=host.docker.internal port=$pg_port user=${1} dbname=${2} sslmode=disable" "${@:3}"; }
-mysql_in() { docker run --rm mysql:8.4 mysql -h host.docker.internal -P "$my_port" -u "${1}" --ssl-mode=DISABLED "${@:2}"; }
+psql_named() { local name="$1"; shift; docker run --rm --name "$name" "$POSTGRES_IMAGE" psql "host=host.docker.internal port=$pg_port user=${1} dbname=${2} sslmode=disable" "${@:3}"; }
+mysql_in() { docker run --rm "$MYSQL_IMAGE" mysql -h host.docker.internal -P "$my_port" -u "${1}" --ssl-mode=DISABLED "${@:2}"; }
 command -v docker >/dev/null || fail "docker is required"
 listeners=()
 cleanup() {
@@ -164,8 +166,8 @@ pass "the open session ended $((SECONDS - started)) s after the lock"
 step "Audit trail: sessions, every statement, errors, bootstrap; no secrets"
 sleep 8   # components ship events through their spools
 "${compose[@]}" cp control-plane:/var/lib/limen/audit/control-plane.jsonl "$state/audit.jsonl" >/dev/null
-pw_pg="$(docker run --rm -v limen-dbdemo_db-secrets:/s alpine cat /s/postgres/limen_readonly)"
-pw_my="$(docker run --rm -v limen-dbdemo_db-secrets:/s alpine cat /s/mysql/limen_readonly)"
+pw_pg="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/postgres/limen_readonly)"
+pw_my="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/mysql/limen_readonly)"
 python3 - "$state/audit.jsonl" "$DEVELOPER" "$pw_pg" "$pw_my" <<'PY'
 import collections, json, sys
 path, dev, pw_pg, pw_my = sys.argv[1:5]

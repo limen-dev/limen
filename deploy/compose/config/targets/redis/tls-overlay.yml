@@ -3,7 +3,7 @@
 # after the redis stack. LIMEN_REDIS_TLS_DIR holds ca.crt, server.crt and server.key.
 services:
   redis-tls:
-    image: redis:7.4-alpine
+    image: ${REDIS_IMAGE}
     command:
       - redis-server
       - --port

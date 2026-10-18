@@ -7,7 +7,12 @@
 #
 # The builder stage is shared, so building all three compiles once.
 
-FROM rust:1.99.0-trixie AS builder
+# These defaults must equal RUST_IMAGE and DISTROLESS_IMAGE in deploy/compose/.env
+# (scripts/check-versions.sh checks it); rust-toolchain.toml pins the same Rust version.
+ARG RUST_IMAGE=rust:1.99.0-trixie
+ARG DISTROLESS_IMAGE=gcr.io/distroless/cc-debian13:nonroot
+
+FROM ${RUST_IMAGE} AS builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends protobuf-compiler cmake \
  && rm -rf /var/lib/apt/lists/*
@@ -29,7 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp target/release/limen-control-plane target/release/limen-audit-verify target/release/limen-spool-adopt target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog target/release/fake-ci-issuer /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.
-FROM gcr.io/distroless/cc-debian13:nonroot AS runtime-base
+FROM ${DISTROLESS_IMAGE} AS runtime-base
 # State directories owned by the runtime user, so named volumes mounted
 # here inherit that ownership.
 COPY --from=builder --chown=nonroot:nonroot /state /var/lib/limen

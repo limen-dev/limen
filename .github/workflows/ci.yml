@@ -88,7 +88,7 @@ jobs:
           set -euo pipefail
           # Code the Rust jobs build, test or package. CI's own files count too,
           # so a change to the workflows is checked by the full suite.
-          rust_re='^(crates/|proto/|deploy/docker/|\.github/|Cargo\.(toml|lock)$|(rust-toolchain|clippy|rustfmt|deny)\.toml$|mise\.toml$)'
+          rust_re='^(crates/|proto/|deploy/docker/|deploy/compose/\.env$|scripts/check-versions\.sh$|\.github/|Cargo\.(toml|lock)$|(rust-toolchain|clippy|rustfmt|deny)\.toml$|mise\.toml$)'
           # Infrastructure code, plus crates (dashboards are generated from metric names).
           infra_re='^(crates/|deploy/terraform/|deploy/grafana/|deploy/compose/config/dev-users\.toml$|deploy/compose/scripts/gen-dev-users\.py$|\.github/)'
           workflows_re='^\.github/'
@@ -139,6 +139,9 @@ jobs:
           git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Image versions live in deploy/compose/.env; the places that cannot read it must agree.
+      - name: Image versions agree
+        run: scripts/check-versions.sh
       # Don't depend on how the toolchain was installed or cached.
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --all --check
@@ -223,10 +226,11 @@ jobs:
       # Service containers can't take a command or mount repo files, so S3 starts here.
       - name: Start SeaweedFS (S3)
         run: >-
+          . deploy/compose/.env;
           docker rm -f s3 >/dev/null 2>&1 || true;
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/config/s3/s3.json:/etc/seaweedfs/s3.json:ro"
-          chrislusf/seaweedfs:4.48 server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
+          "$SEAWEEDFS_IMAGE" server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
       # PostgreSQL and MySQL for the database tests (Phase 6): started with plain
       # docker like S3, and it exports LIMEN_TEST_PG_TARGET, LIMEN_TEST_MYSQL_TARGET,
       # and LIMEN_TEST_PG_CA_FILE to the steps below.

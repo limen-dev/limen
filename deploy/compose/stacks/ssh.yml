@@ -5,7 +5,9 @@ services:
   sshd-target:
     container_name: ssh-web-${LIMEN_ENV:-dev}
     profiles: ["ssh"]
-    build: ./config/targets/sshd
+    build:
+      context: ./config/targets/sshd
+      args: { BASE_IMAGE: "${SSHD_BASE_IMAGE}" }
     image: limen-sshd-target:dev
     restart: unless-stopped
     volumes:

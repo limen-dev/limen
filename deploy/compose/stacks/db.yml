@@ -16,7 +16,7 @@ services:
   # Throwaway CA and server certificates for the database targets below.
   db-tls:
     profiles: ["db"]
-    image: alpine:3.22
+    image: ${ALPINE_IMAGE}
     entrypoint: ["/bin/sh", "/gen.sh"]
     volumes:
       - ./config/targets/tls/gen.sh:/gen.sh:ro
@@ -28,7 +28,7 @@ services:
   postgres-target:
     container_name: postgres-orders-${LIMEN_ENV:-dev}
     profiles: ["db"]
-    image: postgres:18-alpine
+    image: ${POSTGRES_IMAGE}
     command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/tls/pg.crt", "-c", "ssl_key_file=/tls/pg.key", "-c", "hba_file=/etc/limen/pg_hba.conf"]
     environment:
       POSTGRES_PASSWORD: postgres-target-dev-only
@@ -49,7 +49,7 @@ services:
   mysql-target:
     container_name: mysql-orders-${LIMEN_ENV:-dev}
     profiles: ["db"]
-    image: mysql:8.4
+    image: ${MYSQL_IMAGE}
     command: ["mysqld", "--ssl-ca=/tls/ca.pem", "--ssl-cert=/tls/my.crt", "--ssl-key=/tls/my.key"]
     environment:
       MYSQL_ROOT_PASSWORD: mysql-target-dev-only
@@ -67,7 +67,7 @@ services:
   # Phase 6: the admin login the role bootstrap uses (ADR-0033). Dev only.
   db-secrets-init:
     profiles: ["db"]
-    image: alpine:3.22
+    image: ${ALPINE_IMAGE}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-

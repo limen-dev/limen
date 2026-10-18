@@ -29,7 +29,7 @@ x-dev-tokens:
 services:
   postgres:
     container_name: limen-postgres${LIMEN_SUFFIX:-}
-    image: postgres:18-alpine
+    image: ${POSTGRES_IMAGE}
     environment:
       POSTGRES_USER: limen
       POSTGRES_PASSWORD: limen-dev-only
@@ -44,7 +44,7 @@ services:
 
   dex:
     container_name: limen-dex${LIMEN_SUFFIX:-}
-    image: ghcr.io/dexidp/dex:v2.46.0
+    image: ${DEX_IMAGE}
     # The CLI reaches Dex on the host port; the config names the default ports, so
     # it is rewritten for another stack's (LIMEN_PORT_DEX, LIMEN_PORT_PROXY).
     entrypoint: ["/bin/sh", "-c"]
@@ -61,7 +61,7 @@ services:
   # account token, so we use local-kms. Pinned by digest.
   kms:
     container_name: limen-kms${LIMEN_SUFFIX:-}
-    image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
+    image: ${KMS_IMAGE}
     ports: ["127.0.0.1:${LIMEN_PORT_KMS:-8099}:8080"]
 
   # S3-compatible object store for audit batches and recordings (MinIO no
@@ -70,7 +70,7 @@ services:
   # streaming uploads. Development only.
   s3:
     container_name: limen-s3${LIMEN_SUFFIX:-}
-    image: chrislusf/seaweedfs:4.48
+    image: ${SEAWEEDFS_IMAGE}
     command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
     ports: ["127.0.0.1:${LIMEN_PORT_S3:-8333}:8333"]
     volumes: [s3-data:/data, "./config/s3/s3.json:/etc/seaweedfs/s3.json:ro"]

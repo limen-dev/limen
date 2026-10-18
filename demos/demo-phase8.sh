@@ -29,6 +29,8 @@ for arg in "$@"; do
 done
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../deploy/compose/.env
+set -a; source "$root/deploy/compose/.env"; set +a # image versions
 state="$root/deploy/compose/.state/phase8"
 cluster="${LIMEN_DEMO_CLUSTER:-kubernetes-demo8}"
 ctx="kind-$cluster"
@@ -95,7 +97,7 @@ pass "cluster $cluster at $api"
 step "Start Limen in front of it (control plane, proxy, kube worker)"
 docker rm -f "$pg" >/dev/null 2>&1 || true
 docker run -d --name "$pg" -e POSTGRES_USER=limen -e POSTGRES_PASSWORD=limen-dev-only -e POSTGRES_DB=limen \
-  -p 127.0.0.1::5432 postgres:18-alpine >/dev/null
+  -p 127.0.0.1::5432 "$POSTGRES_IMAGE" >/dev/null
 pgport="$(docker port "$pg" 5432/tcp | head -1 | sed 's/.*://')"
 # pg_isready also answers during the image's init-time server, which has no TCP listener. A TCP query does not.
 wait_for "postgres" docker exec "$pg" psql -h 127.0.0.1 -U limen -d limen -c "select 1"

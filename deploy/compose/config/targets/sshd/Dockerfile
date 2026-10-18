@@ -1,6 +1,8 @@
 # Dev-only SSH target. The host key is committed so the example policy can
 # pin it; never reuse it anywhere else.
-FROM alpine:3.23
+# The default must equal SSHD_BASE_IMAGE in deploy/compose/.env (scripts/check-versions.sh checks it).
+ARG BASE_IMAGE=alpine:3.23
+FROM ${BASE_IMAGE}
 RUN apk add --no-cache openssh-server bash \
  && adduser -D -s /bin/bash ubuntu \
  && adduser -D -s /bin/bash ec2-user \
