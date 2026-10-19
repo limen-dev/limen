@@ -1,6 +1,6 @@
 # ADR-0035: MongoDB, Atlas, and DocumentDB access
 
-- Status: Proposed. Built in the same PR for the owner to review together (the owner asked for Phase 9 on 2026-10-18).
+- Status: Accepted (2026-10-19). Built and merged in PR #34; the owner asked for Phase 9 on 2026-10-18 and accepted the decisions below.
 - Date: 2026-10-18
 
 ## Context
@@ -14,7 +14,7 @@ On `main` the policy side already existed as data-only stubs (`mongodb` kind, `m
 - The CLI opens `127.0.0.1:<port>` (or a 0600 unix socket) and turns each accepted connection into one Limen session of kind `mongodb` over a new proxy ALPN, `limen-mongo/1`. The proxy authorizes (resource, role, default database) and routes to a worker exactly as for SSH and SQL; it never parses MongoDB.
 - The worker plays the **server** toward the driver and the **client** toward MongoDB. It answers the handshake itself, logs in to the server itself, and relays `OP_MSG` commands one at a time. It reads each command in full (to audit it first, check its database, and apply the few guards below) and reads each reply only as far as the outcome and any cursor it opened. Result documents are never inspected or kept.
 - Wire support: `OP_MSG` (all commands), and `OP_QUERY`/`OP_REPLY` for the first handshake only (drivers still send it in the old format). `OP_COMPRESSED` is never offered, so it never arrives. The worker clears `exhaustAllowed` and drops the optional checksum when forwarding, so the server never streams replies the relay isn't waiting for. `moreToCome` (unacknowledged writes, `w: 0`) is honored: no reply is awaited.
-- **The worker presents itself as a standalone, writable server**, whatever the real one is. Drivers then talk to it as a single node: no host lists to rewrite, no discovery, and `directConnection=true` is printed for good measure. The cost is that what needs a replica set does not work through Limen in Phase 9: multi-document transactions and retryable writes (see Questions).
+- **The worker presents itself as a standalone, writable server**, whatever the real one is. Drivers then talk to it as a single node: no host lists to rewrite, no discovery, and `directConnection=true` is printed for good measure. The cost is that what needs a replica set does not work through Limen in Phase 9: multi-document transactions and retryable writes (see Decisions).
 - Toward the server: TLS is mandatory with `verify-full` against the resource's `tls_ca_file` (the system bundle for Atlas, the AWS global bundle for DocumentDB). `insecure_dev` plus `--allow-insecure-db-targets` is the local-only escape, refused for Atlas and DocumentDB.
 - **Replica sets**: the resource names one member. If it reports it isn't the primary and names one, the worker connects to that primary once (one hop). `mongodb+srv://` (DNS SRV and TXT) is not resolved: write the host, or any member of the set. A failover ends in an error to the client, who reconnects.
 
@@ -61,12 +61,13 @@ None. BSON and the wire format are small enough to write by hand (a few hundred 
 ## Not verified against the real services
 Atlas (SCRAM, X.509, `MONGODB-AWS`, TLS with the public CA), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the replica-set primary hop on a multi-node set, and sharded clusters (`mongos`). Everything else runs against a real MongoDB 8 in compose.
 
-## Questions for the owner
-1. **Standalone presentation** (section 1): is "no transactions or retryable writes through Limen" acceptable for Phase 9? The alternative is to present the server as the replica set it is (`setName`, and `hosts`/`me` rewritten to the CLI's listener address, which the CLI would pass to the worker), a larger change that also exposes the set's topology to the driver.
-2. **Redaction default** (section 4): shape without values by default, `full_commands` per resource. This differs from SQL, where full text is the default (the owner's earlier decision), because filters carry user data far more often than SQL text does. Confirm, or flip the default.
-3. **Fail closed for every command** (section 4): one spool write before each command. Acceptable, or batch for reads?
-4. **Admin metadata allowance** (section 3): is the list of commands allowed on `admin` without a grant right?
-5. **SRV** (section 1): `mongodb+srv://` resolution (a DNS SRV client dependency) can follow when Atlas is tested. Order?
+## Decisions on the questions
+Accepted by the owner on 2026-10-19, as built:
+1. **Standalone presentation** (section 1): no transactions or retryable writes through Limen in Phase 9. Presenting the real replica set is a later change if it is needed.
+2. **Redaction default** (section 4): command shapes with every value as `?` by default, `full_commands` per resource to keep values. This differs from SQL because filters carry user data far more often than SQL text does.
+3. **Fail closed for every command** (section 4): one spool write before each command, no batching of reads.
+4. **Admin metadata allowance** (section 3): the list as built (`ping`, `buildInfo`, `endSessions`, `listDatabases`, `connectionStatus`, `getParameter`, `whatsmyuri`).
+5. **SRV** (section 1): `mongodb+srv://` resolution (a DNS SRV client dependency) follows once Atlas can be tested.
 
 ## Consequences
 - \+ Users keep `mongosh` and their drivers; one relay covers self-hosted, Atlas, and DocumentDB.
