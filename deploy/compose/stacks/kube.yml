@@ -1,0 +1,61 @@
+# The kube stack (Phase 8, ADR-0038): a Kubernetes cluster (k3s, one container) and one
+# more Limen worker, in its own pool, that serves it as the cluster `staging`. The cluster
+# is a Compose service, so it belongs to the project: `down -v` removes it with the rest.
+# setup.sh applies the worker's service account to it and exports LIMEN_KUBE_DIR (where
+# the worker finds its token and CA) and LIMEN_EXTRA_JOIN_TOKENS, so the control planes
+# accept this worker's join token (pool kube). Works with the single Limen and with
+# --scale: both reach the proxies through the name `proxy`. Dev only.
+x-kube-token: &kube-worker-token dev-only-kube-worker-join-token-9d4b7e1a6c3f2058
+
+services:
+  kubernetes:
+    container_name: kubernetes-${LIMEN_ENV:-dev}
+    image: ${K3S_IMAGE}
+    command:
+      - server
+      - --disable=traefik
+      - --disable=servicelb
+      - --disable=metrics-server
+      - --tls-san=kubernetes
+      - --node-name=kubernetes
+    privileged: true
+    restart: unless-stopped
+    tmpfs: [/run, /var/run]
+    volumes:
+      - kubernetes-data:/var/lib/rancher/k3s
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "--raw", "/readyz"]
+      interval: 3s
+      timeout: 5s
+      retries: 100
+
+  kube-worker:
+    container_name: limen-kube-worker${LIMEN_SUFFIX:-}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
+        DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
+      target: worker
+    image: limen-worker:dev
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+      LIMEN_PROXY_ADDR: proxy:3443
+      LIMEN_PROXY_NAME: proxy
+      LIMEN_CA_FILE: /var/lib/limen/ca-public/internal-ca.pem
+      LIMEN_JOIN_TOKEN: *kube-worker-token
+      LIMEN_DATA_DIR: /var/lib/limen/worker
+      LIMEN_KUBE_CLUSTER: staging
+      LIMEN_KUBE_API_SERVER: https://kubernetes:6443
+      LIMEN_KUBE_CA_FILE: /kube/ca.pem
+      LIMEN_KUBE_TOKEN_FILE: /kube/token
+    volumes:
+      - kube-worker-data:/var/lib/limen/worker
+      - ca-public:/var/lib/limen/ca-public:ro
+      - ${LIMEN_KUBE_DIR:?set by setup.sh}:/kube:ro
+
+volumes:
+  kubernetes-data:
+  kube-worker-data:

@@ -7,6 +7,7 @@
 *.key
 !deploy/compose/**/*.pub
 .env
+!deploy/compose/.env
 # Terraform
 .terraform/
 *.tfstate
@@ -16,5 +17,3 @@
 # Modules leave provider pinning to the root configuration.
 deploy/terraform/modules/*/.terraform.lock.hcl
 deploy/compose/.state/
-deploy/compose/.state-scale/
-deploy/compose/.state-db/

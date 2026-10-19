@@ -3,6 +3,7 @@
 
 pub mod fake_datadog;
 pub mod idp;
+pub mod kube_api;
 pub mod ssh_target;
 pub mod toggle_proxy;
 pub mod users;

@@ -2871,6 +2871,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "axum",
+ "base64 0.23.1",
  "clap",
  "http",
  "limen-core",
@@ -2891,6 +2892,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
  "webbrowser",
  "x509-parser",
 ]
@@ -2989,8 +2991,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "limen-control-plane",
  "limen-core",
+ "limen-kube",
  "limen-policy",
  "limen-proto",
  "limen-proxy",
@@ -3005,9 +3012,20 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tempfile",
+ "time",
  "tokio",
+ "tokio-rustls",
  "tonic",
  "uuid",
+]
+
+[[package]]
+name = "limen-kube"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3043,8 +3061,10 @@ dependencies = [
  "futures",
  "governor",
  "http",
+ "http-body",
  "http-body-util",
  "hyper",
+ "hyper-util",
  "limen-audit",
  "limen-ca",
  "limen-component",
@@ -3101,15 +3121,24 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "flate2",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "limen-kube",
  "openidconnect",
  "rand 0.10.3",
  "rcgen",
  "russh",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "uuid",
 ]
 
@@ -3152,11 +3181,17 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "clap",
+ "flate2",
  "futures",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "limen-audit",
  "limen-ca",
  "limen-component",
  "limen-core",
+ "limen-kube",
  "limen-policy",
  "limen-proto",
  "limen-session",
@@ -3183,7 +3218,9 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tonic",
+ "tower",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -5013,6 +5050,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6007,6 +6050,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

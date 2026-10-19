@@ -9,7 +9,9 @@ limen ls                     # what can I reach?   add --json for scripts
 limen ssh web-staging-1      # connect; the login is picked from policy when there's only one
 limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
 limen redis connect cache-staging          # a local listener for redis-cli, no password
-limen logout                 # delete local credentials
+limen mongo connect catalog-staging        # a local listener for mongosh, no password
+limen search connect search-staging        # a local listener for curl and Elasticsearch/OpenSearch clients, no credential
+limen logout                 # end this login and delete local credentials
 ```
 
 What `limen ls` looks like:
@@ -29,11 +31,13 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 |---|---|
 | `limen login [--device] [--no-browser] [--ca-file PEM]` | Sign in through the identity provider and get short-lived credentials. `--ca-file` pins the proxy's CA for later commands |
 | `limen login --bot <github_actions\|gitlab\|oidc> [--bot-name N] [--token-env VAR] [--token-file FILE] [--audience A]` | Log in as a **bot** with a CI platform's identity token (for CI jobs; see [the bots guide](bots.md)) |
-| `limen logout` | Delete the local credentials |
+| `limen logout` | End this login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and delete the local credentials. Your other logins are not affected. If the proxy can't be reached the credentials are still deleted, and the certificate stays valid until it expires |
 | `limen status` | Show your identity, roles, and the time left on your credentials |
 | `limen ls [--json]` | List the resources you can access |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
 | `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
+| `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `mongosh` or any MongoDB driver; each connection is an audited session (see [the MongoDB guide](mongodb.md)) |
+| `limen search connect <resource> [--role R] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `curl` or any Elasticsearch or OpenSearch client; each connection is an audited session (see [the search guide](search.md)) |
 | `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
 | `limen admin apply <files or dirs> [--dry-run] [--source-ref SHA]` | Validate and apply policy YAML; shows a coloured diff |
 | `limen admin policy` | Show the active policy version, digest, and author |
@@ -42,10 +46,11 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin lock <user> --reason …` / `unlock <user>` / `locks` | Lock or unlock a user; list locks |
 | `limen admin kill-session <id> --reason …` | End one live session |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
+| `limen kube login <cluster> [--kubeconfig FILE \| --print]` | Write a kubeconfig for a cluster you may reach. `kubectl` then runs `limen kube credentials`, the exec plugin that prints your short-lived certificate. See [the Kubernetes guide](kubernetes.md) |
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
 | `limen mq connect <resource> [--user U] [--vhost V] [--listen ADDR] [--idle-timeout 1h]` | Open a loopback listener for an AMQP 0-9-1 client; prints an `amqp://` URL with no real password (see [the messaging guide](messaging.md)) |
 | `limen kafka connect <resource> [--user U] [--listen ADDR] [--brokers 8] [--idle-timeout 1h]` | Open a bootstrap listener and one per broker slot for a Kafka client; prints the bootstrap address |
-| `kube login`, `mongo connect`, `search connect`, `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>

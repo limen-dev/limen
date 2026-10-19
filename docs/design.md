@@ -2,7 +2,7 @@
 
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-17 (Phase 5 complete). Phase status is in §13 only.
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-18 (Phase 9 built). Phase status is in §13 only.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -86,9 +86,9 @@ The proxy still owns session start and end and the authorization decision.
 
 ## 3. Network and ingress (ADR-0005)
 
-- **One public endpoint.** An NLB on TCP 443 passes traffic straight through to the proxies. Proxies route by TLS ALPN (`limen-tunnel/1`, `limen-peer/1`, `limen-db/1`, `limen-redis/1`, `limen-ssh/1`, `h2` and `http/1.1`). HTTP traffic is then routed by path: `/v1/...` is the CLI API, which is relayed to the control plane, and `/k8s/<cluster>/...` is the Kubernetes API. Path routing for kube avoids wildcard certificates. kubectl supports a server URL with a path prefix.
+- **One public endpoint.** An NLB on TCP 443 passes traffic straight through to the proxies. Proxies route by TLS ALPN (`limen-tunnel/1`, `limen-peer/1`, `limen-db/1`, `limen-redis/1`, `limen-search/1`, `limen-ssh/1`, `h2` and `http/1.1`). HTTP traffic is then routed by path: `/v1/...` is the CLI API, which is relayed to the control plane, and `/k8s/<cluster>/...` is the Kubernetes API. Path routing for kube avoids wildcard certificates. kubectl supports a server URL with a path prefix.
 - The **control plane is private**. Only proxies (and admins over a bastion or VPN) reach it. Workers and the CLI talk to it through the proxy. The proxy **forwards the client's verified certificate** and the control plane **verifies it again** itself. That way a compromised proxy can't make up identities. The residual risk is replaying a cert it observed, which is bounded by the cert's 10-minute TTL (see the threat model).
-- **The proxy's public certificate** is publicly trusted. Options are ACM exportable public certificates or an operator-supplied cert in Secrets Manager; *this is an assumption to verify in Phase 13*. In dev, the CLI is pointed at the Limen CA with `--ca-file`. Every other TLS hop uses the Limen internal CA with mTLS.
+- **The proxy's public certificate** is publicly trusted. Options are ACM exportable public certificates or an operator-supplied cert in Secrets Manager; *this is an assumption to verify in Phase 14*. In dev, the CLI is pointed at the Limen CA with `--ca-file`. Every other TLS hop uses the Limen internal CA with mTLS.
 - **Workers need egress only**, to the proxy NLB on port 443. They don't need any route to the control plane, S3, or Datadog. Audit data and recordings go through the proxy to the control plane.
 
 ## 4. Identity and credentials (ADR-0006, ADR-0007)
@@ -106,9 +106,9 @@ The proxy still owns session start and end and the authorization decision.
    - an **X.509 client cert** (user CA, TTL 10 min by default, configurable per role up to a cluster-wide maximum). Subject = username. The identity is carried as URI SANs: `limen://user/<name>`, one `limen://role/<role>` per role, and `limen://login/<uuid>` (ADR-0006, amended). Component certificates carry `limen://component/<kind>/<id>`.
    - the CA bundle, and the public key of the **SSH host CA**, which the CLI writes to its own known_hosts as `@cert-authority * <key>`
    - *Amended in Phase 2:* no SSH certificate is issued at login. A login certificate trusted by targets would let its holder SSH straight to any reachable host, bypassing the proxy, recording, and audit. SSH certificates are issued per session instead (§5.1).
-5. Credentials are stored in `~/.limen/<proxy>/` with mode 0600. The **refresh token is not stored by default**: re-login is cheap with an active IdP session. Making this optional (encrypted in the OS keychain) is a Phase 13 decision.
+5. Credentials are stored in `~/.limen/<proxy>/` with mode 0600. The **refresh token is not stored by default**: re-login is cheap with an active IdP session. Making this optional (encrypted in the OS keychain) is a Phase 14 decision.
 
-`limen logout` deletes the local credentials. Revoking credentials that are already issued relies on short TTLs. A `lock` primitive (to kill a user's sessions immediately) is an extension point noted in ADR-0008.
+`limen logout` ends the login and deletes the local credentials. It calls `Auth.Logout`, which records the login id (the one in the certificate) in `login_revocations` and emits `auth.logout`. The id is kept until the certificate expires and travels to proxies and workers in the signed policy snapshot (`revoked_logins`, like locks and kills), so within one refresh they refuse the certificate for new sessions and requests and end the login's open sessions. The user's other logins are untouched. If the proxy can't be reached the CLI deletes the local credentials anyway and says the certificate stays valid until it expires (short TTLs still bound that). The control plane's own API (including the Admin API) does not yet check revoked logins, as it does not check locks; closing that is future work. A `lock` ends all of a user's sessions.
 
 ### 4.2 Service identity, enrollment, and rotation
 - An admin creates a **join token** (`limen admin token create --kind worker --label k=v`). It is single use, has a TTL (default 15 min), and only its SHA-256 hash is stored in Aurora. It is bound to the component kind, labels, and (for proxies) DNS names. Static and AWS IAM join methods are covered in ADR-0016.
@@ -181,34 +181,50 @@ Built as [ADR-0034](adr/0034-redis-and-valkey-access.md) describes; the user gui
 - **Audit.** One `redis.command` event per command, written before it is forwarded: command, subcommand, key names, argument count. **Values are not logged** unless the target opts in, and credential commands never are. A refused command is `auth.denied`. Key names can be hashed per resource.
 - Not supported yet: cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap. IAM, the 12-hour re-login, and TLS with the AWS bundle are unverified against real ElastiCache.
 
-### 5.5 RabbitMQ and Amazon MQ (Phase 11)
+### 5.4 EKS (Phase 8, built: ADR-0038)
+- `limen kube login <cluster>` writes a kubeconfig (a file of its own, by default in the profile directory, or `--kubeconfig FILE`; `--print` writes it to standard output):
+  - server `https://<proxy>/k8s/<cluster>`
+  - CA = the CA pinned for the proxy
+  - a `client.authentication.k8s.io/v1` **exec plugin** (`limen kube credentials`) that returns `clientCertificateData` and `clientKeyData`: the user's short-lived Limen certificate. When it has expired the plugin fails and says to run `limen login`.
+- The proxy authorizes (which groups does policy let this user assume on this cluster? none is a 403) and relays the request to a kube worker for that cluster. Each request is one tunnel session carrying HTTP/1.1; the proxy never holds a cluster credential.
+- The kube worker serves one cluster. It runs **in the cluster** (or anywhere that can reach the API server, with `--kube-api-server`, `--kube-ca-file`, and `--kube-token-file`) under a service account bound to a ClusterRole that has `impersonate` on `users`, `groups`, and `userextras/limen-session`. It forwards each request to the API server with:
+  - `Impersonate-User: <username>`
+  - `Impersonate-Group: <each group policy grants>`
+  - `Impersonate-Extra-limen-session: <id>`
+
+  It strips every identity header that comes from the client (`Authorization`, `Impersonate-*`, `X-Remote-*`). Kubernetes RBAC, bound to those group names (we ship example bindings in `deploy/kubernetes/access/`), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
+- **exec, attach, and port-forward.** Both transports are supported: WebSocket (`v4`/`v5.channel.k8s.io`) and SPDY/3.1, and the SPDY-inside-WebSocket form kubectl 1.31 and later use for port-forward. The worker copies the bytes untouched and decodes a copy. A stream in a protocol it cannot decode is refused. Exec and attach output is recorded as asciicast v3 (stdin is not recorded, since it can hold passwords), with resizes and the exit status. Port-forward is audited (pod, namespace, ports, bytes) but not recorded.
+- **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies and query strings are not recorded. A stream adds `session.start` and `session.end` (command, exit code, ports, recording). If the audit trail is unavailable the worker answers 503 instead of the response.
+- **Later hardening.** Constrained impersonation (beta and on by default since Kubernetes 1.36) can narrow the worker's impersonation rights.
+
+### 5.5 MongoDB, Atlas, and DocumentDB (Phase 9, ADR-0035)
+Built as [ADR-0035](adr/0035-mongodb-access.md) describes; the user guide is `docs/guides/mongodb.md`.
+- `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR | --socket PATH]` opens a loopback listener (or a private unix socket) for `mongosh` and prints a connection string with no password. Each accepted connection is one Limen session of kind `mongodb` over the proxy's `limen-mongo/1` ALPN, with the same grant, worker, lock, and kill machinery as SSH. A driver opens a few connections, so one shell is a few short sessions.
+- **The worker is a message-aware relay.** It plays the server toward the driver (answering the handshake itself, as a standalone writable server, so no transactions or retryable writes) and logs in to the real server itself over TLS: **SCRAM-SHA-256**, **SCRAM-SHA-1**, **X.509**, or **`MONGODB-AWS`** (the worker's IAM identity). It relays `OP_MSG` commands one at a time with its own BSON and wire code, reading each command in full and each reply only for its outcome and any cursor it opened. Result documents are never inspected. A replica set member is enough as an endpoint: the worker follows the primary it names. `mongodb+srv://` is not resolved yet.
+- **Enforcement at the worker.** Each command's `$db` is checked against policy (grants, wildcards, deny rules) and refused with `Unauthorized` otherwise; login commands are refused so a client can't swap the identity; `admin` is closed except read-only metadata; `deny_commands` on a grant refuses named commands; cursors are kept with the session that opened them. The server's own grants for the role are the real boundary.
+- **Audit and recording.** One `mongo.command` per command, written before it is forwarded (fail closed), and a `mongo.command.end` with status, duration, documents, and the server's error code. **Values are redacted by default**: the event keeps the command, collection, and the shape of the filter, update, or pipeline with every value replaced by `?`; inserted documents are only counted; `full_commands` per resource keeps values (never fields named like secrets). There is no replayable recording: the audited command timeline is the record, projected into the console's session page like SQL and Redis sessions.
+- **Unverified against real services:** Atlas, DocumentDB, `MONGODB-AWS`, a multi-node replica set, and sharded clusters. Everything else runs against a real MongoDB 8 in compose.
+
+### 5.6 OpenSearch and Elasticsearch (Phase 10, ADR-0036)
+Built as [ADR-0036](adr/0036-search-access.md) describes; the user guide is `docs/guides/search.md`.
+- `limen search connect <resource>` opens a loopback listener (or a private unix socket) for `curl` and the Elasticsearch and OpenSearch clients. Each accepted connection is one Limen session over the proxy's `limen-search/1` ALPN, with the same grant, worker, lock, and kill machinery as SSH.
+- **The worker is an HTTP server toward the client and an HTTP client toward the engine** (`hyper`), one request at a time per session. It drops every credential and impersonation header the client sends and adds its own: basic auth, an API key, a bearer token, a client certificate, or a `SigV4` signature for Amazon OpenSearch Service (service `es`, or `aoss`). TLS to the engine is verified in full against `--search-ca-file`. It sets `X-Opaque-Id: limen:<session id>` so the engine's logs join to Limen's audit.
+- **Policy is by method class and index pattern.** Each request is `read`, `write`, or `admin` (an API the worker doesn't recognise is `admin` on every index), and the indices it names, from the path and from the bodies of `_bulk`, `_msearch`, `_mget`, `_reindex`, `_aliases` and the references inside a search body, must each be covered by a pattern in one grant. Hidden (`.`-prefixed) indices need a pattern that starts with a dot. Paths that can be read two ways, date math, cross-cluster names, the `source` parameter, and remote reindex are refused.
+- **Audit.** `search.request` before the request is forwarded (fails closed): method, path, API, class, indices, bulk counts, body size, query-parameter names. `search.response` after: status, time, engine error type. Bodies, query values, and the engine's error text are not logged unless the resource opts in. A refusal is `auth.denied`. No recording: the console lists the session's requests, as for databases and Redis.
+- Not built: Kibana and OpenSearch Dashboards (Phase 12), cross-cluster search, response filtering. Amazon OpenSearch Service, OpenSearch Serverless, and Elastic Cloud are unverified against the real services.
+
+### 5.7 RabbitMQ and Amazon MQ (Phase 11)
 Built as [ADR-0037](adr/0037-messaging-access.md); the user guide is `docs/guides/messaging.md`.
 - `limen mq connect <resource>` opens a loopback listener for any AMQP 0-9-1 client. Each connection is one Limen session over the proxy's `limen-mq/1` ALPN.
 - The worker is an AMQP server toward the client and a client toward the broker. The client's login is dropped; the worker logs in as the broker user the role names (`PLAIN`, TLS optional for self-hosted), to the vhost the client opened if the grant allows it.
 - Method frames from the client are decoded and checked against the role (`read`, `write`, `configure` on vhost and name patterns) before they are forwarded; content headers and bodies pass through unread. A refused method closes its channel with `403`.
 - **Audit.** One `mq.operation` event per decoded operation, before it is forwarded; a publish carries the exchange, routing key, and body size. **Bodies are never read into an event.** Deliveries are counted in `mq.summary`.
 
-### 5.6 Kafka and MSK (Phase 11)
+### 5.8 Kafka and MSK (Phase 11)
 - `limen kafka connect <resource>` opens a bootstrap listener and one per broker slot. A Kafka client talks to every broker at the address `Metadata` and `FindCoordinator` give it, so the worker rewrites those addresses to the CLI's loopback ports (the slot table travels in each session request) and a session on slot *n* is served by the broker of rank *n*.
 - The worker reads each request as far as policy needs (topics, group), pins the API versions it reads (non-flexible encodings; it answers `ApiVersions` itself), cuts a request down to the allowed topics, and adds the broker-style error for the rest. `Metadata` is filtered to the topics the role reaches. Transactions and administration APIs are not offered.
 - It logs in to the cluster with SASL `PLAIN`, `SCRAM-SHA-256/512`, or `AWS_MSK_IAM`.
 - **Audit.** `kafka.request` before forwarding; `Produce` and `Fetch` at first contact per topic and once a minute after, with counts; `kafka.summary` at the end. Record contents are never read.
-
-### 5.4 EKS (Phase 8)
-- `limen kube login <cluster>` writes a kubeconfig context:
-  - server `https://<proxy>/k8s/<cluster>`
-  - CA = the proxy CA
-  - a `client.authentication.k8s.io/v1` **exec plugin** (`limen kube credentials`) that returns `clientCertificateData` and `clientKeyData`, logging in again if needed
-- The proxy authorizes (does the user have *some* role for this cluster?) and routes the HTTP stream to the kube worker for that cluster.
-- The kube worker runs **in the cluster** under a service account bound to a ClusterRole that has `impersonate` on `users` and `groups` (and `userextras/*` for session IDs). It forwards each request to the API server with:
-  - `Impersonate-User: <username>`
-  - `Impersonate-Group: <groups from roles>`
-  - `Impersonate-Extra-limen-session: <id>`
-
-  It strips any impersonation headers that come from the client. Kubernetes RBAC, bound to those group names (we ship example bindings), then decides authorization. This keeps cluster RBAC as the single source of truth for what someone can do *inside* the cluster.
-- **exec, attach, and port-forward.** We support both SPDY and WebSocket upgrades: kubectl ≥ 1.30 uses WebSockets for exec. Exec and attach streams are recorded as asciicast v3. Port-forward is audited (pod and port) but not recorded.
-- **Audit.** One `kube.request` per API request: verb, resource, namespace, name, subresource, response status, latency. Bodies are not recorded by default.
-- **Later hardening.** Constrained impersonation (beta and on by default since Kubernetes 1.36) can narrow the worker's impersonation rights.
 
 ## 6. Reverse tunnel and HA routing (ADR-0003, ADR-0004)
 - The worker dials the NLB with ALPN `limen-tunnel/1` and its worker cert. After the TLS handshake **the roles flip**: the worker serves the `WorkerTunnel` gRPC service (tonic, HTTP/2) over that connection, and the proxy is the client. Each session is one bidirectional stream, so HTTP/2 multiplexes many sessions over one TCP connection, with flow control giving backpressure.
@@ -290,7 +306,7 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - monitors are in `deploy/terraform/modules/datadog`
 - **Grafana** (self-hosted on ECS, ADR-0014):
   - the Athena data source reads the Glue table
-  - dashboards and alert rules are provisioned from `dashboards/grafana/`
+  - dashboards and alert rules are provisioned from `deploy/grafana/`
   - panels: who accessed what, failed and denied attempts, active sessions, privileged commands, top users, access by resource type, ingestion lag (event `time` vs. S3 object time), and producer `seq` gaps
 
 ## 9. Failure semantics (ADR-0011)
@@ -318,8 +334,8 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 - **Images:** multi-stage builds (`rust:1.99-bookworm` builder) on `gcr.io/distroless/cc-debian12:nonroot`.
 - **Terraform:**
   - `modules/audit` and `modules/datadog`: built
-  - `modules/ecs` and `modules/ec2`: planned for Phase 13 (not yet in the repo)
-  - `examples/complete`: planned for Phase 13; `deploy/terraform/examples/audit` exists
+  - `modules/ecs` and `modules/ec2`: planned for Phase 14 (not yet in the repo)
+  - `examples/complete`: planned for Phase 14; `deploy/terraform/examples/audit` exists
 - **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
@@ -341,10 +357,10 @@ crates/
   limen-testkit/         # fixtures, in-process cluster harness
   limen-control-plane/   # bin
   limen-proxy/           # bin
-  limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, kube
+  limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, search, kube
   limen-cli/             # bin `limen`
 deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
-dashboards/grafana/{dashboards,alerting,provisioning}
+deploy/grafana/{dashboards,alerting,provisioning}
 docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
@@ -361,37 +377,45 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 2 ✅ | SSH end to end with recording | `limen ssh` to the sshd container. The recording plays back in asciinema. A denied login is audited |
 | 3 ✅ | Audit to S3 (SeaweedFS) and Datadog (fake intake), Grafana dashboards | Kill-the-sink tests lose no events. The hash chain verifies. Dashboards load against Athena (*Athena itself needs AWS; locally Trino reads the same S3 files and Grafana runs the same SQL*) |
 | 3.5 ✅ | Web console (ADR-0017): users, sessions, workers, policy browsing and dry run, tokens, lock and session kill, worker revoke, recording playback, light and dark themes | An admin sees users, workers, and live sessions in a browser, plays a recording, locks a user, and the user's open SSH session ends. A normal user sees only their resources. CSRF, CSP, and cookie tests |
-| 4 ✅ | **Machine identities** (ADR-0019): `bot` principals that join with GitHub Actions, GitLab CI, or any OIDC provider (Kubernetes service account tokens work through generic OIDC; **the AWS IAM join moved to Phase 13** with the IAM join for components); the run (repository, workflow, commit, trigger) is in every audit event | A GitHub Actions-shaped token logs in as a bot and runs an SSH command; a bot that matches too broadly is rejected by policy validation; the audit trail and console show bots apart from people; lock works on bots |
-| 5 ✅ | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits; optional names for proxies and workers. The Kubernetes example is unverified on a cluster; the ECS and EC2 examples move to Phase 13 | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
+| 4 ✅ | **Machine identities** (ADR-0019): `bot` principals that join with GitHub Actions, GitLab CI, or any OIDC provider (Kubernetes service account tokens work through generic OIDC; **the AWS IAM join moved to Phase 14** with the IAM join for components); the run (repository, workflow, commit, trigger) is in every audit event | A GitHub Actions-shaped token logs in as a bot and runs an SSH command; a bot that matches too broadly is rejected by policy validation; the audit trail and console show bots apart from people; lock works on bots |
+| 5 ✅ | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits; optional names for proxies and workers. The Kubernetes example is unverified on a cluster; the ECS and EC2 examples move to Phase 14 | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
 | Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host |
 | 6 ✅ | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018, ADR-0033) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
-| 6.5 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
 | 7 ✅ | Redis and Valkey (ADR-0034) | `redis-cli` through `limen redis connect`. Values are redacted |
-| 8 | EKS | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
-| 9 | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified |
-| 10 | **Search**: OpenSearch and Elasticsearch (ADR-0018) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
+| 8 ✅ | **EKS** (ADR-0038) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |
+| 9 ✅ | **Document stores**: MongoDB (any server, **Atlas**) and **DocumentDB** (ADR-0018, ADR-0035) | `mongosh` through `limen mongo connect` against a compose MongoDB; SCRAM and X.509 work; command audit with redacted filters; Atlas and IAM paths are written and marked unverified. Built with a console command list in place of a recording, `deny_commands`, and cursor isolation |
+| 10 ✅ | **Search**: OpenSearch and Elasticsearch (ADR-0018, ADR-0036) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture |
 | 11 ✅ | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018, ADR-0037) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
 | 12 | **Internal web apps and TCP services** (ADR-0022) | A browser reaches a compose web app at `https://app.apps.<domain>` after SSO; denied users and bots are refused; every request is audited; WebSockets work; `limen tcp` reaches a raw TCP service |
-| 13 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
+| 13 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
+| 14 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
 - **Phase 7 status (2026-10-17).**
-  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `deploy/compose/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
+  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `demos/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
   - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
+- **Phase 10 status (2026-10-18).**
+  - Implemented and tested: `limen search connect` (loopback or unix-socket listener), the proxy's `limen-search/1` sessions, the worker's HTTP front and engine client, the request classifier (method class, index scope from the path and from bodies, hidden indices, evasions), per-grant `classes` and `indices`, `search.request`/`search.response` audit that fails closed with bodies and query values off by default, the console's request list, basic, API-key, bearer, mTLS, and `SigV4` credentials, and a `SigV4` signer checked against an independent implementation. `demos/demo-phase10.sh` runs real Elasticsearch 8.15 (security on) and OpenSearch 2.17 (security plugin, TLS verified in full).
+  - *Unverified against real services:* Amazon OpenSearch Service (SigV4 acceptance, fine-grained access control), OpenSearch Serverless, Elastic Cloud API keys, TLS with the Amazon bundle.
 - **Phase 11 status (2026-10-18).**
-  - Implemented and tested: `limen mq connect` and `limen kafka connect`, the proxy's `limen-mq/1` and `limen-kafka/1` sessions, the worker's AMQP 0-9-1 relay and Kafka request-level proxy (per-operation policy, audit before forwarding, address rewrite across a real three-broker cluster, SASL `PLAIN`/`SCRAM`), and the console's operation list. `deploy/compose/demo-phase11.sh` runs real RabbitMQ 4 and Apache Kafka 3.9 with pika and librdkafka.
+  - Implemented and tested: `limen mq connect` and `limen kafka connect`, the proxy's `limen-mq/1` and `limen-kafka/1` sessions, the worker's AMQP 0-9-1 relay and Kafka request-level proxy (per-operation policy, audit before forwarding, address rewrite across a real three-broker cluster, SASL `PLAIN`/`SCRAM`), and the console's operation list. `demos/demo-phase11.sh` runs real RabbitMQ 4 and Apache Kafka 3.9 with pika and librdkafka.
   - *Unverified against real AWS:* Amazon MQ, MSK (the `AWS_MSK_IAM` payload, TLS with the AWS bundle), and MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
 - **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
-- **Deferred to Phase 13:** the IAM join method for components.
+- **Deferred to Phase 14:** the IAM join method for components.
+- **Deferred from Phase 9, not yet scheduled in §13:**
+  - `mongodb+srv://` (DNS SRV and TXT) resolution; sharded clusters (`mongos`); presenting the server as a replica set so drivers can use transactions and retryable writes (needs the CLI to tell the worker its listener address)
+  - a role bootstrap for MongoDB users (the users are made by hand, as `docs/guides/mongodb.md` says), SASLprep for non-ASCII passwords, and per-collection or per-operation policy (policy is by database and command name)
+  - fuzzing the BSON reader and wire framing with `cargo-fuzz`, and Grafana panels and typed audit columns for the `mongo.*` events (the audit table ignores fields it doesn't list, as for `db.*`)
 - **Deferred from Phase 6, not yet scheduled in §13:**
   - Secrets Manager for the bootstrap admin (`admin_secret_arn`); the admin password is a file
   - `audit.log_parameters`: query parameters are never logged
   - statement-level allow and deny (enforcement is the database's grants)
   - MySQL cursors, compression, and `LOCAL INFILE`; PostgreSQL protocol versions other than 3.0
   - fuzzing the MySQL codec and the PostgreSQL frame splitter with `cargo-fuzz`, promised in ADR-0012
-  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
+  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
 - **Unverified against real services (Phase 6):** RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; PostgreSQL `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login against a real Redshift server, and Redshift behavior in general.
+- **Unverified against real services (Phase 9):** Atlas (SCRAM, X.509, `MONGODB-AWS`, TLS with the public CA, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, and `mongos`. The SigV4 signature for `MONGODB-AWS` is checked against a fixture; SCRAM against the RFC vectors.
 - **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.
-- The ACM exportable public certificate for the proxy listener has to be verified in Phase 13. The fallback is an operator-supplied cert.
+- The ACM exportable public certificate for the proxy listener has to be verified in Phase 14. The fallback is an operator-supplied cert.

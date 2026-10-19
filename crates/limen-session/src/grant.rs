@@ -193,6 +193,7 @@ mod tests {
             proxy_id: proxy_id.into(),
             worker_id: "w1".into(),
             database: String::new(),
+            groups: Vec::new(),
         }
     }
 

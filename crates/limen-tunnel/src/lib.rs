@@ -20,6 +20,10 @@ pub mod alpn {
     pub const DB: &[u8] = b"limen-db/1";
     /// CLI local listener → proxy, for Redis sessions.
     pub const REDIS: &[u8] = b"limen-redis/1";
+    /// CLI local listener → proxy, for MongoDB sessions.
+    pub const MONGO: &[u8] = b"limen-mongo/1";
+    /// CLI local listener → proxy, for `OpenSearch` and Elasticsearch sessions.
+    pub const SEARCH: &[u8] = b"limen-search/1";
     /// CLI local listener → proxy, for `RabbitMQ` (AMQP 0-9-1) sessions.
     pub const MQ: &[u8] = b"limen-mq/1";
     /// CLI local listener → proxy, for Kafka sessions.
@@ -32,7 +36,9 @@ pub mod alpn {
     pub const HTTP1: &[u8] = b"http/1.1";
     pub const HTTP11: &[u8] = b"http/1.1";
 
-    pub const ALL: [&[u8]; 9] = [TUNNEL, PEER, DB, REDIS, MQ, KAFKA, SSH, H2, HTTP11];
+    pub const ALL: [&[u8]; 11] = [
+        TUNNEL, PEER, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, SSH, H2, HTTP11,
+    ];
 }
 
 /// Refusals a worker makes before it reads anything from a session stream,

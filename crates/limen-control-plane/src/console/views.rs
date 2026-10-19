@@ -71,7 +71,7 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
         "postgres" | "postgresql" => ("k-postgres", "k-postgres"),
         "mysql" => ("k-mysql", "k-mysql"),
         "redis" => ("k-redis", "k-redis"),
-        "kubernetes" => ("k-kubernetes", "k-kubernetes"),
+        "kubernetes" | "kube" | "kubectl" => ("k-kubernetes", "k-kubernetes"),
         "redshift" => ("warehouse", "k-redshift"),
         "mongodb" => ("k-mongodb", "k-mongodb"),
         "opensearch" => ("k-opensearch", "k-opensearch"),
@@ -209,6 +209,8 @@ pub struct SessionView {
     pub started: String,
     pub ended: String,
     pub duration: String,
+    /// More than one: the connections a driver opened in one run.
+    pub connections: i64,
     pub status: &'static str,
     pub status_class: &'static str,
     pub reason: String,
@@ -216,10 +218,16 @@ pub struct SessionView {
     pub has_recording: bool,
     /// A Redis or Valkey session: no recording, but audited commands.
     pub is_redis: bool,
+    /// A MongoDB session: no recording, but audited commands.
+    pub is_mongo: bool,
+    /// An `OpenSearch` or Elasticsearch session: no recording, but audited requests.
+    pub is_search: bool,
     /// A `RabbitMQ` or Kafka session: no recording, but audited operations.
     pub is_broker: bool,
-    /// Either of the two: the page lists what was sent instead of a recording.
+    /// Any of those: the page lists what was sent instead of a recording.
     pub has_statements: bool,
+    /// One login's kubectl requests on a cluster: the page lists them.
+    pub is_kubectl: bool,
     pub recording_sha256: String,
     pub recording_note: &'static str,
     pub bytes: String,
@@ -233,6 +241,7 @@ pub struct SessionView {
 
 impl From<&SessionRow> for SessionView {
     fn from(s: &SessionRow) -> Self {
+        // A login ended by `limen logout` ends its kubectl session at once.
         let (status, status_class) = if s.active {
             ("active", "live")
         } else if s.ended_at.is_some() {
@@ -251,13 +260,16 @@ impl From<&SessionRow> for SessionView {
             resource: dash(s.resource.as_deref()),
             login: dash(s.login.as_deref()),
             started: time_text(s.started_at),
-            ended: time_text(s.ended_at),
+            ended: time_text(s.logged_out_at.or(s.ended_at)),
             duration: duration_text(s.duration_ms),
+            connections: s.connections,
             status,
             status_class,
             // "ended" says nothing the status doesn't.
             reason: if s.active {
                 String::new()
+            } else if s.logged_out_at.is_some() {
+                "logged out".to_owned()
             } else {
                 s.end_reason
                     .clone()
@@ -267,10 +279,23 @@ impl From<&SessionRow> for SessionView {
             active: s.active,
             has_recording,
             is_redis: s.kind.as_deref() == Some("redis"),
+            is_kubectl: s.kind.as_deref() == Some("kubectl"),
+            is_mongo: s.kind.as_deref() == Some("mongodb"),
+            is_search: matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")),
             is_broker: matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")),
             has_statements: matches!(
                 s.kind.as_deref(),
-                Some("postgres" | "mysql" | "redshift" | "redis" | "rabbitmq" | "kafka")
+                Some(
+                    "postgres"
+                        | "mysql"
+                        | "redshift"
+                        | "redis"
+                        | "mongodb"
+                        | "opensearch"
+                        | "elasticsearch"
+                        | "rabbitmq"
+                        | "kafka"
+                )
             ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
@@ -279,8 +304,12 @@ impl From<&SessionRow> for SessionView {
                 "The recording was made but hasn't reached the control plane yet. Check again shortly."
             } else if matches!(s.kind.as_deref(), Some("postgres" | "mysql" | "redshift")) {
                 "Database sessions have no terminal recording. Every statement is in the audit trail as db.query events that carry this session id (in S3 and Datadog)."
+            } else if s.kind.as_deref() == Some("mongodb") {
+                "MongoDB sessions have no terminal recording. Every command is in the audit trail as mongo.command events that carry this session id (in S3 and Datadog)."
             } else if s.kind.as_deref() == Some("redis") {
                 "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
+            } else if matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")) {
+                "Search sessions have no terminal recording. Every request is in the audit trail as search.request and search.response events that carry this session id (in S3 and Datadog)."
             } else if matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")) {
                 "RabbitMQ and Kafka sessions have no terminal recording. Every operation is in the audit trail as mq.operation or kafka.request events that carry this session id (in S3 and Datadog). Message content is never recorded."
             } else {
@@ -491,6 +520,10 @@ pub struct SessionPage {
     pub s: SessionView,
     /// Database sessions: the statements sent, oldest first.
     pub statements: Vec<StatementView>,
+    /// kubectl sessions: the API requests, oldest first.
+    pub requests: Vec<KubeView>,
+    pub request_total: i64,
+    pub request_problems: i64,
     pub statement_total: i64,
     pub statement_errors: i64,
 }
@@ -514,6 +547,8 @@ impl From<&super::store::DbStatementRow> for StatementView {
             // Redis: policy allowed it and the audit event was written before it
             // was forwarded. ("sent" is what earlier versions stored.)
             Some("allowed" | "sent") => "allowed",
+            // MongoDB: the client asked for no answer (`w: 0`).
+            Some("unacknowledged") => "sent, no reply",
             Some("denied") => "refused",
             Some("error") => "error",
             Some(_) => "not completed",
@@ -551,7 +586,7 @@ impl From<&super::store::DbStatementRow> for StatementView {
             },
             outcome: outcome.to_owned(),
             outcome_class: match r.status.as_deref() {
-                Some("ok" | "allowed" | "sent") => "ok",
+                Some("ok" | "allowed" | "sent" | "unacknowledged") => "ok",
                 Some("error" | "denied") => "bad",
                 _ => "warn",
             },
@@ -663,6 +698,44 @@ pub struct AuditPage {
     pub kinds: Vec<String>,
     pub kind_filter: Option<String>,
     pub user_filter: Option<String>,
+    pub newer: Option<String>,
+    pub older: Option<String>,
+}
+
+/// One Kubernetes API request, in kubectl's terms.
+pub struct KubeView {
+    pub at: String,
+    pub user: Option<String>,
+    pub user_path: Option<String>,
+    /// The kubectl session (one login on one cluster) that lists the request.
+    pub session_path: Option<String>,
+    /// For exec, attach, and port-forward: the stream's own session, which has the recording.
+    pub stream_path: Option<String>,
+    pub cluster: String,
+    pub verb: String,
+    /// `pods`, `pods/exec`, `deployments.apps`.
+    pub resource: String,
+    pub namespace: String,
+    pub name: String,
+    pub status: i32,
+    /// `ok` below 400, `bad` from 400 up.
+    pub tone: &'static str,
+    pub latency: String,
+    pub error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "kube_requests.html")]
+pub struct KubePage {
+    pub chrome: Chrome,
+    pub requests: Vec<KubeView>,
+    pub clusters: Vec<String>,
+    pub verbs: Vec<String>,
+    pub cluster_filter: Option<String>,
+    pub verb_filter: Option<String>,
+    pub user_filter: Option<String>,
+    pub namespace_filter: Option<String>,
+    pub problems_only: bool,
     pub newer: Option<String>,
     pub older: Option<String>,
 }

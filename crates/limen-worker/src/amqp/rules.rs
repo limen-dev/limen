@@ -38,6 +38,13 @@ pub struct Inspected {
     pub audited: bool,
     /// `Basic.publish`: a content header and body follow.
     pub publish: bool,
+    /// A passive declare only asks whether the name exists: any permission on
+    /// it will do, as in `RabbitMQ`.
+    pub passive: bool,
+    /// Exchanges the declared object forwards to (a queue's dead-letter
+    /// exchange, an exchange's alternate): the grant must let the role write
+    /// to them, as `RabbitMQ` requires.
+    pub forwards_to: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +75,22 @@ fn unaudited(action: &'static str, needs: MqClass) -> Inspected {
     }
 }
 
+/// The exchange a declare's arguments forward to under `key`. A passive
+/// declare sends no arguments that matter, so they aren't read.
+fn forward_targets(
+    a: &mut Args<'_>,
+    read_arguments: bool,
+    key: &str,
+) -> Result<Vec<String>, InspectError> {
+    if !read_arguments {
+        return Ok(Vec::new());
+    }
+    Ok(a.table_strings(&[key])?
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect())
+}
+
 /// Decode what a client method on a channel asks for.
 ///
 /// # Errors
@@ -86,9 +109,13 @@ pub fn inspect(class: u16, method: u16, args: &[u8]) -> Result<Inspected, Inspec
             a.u16()?;
             let exchange = a.shortstr()?;
             let kind = a.shortstr()?;
+            let bits = a.u8()?;
+            let forwards_to = forward_targets(&mut a, bits & 1 == 0, "alternate-exchange")?;
             Inspected {
                 action: "declare_exchange",
                 needs: Some(MqClass::Configure),
+                passive: bits & 1 != 0,
+                forwards_to,
                 names: vec![exchange.clone()],
                 exchange: Some(exchange),
                 // The exchange type is a name, not data.
@@ -133,9 +160,13 @@ pub fn inspect(class: u16, method: u16, args: &[u8]) -> Result<Inspected, Inspec
         (ids::QUEUE, 10) => {
             a.u16()?;
             let queue = a.shortstr()?;
+            let bits = a.u8()?;
+            let forwards_to = forward_targets(&mut a, bits & 1 == 0, "x-dead-letter-exchange")?;
             Inspected {
                 action: "declare_queue",
                 needs: Some(MqClass::Configure),
+                passive: bits & 1 != 0,
+                forwards_to,
                 // An empty name asks the server to choose one.
                 names: vec![queue.clone()],
                 queue: Some(queue),
@@ -273,6 +304,25 @@ impl Rules {
         let Some(needs) = insp.needs else {
             return Ok(());
         };
+        if insp.passive {
+            return self.check_passive(vhost, insp, owned);
+        }
+        // What the declared object forwards to is written to: the dead-letter
+        // or alternate exchange must be one the role may publish to.
+        for target in &insp.forwards_to {
+            let publish = Inspected {
+                action: "forward",
+                needs: Some(MqClass::Write),
+                names: vec![target.clone()],
+                ..Inspected::default()
+            };
+            self.check(vhost, &publish, owned).map_err(|_| {
+                format!(
+                    "{} forwards to {target:?}, which your role may not publish to",
+                    insp.action
+                )
+            })?;
+        }
         let in_vhost: Vec<&MqGrant> = self
             .grants
             .iter()
@@ -307,6 +357,31 @@ impl Rules {
             insp.action,
             first_uncovered.unwrap_or_default()
         ))
+    }
+}
+
+impl Rules {
+    /// A passive declare: any permission on the name will do.
+    fn check_passive(
+        &self,
+        vhost: &str,
+        insp: &Inspected,
+        owned: &HashSet<String>,
+    ) -> Result<(), String> {
+        let mut last = Err(format!("vhost {vhost:?} is not allowed for your role"));
+        for class in [MqClass::Read, MqClass::Write, MqClass::Configure] {
+            let probe = Inspected {
+                needs: Some(class),
+                passive: false,
+                forwards_to: Vec::new(),
+                ..insp.clone()
+            };
+            last = self.check(vhost, &probe, owned);
+            if last.is_ok() {
+                return Ok(());
+            }
+        }
+        last
     }
 }
 
@@ -641,6 +716,86 @@ mod tests {
         let r = Rules::new(vec![grant(&[], &[MqClass::Configure], &["orders.*"])]);
         assert!(r.check("/", &declare_queue(""), &none()).is_ok());
         assert!(r.check("/", &declare_queue("billing"), &none()).is_err());
+    }
+
+    fn declare_with(kind: &str, bits: u8, key: &str, target: &str) -> Inspected {
+        use crate::amqp::codec::Field;
+        let out = Out::new().u16(0).shortstr("orders.q");
+        let out = if kind == "exchange" {
+            out.shortstr("direct")
+        } else {
+            out
+        };
+        let args = out
+            .u8(bits)
+            .table(&[
+                ("x-unrelated", Field::Bool(true)),
+                (key, Field::Str(target)),
+            ])
+            .finish();
+        let class = if kind == "exchange" {
+            ids::EXCHANGE
+        } else {
+            ids::QUEUE
+        };
+        inspect(class, 10, &args).expect("declare")
+    }
+
+    #[test]
+    fn a_dead_letter_or_alternate_exchange_needs_write_on_it() {
+        let r = Rules::new(vec![grant(
+            &[],
+            &[MqClass::Configure, MqClass::Read],
+            &["orders.*"],
+        )]);
+        let dlx = declare_with("queue", 0, "x-dead-letter-exchange", "payments");
+        assert_eq!(dlx.forwards_to, ["payments"]);
+        let err = r.check("/", &dlx, &none()).expect_err("no write");
+        assert!(err.contains("payments"), "{err}");
+        let ae = declare_with("exchange", 0, "alternate-exchange", "payments");
+        assert!(r.check("/", &ae, &none()).is_err());
+        let writer = Rules::new(vec![grant(
+            &[],
+            &[MqClass::Configure, MqClass::Write],
+            &["orders.*"],
+        )]);
+        assert!(
+            writer
+                .check(
+                    "/",
+                    &declare_with("queue", 0, "x-dead-letter-exchange", "orders.dead"),
+                    &none()
+                )
+                .is_ok()
+        );
+        assert!(
+            writer
+                .check(
+                    "/",
+                    &declare_with("queue", 0, "x-dead-letter-exchange", "payments"),
+                    &none()
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_passive_declare_needs_any_permission_on_the_name() {
+        let reader = Rules::new(vec![grant(&[], &[MqClass::Read], &["orders.*"])]);
+        let passive = declare_with("queue", 1, "x-unrelated", "ignored");
+        assert!(passive.passive && passive.forwards_to.is_empty());
+        assert!(reader.check("/", &passive, &none()).is_ok());
+        let other = Inspected {
+            names: vec!["payments".into()],
+            ..passive.clone()
+        };
+        assert!(reader.check("/", &other, &none()).is_err());
+        // Declaring for real still needs configure.
+        assert!(
+            reader
+                .check("/", &declare_with("queue", 0, "x-unrelated", "n"), &none())
+                .is_err()
+        );
     }
 
     #[test]

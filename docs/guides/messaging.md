@@ -10,7 +10,7 @@ limen mq connect events-rabbit-staging        # the user is picked from policy w
 # Run: amqp://limen:limen@127.0.0.1:51234/%2F
 ```
 
-Point your client at that URL. Any user name and password work (some libraries insist on having one); Limen ignores them. Each connection is its own audited session. `--user` picks the broker user when policy allows several, `--listen 127.0.0.1:5673` fixes the port (loopback only), `--vhost` changes the vhost in the printed URL. The client chooses the real vhost; your role limits it.
+Point your client at that URL. Any user name and password work (some libraries insist on having one); Limen ignores them. Each connection is its own audited session, and the console shows the connections of one run as one row ("3 connections"): they share a group id that `limen mq connect` generates, and the session page lists the operations of all of them. Each connection keeps its own session id and audit events, and the check the command makes at startup carries no traffic and is not counted. `--user` picks the broker user when policy allows several, `--listen 127.0.0.1:5673` fixes the port (loopback only), `--vhost` changes the vhost in the printed URL. The client chooses the real vhost; your role limits it.
 
 A role grants broker users with limits shaped like RabbitMQ's own permissions:
 
@@ -23,7 +23,7 @@ A role grants broker users with limits shaped like RabbitMQ's own permissions:
     names: ["orders.*"]            # exchange and queue name patterns. Default: any name
 ```
 
-- **read**: consume, get, acknowledge. **write**: publish (to the default exchange, the routing key is the queue, so it is the name checked). **configure**: declare, delete, bind, and purge exchanges and queues.
+- **read**: consume, get, acknowledge. **write**: publish (to the default exchange, the routing key is the queue, so it is the name checked). **configure**: declare, delete, bind, and purge exchanges and queues. As in RabbitMQ's own permissions, a queue declared with `x-dead-letter-exchange`, or an exchange with `alternate-exchange`, also needs **write** on that exchange (otherwise a role could route messages somewhere it may not publish), and a passive declare ("does this exist?") needs any one of the three on the name.
 - `*` never opens the broker's own `amq.rabbitmq.*` names (the firehose tracer). Direct reply-to (`amq.rabbitmq.reply-to`) and the server-named queues your own session declared always work.
 - A refused operation closes **that channel** with `403 ACCESS_REFUSED` (what RabbitMQ does for a permission error); other channels and the connection carry on. An unknown vhost is refused when the connection opens.
 - Not supported: AMQP 1.0, Streams, MQTT, STOMP (a client that offers them is told what is supported), and Amazon MQ's IAM sign-in (use a broker user whose password the worker holds). The management UI and API are web apps (Phase 12).

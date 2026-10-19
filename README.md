@@ -28,10 +28,10 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/redis" height="48" alt="Redis / Valkey"><br><br><b>Redis / Valkey</b><br><sub>ElastiCache<br>values redacted in audit</sub><br><sub>✅ Working with Redis and Valkey<br>⚠️ ElastiCache IAM not yet tested</sub><br><br></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>Amazon EKS<br>impersonation, recorded exec</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/11">Phase 8</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt="MongoDB"><br><br><b>MongoDB</b><br><sub>any server · Atlas · DocumentDB<br>SCRAM, X.509, IAM</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/12">Phase 9</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opensearch" height="48" alt="OpenSearch"><br><br><b>OpenSearch</b><br><sub>Amazon OpenSearch Service<br>index-aware policy</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/13">Phase 10</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt="Elasticsearch"></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>index-aware policy</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/13">Phase 10</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>Amazon EKS and any cluster<br>impersonation, recorded exec</sub><br><sub>✅ Working on kind<br>⚠️ not yet on EKS</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt="MongoDB"><br><br><b>MongoDB</b><br><sub>any server · Atlas · DocumentDB<br>SCRAM, X.509, IAM · values redacted in audit</sub><br><sub>✅ Working (Atlas, DocumentDB, and IAM unverified)</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opensearch" height="48" alt="OpenSearch"><br><br><b>OpenSearch</b><br><sub>Amazon OpenSearch Service<br>index-aware policy</sub><br><sub>✅ Working<br>⚠️ Not yet tested on the AWS or Elastic Cloud services</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt="Elasticsearch"></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>index-aware policy</sub><br><sub>✅ Working<br>⚠️ Not yet tested on the AWS or Elastic Cloud services</sub><br><br></td>
   </tr>
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/rabbitmq" height="48" alt="RabbitMQ"><br><br><b>RabbitMQ</b><br><sub>any broker · Amazon MQ<br>no message bodies in audit</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/14">Phase 11</a></sub><br><br></td>
@@ -54,7 +54,7 @@ Each target works with the managed AWS service **and** any compatible self-hoste
   </tr>
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt="GitLab CI"><br><br><b>GitLab CI</b><br><sub>ID tokens become bot logins</sub><br><sub>✅ Working with a stand-in<br>⚠️ not yet with real tokens</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/key-round.svg" height="48" alt="AWS IAM and Kubernetes"><br><br><b>AWS IAM and Kubernetes</b><br><sub>workload identity for bots<br>Kubernetes tokens via generic OIDC</sub><br><sub>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 13</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/key-round.svg" height="48" alt="AWS IAM and Kubernetes"><br><br><b>AWS IAM and Kubernetes</b><br><sub>workload identity for bots<br>Kubernetes tokens via generic OIDC</sub><br><sub>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/datadog/white"><img src="https://cdn.simpleicons.org/datadog" height="48" alt="Datadog"></picture><br><br><b>Datadog</b><br><sub>logs and monitors as Terraform</sub><br><sub>✅ Working (fake intake)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/grafana" height="48" alt="Grafana"><br><br><b>Grafana</b><br><sub>optional dashboards over S3 and Athena</sub><br><sub>✅ Working (Trino locally)</sub><br><br></td>
   </tr>
@@ -65,7 +65,7 @@ Each target works with the managed AWS service **and** any compatible self-hoste
 <table>
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>StatefulSet or Deployment</sub><br><sub>scale-out example, unverified on a cluster<br>EKS: ⏳ <a href="https://github.com/jfcmartins/limen/milestone/11">Phase 8</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/hard-drive.svg" height="48" alt="Amazon ECS and EC2"><br><br><b>Amazon ECS and EC2</b><br><sub>Fargate tasks or an Auto Scaling group</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 13</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/hard-drive.svg" height="48" alt="Amazon ECS and EC2"><br><br><b>Amazon ECS and EC2</b><br><sub>Fargate tasks or an Auto Scaling group</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/terraform" height="48" alt="Terraform"><br><br><b>Terraform</b><br><sub>audit store and monitors today</sub><br><sub>✅ Working (audit module)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/docker" height="48" alt="Docker Compose"><br><br><b>Docker Compose</b><br><sub>the full local stack</sub><br><sub>✅ Working</sub><br><br></td>
   </tr>
@@ -107,26 +107,24 @@ Behind both: short-lived certificates instead of keys and passwords, deny-by-def
 
 ## Quickstart
 
-You need Docker (OrbStack on macOS) and the Rust toolchain from `mise.toml`. Everything below runs on your machine against local stand-ins.
+You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`). Everything below runs on your machine against local stand-ins.
 
 ```sh
-# 1. Start the stack: control plane, proxy, worker, Postgres, Dex (the identity provider), a test SSH host
-docker compose -f deploy/compose/docker-compose.yml up -d --build
+# 1. One script: checks what you need, asks what to enable (SSH host, databases, Redis,
+#    Kubernetes, observability...), starts Limen, applies the example policy, and prints
+#    the ports, a command for each resource, and the CLI and console sign-in.
+deploy/compose/setup.sh
 
-# 2. Install the CLI (once; re-run after pulling to upgrade) and trust the dev stack's CA
-scripts/install-cli.sh
-mkdir -p deploy/compose/.state
-docker compose -f deploy/compose/docker-compose.yml cp control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
+# 2. Install the CLI (once; re-run after pulling to upgrade)
+deploy/cli/install.sh
 
-# 3. Sign in as the dev admin, admin@example.com (password: "password"), then load the example policy
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # opens your browser on Dex
-limen admin apply examples/policy
-limen login                                       # roles are fixed at login: sign in again to pick them up
+# 3. Sign in (a browser opens on Dex; the dev admin is admin@example.com, password "password")
+limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 
 # 4. Use it
 limen ls                                          # what can I reach?
 limen ssh web-staging-1                           # a recorded SSH session
-# databases: see docs/guides/databases.md, or run deploy/compose/demo-phase6.sh
+# databases, Redis and Kubernetes: the script prints the commands, or see docs/guides/
 
 # 5. Open the console in your browser (sign in with the same user)
 open https://localhost:3443/console/              # macOS; elsewhere just paste the URL
@@ -141,19 +139,22 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 
 | Phase | What | Status |
 |---|---|---|
-| 0 – 3.5 | Foundations, control plane, SSH, audit pipeline, web console | ✅ Done: [0](https://github.com/jfcmartins/limen/milestone/1), [1](https://github.com/jfcmartins/limen/milestone/2), [2](https://github.com/jfcmartins/limen/milestone/3), [3](https://github.com/jfcmartins/limen/milestone/4), [3.5](https://github.com/jfcmartins/limen/milestone/5) |
+| 0 | Design, ADRs, threat model, skeleton, CI | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/1) |
+| 1 | Control plane, OIDC login, worker enrollment and reverse tunnels | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/2) |
+| 2 | SSH with session recording | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/3) |
+| 3 | Audit pipeline: S3 and Datadog, hash chain, Grafana dashboards | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/4) |
+| 3.5 | Web console | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/5) |
 | 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
 | 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
-| 6.5 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
 | 7 | Redis and Valkey | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/10) (ElastiCache IAM unverified) |
-| 11 | RabbitMQ, Amazon MQ, Kafka, MSK | 🚧 [ADR-0037](docs/adr/0037-messaging-access.md) (Amazon MQ and MSK unverified) |
-| 8 | Kubernetes (EKS) | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/11) |
-| 9 | MongoDB, Atlas, DocumentDB | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/12) |
-| 10 | OpenSearch and Elasticsearch | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/13) |
-| 11 | RabbitMQ and Kafka | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/14) |
+| 8 | Kubernetes (EKS) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/11) (verified on kind, not yet on EKS) |
+| 9 | MongoDB, Atlas, DocumentDB | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/12) (Atlas, DocumentDB, and IAM unverified) |
+| 10 | OpenSearch and Elasticsearch | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/13) (Amazon OpenSearch Service and Elastic Cloud unverified) |
+| 11 | RabbitMQ and Kafka | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/14) (Amazon MQ, MSK, and MSK IAM unverified) |
 | 12 | Internal web apps and TCP services | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
-| 13 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |
+| 13 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
+| 14 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |
 | Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
 
 ## Why "Limen"
@@ -162,7 +163,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), and [bots for CI](docs/guides/bots.md)
+- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), and [bots for CI](docs/guides/bots.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs

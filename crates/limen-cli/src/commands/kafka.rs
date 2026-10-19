@@ -58,6 +58,9 @@ pub async fn connect(
             .await?
         }
     };
+    // Every session of this run carries one group, so the console shows them
+    // as one row: a client holds a connection to each broker.
+    let group: Arc<str> = Arc::from(uuid::Uuid::new_v4().simple().to_string());
     // The bootstrap listener first, then one per broker slot, all on loopback.
     let mut listeners = Vec::with_capacity(brokers + 1);
     for i in 0..=brokers {
@@ -79,7 +82,16 @@ pub async fn connect(
         .map(|l| l.local_addr().map(|a| a.port()))
         .collect::<Result<_, _>>()?;
     // Fail now, with a clear message, if the login is gone or the proxy is unreachable.
-    drop(open(proxy, resource, &user, &KafkaSlot::new(0, ports.clone())).await?);
+    drop(
+        open(
+            proxy,
+            resource,
+            &user,
+            &KafkaSlot::new(0, ports.clone()),
+            &group,
+        )
+        .await?,
+    );
 
     ui::success(&format!(
         "Listening for {} as {} ({} broker slot{}).",
@@ -110,11 +122,12 @@ pub async fn connect(
     let quiet_since = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
     let mut accepts = Vec::new();
     for (slot, listener) in listeners.into_iter().enumerate() {
-        let (proxy, resource, user, ports) = (
+        let (proxy, resource, user, ports, group) = (
             proxy.clone(),
             Arc::clone(&resource),
             Arc::clone(&user),
             Arc::clone(&ports),
+            Arc::clone(&group),
         );
         let (active, quiet_since) = (Arc::clone(&active), Arc::clone(&quiet_since));
         accepts.push(tokio::spawn(async move {
@@ -123,17 +136,26 @@ pub async fn connect(
                     return;
                 };
                 let _ = stream.set_nodelay(true);
-                let (proxy, resource, user, ports) = (
+                let (proxy, resource, user, ports, group) = (
                     proxy.clone(),
                     Arc::clone(&resource),
                     Arc::clone(&user),
                     Arc::clone(&ports),
+                    Arc::clone(&group),
                 );
                 let (active, quiet_since) = (Arc::clone(&active), Arc::clone(&quiet_since));
                 active.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
                     let slot = KafkaSlot::new(slot, ports.to_vec());
-                    session(Box::new(stream), proxy.as_deref(), &resource, &user, &slot).await;
+                    session(
+                        Box::new(stream),
+                        proxy.as_deref(),
+                        &resource,
+                        &user,
+                        &slot,
+                        &group,
+                    )
+                    .await;
                     *quiet_since
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) =
@@ -167,11 +189,20 @@ async fn open(
     resource: &str,
     user: &str,
     slot: &KafkaSlot,
+    group: &str,
 ) -> anyhow::Result<
     impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
 > {
     let table = slot.encode();
-    super::ssh::open_session_for(proxy, limen_tunnel::alpn::KAFKA, resource, user, &table).await
+    super::ssh::open_session_in(
+        proxy,
+        limen_tunnel::alpn::KAFKA,
+        resource,
+        user,
+        &table,
+        group,
+    )
+    .await
 }
 
 /// One local connection = one session. Kafka has no way to say "refused"
@@ -183,8 +214,9 @@ async fn session(
     resource: &str,
     user: &str,
     slot: &KafkaSlot,
+    group: &str,
 ) {
-    match open(proxy, resource, user, slot).await {
+    match open(proxy, resource, user, slot, group).await {
         Ok(mut upstream) => {
             let _ = tokio::io::copy_bidirectional(&mut local, &mut upstream).await;
         }

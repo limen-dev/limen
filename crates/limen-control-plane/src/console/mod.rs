@@ -92,6 +92,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
         .route("/console/audit", get(pages::audit))
+        .route("/console/audit/kubernetes", get(pages::kube_requests))
         .route("/console/dashboards", get(dashboards::dashboards))
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))

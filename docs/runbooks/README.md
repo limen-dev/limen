@@ -15,5 +15,6 @@ Runbooks are added as each component ships. Planned:
 | [Scaling out, replacing, and upgrading copies](scale-out.md) | 5 ✅ |
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
 | [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |
+| [Onboarding MongoDB, Atlas, or DocumentDB](mongodb-onboarding.md) | 9 ✅ |
 | Control plane outage | not scheduled |
-| Okta setup | 13 |
+| Okta setup | 14 |

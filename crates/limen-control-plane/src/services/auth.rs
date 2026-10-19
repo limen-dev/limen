@@ -7,7 +7,7 @@ use limen_ca::UserCertRequest;
 use limen_proto::v1::auth_server::Auth;
 use limen_proto::v1::{
     BotLoginRequest, GetAuthConfigRequest, GetAuthConfigResponse, LoginFlow, LoginRequest,
-    LoginResponse, WhoAmIRequest, WhoAmIResponse,
+    LoginResponse, LogoutRequest, LogoutResponse, WhoAmIRequest, WhoAmIResponse,
 };
 use rcgen::CertificateSigningRequestParams;
 use rustls_pki_types::CertificateSigningRequestDer;
@@ -89,6 +89,50 @@ impl Auth for AuthService {
         super::bot_login::bot_login(self.0.clone(), caller.addr(), request.into_inner())
             .await
             .map(Response::new)
+    }
+
+    async fn logout(
+        &self,
+        request: Request<LogoutRequest>,
+    ) -> Result<Response<LogoutResponse>, Status> {
+        let caller = caller::resolve(&request, &self.0.cas)?;
+        let user = caller.user()?;
+        // Audited first: if the trail is unavailable the logout is refused
+        // (the CLI says so), rather than happening unrecorded.
+        let already = crate::db::is_login_revoked(&self.0.db, &user.login_id)
+            .await
+            .map_err(|e| internal("checking ended logins", e))?;
+        if !already {
+            self.0
+                .audit
+                .emit(
+                    EventKind::AuthLogout,
+                    Context {
+                        user: Some(user.username.clone()),
+                        session_id: None,
+                    },
+                    json!({
+                        "login_id": user.login_id,
+                        "client_addr": caller.addr().map(|a| a.to_string()),
+                    }),
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "audit unavailable; refusing logout");
+                    Status::unavailable("audit unavailable")
+                })?;
+        }
+        let revoked =
+            crate::db::revoke_login(&self.0.db, &user.login_id, &user.username, user.not_after)
+                .await
+                .map_err(|e| internal("ending a login", e))?;
+        if revoked {
+            tracing::info!(user = %user.username, login = %user.login_id, "logout");
+        }
+        Ok(Response::new(LogoutResponse {
+            login_id: user.login_id.clone(),
+            revoked,
+        }))
     }
 
     async fn who_am_i(

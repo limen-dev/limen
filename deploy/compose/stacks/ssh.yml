@@ -1,0 +1,18 @@
+# An SSH target that trusts only Limen per-session certificates (profile `ssh`).
+# Layered on the limen stack or the scale stack; setup.sh does it.
+services:
+  # An SSH target that trusts only Limen per-session certificates.
+  sshd-target:
+    container_name: ssh-web-${LIMEN_ENV:-dev}
+    profiles: ["ssh"]
+    build:
+      context: ./config/targets/sshd
+      args: { BASE_IMAGE: "${SSHD_BASE_IMAGE}" }
+    image: limen-sshd-target:dev
+    restart: unless-stopped
+    volumes:
+      # ssh-user-ca.pub, exported by the control plane.
+      - ca-public:/etc/ssh/limen:ro
+
+volumes:
+  ca-public: {}

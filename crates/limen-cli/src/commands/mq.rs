@@ -36,8 +36,11 @@ pub async fn connect(
             .await?
         }
     };
+    // Every session of this run carries one group, so the console shows them
+    // as one row.
+    let group: Arc<str> = Arc::from(uuid::Uuid::new_v4().simple().to_string());
     // Fail now, with a clear message, if the login is gone or the proxy is unreachable.
-    drop(super::ssh::open_session(proxy, limen_tunnel::alpn::MQ, resource, &user).await?);
+    drop(open(proxy, resource, &user, &group).await?);
 
     let addr = listen.unwrap_or("127.0.0.1:0");
     let listener = tokio::net::TcpListener::bind(addr)
@@ -68,12 +71,16 @@ pub async fn connect(
             accepted = listener.accept() => {
                 let (stream, _) = accepted.context("accepting a connection")?;
                 stream.set_nodelay(true)?;
-                let (proxy, resource, user) =
-                    (proxy.clone(), Arc::clone(&resource), Arc::clone(&user));
+                let (proxy, resource, user, group) = (
+                    proxy.clone(),
+                    Arc::clone(&resource),
+                    Arc::clone(&user),
+                    Arc::clone(&group),
+                );
                 let (active, quiet_since) = (Arc::clone(&active), Arc::clone(&quiet_since));
                 active.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    session(Box::new(stream), proxy.as_deref(), &resource, &user).await;
+                    session(Box::new(stream), proxy.as_deref(), &resource, &user, &group).await;
                     *quiet_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
                         tokio::time::Instant::now();
                     active.fetch_sub(1, Ordering::SeqCst);
@@ -103,11 +110,28 @@ fn amqp_url(port: u16, vhost: &str) -> String {
     format!("amqp://limen:limen@127.0.0.1:{port}/{path}")
 }
 
+async fn open(
+    proxy: Option<&str>,
+    resource: &str,
+    user: &str,
+    group: &str,
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
+    super::ssh::open_session_in(proxy, limen_tunnel::alpn::MQ, resource, user, "", group).await
+}
+
 /// One local connection = one session. AMQP has no way to say "refused"
 /// before the handshake, so the reason is printed here, and the client sees
 /// the connection close.
-async fn session(mut local: Box<dyn Io>, proxy: Option<&str>, resource: &str, user: &str) {
-    match super::ssh::open_session(proxy, limen_tunnel::alpn::MQ, resource, user).await {
+async fn session(
+    mut local: Box<dyn Io>,
+    proxy: Option<&str>,
+    resource: &str,
+    user: &str,
+    group: &str,
+) {
+    match open(proxy, resource, user, group).await {
         Ok(mut upstream) => {
             let _ = tokio::io::copy_bidirectional(&mut local, &mut upstream).await;
         }

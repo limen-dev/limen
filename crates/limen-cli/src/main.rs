@@ -1,6 +1,7 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts, SQL databases, and Redis or Valkey today, and (planned)
-//! Kubernetes, MongoDB, search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, Redis or Valkey, Kubernetes clusters, and search
+//! (`OpenSearch` and Elasticsearch), and (planned) MongoDB, message brokers, web
+//! apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -158,17 +159,17 @@ enum Command {
         #[command(subcommand)]
         command: RedisCommand,
     },
-    /// Kubernetes and EKS (planned, Phase 8).
+    /// Kubernetes and EKS.
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
     },
-    /// MongoDB, Atlas, and DocumentDB (planned, Phase 9).
+    /// MongoDB, Atlas, and DocumentDB: `limen mongo connect <resource>`.
     Mongo {
         #[command(subcommand)]
         command: MongoCommand,
     },
-    /// OpenSearch and Elasticsearch (planned, Phase 10).
+    /// `OpenSearch` and Elasticsearch: `limen search connect <resource>`.
     Search {
         #[command(subcommand)]
         command: SearchCommand,
@@ -248,33 +249,60 @@ enum RedisCommand {
 
 #[derive(Debug, Subcommand)]
 enum KubeCommand {
-    /// Write a kubeconfig context that uses the limen exec credential plugin.
-    Login { cluster: String },
+    /// Write a kubeconfig for a cluster; kubectl then asks `limen kube credentials`.
+    Login {
+        cluster: String,
+        /// Write the kubeconfig here instead of in the profile directory.
+        #[arg(long, value_name = "FILE")]
+        kubeconfig: Option<PathBuf>,
+        /// Print the kubeconfig instead of writing it.
+        #[arg(long, conflicts_with = "kubeconfig")]
+        print: bool,
+    },
+    /// The kubectl exec credential plugin: prints your short-lived certificate.
+    Credentials,
 }
 
 #[derive(Debug, Subcommand)]
 enum MongoCommand {
-    /// Open a local listener for mongosh and drivers.
+    /// Open a local listener that mongosh (or any MongoDB driver) connects to without a password.
     Connect {
         resource: String,
+        /// The MongoDB role to act as. Optional when policy allows only one.
         #[arg(long)]
         role: Option<String>,
+        /// The database to open. Defaults to the resource's default_database.
         #[arg(long)]
         database: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum SearchCommand {
-    /// Open a local listener for curl and the OpenSearch or Elasticsearch clients.
+    /// Open a local listener that curl and the Elasticsearch and `OpenSearch` clients use without a credential.
     Connect {
         resource: String,
+        /// The engine role to act as. Optional when policy allows only one.
         #[arg(long)]
         role: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on (loopback only). Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::search::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -345,6 +373,7 @@ async fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.proxy.as_deref();
     match cli.command {
@@ -374,7 +403,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ca_file,
             ..
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
-        Command::Logout => commands::logout(proxy),
+        Command::Logout => commands::logout(proxy).await,
         Command::Status => commands::status(proxy),
         Command::Ls { json } => commands::ls(proxy, json).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
@@ -423,9 +452,56 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Kube { .. } => not_yet("limen kube login", "Kubernetes access", "Phase 8"),
-        Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
-        Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
+        Command::Kube { command } => match command {
+            KubeCommand::Login {
+                cluster,
+                kubeconfig,
+                print,
+            } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
+            KubeCommand::Credentials => commands::kube::credentials(proxy),
+        },
+        Command::Mongo {
+            command:
+                MongoCommand::Connect {
+                    resource,
+                    role,
+                    database,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::mongo::connect(
+                proxy,
+                &resource,
+                role.as_deref(),
+                database.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
+        Command::Search {
+            command:
+                SearchCommand::Connect {
+                    resource,
+                    role,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::search::connect(
+                proxy,
+                &resource,
+                role.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
         Command::Mq {
             command:
                 MqCommand::Connect {
@@ -502,9 +578,11 @@ mod tests {
                 "--listen",
                 "127.0.0.1:5433",
             ][..],
-            &["kube", "login", "c"],
+            &["redis", "connect", "r", "--user", "u"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
             &["search", "connect", "r", "--role", "x"],
+            &["mq", "connect", "r", "--user", "u"],
+            &["kafka", "connect", "r", "--user", "u"],
             &["web", "open", "app", "--no-browser"],
             &["tcp", "r", "--listen", "127.0.0.1:2121"],
         ] {
@@ -512,6 +590,32 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn kube_commands_parse() {
+        for args in [
+            &["kube", "login", "c"][..],
+            &["kube", "login", "c", "--kubeconfig", "/tmp/k"],
+            &["kube", "login", "c", "--print"],
+            &["--proxy", "p:1", "kube", "credentials"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "limen",
+                "kube",
+                "login",
+                "c",
+                "--print",
+                "--kubeconfig",
+                "x"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -578,6 +682,28 @@ mod tests {
     }
 
     #[test]
+    fn search_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "search", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["logs", "--role", "limen-read", "--listen", "127.0.0.1:9200"]).is_ok());
+        assert!(
+            ok(&[
+                "logs",
+                "--socket",
+                "/tmp/limen/s.sock",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["logs", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["logs", "--idle-timeout", "soon"]).is_err());
+    }
+
+    #[test]
     fn bot_login_options_parse_and_conflict_where_they_should() {
         let ok = |args: &[&str]| {
             let mut full = vec!["limen"];
@@ -620,11 +746,34 @@ mod tests {
     }
 
     #[test]
+    fn mongo_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "mongo", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["catalog", "--role", "limen-read", "--database", "orders"]).is_ok());
+        assert!(
+            ok(&[
+                "catalog",
+                "--listen",
+                "127.0.0.1:27018",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["catalog", "--socket", "/tmp/limen/m.sock"]).is_ok());
+        assert!(ok(&["catalog", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["catalog", "--idle-timeout", "soon"]).is_err());
+    }
+
+    #[test]
     fn planned_commands_say_when() {
-        let message = super::not_yet("limen mongo connect", "MongoDB access", "Phase 9")
+        let message = super::not_yet("limen search connect", "search access", "Phase 10")
             .expect_err("not available")
             .to_string();
-        assert!(message.contains("limen mongo connect") && message.contains("Phase 9"));
+        assert!(message.contains("limen search connect") && message.contains("Phase 10"));
     }
 
     #[test]

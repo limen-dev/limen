@@ -74,8 +74,9 @@ impl ResourceKind {
     }
 
     /// The command that opens this kind, and the phase that delivers it. SSH,
-    /// the SQL databases, Redis, `RabbitMQ`, and Kafka are served; the other kinds can be written
-    /// in policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
+    /// the SQL databases, Redis, Kubernetes, MongoDB, search, `RabbitMQ`, and Kafka are served;
+    /// the other kinds can be written in policy and listed, but nothing serves them yet
+    /// (ADR-0018, ADR-0022).
     #[must_use]
     pub fn access(self) -> Access {
         let (command, planned) = match self {
@@ -84,10 +85,10 @@ impl ResourceKind {
                 ("limen db connect {name}", None)
             }
             ResourceKind::Redis => ("limen redis connect {name}", None),
-            ResourceKind::Kubernetes => ("limen kube login {name}", Some("Phase 8")),
-            ResourceKind::Mongodb => ("limen mongo connect {name}", Some("Phase 9")),
+            ResourceKind::Kubernetes => ("limen kube login {name}", None),
+            ResourceKind::Mongodb => ("limen mongo connect {name}", None),
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
-                ("limen search connect {name}", Some("Phase 10"))
+                ("limen search connect {name}", None)
             }
             ResourceKind::Rabbitmq => ("limen mq connect {name}", None),
             ResourceKind::Kafka => ("limen kafka connect {name}", None),
@@ -119,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_the_databases_redis_and_the_brokers_are_available_today() {
+    fn ssh_the_databases_redis_kubernetes_search_and_the_brokers_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
@@ -132,6 +133,10 @@ mod tests {
                 ResourceKind::Mysql,
                 ResourceKind::Redshift,
                 ResourceKind::Redis,
+                ResourceKind::Kubernetes,
+                ResourceKind::Mongodb,
+                ResourceKind::Opensearch,
+                ResourceKind::Elasticsearch,
                 ResourceKind::Rabbitmq,
                 ResourceKind::Kafka
             ]

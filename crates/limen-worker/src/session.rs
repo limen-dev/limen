@@ -3,7 +3,7 @@
 //! The first frame carries the proxy's signed grant. The worker checks it
 //! independently (defense in depth: both proxy and worker must allow), gets
 //! per-session SSH certificates from the control plane, then bridges the
-//! frame stream to its SSH server.
+//! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
 
@@ -38,6 +38,7 @@ pub(crate) const WORKER_DRAIN: &str = "worker_drain";
 
 /// `guard` holds the session's slot under the worker's cap: dropped on any
 /// early return, otherwise moved into the session task.
+#[allow(clippy::too_many_lines)] // one arm per protocol
 pub(crate) async fn open(
     worker: Worker,
     guard: SessionGuard,
@@ -92,6 +93,7 @@ pub(crate) async fn open(
     let expires = config_expiry(&signed);
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
+    let kube_worker = worker.clone();
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -136,7 +138,7 @@ pub(crate) async fn open(
                 Admitted::Kafka(prepared) => {
                     let mut end = end;
                     tokio::select! {
-                        r = kafka::serve(ours, *prepared, audit) => r,
+                        r = Box::pin(kafka::serve(ours, *prepared, audit)) => r,
                         _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
                             ended_by_drain: true,
                             ..Default::default()
@@ -146,7 +148,7 @@ pub(crate) async fn open(
                 Admitted::Mq(prepared) => {
                     let mut end = end;
                     tokio::select! {
-                        r = amqp::serve(ours, *prepared, audit) => r,
+                        r = Box::pin(amqp::serve(ours, *prepared, audit)) => r,
                         _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
                             ended_by_drain: true,
                             ..Default::default()
@@ -157,6 +159,40 @@ pub(crate) async fn open(
                     let mut end = end;
                     tokio::select! {
                         r = redis::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Kube(request) => {
+                    // One HTTP request (and any stream it upgrades to). A
+                    // drain that reaches its timeout ends it too.
+                    let mut end = end;
+                    tokio::select! {
+                        () = crate::kube::serve(kube_worker, *request, ours) => {
+                            Ok(crate::ssh::SessionOutcome::default())
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Search(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::search::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Mongo(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::mongo::serve(ours, *prepared, audit) => r,
                         _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
                             ended_by_drain: true,
                             ..Default::default()
@@ -213,6 +249,9 @@ enum Admitted {
     Ssh(Box<SshSessionConfig>),
     Db(Box<crate::db::DbSessionConfig>),
     Redis(Box<redis::Prepared>),
+    Kube(Box<crate::kube::Admitted>),
+    Mongo(Box<crate::mongo::Prepared>),
+    Search(Box<crate::search::Prepared>),
     Mq(Box<amqp::Prepared>),
     Kafka(Box<kafka::Prepared>),
 }
@@ -223,6 +262,9 @@ impl Admitted {
             Admitted::Ssh(c) => c.session_id.clone(),
             Admitted::Db(c) => c.session_id.to_string(),
             Admitted::Redis(p) => p.session_id().to_owned(),
+            Admitted::Kube(k) => k.session_id.clone(),
+            Admitted::Mongo(p) => p.session_id(),
+            Admitted::Search(p) => p.session_id(),
             Admitted::Mq(p) => p.session_id().to_owned(),
             Admitted::Kafka(p) => p.session_id().to_owned(),
         }
@@ -275,6 +317,15 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "redis" => admit_redis(worker, &checked)
             .await
             .map(|c| Admitted::Redis(Box::new(c))),
+        "kube" => {
+            crate::kube::admit(worker, &checked.verified, now).map(|k| Admitted::Kube(Box::new(k)))
+        }
+        "opensearch" | "elasticsearch" => admit_search(worker, &checked)
+            .await
+            .map(|p| Admitted::Search(Box::new(p))),
+        "mongodb" => admit_mongo(worker, &checked)
+            .await
+            .map(|c| Admitted::Mongo(Box::new(c))),
         "rabbitmq" => admit_mq(worker, &checked).map(|c| Admitted::Mq(Box::new(c))),
         "kafka" => admit_kafka(worker, &checked).map(|c| Admitted::Kafka(Box::new(c))),
         other => Err(Status::unimplemented(format!(
@@ -289,10 +340,11 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
     let creds = worker.credentials();
     let grant = &checked.verified.grant;
     let snapshot = &checked.snapshot;
-    if let Some(why) = snapshot
-        .restrictions
-        .blocks(&checked.verified.user.username, &grant.session_id)
-    {
+    if let Some(why) = snapshot.restrictions.blocks(
+        &checked.verified.user.username,
+        &checked.verified.user.login_id,
+        &grant.session_id,
+    ) {
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {
@@ -428,6 +480,155 @@ async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepar
             "couldn't connect to the Redis server; ask an admin to check the worker's log",
         )
     })
+}
+
+/// The longest a search session may take to open its connection to the target.
+const SEARCH_PREPARE: std::time::Duration = std::time::Duration::from_secs(30);
+
+async fn admit_search(
+    worker: &Worker,
+    checked: &Checked,
+) -> Result<crate::search::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::SearchRole(grant.principal.clone()),
+    )?;
+    let resource = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .ok_or_else(|| Status::failed_precondition("unknown resource"))?;
+    let (engine, target) = match grant.kind.as_str() {
+        "opensearch" => ("opensearch", resource.spec.opensearch.clone()),
+        _ => ("elasticsearch", resource.spec.elasticsearch.clone()),
+    };
+    let target =
+        target.ok_or_else(|| Status::failed_precondition("resource is not a search resource"))?;
+    let grants = checked.snapshot.policy.search_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    let config = crate::search::SessionConfig {
+        session_id,
+        username: checked.verified.user.username.clone(),
+        resource: grant.resource.clone(),
+        engine_role: grant.principal.clone(),
+        engine,
+        target: target.clone(),
+    };
+    let aws: Option<crate::search::target::AwsSource> = target.aws.then(|| {
+        let worker = worker.clone();
+        Arc::new(move || {
+            let worker = worker.clone();
+            Box::pin(async move { worker.aws_credentials().await })
+                as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+        }) as crate::search::target::AwsSource
+    });
+    tokio::time::timeout(
+        SEARCH_PREPARE,
+        crate::search::prepare(&worker.search, grants, config, aws),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out"))
+    .and_then(|r| r)
+    .map_err(|e| {
+        // The detail names the server and the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't open the search connection");
+        Status::unavailable(
+            "couldn't connect to the search server; ask an admin to check the worker's log",
+        )
+    })
+}
+
+/// The longest a MongoDB session may take to open its connection to the server.
+const MONGO_PREPARE: std::time::Duration = std::time::Duration::from_secs(25);
+
+async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo::Prepared, Status> {
+    use limen_policy::model::MongoAuth;
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::MongoRole {
+            role: grant.principal.clone(),
+            database: grant.database.clone(),
+        },
+    )?;
+    if !limen_policy::valid_mongo_role(&grant.principal) {
+        return Err(Status::permission_denied("not a valid MongoDB role name"));
+    }
+    let spec = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.mongodb.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a MongoDB resource"))?;
+    // The detail names the server and the account: it stays in the log.
+    let unavailable = |what: &str, e: &dyn std::fmt::Display| {
+        metrics::counter!("limen_mongo_connect_failures_total").increment(1);
+        tracing::warn!(error = %e, resource = %grant.resource, "{what}");
+        Status::unavailable(
+            "couldn't connect to the MongoDB server; ask an admin to check the worker's log",
+        )
+    };
+    let aws = if spec.auth == MongoAuth::Aws {
+        Some(
+            worker
+                .aws_credentials()
+                .await
+                .map_err(|e| unavailable("couldn't get AWS credentials for MONGODB-AWS", &e))?,
+        )
+    } else {
+        None
+    };
+    let (login, identity) = crate::mongo::credentials(&spec, &grant.principal, aws)
+        .await
+        .map_err(|e| {
+            metrics::counter!("limen_mongo_connect_failures_total").increment(1);
+            tracing::error!(resource = %grant.resource, error = %e, "can't load the MongoDB role's credential");
+            Status::failed_precondition("the worker has no credential for this MongoDB role")
+        })?;
+    let target = crate::db::Target::from_mongo(&spec, worker.allow_insecure_db_targets(), identity)
+        .await
+        .map_err(Status::failed_precondition)?;
+    let auth_source = spec.auth_source.clone().unwrap_or_else(|| {
+        match spec.auth {
+            MongoAuth::Scram | MongoAuth::ScramSha1 => "admin",
+            MongoAuth::X509 | MongoAuth::Aws => "$external",
+        }
+        .to_owned()
+    });
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    let access = crate::mongo::Access::new(
+        std::sync::Arc::clone(&checked.snapshot.policy),
+        checked.verified.user.roles.clone(),
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = crate::mongo::SessionConfig::new(
+        session_id,
+        grant.username.clone(),
+        grant.resource.clone(),
+        grant.principal.clone(),
+        &spec,
+    );
+    tokio::time::timeout(
+        MONGO_PREPARE,
+        crate::mongo::prepare(config, &target, &login, &auth_source, access),
+    )
+    .await
+    .map_err(|_| unavailable("MongoDB connection timed out", &"timed out"))?
+    .map_err(|e| unavailable("couldn't open the MongoDB connection", &e))
 }
 
 async fn admit_db(

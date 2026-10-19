@@ -1,0 +1,79 @@
+# Elasticsearch and OpenSearch targets (Phase 10, ADR-0036), profile `search`:
+# real Elasticsearch 8 (security on, plain HTTP) and real OpenSearch 2 (its
+# security plugin on, TLS with the image's demo certificate, which the worker
+# verifies in full). Layered on a Limen stack by setup.sh search. Development
+# only: fixed engine passwords, a demo certificate.
+#
+# The engine-side roles and users the example policy names are created by
+# config/targets/search/provision.sh (setup.sh and the demo run it). The worker
+# holds their logins (config/targets/search/credentials.json) and OpenSearch's
+# CA (the `search-worker` volume, filled below). Amazon OpenSearch Service,
+# OpenSearch Serverless, and Elastic Cloud are unverified; this is the
+# self-hosted path.
+services:
+  # OpenSearch makes its demo certificates when it first starts, and runs as
+  # a user that can't write to a new volume: this gives it the directory.
+  search-ca-dir:
+    profiles: ["search"]
+    image: ${ALPINE_IMAGE}
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /out && chmod 755 /out"]
+    volumes:
+      - search-worker:/out
+
+  elasticsearch-target:
+    container_name: elasticsearch-search-${LIMEN_ENV:-dev}
+    profiles: ["search"]
+    image: ${ELASTICSEARCH_IMAGE}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.ml.enabled: "false"
+      xpack.watcher.enabled: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      ELASTIC_PASSWORD: elastic-dev-only
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: [es-data:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:elastic-dev-only 'localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s'"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+
+  # The alias is the name the demo certificate carries, so the worker can
+  # verify it in full.
+  opensearch-target:
+    container_name: opensearch-search-${LIMEN_ENV:-dev}
+    profiles: ["search"]
+    image: ${OPENSEARCH_IMAGE}
+    depends_on:
+      search-ca-dir: { condition: service_completed_successfully }
+    # Hands the demo root CA to the worker (the volume it reads) once it exists.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        (until [ -f /usr/share/opensearch/config/root-ca.pem ]; do sleep 1; done
+         cp /usr/share/opensearch/config/root-ca.pem /out/opensearch-root-ca.pem
+         chmod 644 /out/opensearch-root-ca.pem) &
+        exec ./opensearch-docker-entrypoint.sh opensearch
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: Dev-only-Opensearch-1
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      plugins.security.audit.type: noop
+    networks:
+      default:
+        aliases: [node-0.example.com]
+    volumes:
+      - os-data:/usr/share/opensearch/data
+      - search-worker:/out
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk -u admin:Dev-only-Opensearch-1 'https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s'"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+
+volumes:
+  es-data: {}
+  os-data: {}

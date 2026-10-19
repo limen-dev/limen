@@ -170,8 +170,10 @@ jobs:
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           mkdir -p digests
+          . deploy/compose/.env   # RUST_IMAGE and DISTROLESS_IMAGE: the Dockerfile has no default for them
           for target in control-plane proxy worker; do
             docker buildx build \
+              --build-arg RUST_IMAGE="$RUST_IMAGE" --build-arg DISTROLESS_IMAGE="$DISTROLESS_IMAGE" \
               --file deploy/docker/Dockerfile --target "$target" \
               --platform "linux/${ARCH}" \
               --provenance=false \
@@ -264,7 +266,7 @@ jobs:
           mkdir -p dist
           mv "limen-${TAG}.sbom.cdx.json" dist/
           git archive --format=zip --prefix="limen-${TAG}/" -o "dist/limen-${TAG}-deploy.zip" HEAD \
-            deploy/compose deploy/terraform dashboards docs/runbooks LICENSE
+            deploy/compose deploy/terraform deploy/grafana docs/runbooks LICENSE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-and-deploy

@@ -452,6 +452,17 @@ impl Deployment {
 
     /// Log in through the proxy, as the CLI does. Returns a TLS identity.
     pub async fn login(&self, email: &str, groups: &[&str]) -> Result<Identity, tonic::Status> {
+        let (cert_pem, key_pem) = self.login_pem(email, groups).await?;
+        Ok(Identity::from_pem(&cert_pem, &key_pem).expect("identity"))
+    }
+
+    /// Like [`login`](Self::login), returning the certificate and private key
+    /// as PEM, which is what the CLI stores in a profile.
+    pub async fn login_pem(
+        &self,
+        email: &str,
+        groups: &[&str],
+    ) -> Result<(String, String), tonic::Status> {
         let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
         let csr = CertificateParams::default()
             .serialize_request(&key)
@@ -475,7 +486,7 @@ impl Deployment {
             })
             .await?
             .into_inner();
-        Ok(Identity::from_pem(&resp.cert_pem, &key.serialize_pem()).expect("identity"))
+        Ok((resp.cert_pem, key.serialize_pem()))
     }
 }
 
@@ -605,6 +616,7 @@ pub mod ssh_client {
                 resource: resource.into(),
                 principal: login.into(),
                 database: String::new(),
+                group: String::new(),
             },
         )
         .await
@@ -703,11 +715,33 @@ pub mod db_client {
         role: &str,
         database: &str,
     ) -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
+        listen_on(
+            proxy_addr,
+            ca_pem,
+            identity,
+            limen_tunnel::alpn::DB,
+            resource,
+            role,
+            database,
+        )
+        .await
+    }
+
+    /// The same for another protocol's ALPN (`limen-mongo/1`).
+    pub async fn listen_on(
+        proxy_addr: &str,
+        ca_pem: &str,
+        identity: Identity,
+        alpn: &[u8],
+        resource: &str,
+        role: &str,
+        database: &str,
+    ) -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
         let tls = Arc::new(
             client_config(
                 &certs_from_pem(ca_pem).expect("ca"),
                 Some(identity),
-                &[limen_tunnel::alpn::DB],
+                &[alpn],
             )
             .expect("tls"),
         );
@@ -734,6 +768,7 @@ pub mod db_client {
                     resource: resource.clone(),
                     principal: role.clone(),
                     database: database.clone(),
+                    group: String::new(),
                 };
                 tokio::spawn(async move {
                     let mut remote = limen_tunnel::connect::dial(&proxy_addr, "localhost", tls)

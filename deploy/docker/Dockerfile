@@ -1,13 +1,20 @@
 # syntax=docker/dockerfile:1.7
 #
 # One Dockerfile for all Limen server images. Pick one with --target:
-#   docker build -f deploy/docker/Dockerfile --target control-plane -t limen-control-plane .
-#   docker build -f deploy/docker/Dockerfile --target proxy -t limen-proxy .
-#   docker build -f deploy/docker/Dockerfile --target worker -t limen-worker .
+#   . deploy/compose/.env    # RUST_IMAGE and DISTROLESS_IMAGE, which the Dockerfile has no default for
+#   docker build -f deploy/docker/Dockerfile --target control-plane -t limen-control-plane \
+#     --build-arg RUST_IMAGE --build-arg DISTROLESS_IMAGE .
 #
 # The builder stage is shared, so building all three compiles once.
 
-FROM rust:1.99.0-trixie AS builder
+# The base images come from deploy/compose/.env (RUST_IMAGE, DISTROLESS_IMAGE) and have no
+# default here: Compose passes them, and so do CI and the release (--build-arg), so there is
+# one place to change them. rust-toolchain.toml pins the same Rust version (scripts/check-versions.sh
+# checks it).
+ARG RUST_IMAGE
+ARG DISTROLESS_IMAGE
+
+FROM ${RUST_IMAGE} AS builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends protobuf-compiler cmake \
  && rm -rf /var/lib/apt/lists/*
@@ -29,7 +36,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp target/release/limen-control-plane target/release/limen-audit-verify target/release/limen-spool-adopt target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog target/release/fake-ci-issuer /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.
-FROM gcr.io/distroless/cc-debian13:nonroot AS runtime-base
+FROM ${DISTROLESS_IMAGE} AS runtime-base
 # State directories owned by the runtime user, so named volumes mounted
 # here inherit that ownership.
 COPY --from=builder --chown=nonroot:nonroot /state /var/lib/limen

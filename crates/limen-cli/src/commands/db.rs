@@ -267,6 +267,7 @@ impl Session {
                 resource: self.resource.clone(),
                 principal: self.role.clone(),
                 database: self.database.clone(),
+                group: String::new(),
             },
         )
         .await?;

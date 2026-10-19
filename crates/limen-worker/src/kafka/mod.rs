@@ -24,6 +24,7 @@ pub mod wire;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -162,6 +163,45 @@ struct Counts {
     bytes: u64,
 }
 
+/// The most (API, name) pairs a session tracks for the audit window.
+const MAX_DEDUPE_ENTRIES: usize = 4096;
+/// The most names an audit event lists, and the longest one it keeps: what a
+/// client sends can't make one event as big as the request.
+const MAX_EVENT_NAMES: usize = 32;
+const MAX_EVENT_STRING: usize = 256;
+
+/// Cut what a client controls down to what an event should hold: lists of
+/// names to [`MAX_EVENT_NAMES`] (with the count in `<key>_total`), strings to
+/// [`MAX_EVENT_STRING`] characters.
+fn bound_event(data: &mut Value) {
+    fn trim(v: &mut Value) {
+        match v {
+            Value::String(s) if s.chars().count() > MAX_EVENT_STRING => {
+                *s = s.chars().take(MAX_EVENT_STRING).collect();
+            }
+            Value::Array(a) => a.iter_mut().for_each(trim),
+            Value::Object(o) => o.values_mut().for_each(trim),
+            _ => {}
+        }
+    }
+    let Some(object) = data.as_object_mut() else {
+        return;
+    };
+    let mut totals = Vec::new();
+    for (key, value) in object.iter_mut() {
+        if let Value::Array(a) = value
+            && a.len() > MAX_EVENT_NAMES
+        {
+            totals.push((format!("{key}_total"), a.len()));
+            a.truncate(MAX_EVENT_NAMES);
+        }
+        trim(value);
+    }
+    for (key, total) in totals {
+        object.insert(key, Value::from(total));
+    }
+}
+
 /// Which (API, name) pairs were logged recently, and what has happened to
 /// them since.
 #[derive(Debug)]
@@ -181,6 +221,15 @@ impl Dedupe {
     /// Count a request. `Some` (the counts since the last event) when an
     /// event is due: the first contact, or a request after the window.
     fn touch(&mut self, key: i16, name: &str, bytes: u64, now: Instant) -> Option<Counts> {
+        // A client that varies names without end (any name a wildcard grant
+        // covers) can't grow this without bound: past the cap, new names share one entry.
+        let name = if self.entries.len() >= MAX_DEDUPE_ENTRIES
+            && !self.entries.contains_key(&(key, name.to_owned()))
+        {
+            "(other)"
+        } else {
+            name
+        };
         let entry = self
             .entries
             .entry((key, name.to_owned()))
@@ -385,6 +434,8 @@ struct MessageReader<R> {
     reader: R,
     buf: Vec<u8>,
     max: usize,
+    /// Where reads land, allocated once.
+    chunk: Vec<u8>,
 }
 
 impl<R: AsyncRead + Unpin> MessageReader<R> {
@@ -393,6 +444,7 @@ impl<R: AsyncRead + Unpin> MessageReader<R> {
             reader,
             buf: Vec::new(),
             max,
+            chunk: vec![0u8; 64 * 1024],
         }
     }
 
@@ -420,15 +472,14 @@ impl<R: AsyncRead + Unpin> MessageReader<R> {
             if let Some(m) = self.buffered()? {
                 return Ok(Some(m));
             }
-            let mut chunk = vec![0u8; 64 * 1024];
-            let n = self.reader.read(&mut chunk).await?;
+            let n = self.reader.read(&mut self.chunk).await?;
             if n == 0 {
                 if self.buf.is_empty() {
                     return Ok(None);
                 }
                 bail!("the connection closed in the middle of a message");
             }
-            self.buf.extend_from_slice(&chunk[..n]);
+            self.buf.extend_from_slice(&self.chunk[..n]);
         }
     }
 }
@@ -714,6 +765,7 @@ fn denied_event(cx: &Cx, operation: &str, detail: &Value, reason: &str) -> (Even
             d.insert(k.clone(), v.clone());
         }
     }
+    bound_event(&mut data);
     (EventKind::AuthDenied, data)
 }
 
@@ -737,6 +789,7 @@ fn request_event(
             d.insert(k.clone(), v.clone());
         }
     }
+    bound_event(&mut data);
     (EventKind::KafkaRequest, data)
 }
 
@@ -1478,20 +1531,21 @@ where
     }
 }
 
-async fn transform_response(
+async fn transform_response<'a>(
     shared: &Shared,
     cx: &Cx,
     key: i16,
     version: i16,
     transform: &Transform,
-    body: &[u8],
-) -> anyhow::Result<Vec<u8>> {
+    body: &'a [u8],
+) -> anyhow::Result<Cow<'a, [u8]>> {
     let malformed = |what: &str| anyhow::anyhow!("a garbled {what} response from the broker");
     match transform {
-        Transform::None => Ok(body.to_vec()),
+        Transform::None => Ok(Cow::Borrowed(body)),
         Transform::AppendRefused { refused, error } => {
             let refs: Vec<&TopicSpan> = refused.iter().collect();
             proto::append_refused(key, version, body, &refs, *error)
+                .map(Cow::Owned)
                 .map_err(|_| malformed(api::name(key)))
         }
         Transform::Metadata { refused } => {
@@ -1520,7 +1574,7 @@ async fn transform_response(
                 b.host = host;
                 b.port = port;
             }
-            Ok(m.encode(version))
+            Ok(Cow::Owned(m.encode(version)))
         }
         Transform::Coordinator => {
             let mut c = CoordinatorResponse::decode(version, body)
@@ -1553,7 +1607,7 @@ async fn transform_response(
                 c.host = host;
                 c.port = port;
             }
-            Ok(c.encode(version))
+            Ok(Cow::Owned(c.encode(version)))
         }
         Transform::OffsetFetch { group } => {
             let mut r =
@@ -1564,7 +1618,7 @@ async fn transform_response(
                     .topic(KafkaClass::Read, name, Some(group))
                     .is_ok()
             });
-            Ok(r.encode(version))
+            Ok(Cow::Owned(r.encode(version)))
         }
     }
 }

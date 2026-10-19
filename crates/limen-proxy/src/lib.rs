@@ -3,6 +3,7 @@
 //! (ADR-0002 through ADR-0005).
 
 pub mod config;
+mod kube;
 mod peer;
 pub mod relay;
 mod sessions;
@@ -200,6 +201,8 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
             alpn::SSH,
             alpn::DB,
             alpn::REDIS,
+            alpn::MONGO,
+            alpn::SEARCH,
             alpn::MQ,
             alpn::KAFKA,
             alpn::H2,
@@ -366,6 +369,12 @@ async fn handle_connection(
         Some(p) if p == alpn::REDIS => {
             sessions::handle(proxy, tls, peer, sessions::Protocol::Redis).await;
         }
+        Some(p) if p == alpn::MONGO => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Mongo).await;
+        }
+        Some(p) if p == alpn::SEARCH => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Search).await;
+        }
         Some(p) if p == alpn::MQ => {
             sessions::handle(proxy, tls, peer, sessions::Protocol::Mq).await;
         }
@@ -394,18 +403,28 @@ async fn handle_connection(
                 }
             }
         }
-        Some(p) if p == alpn::HTTP1 => {
-            // Browsers on HTTP/1.1: the relay answers only `/console/`.
-            if let Err(e) =
-                limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone()))
-                    .await
-            {
-                tracing::debug!(error = %e, %remote, "browser connection ended with error");
-            }
-        }
+        Some(p) if p == alpn::HTTP1 => serve_http1(proxy, tls, peer, remote).await,
+        // No ALPN at all means HTTP/1.1 (RFC 7301). kubectl opens its exec,
+        // attach, and port-forward connections that way.
+        None => serve_http1(proxy, tls, peer, remote).await,
         other => {
             tracing::debug!(%remote, alpn = ?other.map(String::from_utf8_lossy), "unsupported or missing ALPN; closing");
         }
+    }
+}
+
+/// HTTP/1.1: browsers (the relay answers only `/console/`) and kubectl streams
+/// (`/k8s/<cluster>/`, which may upgrade).
+async fn serve_http1(
+    proxy: &Proxy,
+    tls: tokio_rustls::server::TlsStream<TcpStream>,
+    peer: PeerInfo,
+    remote: SocketAddr,
+) {
+    if let Err(e) =
+        limen_tunnel::serve::serve_http1(tls, peer, relay::RelayService::new(proxy.clone())).await
+    {
+        tracing::debug!(error = %e, %remote, "HTTP/1.1 connection ended with error");
     }
 }
 

@@ -232,6 +232,59 @@ impl<'a> Args<'a> {
         let n = self.u32()? as usize;
         self.take(n)
     }
+
+    /// A field table, reduced to the string values of the top-level entries
+    /// named in `keys` (every other value is skipped, whatever its type).
+    pub fn table_strings(&mut self, keys: &[&str]) -> Result<Vec<(String, String)>, Malformed> {
+        let mut table = Args::new(self.longstr()?);
+        let mut found = Vec::new();
+        while table.pos < table.buf.len() {
+            let key = table.shortstr()?;
+            let kind = table.u8()?;
+            if kind == b'S' && keys.contains(&key.as_str()) {
+                let value = String::from_utf8_lossy(table.longstr()?).into_owned();
+                found.push((key, value));
+            } else {
+                table.skip_value(kind, 0)?;
+            }
+        }
+        Ok(found)
+    }
+
+    /// Skip one field-table value of type `kind`. Nesting is bounded so a
+    /// hostile table can't exhaust the stack.
+    fn skip_value(&mut self, kind: u8, depth: u8) -> Result<(), Malformed> {
+        if depth > 16 {
+            return Err(Malformed);
+        }
+        match kind {
+            b't' | b'b' | b'B' => self.take(1).map(|_| ()),
+            b's' | b'u' => self.take(2).map(|_| ()),
+            b'I' | b'i' | b'f' => self.take(4).map(|_| ()),
+            b'l' | b'L' | b'd' | b'T' => self.take(8).map(|_| ()),
+            b'D' => self.take(5).map(|_| ()),
+            b'S' | b'x' => self.skip_long(),
+            b'V' => Ok(()),
+            b'F' => {
+                let mut inner = Args::new(self.longstr()?);
+                while inner.pos < inner.buf.len() {
+                    inner.shortstr()?;
+                    let k = inner.u8()?;
+                    inner.skip_value(k, depth + 1)?;
+                }
+                Ok(())
+            }
+            b'A' => {
+                let mut inner = Args::new(self.longstr()?);
+                while inner.pos < inner.buf.len() {
+                    let k = inner.u8()?;
+                    inner.skip_value(k, depth + 1)?;
+                }
+                Ok(())
+            }
+            _ => Err(Malformed),
+        }
+    }
 }
 
 /// Writes method arguments.

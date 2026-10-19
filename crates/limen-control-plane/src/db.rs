@@ -526,6 +526,10 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query("DELETE FROM kube_requests WHERE at < now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM console_sessions WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?
@@ -538,6 +542,11 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted +=
+        sqlx::query("DELETE FROM login_revocations WHERE COALESCE(expires_at, revoked_at + interval '30 days') + interval '2 days' < now()")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
     deleted += sqlx::query("DELETE FROM tunnels WHERE lease_expires_at < now()")
         .execute(&mut *tx)
         .await?
@@ -667,4 +676,40 @@ pub async fn recent_kills(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     )
     .fetch_all(db)
     .await
+}
+
+/// End a login. `false` if it already was.
+pub async fn revoke_login(
+    db: &Db,
+    login_id: &str,
+    username: &str,
+    cert_expires: OffsetDateTime,
+) -> Result<bool, sqlx::Error> {
+    let inserted = sqlx::query(
+        "INSERT INTO login_revocations (login_id, username, expires_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(login_id)
+    .bind(username)
+    .bind(cert_expires)
+    .execute(db)
+    .await?;
+    Ok(inserted.rows_affected() > 0)
+}
+
+/// Logins ended whose certificate has not yet expired (a day of slack for
+/// clock skew; rows from before the expiry was recorded last a month).
+pub async fn recent_revoked_logins(db: &Db) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT login_id FROM login_revocations
+         WHERE COALESCE(expires_at, revoked_at + interval '30 days') + interval '1 day' > now()",
+    )
+    .fetch_all(db)
+    .await
+}
+
+pub async fn is_login_revoked(db: &Db, login_id: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM login_revocations WHERE login_id = $1)")
+        .bind(login_id)
+        .fetch_one(db)
+        .await
 }

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Kubernetes audit{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Audit trail</h1>
+    <p class="sub">Every Kubernetes API request through Limen, newest first, in kubectl's terms. Bodies and query strings are not kept here; the complete, signed events are in your audit sinks.</p>
+  </div>
+</div>
+<nav class="tabs" aria-label="Audit views"><a href="/console/audit">All events</a><a href="/console/audit/kubernetes" aria-current="true">Kubernetes</a></nav>
+<form method="get" action="/console/audit/kubernetes" class="filters">
+  <label><span>Cluster</span>
+    <select name="cluster"><option value="">All clusters</option>{% for c in clusters %}<option value="{{ c }}"{% if cluster_filter.as_deref() == Some(c.as_str()) %} selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+  </label>
+  <label><span>Verb</span>
+    <select name="verb"><option value="">Any</option>{% for v in verbs %}<option value="{{ v }}"{% if verb_filter.as_deref() == Some(v.as_str()) %} selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+  </label>
+  <label><span>Namespace</span>
+    <input type="text" name="namespace" value="{% if let Some(n) = namespace_filter %}{{ n }}{% endif %}" placeholder="any" maxlength="253">
+  </label>
+  <label><span>User</span>
+    <input type="text" name="user" value="{% if let Some(u) = user_filter %}{{ u }}{% endif %}" placeholder="anyone" maxlength="200">
+  </label>
+  <label><span>Outcome</span>
+    <select name="problems"><option value="">All</option><option value="1"{% if problems_only %} selected{% endif %}>Refused or failed (400+)</option></select>
+  </label>
+  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
+</form>
+<div class="table-wrap"><table>
+  <thead><tr><th>When</th><th>User</th><th>Cluster</th><th>Verb</th><th>Resource</th><th>Namespace</th><th>Name</th><th>Status</th><th>Time</th><th></th></tr></thead>
+  <tbody>
+  {% for r in requests %}
+    <tr>
+      <td class="nowrap">{{ r.at }}</td>
+      <td>{% if let Some(u) = r.user %}{% if let Some(p) = r.user_path %}<a href="/console/users/{{ p }}">{{ u }}</a>{% endif %}{% else %}—{% endif %}</td>
+      <td class="nowrap">{{ r.cluster }}</td>
+      <td class="nowrap mono">{{ r.verb }}</td>
+      <td class="mono">{{ r.resource }}</td>
+      <td class="mono">{% if r.namespace.is_empty() %}—{% else %}{{ r.namespace }}{% endif %}</td>
+      <td class="mono">{% if r.name.is_empty() %}—{% else %}{{ r.name }}{% endif %}</td>
+      <td class="nowrap"><span class="pill {{ r.tone }}">{{ r.status }}</span>{% if let Some(e) = r.error %} <span class="sub">{{ e }}</span>{% endif %}</td>
+      <td class="nowrap">{{ r.latency }}</td>
+      <td class="nowrap">{% if let Some(s) = r.session_path %}<a href="/console/sessions/{{ s }}">session</a>{% endif %}{% if let Some(t) = r.stream_path %} · <a href="/console/sessions/{{ t }}">recording</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="empty">No Kubernetes requests match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="pager">
+  {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
+  {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}
+</p>
+{% endblock %}

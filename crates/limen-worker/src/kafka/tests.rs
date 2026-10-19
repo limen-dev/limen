@@ -1,7 +1,7 @@
 //! Whole-session tests: a Kafka client, the worker's session code, and a fake
 //! cluster of brokers on loopback sockets, so the worker's real dial path and
 //! its broker-slot logic are used. The real brokers are exercised by
-//! `deploy/compose/test-phase11-scenarios.sh`.
+//! `demos/demo-phase11.sh`.
 
 use std::sync::{Arc, Mutex};
 
@@ -1126,4 +1126,37 @@ fn a_missing_password_is_caught_when_the_session_is_prepared() {
         KafkaSlot::new(0, vec![1, 2]),
     );
     assert!(prepare(&settings, vec![], config).is_ok());
+}
+
+#[test]
+fn an_event_never_holds_more_than_a_few_names_or_a_long_one() {
+    let names: Vec<String> = (0..500).map(|i| format!("t{i}")).collect();
+    let mut data = json!({ "topics": names, "reason": "x".repeat(10_000), "group": "g" });
+    bound_event(&mut data);
+    assert_eq!(
+        data["topics"].as_array().expect("array").len(),
+        MAX_EVENT_NAMES
+    );
+    assert_eq!(data["topics_total"], 500);
+    assert_eq!(
+        data["reason"].as_str().expect("str").len(),
+        MAX_EVENT_STRING
+    );
+    assert_eq!(data["group"], "g");
+}
+
+#[test]
+fn a_client_varying_names_cannot_grow_the_audit_window_state_without_bound() {
+    let mut d = Dedupe::new(Duration::from_secs(60));
+    let now = Instant::now();
+    for i in 0..(MAX_DEDUPE_ENTRIES * 3) {
+        d.touch(0, &format!("topic-{i}"), 1, now);
+    }
+    assert!(
+        d.entries.len() <= MAX_DEDUPE_ENTRIES + 1,
+        "{}",
+        d.entries.len()
+    );
+    // A name already tracked keeps its own entry.
+    assert!(d.touch(0, "topic-0", 1, now).is_none());
 }

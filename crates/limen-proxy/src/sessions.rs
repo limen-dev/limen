@@ -41,6 +41,8 @@ pub(crate) enum Protocol {
     Ssh,
     Db,
     Redis,
+    Mongo,
+    Search,
     Mq,
     Kafka,
 }
@@ -51,6 +53,8 @@ impl Protocol {
             Protocol::Ssh => "ssh",
             Protocol::Db => "db",
             Protocol::Redis => "redis",
+            Protocol::Mongo => "mongo",
+            Protocol::Search => "search",
             Protocol::Mq => "mq",
             Protocol::Kafka => "kafka",
         }
@@ -59,11 +63,17 @@ impl Protocol {
     /// The audit field that names the identity used upstream.
     fn principal_field(self) -> &'static str {
         match self {
-            Protocol::Ssh | Protocol::Db => "login",
+            Protocol::Ssh | Protocol::Db | Protocol::Search => "login",
             Protocol::Redis => "redis_user",
+            Protocol::Mongo => "mongo_role",
             Protocol::Mq => "mq_user",
             Protocol::Kafka => "kafka_user",
         }
+    }
+
+    /// Whether the request names a database to be checked.
+    fn has_database(self) -> bool {
+        matches!(self, Protocol::Db | Protocol::Mongo)
     }
 }
 
@@ -117,7 +127,7 @@ pub(crate) async fn handle(
         Err(denial) => {
             if denial.audit {
                 let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
-                if protocol == Protocol::Db {
+                if protocol.has_database() {
                     data["database"] = json!(request.database);
                 }
                 if let Some(code) = denial.code {
@@ -200,7 +210,11 @@ impl Route {
 
 /// Add `worker_name` and `proxy_name` to session event data, only for
 /// components that have a name: unnamed ones are audited as before names.
-fn add_names(data: &mut serde_json::Value, worker: &SessionWorker, proxy_name: Option<String>) {
+pub(crate) fn add_names(
+    data: &mut serde_json::Value,
+    worker: &SessionWorker,
+    proxy_name: Option<String>,
+) {
     if let Some(name) = &worker.name {
         data["worker_name"] = json!(name);
     }
@@ -211,20 +225,20 @@ fn add_names(data: &mut serde_json::Value, worker: &SessionWorker, proxy_name: O
 
 /// The worker serving a session. The name, if any, comes from its
 /// certificate (directly or through the registry), for display only.
-struct SessionWorker {
-    id: String,
-    name: Option<String>,
+pub(crate) struct SessionWorker {
+    pub(crate) id: String,
+    pub(crate) name: Option<String>,
 }
 
-struct Denial {
-    reason: String,
+pub(crate) struct Denial {
+    pub(crate) reason: String,
     /// Policy denials are audited; infrastructure failures are logged.
-    audit: bool,
+    pub(crate) audit: bool,
     /// For the audit event's `data.reason` instead of the message.
-    code: Option<&'static str>,
+    pub(crate) code: Option<&'static str>,
 }
 
-fn denied(reason: impl Into<String>) -> Denial {
+pub(crate) fn denied(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: true,
@@ -232,7 +246,7 @@ fn denied(reason: impl Into<String>) -> Denial {
     }
 }
 
-fn failed(reason: impl Into<String>) -> Denial {
+pub(crate) fn failed(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
         audit: false,
@@ -271,11 +285,22 @@ fn refused(s: &tonic::Status) -> Denial {
     }
 }
 
-type Outbound = tokio::sync::mpsc::Sender<TunnelFrame>;
-type Inbound = tonic::Streaming<TunnelFrame>;
+pub(crate) type Outbound = tokio::sync::mpsc::Sender<TunnelFrame>;
+pub(crate) type Inbound = tonic::Streaming<TunnelFrame>;
 /// Counts a local session in the worker's load (peered ones are counted by
 /// the proxy holding the tunnel).
-type Slot = Option<SessionSlot>;
+pub(crate) type Slot = Option<SessionSlot>;
+
+/// The client's group id for the sessions of one run, if it is well formed:
+/// it only labels rows in the console, so anything else is dropped, not refused.
+fn connection_group(group: &str) -> Option<&str> {
+    (!group.is_empty()
+        && group.len() <= 64
+        && group
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    .then_some(group)
+}
 
 /// The principal, resource kind, and database a request names.
 fn resolve_principal(
@@ -310,7 +335,7 @@ fn resolve_principal(
                 request.database.clone(),
             )
         }
-        Protocol::Db => {
+        Protocol::Search => {
             let refused = || {
                 denied(format!(
                     "access denied to {}@{}",
@@ -319,16 +344,46 @@ fn resolve_principal(
             };
             let resource = policy.resource(&request.resource).ok_or_else(refused)?;
             let kind = resource.spec.kinds()[0];
-            let target = match kind {
-                ResourceKind::Postgres => resource.spec.postgres.as_ref(),
-                ResourceKind::Mysql => resource.spec.mysql.as_ref(),
-                ResourceKind::Redshift => resource.spec.redshift.as_ref(),
+            if !matches!(kind, ResourceKind::Opensearch | ResourceKind::Elasticsearch) {
+                return Err(refused());
+            }
+            (
+                Principal::SearchRole(request.principal.clone()),
+                kind.as_str().to_owned(),
+                String::new(),
+            )
+        }
+        Protocol::Db | Protocol::Mongo => {
+            let refused = || {
+                denied(format!(
+                    "access denied to {}@{}",
+                    request.principal, request.resource
+                ))
+            };
+            let resource = policy.resource(&request.resource).ok_or_else(refused)?;
+            let kind = resource.spec.kinds()[0];
+            // Each protocol serves its own kinds: a `limen db connect` can't
+            // open a MongoDB resource, and the other way round.
+            let spec = &resource.spec;
+            let default_database = match (protocol, kind) {
+                (Protocol::Db, ResourceKind::Postgres) => {
+                    spec.postgres.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Db, ResourceKind::Mysql) => {
+                    spec.mysql.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Db, ResourceKind::Redshift) => {
+                    spec.redshift.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Mongo, ResourceKind::Mongodb) => {
+                    spec.mongodb.as_ref().map(|t| t.default_database.clone())
+                }
                 _ => None,
             }
             .ok_or_else(refused)?;
             let database = if request.database.is_empty() {
-                match &target.default_database {
-                    Some(d) => d.clone(),
+                match default_database {
+                    Some(d) => d,
                     None => {
                         return Err(failed(
                             "name a database: this resource has no default (--database)",
@@ -338,14 +393,18 @@ fn resolve_principal(
             } else {
                 request.database.clone()
             };
-            (
+            let principal = if protocol == Protocol::Mongo {
+                Principal::MongoRole {
+                    role: request.principal.clone(),
+                    database: database.clone(),
+                }
+            } else {
                 Principal::DbRole {
                     role: request.principal.clone(),
                     database: database.clone(),
-                },
-                kind.as_str().to_owned(),
-                database,
-            )
+                }
+            };
+            (principal, kind.as_str().to_owned(), database)
         }
     })
 }
@@ -363,7 +422,10 @@ async fn establish(
         .fresh(now)
         .map_err(|e| failed(format!("access can't be decided right now ({e})")))?;
     let policy = &snapshot.policy;
-    if let Some(why) = snapshot.restrictions.blocks(&user.username, "") {
+    if let Some(why) = snapshot
+        .restrictions
+        .blocks(&user.username, &user.login_id, "")
+    {
         return Err(denied(why));
     }
     let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
@@ -378,6 +440,49 @@ async fn establish(
             request.principal, request.resource
         )));
     }
+    let target = Target {
+        resource: &request.resource,
+        kind: &kind,
+        principal: &request.principal,
+        database: &database,
+        groups: Vec::new(),
+    };
+    let (session_id, worker, inbound, outbound, slot) =
+        open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
+    Ok((
+        session_id,
+        worker,
+        inbound,
+        outbound,
+        slot,
+        Resolved { kind, database },
+    ))
+}
+
+/// What a session is for. The caller has already decided policy allows it.
+pub(crate) struct Target<'a> {
+    pub resource: &'a str,
+    /// `ssh`, `kube`, a database kind, or `redis`.
+    pub kind: &'a str,
+    /// The upstream identity for single-principal kinds (an SSH login).
+    pub principal: &'a str,
+    pub database: &'a str,
+    /// The Kubernetes groups to impersonate.
+    pub groups: Vec<String>,
+}
+
+/// Pick a worker that may serve the resource, sign a grant for it, and open
+/// the stream, trying other workers if one is full or draining. Returns the
+/// session ID, the worker, both ends of the stream, and the load slot to hold
+/// until the session ends.
+pub(crate) async fn open_session(
+    proxy: &Proxy,
+    policy: &limen_policy::Policy,
+    user: &UserIdentity,
+    user_cert_der: &[u8],
+    target: &Target<'_>,
+    now: OffsetDateTime,
+) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
     let session_id = Uuid::now_v7();
     let ttl = policy.max_session_ttl(&user.roles);
     let creds = proxy.credentials();
@@ -392,7 +497,7 @@ async fn establish(
         let (route, slot) = choose_route(
             proxy,
             policy,
-            &request.resource,
+            target.resource,
             &tried,
             !refused_full.is_empty(),
         )
@@ -404,17 +509,18 @@ async fn establish(
             username: user.username.clone(),
             roles: user.roles.clone(),
             login_id: user.login_id.clone(),
-            resource: request.resource.clone(),
-            kind: kind.clone(),
-            principal: request.principal.clone(),
+            resource: target.resource.to_owned(),
+            kind: target.kind.to_owned(),
+            principal: target.principal.to_owned(),
             issued_at_unix: now.unix_timestamp(),
             establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
             session_expires_at_unix: (now + ttl).unix_timestamp(),
             nonce: rand::random::<[u8; 32]>().to_vec(),
-            user_cert_der: user_cert_der.clone(),
+            user_cert_der: user_cert_der.to_vec(),
             proxy_id: creds.id.clone(),
             worker_id: worker_id.clone(),
-            database: database.clone(),
+            database: target.database.to_owned(),
+            groups: target.groups.clone(),
         };
         let signed = limen_session::grant::sign(&proxy.signer(), &grant)
             .map_err(|e| failed(format!("signing grant: {e}")))?;
@@ -424,14 +530,7 @@ async fn establish(
                     id: worker_id,
                     name: worker_name,
                 };
-                return Ok((
-                    session_id,
-                    worker,
-                    inbound,
-                    outbound,
-                    slot,
-                    Resolved { kind, database },
-                ));
+                return Ok((session_id, worker, inbound, outbound, slot));
             }
             Err(Opening::Full(why)) => {
                 tracing::info!(worker = %worker_id, reason = %why, "worker is full; trying another");
@@ -445,7 +544,7 @@ async fn establish(
                 refused_full.push(worker_id.clone());
                 tried.push(worker_id);
                 if tried.len() >= MAX_ATTEMPTS {
-                    return Err(no_capacity(&request.resource));
+                    return Err(no_capacity(target.resource));
                 }
             }
             Err(Opening::Draining(why)) => {
@@ -458,9 +557,9 @@ async fn establish(
                 tried.push(worker_id);
                 if tried.len() >= MAX_ATTEMPTS {
                     return Err(if refused_full.is_empty() {
-                        shutting_down(&request.resource)
+                        shutting_down(target.resource)
                     } else {
-                        no_capacity(&request.resource)
+                        no_capacity(target.resource)
                     });
                 }
             }
@@ -604,9 +703,10 @@ async fn relay(
 ) {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
-    // Redis and the brokers name the upstream identity for what it is, not `login`.
+    // Redis, MongoDB, and the brokers name the upstream identity for what it is, not `login`.
     let principal_field = match kind {
         "redis" => "redis_user",
+        "mongodb" => "mongo_role",
         "rabbitmq" => "mq_user",
         "kafka" => "kafka_user",
         _ => "login",
@@ -622,6 +722,9 @@ async fn relay(
     add_names(&mut start, worker, proxy.name());
     if !database.is_empty() {
         start["database"] = json!(database);
+    }
+    if let Some(group) = connection_group(&request.group) {
+        start["group"] = json!(group);
     }
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
@@ -704,10 +807,11 @@ async fn relay(
         loop {
             tick.tick().await;
             if let Some(snapshot) = proxy.policy.latest() {
-                if let Some(why) = snapshot
-                    .restrictions
-                    .blocks(&user.username, &session_id.to_string())
-                {
+                if let Some(why) = snapshot.restrictions.blocks(
+                    &user.username,
+                    &user.login_id,
+                    &session_id.to_string(),
+                ) {
                     return why;
                 }
                 if snapshot.restrictions.is_revoked(worker_id) {
@@ -775,4 +879,19 @@ async fn relay(
         tracing::error!(error = %e, "failed to audit session end");
     }
     tracing::info!(session = %session_id, "session ended");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connection_group;
+
+    #[test]
+    fn group_ids_are_labels_only() {
+        assert_eq!(connection_group("0a1b-2C"), Some("0a1b-2C"));
+        assert_eq!(connection_group(""), None);
+        assert_eq!(connection_group("has space"), None);
+        assert_eq!(connection_group("<script>"), None);
+        assert_eq!(connection_group(&"a".repeat(65)), None);
+        assert!(connection_group(&"a".repeat(64)).is_some());
+    }
 }

@@ -145,11 +145,15 @@ fn accessible_lists_resources_and_principals() {
         [
             ("cache-staging", vec!["limen-ro"]),
             ("cache-valkey", vec!["limen-ro"]),
+            ("catalog-staging", vec!["limen-read"]),
+            ("catalog-x509", vec!["limen-read"]),
             ("events-kafka-scram", vec!["limen-consumer"]),
             ("events-kafka-staging", vec!["limen-consumer"]),
             ("events-rabbit-staging", vec!["limen-consumer"]),
             ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
+            ("search-opensearch", vec!["limen-read"]),
+            ("search-staging", vec!["limen-read"]),
             ("web-staging-1", vec!["ubuntu"])
         ]
     );
@@ -162,12 +166,19 @@ fn accessible_lists_resources_and_principals() {
             "bastion-staging",
             "cache-staging",
             "cache-valkey",
+            "catalog-atlas",
+            "catalog-staging",
+            "catalog-x509",
             "events-kafka-scram",
             "events-kafka-staging",
             "events-rabbit-staging",
+            "logs-opensearch",
             "orders-mysql-staging",
             "orders-prod",
             "orders-staging",
+            "reviews-docdb",
+            "search-opensearch",
+            "search-staging",
             "web-staging-1"
         ]
     );
@@ -213,7 +224,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 10);
+    assert_eq!(diff.removed.len(), 17);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
@@ -327,7 +338,7 @@ mod planned_integrations {
     #[test]
     fn developers_get_staging_only_and_read_only_principals() {
         let policy = with_planned();
-        let dev = roles(&["dev-planned"]);
+        let dev = roles(&["dev-readonly", "dev-planned"]);
         let seen = policy.accessible(&dev);
         let names: Vec<_> = seen.iter().map(|r| r.name.as_str()).collect();
         assert!(names.contains(&"catalog-staging") && names.contains(&"grafana"));
@@ -365,13 +376,14 @@ mod planned_integrations {
             )
             .is_allowed()
         );
-        assert!(
-            eval(
-                "logs-opensearch",
-                Principal::SearchRole("limen-read".into())
-            )
-            .is_allowed()
-        );
+        let search = policy
+            .evaluate(&AccessRequest {
+                roles: &roles(&["sre"]),
+                resource: "logs-opensearch",
+                principal: Principal::SearchRole("limen-write".into()),
+            })
+            .is_allowed();
+        assert!(search, "search moved out of the planned file in Phase 10");
         assert!(eval("orders-mq", Principal::MqUser("limen-admin".into())).is_allowed());
         assert!(
             eval(
@@ -703,6 +715,60 @@ mod bots {
 }
 
 #[test]
+fn kube_groups_are_what_the_roles_grant_minus_denies() {
+    let docs = "\
+kind: resource
+version: v1
+metadata: {name: eks-dev, labels: {env: dev}}
+spec:
+  kubernetes: {cluster_name: dev}
+---
+kind: resource
+version: v1
+metadata: {name: web-dev, labels: {env: dev}}
+spec:
+  ssh: {address: 'h:22', host_key: 'ssh-ed25519 AAAA'}
+---
+kind: role
+version: v1
+metadata: {name: dev}
+spec:
+  allow:
+    - resources: {kind: [kubernetes], labels: {env: [dev]}}
+      kube: {groups: ['limen:view', 'limen:edit']}
+  deny:
+    - resources: {kind: [kubernetes]}
+      kube: {groups: ['limen:edit']}
+---
+kind: role
+version: v1
+metadata: {name: viewer}
+spec:
+  allow:
+    - resources: {kind: [kubernetes]}
+      kube: {groups: ['limen:view']}
+";
+    let p = Policy::parse_yaml([("p.yaml", docs)]).expect("valid");
+    assert_eq!(p.kube_groups(&roles(&["dev"]), "eks-dev"), ["limen:view"]);
+    assert_eq!(
+        p.kube_groups(&roles(&["dev", "viewer"]), "eks-dev"),
+        ["limen:view"]
+    );
+    assert_eq!(
+        p.kube_groups(&roles(&["nobody"]), "eks-dev"),
+        Vec::<String>::new()
+    );
+    assert!(
+        p.kube_groups(&roles(&["dev"]), "web-dev").is_empty(),
+        "not a cluster"
+    );
+    assert_eq!(
+        p.kube_groups(&roles(&["dev"]), "ghost"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn redis_grants_come_from_matching_allow_rules() {
     let docs = "kind: role\nversion: v1\nmetadata: {name: cachers}\nspec:\n  allow:\n    - resources: {kind: [redis], labels: {env: [staging]}}\n      redis: {users: [limen-ro], keys: ['session:*'], deny_commands: [KEYS]}\n    - resources: {kind: [redis], labels: {env: [prod]}}\n      redis: {users: [limen-ro]}";
     let policy =
@@ -882,4 +948,262 @@ fn broker_targets_keep_old_snapshots_readable() {
         json.contains("\"tls\":false") && json.contains("aws-msk-iam"),
         "{json}"
     );
+}
+
+mod mongodb {
+    use super::*;
+
+    fn resource(spec: &str) -> Result<Policy, PolicyError> {
+        let doc = format!(
+            "kind: resource\nversion: v1\nmetadata: {{ name: m }}\nspec:\n  mongodb: {{ {spec} }}\n"
+        );
+        Policy::parse_yaml([("m.yaml", doc.as_str())])
+    }
+
+    fn role(grant: &str) -> Result<Policy, PolicyError> {
+        let doc = format!(
+            "kind: role\nversion: v1\nmetadata: {{ name: r }}\nspec:\n  allow:\n    - resources: {{ kind: [mongodb], labels: {{ \"*\": [\"*\"] }} }}\n      mongo: {{ {grant} }}\n"
+        );
+        Policy::parse_yaml([("r.yaml", doc.as_str())])
+    }
+
+    #[test]
+    fn a_scram_resource_needs_credentials_and_an_x509_one_cannot_be_documentdb() {
+        assert!(
+            resource("endpoint: \"m:27017\", credentials_dir: /c, tls_ca_file: /ca.pem").is_ok()
+        );
+        assert!(resource("endpoint: \"m:27017\", tls_ca_file: /ca.pem").is_err());
+        assert!(
+            resource("endpoint: \"m:27017\", flavor: documentdb, auth: x509, credentials_dir: /c")
+                .is_err()
+        );
+        assert!(
+            resource("endpoint: \"m:27017\", flavor: atlas, auth: x509, credentials_dir: /c")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn iam_login_is_for_atlas_and_documentdb_and_uses_the_external_source() {
+        assert!(resource("endpoint: \"m:27017\", flavor: atlas, auth: aws").is_ok());
+        assert!(resource("endpoint: \"m:27017\", auth: aws").is_err());
+        assert!(
+            resource("endpoint: \"m:27017\", flavor: documentdb, auth: aws, auth_source: admin")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn command_pacing_defaults_to_500_a_second_and_zero_is_unlimited() {
+        let policy = resource("endpoint: \"m:27017\", credentials_dir: /c").expect("policy");
+        let target = policy
+            .resource("m")
+            .expect("resource")
+            .spec
+            .mongodb
+            .clone()
+            .expect("mongodb");
+        assert_eq!(target.max_commands_per_second, 500);
+        let policy =
+            resource("endpoint: \"m:27017\", credentials_dir: /c, max_commands_per_second: 0")
+                .expect("policy");
+        let target = policy
+            .resource("m")
+            .expect("resource")
+            .spec
+            .mongodb
+            .clone()
+            .expect("mongodb");
+        assert_eq!(target.max_commands_per_second, 0);
+        assert!(
+            resource("endpoint: \"m:27017\", credentials_dir: /c, max_commands_per_second: -1")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn insecure_dev_is_only_for_standard_servers() {
+        assert!(resource("endpoint: \"m:27017\", credentials_dir: /c, insecure_dev: true").is_ok());
+        assert!(
+            resource(
+                "endpoint: \"m:27017\", flavor: atlas, credentials_dir: /c, insecure_dev: true"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn names_that_reach_the_filesystem_or_the_server_are_checked() {
+        assert!(valid_mongo_role("limen-read") && valid_mongo_role("limen_rw.1"));
+        assert!(
+            !valid_mongo_role("../etc") && !valid_mongo_role(".hidden") && !valid_mongo_role("")
+        );
+        assert!(!valid_mongo_role("a/b") && !valid_mongo_role(&"x".repeat(65)));
+        assert!(valid_mongo_database("orders") && valid_mongo_database("shop-2"));
+        assert!(
+            !valid_mongo_database("a.b")
+                && !valid_mongo_database("a b")
+                && !valid_mongo_database("$x")
+        );
+        assert!(role("roles: [\"../x\"]").is_err());
+        assert!(role("roles: [limen-read], databases: [\"a.b\"]").is_err());
+        assert!(role("roles: [limen-read], databases: [orders, \"*\"]").is_ok());
+        assert!(role("roles: [limen-read], deny_commands: [\"drop;\"]").is_err());
+        assert!(role("roles: [limen-read], deny_commands: [drop, dropDatabase]").is_ok());
+    }
+
+    #[test]
+    fn a_session_may_do_what_any_covering_grant_permits() {
+        let roles_doc = r#"
+kind: role
+version: v1
+metadata: { name: dev }
+spec:
+  allow:
+    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
+      mongo: { roles: [limen-read], databases: [orders], deny_commands: [drop] }
+    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
+      mongo: { roles: [limen-rw], databases: ["*"] }
+"#;
+        let res = "kind: resource\nversion: v1\nmetadata: { name: m }\nspec:\n  mongodb: { endpoint: \"m:1\", credentials_dir: /c }\n";
+        let p = Policy::parse_yaml([("r.yaml", roles_doc), ("m.yaml", res)]).expect("policy");
+        let dev = roles(&["dev"]);
+        let grants = p.mongo_grants(&dev, "m", "limen-read");
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].deny_commands, ["drop"]);
+        assert!(matches!(
+            p.mongo_grants(&dev, "m", "limen-other").as_slice(),
+            []
+        ));
+        assert!(matches!(
+            p.mongo_grants(&dev, "nope", "limen-read").as_slice(),
+            []
+        ));
+        let eval = |role: &str, database: &str| {
+            p.evaluate(&AccessRequest {
+                roles: &dev,
+                resource: "m",
+                principal: Principal::MongoRole {
+                    role: role.into(),
+                    database: database.into(),
+                },
+            })
+            .is_allowed()
+        };
+        assert!(eval("limen-read", "orders"));
+        assert!(!eval("limen-read", "billing"), "only the granted databases");
+        assert!(eval("limen-rw", "billing"));
+    }
+}
+
+const SEARCH_POLICY: &str = r#"
+kind: resource
+version: v1
+metadata: { name: logs, labels: { env: staging } }
+spec:
+  elasticsearch: { endpoint: "es:9200" }
+---
+kind: role
+version: v1
+metadata: { name: logs-reader }
+spec:
+  allow:
+    - resources: { kind: [elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read], indices: ["logs-*"] }
+---
+kind: role
+version: v1
+metadata: { name: logs-writer }
+spec:
+  allow:
+    - resources: { kind: [elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read, limen-write], classes: [read, write] }
+"#;
+
+fn search_policy() -> Policy {
+    Policy::parse_yaml([("p.yaml", SEARCH_POLICY)]).expect("valid search policy")
+}
+
+#[test]
+fn search_grants_come_from_every_role_that_names_the_engine_role() {
+    let p = search_policy();
+    let both = roles(&["logs-reader", "logs-writer"]);
+    let grants = p.search_grants(&both, "logs", "limen-read");
+    assert_eq!(grants.len(), 2);
+    // The default is read only; classes widen it.
+    assert_eq!(grants[0].allowed_classes(), [SearchClass::Read]);
+    assert_eq!(
+        grants[1].allowed_classes(),
+        [SearchClass::Read, SearchClass::Write]
+    );
+    assert_eq!(grants[0].indices, ["logs-*"]);
+    // Only the writer names limen-write; nobody else gets it.
+    assert_eq!(p.search_grants(&both, "logs", "limen-write").len(), 1);
+    let none = |g: Vec<SearchGrant>| g.is_empty().then_some(()).ok_or(g.len());
+    assert_eq!(
+        none(p.search_grants(&roles(&["logs-reader"]), "logs", "limen-write")),
+        Ok(())
+    );
+    assert_eq!(none(p.search_grants(&both, "ghost", "limen-read")), Ok(()));
+}
+
+#[test]
+fn search_access_is_decided_by_the_engine_role() {
+    let p = search_policy();
+    let r = roles(&["logs-reader"]);
+    let eval = |role: &str| {
+        p.evaluate(&AccessRequest {
+            roles: &r,
+            resource: "logs",
+            principal: Principal::SearchRole(role.into()),
+        })
+        .is_allowed()
+    };
+    assert!(eval("limen-read"));
+    assert!(!eval("limen-write"));
+}
+
+#[test]
+fn search_grants_reject_what_the_worker_could_not_enforce() {
+    for bad in [
+        "Logs-*",
+        "logs,other",
+        "-logs",
+        "remote:logs",
+        "a/b",
+        "",
+        "logs *",
+    ] {
+        let yaml = format!(
+            "kind: role\nversion: v1\nmetadata: {{name: a}}\nspec:\n  allow:\n    - resources: {{kind: [elasticsearch]}}\n      search: {{roles: [r], indices: ['{bad}']}}"
+        );
+        assert!(
+            Policy::parse_yaml([("p.yaml", yaml.as_str())]).is_err(),
+            "{bad:?} was accepted"
+        );
+    }
+    let unknown_class = "kind: role\nversion: v1\nmetadata: {name: a}\nspec:\n  allow:\n    - resources: {kind: [elasticsearch]}\n      search: {roles: [r], classes: [superuser]}";
+    assert!(Policy::parse_yaml([("p.yaml", unknown_class)]).is_err());
+}
+
+#[test]
+fn a_search_target_with_defaults_serializes_as_before() {
+    // Components from before Phase 10 reject unknown fields, so the new ones
+    // stay out of the snapshot until someone sets them.
+    let p = search_policy();
+    let json = serde_json::to_string(&p.resource("logs").expect("resource").spec).expect("json");
+    assert!(
+        !json.contains("tls") && !json.contains("audit") && !json.contains("serverless"),
+        "{json}"
+    );
+    let custom = "kind: resource\nversion: v1\nmetadata: {name: c}\nspec:\n  opensearch: {endpoint: 'h:9200', tls: false, audit: {redact_ids: true}}";
+    let p = Policy::parse_yaml([("p.yaml", custom)]).expect("valid");
+    let t = p
+        .resource("c")
+        .expect("resource")
+        .spec
+        .opensearch
+        .clone()
+        .expect("target");
+    assert!(!t.tls && t.audit.redact_ids && !t.audit.log_bodies);
 }

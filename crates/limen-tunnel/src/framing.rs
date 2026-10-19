@@ -51,6 +51,7 @@ mod tests {
             resource: "web-1".into(),
             principal: "ubuntu".into(),
             database: String::new(),
+            group: String::new(),
         };
         write_message(&mut a, &req).await.expect("write");
         let got: SessionRequest = read_message(&mut b).await.expect("read");

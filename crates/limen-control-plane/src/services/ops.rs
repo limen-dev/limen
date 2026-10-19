@@ -136,6 +136,15 @@ pub async fn kill_session(
     let session_id = Uuid::parse_str(session_id.trim())
         .map_err(|_| Status::invalid_argument("session_id must be a session UUID"))?;
     let reason = clean_reason(reason)?;
+    // A kubectl console session groups a login's requests and has no
+    // connection of its own to end; killing its derived id would do nothing.
+    if let Ok(Some(row)) = crate::console::store::session(&state.db, session_id).await
+        && row.kind.as_deref() == Some("kubectl")
+    {
+        return Err(Status::failed_precondition(
+            "a kubectl session has no connection to end; lock the user, or have them run `limen logout`",
+        ));
+    }
     let killed = db::kill_session(&state.db, &session_id.to_string(), &reason, actor.username)
         .await
         .map_err(|e| internal("killing session", e))?;

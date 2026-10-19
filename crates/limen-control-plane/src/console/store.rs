@@ -163,15 +163,69 @@ pub struct SessionRow {
     pub actor_type: String,
     /// The CI run, for a bot's session.
     pub ci: Option<serde_json::Value>,
+    /// When the login behind this session was ended by `limen logout`.
+    pub logged_out_at: Option<OffsetDateTime>,
+    /// Connections that carry this row: a driver opens several per run, and
+    /// they share a group. 1 for everything else.
+    pub connections: i64,
+}
+
+/// Whether a `sessions` row is live, with the window in hours as `$1`. A
+/// `kubectl` row (one per login and cluster) has no end event: its `ended_at`
+/// is its last request, and it is live while that is recent.
+macro_rules! is_active {
+    () => {
+        "(CASE WHEN kind = 'kubectl' THEN ended_at > now() - interval '5 minutes'
+                 AND NOT EXISTS (SELECT 1 FROM login_revocations r WHERE r.login_id = sessions.login_id)
+               ELSE ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1) END)"
+    };
+}
+
+/// A connection of the same run as `sessions`' row: same group, user, and
+/// resource (the group id comes from the client, so it only groups what is
+/// already the same user's and resource's).
+macro_rules! same_run {
+    () => {
+        "o.conn_group = sessions.conn_group AND o.username = sessions.username AND o.resource = sessions.resource"
+    };
+}
+
+/// `o` did something, or is still open. The empty startup check of
+/// `limen mongo connect` doesn't count as a connection.
+macro_rules! carries_traffic {
+    () => {
+        "(COALESCE(o.bytes_in, 0) > 0 OR o.ended_at IS NULL)"
+    };
+}
+
+/// A row is live when it is, or another connection of its run is.
+macro_rules! run_active {
+    () => {
+        concat!(
+            "(",
+            is_active!(),
+            " OR (conn_group IS NOT NULL AND EXISTS (SELECT 1 FROM sessions o WHERE ",
+            same_run!(),
+            " AND o.ended_at IS NULL AND o.started_at > now() - make_interval(hours => $1))))"
+        )
+    };
 }
 
 macro_rules! session_select {
     () => {
-        "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
+        concat!(
+            "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
         started_at, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_uri, recording_sha256,
         actor_type, ci,
-        (ended_at IS NULL AND started_at IS NOT NULL AND started_at > now() - make_interval(hours => $1)) AS active
-     FROM sessions"
+        (SELECT r.revoked_at FROM login_revocations r WHERE r.login_id = sessions.login_id) AS logged_out_at,
+        CASE WHEN conn_group IS NULL THEN 1 ELSE GREATEST(1, (SELECT count(*) FROM sessions o WHERE ",
+            same_run!(),
+            " AND ",
+            carries_traffic!(),
+            ")) END AS connections, ",
+            run_active!(),
+            " AS active FROM sessions"
+        )
     };
 }
 
@@ -196,6 +250,8 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
         active: r.try_get("active")?,
         actor_type: r.try_get("actor_type")?,
         ci: r.try_get("ci")?,
+        logged_out_at: r.try_get("logged_out_at")?,
+        connections: r.try_get("connections")?,
     })
 }
 
@@ -216,7 +272,15 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
         "
          WHERE ($2::text IS NULL OR username = $2)
            AND ($6::text IS NULL OR resource = $6)
-           AND (NOT $3 OR (ended_at IS NULL AND started_at > now() - make_interval(hours => $1)))
+           AND (NOT $3 OR ",
+        run_active!(),
+        ")
+           AND (conn_group IS NULL OR session_id = (
+                SELECT o.session_id FROM sessions o WHERE ",
+        same_run!(),
+        " ORDER BY ",
+        carries_traffic!(),
+        " DESC, o.started_at, o.session_id LIMIT 1))
          ORDER BY COALESCE(started_at, ended_at) DESC, session_id DESC
          LIMIT $4 OFFSET $5"
     ))
@@ -248,11 +312,11 @@ pub async fn session(db: &Db, id: Uuid) -> Result<Option<SessionRow>, sqlx::Erro
 pub async fn session_counts_by_resource(
     db: &Db,
 ) -> Result<std::collections::HashMap<String, (i64, i64)>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT resource, count(*) AS total,
-                count(*) FILTER (WHERE ended_at IS NULL AND started_at > now() - make_interval(hours => $1)) AS active
-         FROM sessions WHERE resource IS NOT NULL GROUP BY resource",
-    )
+    let rows = sqlx::query(concat!(
+        "SELECT resource, count(*) AS total, count(*) FILTER (WHERE ",
+        is_active!(),
+        ") AS active FROM sessions WHERE resource IS NOT NULL GROUP BY resource"
+    ))
     .bind(ACTIVE_WINDOW_HOURS)
     .fetch_all(db)
     .await?;
@@ -270,9 +334,10 @@ pub async fn session_counts_by_resource(
 }
 
 pub async fn active_session_count(db: &Db) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM sessions WHERE ended_at IS NULL AND started_at > now() - make_interval(hours => $1)",
-    )
+    sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM sessions WHERE ",
+        is_active!()
+    ))
     .bind(ACTIVE_WINDOW_HOURS)
     .fetch_one(db)
     .await
@@ -292,7 +357,7 @@ fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 18] = [
+const SUMMARY_KEYS: [&str; 23] = [
     "action",
     "target_user",
     "component_id",
@@ -302,6 +367,7 @@ const SUMMARY_KEYS: [&str; 18] = [
     "resource",
     "login",
     "redis_user",
+    "mongo_role",
     "mq_user",
     "kafka_user",
     "reason",
@@ -311,6 +377,11 @@ const SUMMARY_KEYS: [&str; 18] = [
     "worker_name",
     "bot",
     "method",
+    // kube.request
+    "verb",
+    "k8s_resource",
+    "namespace",
+    "status",
 ];
 
 /// Facts about a bot's CI run that may appear in the trail.
@@ -366,17 +437,30 @@ pub struct DbStatementRow {
 /// The longest statement text kept in the console's table.
 const MAX_STATEMENT_TEXT: usize = 16 * 1024;
 
-/// The statements of a session in the order they were sent, at most `limit`.
+/// `db_statements` rows of session `$1` and of the other connections of its run.
+macro_rules! run_sessions {
+    () => {
+        "(session_id = $1 OR session_id IN (
+            SELECT o.session_id FROM sessions o, sessions me
+            WHERE me.session_id = $1 AND me.conn_group IS NOT NULL AND o.conn_group = me.conn_group
+              AND o.username = me.username AND o.resource = me.resource))"
+    };
+}
+
+/// The statements of a session (and of the other connections of its run) in
+/// the order they were sent, at most `limit`.
 pub async fn db_statements(
     db: &Db,
     id: Uuid,
     limit: i64,
 ) -> Result<Vec<DbStatementRow>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT at, phase, statement_type, statement, truncated, status, \"rows\", duration_ms, error_code, error
-         FROM db_statements WHERE session_id = $1 AND statement_type IS NOT NULL
-         ORDER BY at, event_id LIMIT $2",
-    )
+         FROM db_statements WHERE ",
+        run_sessions!(),
+        " AND statement_type IS NOT NULL
+         ORDER BY at, event_id LIMIT $2"
+    ))
     .bind(id)
     .bind(limit)
     .fetch_all(db)
@@ -402,11 +486,12 @@ pub async fn db_statements(
 /// `(statements, errors)` of a session. Errors include Redis commands that
 /// policy refused.
 pub async fn db_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         "SELECT count(*) FILTER (WHERE statement_type IS NOT NULL) AS statements,
                 count(*) FILTER (WHERE status IN ('error', 'denied')) AS errors
-         FROM db_statements WHERE session_id = $1",
-    )
+         FROM db_statements WHERE ",
+        run_sessions!()
+    ))
     .bind(id)
     .fetch_one(db)
     .await?;
@@ -427,7 +512,7 @@ fn cut(text: &str, max: usize) -> (&str, bool) {
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)] // one arm per audit event kind
 pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<(), sqlx::Error> {
     use limen_audit::EventKind;
     let mut tx = db.begin().await?;
@@ -444,30 +529,39 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         .bind(summarize(&e.data))
         .execute(&mut *tx)
         .await?;
+        if e.kind == EventKind::KubeRequest {
+            project_kube_request(&mut tx, e).await?;
+        }
         let Some(session_id) = e.session_id else {
             continue;
         };
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                      ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
                        resource = EXCLUDED.resource, login = EXCLUDED.login, worker_id = EXCLUDED.worker_id,
                        proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at,
-                       actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci",
+                       actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci,
+                       conn_group = EXCLUDED.conn_group",
                 )
                 .bind(session_id)
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")).or_else(|| text(&e.data, "mq_user")).or_else(|| text(&e.data, "kafka_user")))
+                .bind(text(&e.data, "login")
+                    .or_else(|| text(&e.data, "redis_user"))
+                    .or_else(|| text(&e.data, "mongo_role"))
+                    .or_else(|| text(&e.data, "mq_user"))
+                    .or_else(|| text(&e.data, "kafka_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(text(&e.data, "proxy_id"))
                 .bind(text(&e.data, "client_addr"))
                 .bind(e.time)
                 .bind(text(&e.data, "actor_type").unwrap_or("user"))
                 .bind(e.data.get("ci").filter(|c| c.is_object()))
+                .bind(text(&e.data, "group"))
                 .execute(&mut *tx)
                 .await?;
             }
@@ -488,7 +582,11 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(&e.user)
                 .bind(text(&e.data, "kind"))
                 .bind(text(&e.data, "resource"))
-                .bind(text(&e.data, "login").or_else(|| text(&e.data, "redis_user")).or_else(|| text(&e.data, "mq_user")).or_else(|| text(&e.data, "kafka_user")))
+                .bind(text(&e.data, "login")
+                    .or_else(|| text(&e.data, "redis_user"))
+                    .or_else(|| text(&e.data, "mongo_role"))
+                    .or_else(|| text(&e.data, "mq_user"))
+                    .or_else(|| text(&e.data, "kafka_user")))
                 .bind(text(&e.data, "worker_id"))
                 .bind(e.time)
                 .bind(text(&e.data, "reason"))
@@ -501,34 +599,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .await?;
             }
             EventKind::DbQuery => {
-                let (statement, truncated) = cut(
-                    e.data
-                        .get("statement")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default(),
-                    MAX_STATEMENT_TEXT,
-                );
-                let truncated = truncated
-                    || e.data
-                        .get("truncated")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false);
-                sqlx::query(
-                    "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                     ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
-                       phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
-                       statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
-                )
-                .bind(e.event_id)
-                .bind(session_id)
-                .bind(e.time)
-                .bind(text(&e.data, "phase"))
-                .bind(text(&e.data, "statement_type"))
-                .bind((!statement.is_empty()).then_some(statement))
-                .bind(truncated)
-                .execute(&mut *tx)
-                .await?;
+                project_db_query(&mut tx, e, session_id).await?;
             }
             // Redis sessions have no recording either; their commands share the
             // statements table (ADR-0034). The text holds key names (hashed if
@@ -539,6 +610,27 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             EventKind::AuthDenied if text(&e.data, "action") == Some("redis") => {
                 project_redis_command(&mut tx, e, session_id, "denied", text(&e.data, "reason"))
                     .await?;
+            }
+            // MongoDB sessions have no recording either (ADR-0035). The commands
+            // share the statements table; the text is the command's shape with
+            // every value replaced (or the values, if the resource keeps them).
+            EventKind::MongoCommand => {
+                project_mongo_command(&mut tx, e, session_id).await?;
+            }
+            EventKind::MongoCommandEnd => {
+                project_mongo_end(&mut tx, e, session_id).await?;
+            }
+            // Search sessions have no recording either (ADR-0036): each request
+            // is a row, the response fills in how it ended, and a refused
+            // request is a row with status `denied`. Bodies are never here.
+            EventKind::SearchRequest => {
+                project_search_request(&mut tx, e, session_id).await?;
+            }
+            EventKind::SearchResponse => {
+                project_search_response(&mut tx, e, session_id).await?;
+            }
+            EventKind::AuthDenied if text(&e.data, "action") == Some("search") => {
+                project_search_denied(&mut tx, e, session_id).await?;
             }
             // RabbitMQ and Kafka sessions are listed the same way (ADR-0037): the
             // text holds names and sizes, never message content.
@@ -597,6 +689,206 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         }
     }
     tx.commit().await
+}
+
+/// One `kube.request` event into the Kubernetes view's table.
+async fn project_kube_request(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+) -> Result<(), sqlx::Error> {
+    let field = |key: &str| text(&e.data, key).unwrap_or_default();
+    let login_session = kube_login_session(&e.data);
+    // A path only where there is no resource to name (`/version`), and never
+    // its query string.
+    let path = if text(&e.data, "k8s_resource").is_none() {
+        field("path").split('?').next().unwrap_or_default()
+    } else {
+        ""
+    };
+    sqlx::query(
+        "INSERT INTO kube_requests (event_id, at, username, session_id, login_session, cluster, verb, api_group,
+                                    resource, subresource, namespace, name, path, method, status, latency_ms, error)
+         VALUES ($1, $2, $3, $4, $17, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(e.event_id)
+    .bind(e.time)
+    .bind(&e.user)
+    .bind(e.session_id)
+    .bind(field("resource"))
+    .bind(field("verb"))
+    .bind(field("k8s_group"))
+    .bind(field("k8s_resource"))
+    .bind(field("subresource"))
+    .bind(field("namespace"))
+    .bind(field("name"))
+    .bind(path)
+    .bind(field("method"))
+    .bind(i32::try_from(number(&e.data, "status").unwrap_or(0)).unwrap_or(0))
+    .bind(number(&e.data, "latency_ms"))
+    .bind(text(&e.data, "error"))
+    .bind(login_session)
+    .execute(&mut **tx)
+    .await?;
+    if let Some(id) = login_session {
+        // One console session per login and cluster. It has no end event: it
+        // spans its first to its last request, so each request only widens
+        // it, which is idempotent and order-independent.
+        sqlx::query(
+            "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
+                                   started_at, ended_at, duration_ms, actor_type, ci, login_id)
+             VALUES ($1, $2, 'kubectl', $3, 'kubectl', $4, $5, $6, $7, $7, 0, $8, $9, $10)
+             ON CONFLICT (session_id) DO UPDATE SET
+               started_at = LEAST(sessions.started_at, EXCLUDED.started_at),
+               ended_at = GREATEST(sessions.ended_at, EXCLUDED.ended_at),
+               duration_ms = (EXTRACT(EPOCH FROM (GREATEST(sessions.ended_at, EXCLUDED.ended_at)
+                                                  - LEAST(sessions.started_at, EXCLUDED.started_at))) * 1000)::bigint",
+        )
+        .bind(id)
+        .bind(&e.user)
+        .bind(field("resource"))
+        .bind(text(&e.data, "worker_id"))
+        .bind(text(&e.data, "proxy_id"))
+        .bind(text(&e.data, "client_addr"))
+        .bind(e.time)
+        .bind(text(&e.data, "actor_type").unwrap_or("user"))
+        .bind(e.data.get("ci").filter(|c| c.is_object()))
+        .bind(text(&e.data, "login_id"))
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// The console session a `kube.request` belongs to: the same for every
+/// request of one login on one cluster, derived so that any order of delivery
+/// agrees. `None` for events from before the worker named the login.
+fn kube_login_session(data: &serde_json::Value) -> Option<Uuid> {
+    let login = text(data, "login_id")?;
+    let cluster = text(data, "resource")?;
+    Some(Uuid::new_v5(
+        &Uuid::NAMESPACE_OID,
+        format!("limen/kubectl/{login}/{cluster}").as_bytes(),
+    ))
+}
+
+/// A statement sent to a SQL database, as the console shows it.
+async fn project_db_query(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let (statement, truncated) = cut(
+        e.data
+            .get("statement")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        MAX_STATEMENT_TEXT,
+    );
+    let truncated = truncated
+        || e.data
+            .get("truncated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    sqlx::query(
+            "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+               phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+               statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
+        )
+        .bind(e.event_id)
+        .bind(session_id)
+        .bind(e.time)
+        .bind(text(&e.data, "phase"))
+        .bind(text(&e.data, "statement_type"))
+        .bind((!statement.is_empty()).then_some(statement))
+        .bind(truncated)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// How a MongoDB command ended, onto the row of the command itself.
+async fn project_mongo_end(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(command_id) = text(&e.data, "command_id").and_then(|q| q.parse::<Uuid>().ok()) else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, status, \"rows\", duration_ms, error_code, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (event_id) DO UPDATE SET status = EXCLUDED.status, \"rows\" = EXCLUDED.\"rows\",
+           duration_ms = EXCLUDED.duration_ms, error_code = EXCLUDED.error_code, error = EXCLUDED.error",
+    )
+    .bind(command_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "status"))
+    .bind(number(&e.data, "docs"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(
+        text(&e.data, "error_code_name")
+            .map(str::to_owned)
+            .or_else(|| number(&e.data, "error_code").map(|c| c.to_string())),
+    )
+    .bind(text(&e.data, "error"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// The command a MongoDB event names, as the console shows it: namespace,
+/// then the redacted shape.
+fn mongo_statement(data: &serde_json::Value) -> String {
+    let db = text(data, "database").unwrap_or_default();
+    let namespace = match text(data, "collection") {
+        Some(c) => format!("{db}.{c}"),
+        None => db.to_owned(),
+    };
+    let summary = text(data, "summary")
+        .filter(|s| *s != "{}")
+        .unwrap_or_default();
+    format!("{namespace} {summary}").trim().to_owned()
+}
+
+async fn project_mongo_command(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let refused = text(&e.data, "phase") == Some("refused");
+    let statement = mongo_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    let truncated = truncated
+        || e.data
+            .get("summary_truncated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    // A forwarded command has no status until its end event arrives.
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated, status, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+           statement = EXCLUDED.statement, truncated = EXCLUDED.truncated,
+           status = COALESCE(db_statements.status, EXCLUDED.status), error = COALESCE(db_statements.error, EXCLUDED.error)",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "phase"))
+    .bind(text(&e.data, "command").map_or_else(|| "mongo".to_owned(), str::to_owned))
+    .bind((!statement.is_empty()).then_some(statement))
+    .bind(truncated)
+    .bind(refused.then_some("denied"))
+    .bind(if refused { text(&e.data, "reason") } else { None })
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// The command a Redis event names, as the console shows it: the command,
@@ -719,6 +1011,97 @@ async fn project_statement(
     .bind(truncated)
     .bind(status)
     .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// `GET /logs-1/_search`, with the query string if the resource logs it.
+fn search_statement(data: &serde_json::Value) -> String {
+    let mut out = format!(
+        "{} {}",
+        text(data, "method").unwrap_or("?"),
+        text(data, "path").unwrap_or("/")
+    );
+    if let Some(q) = text(data, "query") {
+        out.push('?');
+        out.push_str(q);
+    }
+    out
+}
+
+async fn project_search_request(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let statement = search_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
+         VALUES ($1, $2, $3, 'request', $4, $5, $6)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+           statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "api").unwrap_or("search"))
+    .bind(statement)
+    .bind(truncated)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_search_response(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(request_id) = text(&e.data, "request_id").and_then(|q| q.parse::<Uuid>().ok()) else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, status, duration_ms, error_code, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (event_id) DO UPDATE SET status = EXCLUDED.status,
+           duration_ms = EXCLUDED.duration_ms, error_code = EXCLUDED.error_code, error = EXCLUDED.error",
+    )
+    .bind(request_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "outcome"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(number(&e.data, "status").map(|s| s.to_string()))
+    .bind(text(&e.data, "error_type"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_search_denied(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let statement = search_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated, status, error)
+         VALUES ($1, $2, $3, 'request', $4, $5, $6, 'denied', $7)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type, statement = EXCLUDED.statement,
+           truncated = EXCLUDED.truncated, status = EXCLUDED.status, error = EXCLUDED.error",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "api").unwrap_or("search"))
+    .bind(statement)
+    .bind(truncated)
+    .bind(text(&e.data, "reason"))
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -891,6 +1274,113 @@ pub async fn event_kinds(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT DISTINCT kind FROM audit_events ORDER BY kind")
         .fetch_all(db)
         .await
+}
+
+// ---- Kubernetes requests --------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct KubeRow {
+    pub at: OffsetDateTime,
+    pub username: Option<String>,
+    /// The request's own session: an exec's recording lives under it.
+    pub session_id: Option<Uuid>,
+    /// The console session of the login: the page that lists the request.
+    pub login_session: Option<Uuid>,
+    pub cluster: String,
+    pub verb: String,
+    pub api_group: String,
+    pub resource: String,
+    pub subresource: String,
+    pub namespace: String,
+    pub name: String,
+    pub path: String,
+    pub method: String,
+    pub status: i32,
+    pub latency_ms: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct KubeFilter {
+    pub username: Option<String>,
+    pub cluster: Option<String>,
+    pub namespace: Option<String>,
+    pub verb: Option<String>,
+    /// Only requests the cluster (or Limen) refused or failed: status 400 and up.
+    pub problems_only: bool,
+    /// Only this console session's requests, oldest first.
+    pub login_session: Option<Uuid>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Newest first.
+pub async fn list_kube_requests(db: &Db, f: &KubeFilter) -> Result<Vec<KubeRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT at, username, session_id, login_session, cluster, verb, api_group, resource, subresource, namespace, name,
+                path, method, status, latency_ms, error
+         FROM kube_requests
+         WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR cluster = $2)
+           AND ($3::text IS NULL OR namespace = $3) AND ($4::text IS NULL OR verb = $4)
+           AND (NOT $5 OR status >= 400) AND ($8::uuid IS NULL OR login_session = $8)
+         ORDER BY (CASE WHEN $8::uuid IS NOT NULL THEN at END) ASC, at DESC, event_id DESC LIMIT $6 OFFSET $7",
+    )
+    .bind(&f.username)
+    .bind(&f.cluster)
+    .bind(&f.namespace)
+    .bind(&f.verb)
+    .bind(f.problems_only)
+    .bind(f.limit + 1)
+    .bind(f.offset)
+    .bind(f.login_session)
+    .fetch_all(db)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok(KubeRow {
+                at: r.try_get("at")?,
+                username: r.try_get("username")?,
+                session_id: r.try_get("session_id")?,
+                login_session: r.try_get("login_session")?,
+                cluster: r.try_get("cluster")?,
+                verb: r.try_get("verb")?,
+                api_group: r.try_get("api_group")?,
+                resource: r.try_get("resource")?,
+                subresource: r.try_get("subresource")?,
+                namespace: r.try_get("namespace")?,
+                name: r.try_get("name")?,
+                path: r.try_get("path")?,
+                method: r.try_get("method")?,
+                status: r.try_get("status")?,
+                latency_ms: r.try_get("latency_ms")?,
+                error: r.try_get("error")?,
+            })
+        })
+        .collect()
+}
+
+/// `(requests, refused or failed)` of a console session.
+pub async fn kube_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT count(*) AS total, count(*) FILTER (WHERE status >= 400) AS problems
+         FROM kube_requests WHERE login_session = $1",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok((row.try_get("total")?, row.try_get("problems")?))
+}
+
+/// The clusters and verbs seen, for the filters.
+pub async fn kube_filter_options(db: &Db) -> Result<(Vec<String>, Vec<String>), sqlx::Error> {
+    let clusters =
+        sqlx::query_scalar("SELECT DISTINCT cluster FROM kube_requests ORDER BY cluster")
+            .fetch_all(db)
+            .await?;
+    let verbs = sqlx::query_scalar("SELECT DISTINCT verb FROM kube_requests ORDER BY verb")
+        .fetch_all(db)
+        .await?;
+    Ok((clusters, verbs))
 }
 
 #[cfg(test)]

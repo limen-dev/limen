@@ -91,6 +91,12 @@ impl SshCertificates for SshCertificatesService {
         {
             return Err(Status::permission_denied("user locked"));
         }
+        if db::is_login_revoked(&self.0.db, &verified.user.login_id)
+            .await
+            .map_err(|e| internal("checking ended logins", e))?
+        {
+            return Err(Status::permission_denied("logged out"));
+        }
         if !loaded
             .policy
             .worker_may_serve(&grant.resource, &worker.labels)

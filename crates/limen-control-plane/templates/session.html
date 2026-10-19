@@ -12,7 +12,7 @@
 
 
 
-{% if chrome.is_admin && s.active %}
+{% if chrome.is_admin && s.active && !s.is_kubectl %}
 <form method="post" action="/console/sessions/{{ s.id }}/kill" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360">
@@ -21,19 +21,62 @@
 </form>
 {% endif %}
 
-{% if s.has_statements %}
-{% if s.is_broker %}
-<h2>Operations</h2>
+{% if s.is_kubectl %}
+<h2>Requests</h2>
 <p class="hint">
-  <strong>{{ statement_total }}</strong> operation{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
-  "Allowed" means policy let it through to the broker; the broker's own answer is not recorded. RabbitMQ and Kafka sessions have no terminal recording; this is the audited record of what was done: names and sizes, never message content. Kafka produce and fetch traffic is listed at first contact with a topic and then about once a minute.
-  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+  <strong>{{ request_total }}</strong> request{% if request_total != 1 %}s{% endif %} to the Kubernetes API{% if request_problems != 0 %}, <strong>{{ request_problems }}</strong> refused or failed{% endif %}.
+  Every call kubectl made while this login was in use, as the cluster saw it. Bodies are not kept here; the complete, signed events are in the audit sinks.
+  An <span class="mono">exec</span> or <span class="mono">attach</span> has its own session with a recording, linked on its row.
+  {% if request_total > 500 %}Showing the first 500.{% endif %}
 </p>
-{% else if s.is_redis %}
+{% if requests.is_empty() %}
+<div class="card empty"><div>No requests yet. They appear here within a few seconds.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Time</th><th>Verb</th><th>Resource</th><th>Namespace</th><th>Name</th><th>Status</th><th>Time taken</th><th></th></tr></thead>
+  <tbody>
+  {% for r in requests %}
+  <tr>
+    <td class="nowrap">{{ r.at }}</td>
+    <td class="nowrap mono">{{ r.verb }}</td>
+    <td class="mono">{{ r.resource }}</td>
+    <td class="mono">{% if r.namespace.is_empty() %}—{% else %}{{ r.namespace }}{% endif %}</td>
+    <td class="mono">{% if r.name.is_empty() %}—{% else %}{{ r.name }}{% endif %}</td>
+    <td class="nowrap"><span class="pill {{ r.tone }}">{{ r.status }}</span>{% if let Some(e) = r.error %} <span class="sub">{{ e }}</span>{% endif %}</td>
+    <td class="nowrap">{{ r.latency }}</td>
+    <td class="nowrap">{% if let Some(t) = r.stream_path %}<a href="/console/sessions/{{ t }}">recording</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% else if s.has_statements %}
+{% if s.is_redis %}
 <h2>Commands</h2>
 <p class="hint">
   <strong>{{ statement_total }}</strong> command{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
   "Allowed" means policy let the command through to the server; the server's own answer is not recorded. Redis sessions have no terminal recording; this is the audited record of what was sent. Key names are shown (hashed if the resource asks for it); values are never kept.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
+{% else if s.is_mongo %}
+<h2>Commands</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> command{% if statement_total != 1 %}s{% endif %}{% if statement_errors != 0 %}, <strong>{{ statement_errors }}</strong> refused or with an error{% endif %}.
+  MongoDB sessions have no terminal recording; this is the audited record of what was sent. Each command shows the shape of its filter, update, or pipeline with every value replaced by <code>?</code> (unless the resource keeps values); inserted documents are only counted; "rows" are documents. Results are never kept.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
+{% else if s.is_search %}
+<h2>Requests</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> request{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> ok or in flight, <strong>{{ statement_errors }}</strong> refused by policy or answered with an error.
+  Search sessions have no terminal recording; this is the audited record of what was sent: the method, the path, and the status the server answered. Request and response bodies are not kept unless the resource opts in (and then only in the audit sinks).
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
+{% else if s.is_broker %}
+<h2>Operations</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> operation{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
+  "Allowed" means policy let it through to the broker; the broker's own answer is not recorded. RabbitMQ and Kafka sessions have no terminal recording; this is the audited record of what was done: names and sizes, never message content. Kafka produce and fetch traffic is listed at first contact with a topic and then about once a minute.
   {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
 </p>
 {% else %}
@@ -45,10 +88,10 @@
 </p>
 {% endif %}
 {% if statements.is_empty() %}
-<div class="card empty"><div>{% if s.is_broker %}No operations yet.{% else if s.is_redis %}No commands yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
+<div class="card empty"><div>{% if s.is_broker %}No operations yet.{% else if s.is_redis || s.is_mongo %}No commands yet.{% else if s.is_search %}No requests yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_broker %}Operation{% else if s.is_redis %}Command{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
+  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_broker %}Operation{% else if s.is_redis || s.is_mongo %}Command{% else if s.is_search %}Request{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
   <tbody>
   {% for st in statements %}
   <tr>
@@ -90,6 +133,7 @@
   <tr><th>Started</th><td>{{ s.started }}</td></tr>
   <tr><th>Ended</th><td>{{ s.ended }}</td></tr>
   <tr><th>Duration</th><td>{{ s.duration }}</td></tr>
+  {% if s.connections > 1 %}<tr><th>Connections</th><td>{{ s.connections }} <span class="muted">(opened by one client run; the commands below are all of them)</span></td></tr>{% endif %}
   <tr><th>Traffic</th><td>{{ s.bytes }}</td></tr>
   {% if chrome.is_admin %}
   <tr><th>Client address</th><td class="mono">{{ s.client_addr }}</td></tr>

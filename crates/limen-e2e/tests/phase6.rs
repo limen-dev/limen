@@ -3,7 +3,7 @@
 //! the denials and locks of the earlier phases (ADR-0033).
 //!
 //! Needs `LIMEN_TEST_DATABASE_URL` (control plane state) and
-//! `LIMEN_TEST_PG_TARGET=host:port` (see `deploy/compose/targets/postgres`).
+//! `LIMEN_TEST_PG_TARGET=host:port` (see `deploy/compose/config/targets/postgres`).
 
 use std::collections::HashMap;
 use std::time::Duration;

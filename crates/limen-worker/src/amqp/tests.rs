@@ -1,6 +1,6 @@
 //! Whole-session tests: an AMQP client, the worker's session code, and a fake
 //! broker on a loopback socket, so the worker's real dial path is used. The
-//! real broker is exercised by `deploy/compose/test-phase11-scenarios.sh`.
+//! real broker is exercised by `demos/demo-phase11.sh`.
 
 use std::sync::{Arc, Mutex};
 

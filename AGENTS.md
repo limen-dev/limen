@@ -7,8 +7,10 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 - **Phase by phase.** Status is in `docs/design.md` §13 (✅ = done). Several phases are already implemented, so check there before any change. Only work on a phase the owner has approved; don't build ahead, even partially (planned integrations are data-only stubs). Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
 - **Verify before claiming.** Run it before saying it works. Anything tested only against a local stand-in is labelled `unverified`.
 - **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
+- **Image versions.** Container images are pinned only in `deploy/compose/.env`; edit it and run `scripts/check-versions.sh` (CI runs it). Tool versions are in `mise.toml`.
 - **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
 - **Commits.** Conventional, small, focused. Stage specific files, never `git add -A`. Don't push or tag unless asked.
+- **Pull requests.** Always open them as drafts (`gh pr create --draft`). CI doesn't run on a draft; it starts when the PR is marked ready for review.
 - **Certificates.** Don't bypass browser warnings or touch trust stores. Dev CA: `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Agent use (cost)
@@ -30,16 +32,17 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 LIMEN_TES
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 \
 cargo test --workspace --all-features --locked          # without the env vars, integration tests print SKIPPED
 cargo deny --locked check && cargo audit; mise exec -- actionlint
-deploy/compose/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
+demos/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
 ```
 Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbStack.
 
 ## Layout
 - Binaries: `crates/limen-{control-plane,proxy,worker,cli}`.
 - Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component}`; tests in `limen-testkit` and `limen-e2e`.
+- Dev stack: `deploy/compose/` (`setup.sh` starts it; `stacks/`, `config/`, `scripts/`, `demos/`; see its README).
 - Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`). Terraform: `deploy/terraform`.
-- Generated dashboards: `python3 dashboards/grafana/generate.py`.
-- Dev users: only in `deploy/compose/dev-users.toml`; regenerate with `python3 deploy/compose/gen-dev-users.py`. Tests use `limen_testkit::users`.
+- Generated dashboards: `python3 deploy/grafana/generate.py`.
+- Dev users: only in `deploy/compose/config/dev-users.toml`; regenerate with `python3 deploy/compose/scripts/gen-dev-users.py`. Tests use `limen_testkit::users`.
 
 ## Gotchas
 - sqlx needs literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.

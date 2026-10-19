@@ -22,7 +22,7 @@ Without the public URL the console is off and `/console/*` answers 404.
 - **Users**: who has signed in, their roles, lock status. Lock or unlock with a reason.
 - **Sessions**: active and past. Open one to play its recording or end it.
 - **Workers**: enrollment state, tunnels, certificate expiry. Outstanding join tokens (unused and unexpired; values are never stored). Create single-use join tokens (shown once) and revoke a worker.
-- **Dashboards**: built-in charts from the console's own records (30 days). For longer history, or your own panels and alerts, the optional Grafana dashboards in `dashboards/grafana` read the audit store directly.
+- **Dashboards**: built-in charts from the console's own records (30 days). For longer history, or your own panels and alerts, the optional Grafana dashboards in `deploy/grafana` read the audit store directly.
 - **Audit trail**: the last 30 days, filterable. A convenience copy for answering "what just happened"; for investigations use the sinks (S3 or Datadog) and [verify the chain](audit-verify.md).
 - **Policy**: what's active, the YAML behind each document, and a dry-run check. Apply changes with `limen admin apply`.
 

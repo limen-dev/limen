@@ -29,7 +29,7 @@ Limen is three programs plus the `limen` CLI. [The design](design.md) has the da
 
 ## Worker
 - Opens **outbound** tunnels to the proxy, so your network needs no inbound ports.
-- Opens the real connection to the target: SSH today, databases and more later.
+- Opens the real connection to the target: SSH and Kubernetes today (a kube worker serves one cluster and impersonates the user), databases and more later.
 - Records the session and ships the recording and events to the control plane.
 
 ## Upgrading

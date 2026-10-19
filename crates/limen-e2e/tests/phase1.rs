@@ -72,7 +72,20 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     let names: Vec<_> = listed.resources.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
         names,
-        ["orders-mysql-staging", "orders-staging", "web-staging-1"]
+        [
+            "cache-staging",
+            "cache-valkey",
+            "catalog-staging",
+            "catalog-x509",
+            "events-kafka-scram",
+            "events-kafka-staging",
+            "events-rabbit-staging",
+            "orders-mysql-staging",
+            "orders-staging",
+            "search-opensearch",
+            "search-staging",
+            "web-staging-1"
+        ]
     );
 
     // A user with no mapped roles can't log in.
