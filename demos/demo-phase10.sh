@@ -281,4 +281,4 @@ IFS='|' read -r d o e <<<"$rows"
 pass "the console has the requests, with their outcomes, for each search session"
 
 printf '\n\033[32mPhase 10 demo passed.\033[0m\n'
-echo "Stop it with: docker compose -p $project -f deploy/compose/stacks/search.yml down -v (or demos/demo-phase10.sh without --keep)"
+echo "Reset it by running this script without --keep"

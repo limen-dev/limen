@@ -11,12 +11,12 @@
 # OpenSearch Serverless, and Elastic Cloud are unverified; this is the
 # self-hosted path.
 services:
-  # Copies OpenSearch's demo root CA to where the worker reads it.
-  search-ca:
+  # OpenSearch makes its demo certificates when it first starts, and runs as
+  # a user that can't write to a new volume: this gives it the directory.
+  search-ca-dir:
     profiles: ["search"]
-    image: ${OPENSEARCH_IMAGE}
-    user: root
-    entrypoint: ["/bin/sh", "-c", "cp /usr/share/opensearch/config/root-ca.pem /out/opensearch-root-ca.pem && chmod 644 /out/opensearch-root-ca.pem"]
+    image: ${ALPINE_IMAGE}
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /out && chmod 755 /out"]
     volumes:
       - search-worker:/out
 
@@ -47,7 +47,16 @@ services:
     profiles: ["search"]
     image: ${OPENSEARCH_IMAGE}
     depends_on:
-      search-ca: { condition: service_completed_successfully }
+      search-ca-dir: { condition: service_completed_successfully }
+    # Hands the demo root CA to the worker (the volume it reads) once it exists.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        (until [ -f /usr/share/opensearch/config/root-ca.pem ]; do sleep 1; done
+         cp /usr/share/opensearch/config/root-ca.pem /out/opensearch-root-ca.pem
+         chmod 644 /out/opensearch-root-ca.pem) &
+        exec ./opensearch-docker-entrypoint.sh opensearch
     environment:
       discovery.type: single-node
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: Dev-only-Opensearch-1
@@ -56,7 +65,9 @@ services:
     networks:
       default:
         aliases: [node-0.example.com]
-    volumes: [os-data:/usr/share/opensearch/data]
+    volumes:
+      - os-data:/usr/share/opensearch/data
+      - search-worker:/out
     healthcheck:
       test: ["CMD-SHELL", "curl -sk -u admin:Dev-only-Opensearch-1 'https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s'"]
       interval: 5s
