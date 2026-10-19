@@ -165,6 +165,9 @@ pub struct SessionRow {
     pub ci: Option<serde_json::Value>,
     /// When the login behind this session was ended by `limen logout`.
     pub logged_out_at: Option<OffsetDateTime>,
+    /// Connections that carry this row: a driver opens several per run, and
+    /// they share a group. 1 for everything else.
+    pub connections: i64,
 }
 
 /// Whether a `sessions` row is live, with the window in hours as `$1`. A
@@ -178,14 +181,49 @@ macro_rules! is_active {
     };
 }
 
+/// A connection of the same run as `sessions`' row: same group, user, and
+/// resource (the group id comes from the client, so it only groups what is
+/// already the same user's and resource's).
+macro_rules! same_run {
+    () => {
+        "o.conn_group = sessions.conn_group AND o.username = sessions.username AND o.resource = sessions.resource"
+    };
+}
+
+/// `o` did something, or is still open. The empty startup check of
+/// `limen mongo connect` doesn't count as a connection.
+macro_rules! carries_traffic {
+    () => {
+        "(COALESCE(o.bytes_in, 0) > 0 OR o.ended_at IS NULL)"
+    };
+}
+
+/// A row is live when it is, or another connection of its run is.
+macro_rules! run_active {
+    () => {
+        concat!(
+            "(",
+            is_active!(),
+            " OR (conn_group IS NOT NULL AND EXISTS (SELECT 1 FROM sessions o WHERE ",
+            same_run!(),
+            " AND o.ended_at IS NULL AND o.started_at > now() - make_interval(hours => $1))))"
+        )
+    };
+}
+
 macro_rules! session_select {
     () => {
         concat!(
             "SELECT session_id, username, kind, resource, login, worker_id, proxy_id, client_addr,
         started_at, ended_at, end_reason, duration_ms, bytes_in, bytes_out, recording_uri, recording_sha256,
         actor_type, ci,
-        (SELECT r.revoked_at FROM login_revocations r WHERE r.login_id = sessions.login_id) AS logged_out_at, ",
-            is_active!(),
+        (SELECT r.revoked_at FROM login_revocations r WHERE r.login_id = sessions.login_id) AS logged_out_at,
+        CASE WHEN conn_group IS NULL THEN 1 ELSE GREATEST(1, (SELECT count(*) FROM sessions o WHERE ",
+            same_run!(),
+            " AND ",
+            carries_traffic!(),
+            ")) END AS connections, ",
+            run_active!(),
             " AS active FROM sessions"
         )
     };
@@ -213,6 +251,7 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
         actor_type: r.try_get("actor_type")?,
         ci: r.try_get("ci")?,
         logged_out_at: r.try_get("logged_out_at")?,
+        connections: r.try_get("connections")?,
     })
 }
 
@@ -234,8 +273,14 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
          WHERE ($2::text IS NULL OR username = $2)
            AND ($6::text IS NULL OR resource = $6)
            AND (NOT $3 OR ",
-        is_active!(),
+        run_active!(),
         ")
+           AND (conn_group IS NULL OR session_id = (
+                SELECT o.session_id FROM sessions o WHERE ",
+        same_run!(),
+        " ORDER BY ",
+        carries_traffic!(),
+        " DESC, o.started_at, o.session_id LIMIT 1))
          ORDER BY COALESCE(started_at, ended_at) DESC, session_id DESC
          LIMIT $4 OFFSET $5"
     ))
@@ -390,17 +435,30 @@ pub struct DbStatementRow {
 /// The longest statement text kept in the console's table.
 const MAX_STATEMENT_TEXT: usize = 16 * 1024;
 
-/// The statements of a session in the order they were sent, at most `limit`.
+/// `db_statements` rows of session `$1` and of the other connections of its run.
+macro_rules! run_sessions {
+    () => {
+        "(session_id = $1 OR session_id IN (
+            SELECT o.session_id FROM sessions o, sessions me
+            WHERE me.session_id = $1 AND me.conn_group IS NOT NULL AND o.conn_group = me.conn_group
+              AND o.username = me.username AND o.resource = me.resource))"
+    };
+}
+
+/// The statements of a session (and of the other connections of its run) in
+/// the order they were sent, at most `limit`.
 pub async fn db_statements(
     db: &Db,
     id: Uuid,
     limit: i64,
 ) -> Result<Vec<DbStatementRow>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT at, phase, statement_type, statement, truncated, status, \"rows\", duration_ms, error_code, error
-         FROM db_statements WHERE session_id = $1 AND statement_type IS NOT NULL
-         ORDER BY at, event_id LIMIT $2",
-    )
+         FROM db_statements WHERE ",
+        run_sessions!(),
+        " AND statement_type IS NOT NULL
+         ORDER BY at, event_id LIMIT $2"
+    ))
     .bind(id)
     .bind(limit)
     .fetch_all(db)
@@ -426,11 +484,12 @@ pub async fn db_statements(
 /// `(statements, errors)` of a session. Errors include Redis commands that
 /// policy refused.
 pub async fn db_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         "SELECT count(*) FILTER (WHERE statement_type IS NOT NULL) AS statements,
                 count(*) FILTER (WHERE status IN ('error', 'denied')) AS errors
-         FROM db_statements WHERE session_id = $1",
-    )
+         FROM db_statements WHERE ",
+        run_sessions!()
+    ))
     .bind(id)
     .fetch_one(db)
     .await?;
@@ -476,12 +535,13 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                      ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
                        resource = EXCLUDED.resource, login = EXCLUDED.login, worker_id = EXCLUDED.worker_id,
                        proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at,
-                       actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci",
+                       actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci,
+                       conn_group = EXCLUDED.conn_group",
                 )
                 .bind(session_id)
                 .bind(&e.user)
@@ -496,6 +556,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(e.time)
                 .bind(text(&e.data, "actor_type").unwrap_or("user"))
                 .bind(e.data.get("ci").filter(|c| c.is_object()))
+                .bind(text(&e.data, "group"))
                 .execute(&mut *tx)
                 .await?;
             }

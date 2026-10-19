@@ -2892,6 +2892,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
  "webbrowser",
  "x509-parser",
 ]

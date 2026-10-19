@@ -283,6 +283,17 @@ pub(crate) type Inbound = tonic::Streaming<TunnelFrame>;
 /// the proxy holding the tunnel).
 pub(crate) type Slot = Option<SessionSlot>;
 
+/// The client's group id for the sessions of one run, if it is well formed:
+/// it only labels rows in the console, so anything else is dropped, not refused.
+fn connection_group(group: &str) -> Option<&str> {
+    (!group.is_empty()
+        && group.len() <= 64
+        && group
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    .then_some(group)
+}
+
 /// The principal, resource kind, and database a request names.
 fn resolve_principal(
     policy: &limen_policy::Policy,
@@ -668,6 +679,9 @@ async fn relay(
     if !database.is_empty() {
         start["database"] = json!(database);
     }
+    if let Some(group) = connection_group(&request.group) {
+        start["group"] = json!(group);
+    }
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
         start["ci"] = json!(user.ci);
@@ -821,4 +835,19 @@ async fn relay(
         tracing::error!(error = %e, "failed to audit session end");
     }
     tracing::info!(session = %session_id, "session ended");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connection_group;
+
+    #[test]
+    fn group_ids_are_labels_only() {
+        assert_eq!(connection_group("0a1b-2C"), Some("0a1b-2C"));
+        assert_eq!(connection_group(""), None);
+        assert_eq!(connection_group("has space"), None);
+        assert_eq!(connection_group("<script>"), None);
+        assert_eq!(connection_group(&"a".repeat(65)), None);
+        assert!(connection_group(&"a".repeat(64)).is_some());
+    }
 }

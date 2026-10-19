@@ -12,7 +12,7 @@ limen mongo connect catalog-staging        # the role and database are picked fr
 mongosh "mongodb://127.0.0.1:51234/orders?directConnection=true"
 ```
 
-- Each connection to the listener is its own audited session. A driver opens a few (monitoring and a pool), so one `mongosh` shows up as a few short sessions. Leave `limen mongo connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
+- Each connection to the listener is its own audited session. A driver opens a few (monitoring and a pool), so one `mongosh` opens a few sessions. The console shows them as one row ("4 connections"): they share a group id that `limen mongo connect` generates for its run, and the session page lists the commands of all of them. Each connection still has its own session id and audit events. The check `limen mongo connect` makes at startup carries no traffic and is not counted. Leave `limen mongo connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
 - `--role limen-rw` picks the role when policy allows several. `--database orders` opens another database (the resource's `default_database` otherwise). `--listen 127.0.0.1:27018` fixes the port (loopback only). `--socket ~/.limen/run/catalog.sock` uses a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
 - Anyone who can reach the listener acts as you. That is why it binds loopback only and the socket is private. Don't forward the port.
 - **Connect without credentials.** A connection string with a user and password is refused (`Limen has already authenticated this session`); the worker's login stays.

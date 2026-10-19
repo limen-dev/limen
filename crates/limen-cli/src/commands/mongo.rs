@@ -1,11 +1,12 @@
 //! `limen mongo connect` (design §5.4, ADR-0035).
 //!
 //! Opens a listener on loopback (or a unix socket) for `mongosh` and any
-//! MongoDB driver. Each connection it accepts becomes one Limen session: the
+//! MongoDB driver. Each connection it accepts becomes one Limen session (all
+//! of a run share a group, so the console shows them as one row): the
 //! CLI opens a stream to the proxy with the user's certificate and then
 //! copies bytes. The client sends no credentials, and the server's login
 //! never leaves the worker. A driver opens a few connections (monitoring and
-//! the pool), so one `mongosh` shows up as a few short sessions.
+//! the pool), so one `mongosh` opens a few sessions.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -24,6 +25,9 @@ use crate::{api, ui};
 struct Plan {
     role: String,
     database: String,
+    /// Shared by every session of this run, so the console shows one row for
+    /// the several connections a driver opens.
+    group: String,
 }
 
 /// The role (the one named, or the only one policy allows) and the database
@@ -76,7 +80,11 @@ async fn plan(
             "{resource} has no default database; name one: limen mongo connect {resource} --database <name>"
         ),
     };
-    Ok(Plan { role, database })
+    Ok(Plan {
+        role,
+        database,
+        group: uuid::Uuid::new_v4().simple().to_string(),
+    })
 }
 
 /// The connection string to give `mongosh`, without a password.
@@ -129,6 +137,7 @@ pub async fn connect(
             resource,
             &plan.role,
             &plan.database,
+            &plan.group,
         )
         .await?,
     );
@@ -216,6 +225,7 @@ async fn session(mut local: Box<dyn Io>, proxy: Option<&str>, resource: &str, pl
         resource,
         &plan.role,
         &plan.database,
+        &plan.group,
     )
     .await
     {

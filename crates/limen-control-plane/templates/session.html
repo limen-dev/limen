@@ -119,6 +119,7 @@
   <tr><th>Started</th><td>{{ s.started }}</td></tr>
   <tr><th>Ended</th><td>{{ s.ended }}</td></tr>
   <tr><th>Duration</th><td>{{ s.duration }}</td></tr>
+  {% if s.connections > 1 %}<tr><th>Connections</th><td>{{ s.connections }} <span class="muted">(opened by one client run; the commands below are all of them)</span></td></tr>{% endif %}
   <tr><th>Traffic</th><td>{{ s.bytes }}</td></tr>
   {% if chrome.is_admin %}
   <tr><th>Client address</th><td class="mono">{{ s.client_addr }}</td></tr>

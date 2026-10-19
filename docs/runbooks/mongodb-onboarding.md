@@ -81,7 +81,7 @@ mongosh "mongodb://127.0.0.1:<port>/shop?directConnection=true" --eval 'db.runCo
 | Writes work in `mongosh` but a transaction or retryable write fails | The worker presents a standalone server: no transactions or retryable writes through Limen |
 | Sessions end during a failover | Expected: the worker's connection was to the old primary. Reconnect; the worker finds the new one |
 | `CursorNotFound` after a long pause | The cursor timed out on the server (default 10 minutes), or it belonged to another session |
-| Many short sessions for one `mongosh` | Normal: a driver opens monitoring and pool connections, each its own audited session |
+| Several sessions for one `mongosh` | Normal: a driver opens monitoring and pool connections, each its own audited session (own `session_id`). The console shows one row per `limen mongo connect` run ("N connections"); in the audit trail the `session.start` events share a `group` |
 
 ## Watching it
 

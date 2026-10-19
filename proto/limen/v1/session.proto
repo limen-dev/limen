@@ -69,6 +69,9 @@ message SessionRequest {
   string principal = 2;
   // SQL sessions: the database to use. Empty means the resource's default.
   string database = 3;
+  // Sessions opened by one client run (one `limen mongo connect`) share this
+  // id, so the console can show them as one. Optional; at most 64 of [A-Za-z0-9-].
+  string group = 4;
 }
 
 message SessionResponse {

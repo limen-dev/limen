@@ -211,5 +211,12 @@ sleep 2
 grep -q '{"filter":{"email":"?"}}' "$state/console.out" || fail "the console should list the find with its redacted filter"
 pass "db_statements has the MongoDB commands for the session page"
 
+# A driver opens several connections per run; the CLI gives them one group so
+# the console lists the run once.
+runs="$("${compose[@]}" exec -T postgres psql -U limen -d limen -At -c \
+  "select count(*) from (select conn_group from sessions where kind = 'mongodb' and conn_group is not null group by conn_group having count(*) > 1) t")"
+[ "${runs:-0}" -ge 1 ] || fail "the connections of one mongosh run should share a group"
+pass "the connections of one mongosh run share a group (the console shows them as one session)"
+
 printf '\n\033[32mPhase 9 demo passed.\033[0m\n'
 echo "Stop it with: docker compose -p $project down -v"

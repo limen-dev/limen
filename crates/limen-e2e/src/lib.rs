@@ -616,6 +616,7 @@ pub mod ssh_client {
                 resource: resource.into(),
                 principal: login.into(),
                 database: String::new(),
+                group: String::new(),
             },
         )
         .await
@@ -767,6 +768,7 @@ pub mod db_client {
                     resource: resource.clone(),
                     principal: role.clone(),
                     database: database.clone(),
+                    group: String::new(),
                 };
                 tokio::spawn(async move {
                     let mut remote = limen_tunnel::connect::dial(&proxy_addr, "localhost", tls)

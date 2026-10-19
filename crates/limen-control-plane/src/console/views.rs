@@ -209,6 +209,8 @@ pub struct SessionView {
     pub started: String,
     pub ended: String,
     pub duration: String,
+    /// More than one: the connections a driver opened in one run.
+    pub connections: i64,
     pub status: &'static str,
     pub status_class: &'static str,
     pub reason: String,
@@ -256,6 +258,7 @@ impl From<&SessionRow> for SessionView {
             started: time_text(s.started_at),
             ended: time_text(s.logged_out_at.or(s.ended_at)),
             duration: duration_text(s.duration_ms),
+            connections: s.connections,
             status,
             status_class,
             // "ended" says nothing the status doesn't.

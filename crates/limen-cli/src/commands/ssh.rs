@@ -160,16 +160,18 @@ pub(crate) async fn open_session(
     resource: &str,
     principal: &str,
 ) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
-    open_session_in(proxy, alpn, resource, principal, "").await
+    open_session_in(proxy, alpn, resource, principal, "", "").await
 }
 
-/// The same, for protocols whose session names a database (MongoDB).
+/// The same, for protocols whose session names a database (MongoDB), and with a
+/// `group` that ties the sessions of one client run together in the console.
 pub(crate) async fn open_session_in(
     proxy: Option<&str>,
     alpn: &[u8],
     resource: &str,
     principal: &str,
     database: &str,
+    group: &str,
 ) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let profile = Profile::load(&proxy_addr)?
@@ -194,6 +196,7 @@ pub(crate) async fn open_session_in(
             resource: resource.to_owned(),
             principal: principal.to_owned(),
             database: database.to_owned(),
+            group: group.to_owned(),
         },
     )
     .await?;
