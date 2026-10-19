@@ -1,6 +1,7 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts, SQL databases, Redis or Valkey, and Kubernetes clusters, and (planned)
-//! MongoDB, search, message brokers, web apps, and TCP services.
+//! to SSH hosts, SQL databases, Redis or Valkey, Kubernetes clusters, and search
+//! (`OpenSearch` and Elasticsearch), and (planned) MongoDB, message brokers, web
+//! apps, and TCP services.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -168,7 +169,7 @@ enum Command {
         #[command(subcommand)]
         command: MongoCommand,
     },
-    /// OpenSearch and Elasticsearch (planned, Phase 10).
+    /// `OpenSearch` and Elasticsearch: `limen search connect <resource>`.
     Search {
         #[command(subcommand)]
         command: SearchCommand,
@@ -287,13 +288,21 @@ enum MongoCommand {
 
 #[derive(Debug, Subcommand)]
 enum SearchCommand {
-    /// Open a local listener for curl and the OpenSearch or Elasticsearch clients.
+    /// Open a local listener that curl and the Elasticsearch and `OpenSearch` clients use without a credential.
     Connect {
         resource: String,
+        /// The engine role to act as. Optional when policy allows only one.
         #[arg(long)]
         role: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on (loopback only). Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::search::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -456,7 +465,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
+        Command::Search {
+            command:
+                SearchCommand::Connect {
+                    resource,
+                    role,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::search::connect(
+                proxy,
+                &resource,
+                role.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
         Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
         Command::Kafka { .. } => not_yet("limen kafka connect", "Kafka access", "Phase 11"),
         Command::Web { .. } => not_yet("limen web open", "web app access", "Phase 12"),
@@ -497,7 +525,6 @@ mod tests {
             ][..],
             &["redis", "connect", "r", "--user", "u"],
             &["mongo", "connect", "r", "--role", "x", "--database", "d"],
-            &["search", "connect", "r", "--role", "x"],
             &["mq", "connect", "r", "--user", "u"],
             &["kafka", "connect", "r", "--user", "u"],
             &["web", "open", "app", "--no-browser"],
@@ -555,6 +582,28 @@ mod tests {
         );
         assert!(ok(&["cache", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
         assert!(ok(&["cache", "--idle-timeout", "soon"]).is_err());
+    }
+
+    #[test]
+    fn search_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "search", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["logs", "--role", "limen-read", "--listen", "127.0.0.1:9200"]).is_ok());
+        assert!(
+            ok(&[
+                "logs",
+                "--socket",
+                "/tmp/limen/s.sock",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["logs", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["logs", "--idle-timeout", "soon"]).is_err());
     }
 
     #[test]

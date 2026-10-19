@@ -220,7 +220,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("dry run")
         .into_inner();
     assert!(!dry.applied);
-    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 14);
+    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 17);
     assert_eq!(dry.version, 0);
 
     let applied = admin
@@ -282,6 +282,8 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
             "catalog-x509",
             "orders-mysql-staging",
             "orders-staging",
+            "search-opensearch",
+            "search-staging",
             "web-staging-1"
         ]
     );

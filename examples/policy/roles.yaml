@@ -19,6 +19,10 @@ spec:
     # limen-read are the second layer (ADR-0035).
     - resources: { kind: [mongodb], labels: { env: [staging] } }
       mongo: { roles: [limen-read], databases: [orders] }
+    # Search the app's indices on staging. The engine's own role for limen-read
+    # is the second layer (ADR-0036).
+    - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
+      search: { roles: [limen-read], indices: ["app-*"] }
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }
 ---
@@ -37,5 +41,7 @@ spec:
       redis: { users: [limen-rw] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
       mongo: { roles: [limen-read, limen-rw], databases: ["*"], deny_commands: [dropDatabase] }
+    - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
+      search: { roles: [limen-read, limen-write], classes: [read, write] }
     - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
       kube: { groups: ["limen:edit"] }

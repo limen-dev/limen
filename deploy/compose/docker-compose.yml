@@ -172,9 +172,13 @@ services:
       - db-secrets:/var/lib/limen/db-secrets
       # Phase 9: the MongoDB CA, password files and client certificate (filled by the mongo stack).
       - mongo-worker:/etc/limen/mongo:ro
+      # Phase 10: the engines' logins, and OpenSearch's CA (filled by the search stack).
+      - ./config/targets/search/credentials.json:/etc/limen/search-credentials.json:ro
+      - search-worker:/etc/limen/search:ro
 
 volumes:
   mongo-worker: {}
+  search-worker: {}
   db-secrets: {}
   db-tls: {}
   postgres: {}

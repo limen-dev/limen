@@ -7,6 +7,7 @@ pub mod kube;
 pub mod login;
 pub mod mongo;
 pub mod redis;
+pub mod search;
 pub mod ssh;
 
 use limen_proto::v1::ListResourcesRequest;

@@ -510,6 +510,7 @@ fn cut(text: &str, max: usize) -> (&str, bool) {
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
+#[allow(clippy::too_many_lines)] // one arm per audit event kind
 pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<(), sqlx::Error> {
     use limen_audit::EventKind;
     let mut tx = db.begin().await?;
@@ -612,6 +613,18 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             }
             EventKind::MongoCommandEnd => {
                 project_mongo_end(&mut tx, e, session_id).await?;
+            }
+            // Search sessions have no recording either (ADR-0036): each request
+            // is a row, the response fills in how it ended, and a refused
+            // request is a row with status `denied`. Bodies are never here.
+            EventKind::SearchRequest => {
+                project_search_request(&mut tx, e, session_id).await?;
+            }
+            EventKind::SearchResponse => {
+                project_search_response(&mut tx, e, session_id).await?;
+            }
+            EventKind::AuthDenied if text(&e.data, "action") == Some("search") => {
+                project_search_denied(&mut tx, e, session_id).await?;
             }
             EventKind::DbQueryEnd => {
                 let Some(query_id) = text(&e.data, "query_id").and_then(|q| q.parse::<Uuid>().ok())
@@ -903,6 +916,97 @@ async fn project_redis_command(
     .bind(truncated)
     .bind(status)
     .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// `GET /logs-1/_search`, with the query string if the resource logs it.
+fn search_statement(data: &serde_json::Value) -> String {
+    let mut out = format!(
+        "{} {}",
+        text(data, "method").unwrap_or("?"),
+        text(data, "path").unwrap_or("/")
+    );
+    if let Some(q) = text(data, "query") {
+        out.push('?');
+        out.push_str(q);
+    }
+    out
+}
+
+async fn project_search_request(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let statement = search_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated)
+         VALUES ($1, $2, $3, 'request', $4, $5, $6)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type,
+           statement = EXCLUDED.statement, truncated = EXCLUDED.truncated",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "api").unwrap_or("search"))
+    .bind(statement)
+    .bind(truncated)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_search_response(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(request_id) = text(&e.data, "request_id").and_then(|q| q.parse::<Uuid>().ok()) else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, status, duration_ms, error_code, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (event_id) DO UPDATE SET status = EXCLUDED.status,
+           duration_ms = EXCLUDED.duration_ms, error_code = EXCLUDED.error_code, error = EXCLUDED.error",
+    )
+    .bind(request_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "outcome"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(number(&e.data, "status").map(|s| s.to_string()))
+    .bind(text(&e.data, "error_type"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_search_denied(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let statement = search_statement(&e.data);
+    let (statement, truncated) = cut(&statement, MAX_STATEMENT_TEXT);
+    sqlx::query(
+        "INSERT INTO db_statements (event_id, session_id, at, phase, statement_type, statement, truncated, status, error)
+         VALUES ($1, $2, $3, 'request', $4, $5, $6, 'denied', $7)
+         ON CONFLICT (event_id) DO UPDATE SET session_id = EXCLUDED.session_id, at = EXCLUDED.at,
+           phase = EXCLUDED.phase, statement_type = EXCLUDED.statement_type, statement = EXCLUDED.statement,
+           truncated = EXCLUDED.truncated, status = EXCLUDED.status, error = EXCLUDED.error",
+    )
+    .bind(e.event_id)
+    .bind(session_id)
+    .bind(e.time)
+    .bind(text(&e.data, "api").unwrap_or("search"))
+    .bind(statement)
+    .bind(truncated)
+    .bind(text(&e.data, "reason"))
     .execute(&mut **tx)
     .await?;
     Ok(())

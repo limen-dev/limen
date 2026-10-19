@@ -158,6 +158,16 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Search(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = crate::search::serve(ours, *prepared, audit) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 Admitted::Mongo(prepared) => {
                     let mut end = end;
                     tokio::select! {
@@ -220,6 +230,7 @@ enum Admitted {
     Redis(Box<redis::Prepared>),
     Kube(Box<crate::kube::Admitted>),
     Mongo(Box<crate::mongo::Prepared>),
+    Search(Box<crate::search::Prepared>),
 }
 
 impl Admitted {
@@ -230,6 +241,7 @@ impl Admitted {
             Admitted::Redis(p) => p.session_id().to_owned(),
             Admitted::Kube(k) => k.session_id.clone(),
             Admitted::Mongo(p) => p.session_id(),
+            Admitted::Search(p) => p.session_id(),
         }
     }
 }
@@ -283,6 +295,9 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "kube" => {
             crate::kube::admit(worker, &checked.verified, now).map(|k| Admitted::Kube(Box::new(k)))
         }
+        "opensearch" | "elasticsearch" => admit_search(worker, &checked)
+            .await
+            .map(|p| Admitted::Search(Box::new(p))),
         "mongodb" => admit_mongo(worker, &checked)
             .await
             .map(|c| Admitted::Mongo(Box::new(c))),
@@ -368,6 +383,71 @@ async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepar
         tracing::warn!(error = %e, resource = %grant.resource, "couldn't open the Redis connection");
         Status::unavailable(
             "couldn't connect to the Redis server; ask an admin to check the worker's log",
+        )
+    })
+}
+
+/// The longest a search session may take to open its connection to the target.
+const SEARCH_PREPARE: std::time::Duration = std::time::Duration::from_secs(30);
+
+async fn admit_search(
+    worker: &Worker,
+    checked: &Checked,
+) -> Result<crate::search::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::SearchRole(grant.principal.clone()),
+    )?;
+    let resource = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .ok_or_else(|| Status::failed_precondition("unknown resource"))?;
+    let (engine, target) = match grant.kind.as_str() {
+        "opensearch" => ("opensearch", resource.spec.opensearch.clone()),
+        _ => ("elasticsearch", resource.spec.elasticsearch.clone()),
+    };
+    let target =
+        target.ok_or_else(|| Status::failed_precondition("resource is not a search resource"))?;
+    let grants = checked.snapshot.policy.search_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let session_id = grant
+        .session_id
+        .parse()
+        .map_err(|_| Status::invalid_argument("bad session id"))?;
+    let config = crate::search::SessionConfig {
+        session_id,
+        username: checked.verified.user.username.clone(),
+        resource: grant.resource.clone(),
+        engine_role: grant.principal.clone(),
+        engine,
+        target: target.clone(),
+    };
+    let aws: Option<crate::search::target::AwsSource> = target.aws.then(|| {
+        let worker = worker.clone();
+        Arc::new(move || {
+            let worker = worker.clone();
+            Box::pin(async move { worker.aws_credentials().await })
+                as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+        }) as crate::search::target::AwsSource
+    });
+    tokio::time::timeout(
+        SEARCH_PREPARE,
+        crate::search::prepare(&worker.search, grants, config, aws),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out"))
+    .and_then(|r| r)
+    .map_err(|e| {
+        // The detail names the server and the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't open the search connection");
+        Status::unavailable(
+            "couldn't connect to the search server; ask an admin to check the worker's log",
         )
     })
 }

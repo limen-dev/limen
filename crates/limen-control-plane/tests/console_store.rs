@@ -796,3 +796,100 @@ async fn connections_of_one_run_are_one_row() {
         2
     );
 }
+
+/// A search session has no recording; the console lists its requests, how
+/// each ended, and the ones policy refused, whatever order they arrive in.
+#[tokio::test(flavor = "multi_thread")]
+async fn search_sessions_list_their_requests() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let ok = event(
+        EventKind::SearchRequest,
+        s,
+        DEVELOPER,
+        json!({ "method": "POST", "path": "/logs-1/_search", "api": "search", "class": "read", "indices": ["logs-1"], "resource": "logs", "engine_role": "limen-read" }),
+    );
+    let ok_end = event(
+        EventKind::SearchResponse,
+        s,
+        DEVELOPER,
+        json!({ "request_id": ok.event_id, "status": 200, "outcome": "ok", "duration_ms": 12 }),
+    );
+    let missing = event(
+        EventKind::SearchRequest,
+        s,
+        DEVELOPER,
+        json!({ "method": "GET", "path": "/gone/_doc/h:0123", "api": "doc.get", "query": "pretty" }),
+    );
+    let missing_end = event(
+        EventKind::SearchResponse,
+        s,
+        DEVELOPER,
+        json!({ "request_id": missing.event_id, "status": 404, "outcome": "error", "duration_ms": 3, "error_type": "index_not_found_exception" }),
+    );
+    let refused = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "search", "method": "DELETE", "path": "/logs-1", "api": "index.manage", "class": "admin", "reason": "admin requests aren't allowed" }),
+    );
+    // The response may arrive before the request, and batches are redelivered.
+    store::project_events(&db, &[ok_end.clone(), missing.clone(), refused.clone()])
+        .await
+        .expect("first batch");
+    store::project_events(&db, &[ok, missing_end, missing, ok_end, refused])
+        .await
+        .expect("second batch and redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("requests");
+    let by_text = |t: &str| {
+        list.iter()
+            .find(|r| r.statement.as_deref() == Some(t))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{t}: {:?}",
+                    list.iter().map(|r| &r.statement).collect::<Vec<_>>()
+                )
+            })
+    };
+    assert_eq!(list.len(), 3);
+    let ok = by_text("POST /logs-1/_search");
+    assert_eq!(
+        (ok.status.as_deref(), ok.duration_ms),
+        (Some("ok"), Some(12))
+    );
+    assert_eq!(ok.statement_type.as_deref(), Some("search"));
+    let gone = by_text("GET /gone/_doc/h:0123?pretty");
+    assert_eq!(gone.status.as_deref(), Some("error"));
+    assert_eq!(gone.error_code.as_deref(), Some("404"));
+    assert_eq!(gone.error.as_deref(), Some("index_not_found_exception"));
+    let denied = by_text("DELETE /logs-1");
+    assert_eq!(denied.status.as_deref(), Some("denied"));
+    assert!(
+        denied
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("aren't allowed")
+    );
+    // Errors count refused and failed requests.
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 2)
+    );
+    // An auth.denied that is not about search is not a request.
+    let other = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "ssh", "resource": "web", "login": "root", "reason": "no" }),
+    );
+    store::project_events(&db, &[other]).await.expect("other");
+    assert_eq!(
+        store::db_statements(&db, s, 100)
+            .await
+            .expect("again")
+            .len(),
+        3
+    );
+}

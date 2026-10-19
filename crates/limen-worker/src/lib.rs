@@ -8,6 +8,7 @@ pub mod mongo;
 pub mod recording;
 mod recordings;
 pub mod redis;
+pub mod search;
 mod session;
 pub mod ssh;
 
@@ -121,6 +122,31 @@ pub struct Config {
     #[arg(long, env = "LIMEN_REDIS_CREDENTIALS_FILE")]
     pub redis_credentials_file: Option<PathBuf>,
 
+    /// CA bundle for TLS to `OpenSearch` and Elasticsearch targets (for Amazon
+    /// `OpenSearch` Service, the Amazon bundle; for Elastic Cloud, the system bundle).
+    #[arg(long, env = "LIMEN_SEARCH_CA_FILE")]
+    pub search_ca_file: Option<PathBuf>,
+
+    /// JSON file of credentials for search targets that don't use `SigV4`:
+    /// `{"<resource>": {"<engine role>": {"basic": {"username": "...", "password": "..."}}}}`
+    /// (or `api_key`, `bearer`, `client_cert_file` and `client_key_file`).
+    /// Read at start-up.
+    #[arg(long, env = "LIMEN_SEARCH_CREDENTIALS_FILE")]
+    pub search_credentials_file: Option<PathBuf>,
+
+    /// The most a search request body may take in memory when the worker has
+    /// to read it (`_bulk`, searches, and everything on a `SigV4` target).
+    /// Larger ones are answered 413. Memory per session is up to this, twice
+    /// for a gzip body.
+    #[arg(long, env = "LIMEN_SEARCH_MAX_BODY_BYTES", default_value_t = search::target::DEFAULT_MAX_BODY)]
+    pub search_max_body_bytes: usize,
+
+    /// A search connection with no request for this long ends (and frees its
+    /// session slot and its connection to the engine). Clients that pool
+    /// connections open a new one when they need it.
+    #[arg(long, env = "LIMEN_SEARCH_IDLE_TIMEOUT", value_parser = parse_duration, default_value = "1h")]
+    pub search_idle_timeout: Duration,
+
     /// Most sessions this worker serves at once. Over it, new sessions are
     /// refused (`resource_exhausted`), and proxies stop choosing this worker
     /// until it has room. 0: no cap.
@@ -215,6 +241,7 @@ pub struct Worker {
     pub(crate) nonces: Arc<limen_session::grant::NonceCache>,
     pub(crate) audit: limen_audit::Emitter,
     pub(crate) redis: Arc<redis::target::Settings>,
+    pub(crate) search: Arc<search::target::Settings>,
     pub(crate) db_registry: Arc<db::Registry>,
     aws: Arc<tokio::sync::OnceCell<Result<db::iam::CredentialSource, String>>>,
     /// The cluster this worker serves, if it is a kube worker (ADR-0038).
@@ -273,6 +300,12 @@ impl Worker {
             config.redis_credentials_file.as_deref(),
         )?;
         let kube = config.kube.resolve()?.map(Arc::new);
+        let search = search::target::Settings::load(
+            config.search_ca_file.as_deref(),
+            config.search_credentials_file.as_deref(),
+        )?
+        .with_max_body(config.search_max_body_bytes)
+        .with_idle(config.search_idle_timeout);
         let (tx, rx) = watch::channel(Arc::new(creds));
         let sessions = SessionSlots::new(config.max_sessions);
         Ok((
@@ -288,6 +321,7 @@ impl Worker {
                 nonces: Arc::default(),
                 audit,
                 redis: Arc::new(redis),
+                search: Arc::new(search),
                 db_registry: Arc::default(),
                 aws: Arc::default(),
                 kube,

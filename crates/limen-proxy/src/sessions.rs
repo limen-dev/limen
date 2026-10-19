@@ -42,6 +42,7 @@ pub(crate) enum Protocol {
     Db,
     Redis,
     Mongo,
+    Search,
 }
 
 impl Protocol {
@@ -51,13 +52,14 @@ impl Protocol {
             Protocol::Db => "db",
             Protocol::Redis => "redis",
             Protocol::Mongo => "mongo",
+            Protocol::Search => "search",
         }
     }
 
     /// The audit field that names the identity used upstream.
     fn principal_field(self) -> &'static str {
         match self {
-            Protocol::Ssh | Protocol::Db => "login",
+            Protocol::Ssh | Protocol::Db | Protocol::Search => "login",
             Protocol::Redis => "redis_user",
             Protocol::Mongo => "mongo_role",
         }
@@ -311,6 +313,24 @@ fn resolve_principal(
             "redis".to_owned(),
             String::new(),
         ),
+        Protocol::Search => {
+            let refused = || {
+                denied(format!(
+                    "access denied to {}@{}",
+                    request.principal, request.resource
+                ))
+            };
+            let resource = policy.resource(&request.resource).ok_or_else(refused)?;
+            let kind = resource.spec.kinds()[0];
+            if !matches!(kind, ResourceKind::Opensearch | ResourceKind::Elasticsearch) {
+                return Err(refused());
+            }
+            (
+                Principal::SearchRole(request.principal.clone()),
+                kind.as_str().to_owned(),
+                String::new(),
+            )
+        }
         Protocol::Db | Protocol::Mongo => {
             let refused = || {
                 denied(format!(

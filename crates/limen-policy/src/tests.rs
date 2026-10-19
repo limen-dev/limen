@@ -149,6 +149,8 @@ fn accessible_lists_resources_and_principals() {
             ("catalog-x509", vec!["limen-read"]),
             ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
+            ("search-opensearch", vec!["limen-read"]),
+            ("search-staging", vec!["limen-read"]),
             ("web-staging-1", vec!["ubuntu"])
         ]
     );
@@ -164,10 +166,13 @@ fn accessible_lists_resources_and_principals() {
             "catalog-atlas",
             "catalog-staging",
             "catalog-x509",
+            "logs-opensearch",
             "orders-mysql-staging",
             "orders-prod",
             "orders-staging",
             "reviews-docdb",
+            "search-opensearch",
+            "search-staging",
             "web-staging-1"
         ]
     );
@@ -213,7 +218,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 11);
+    assert_eq!(diff.removed.len(), 14);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
@@ -364,13 +369,14 @@ mod planned_integrations {
             )
             .is_allowed()
         );
-        assert!(
-            eval(
-                "logs-opensearch",
-                Principal::SearchRole("limen-read".into())
-            )
-            .is_allowed()
-        );
+        let search = policy
+            .evaluate(&AccessRequest {
+                roles: &roles(&["sre"]),
+                resource: "logs-opensearch",
+                principal: Principal::SearchRole("limen-write".into()),
+            })
+            .is_allowed();
+        assert!(search, "search moved out of the planned file in Phase 10");
         assert!(eval("orders-mq", Principal::MqUser("limen-admin".into())).is_allowed());
         assert!(
             eval(
@@ -957,4 +963,116 @@ spec:
         assert!(!eval("limen-read", "billing"), "only the granted databases");
         assert!(eval("limen-rw", "billing"));
     }
+}
+
+const SEARCH_POLICY: &str = r#"
+kind: resource
+version: v1
+metadata: { name: logs, labels: { env: staging } }
+spec:
+  elasticsearch: { endpoint: "es:9200" }
+---
+kind: role
+version: v1
+metadata: { name: logs-reader }
+spec:
+  allow:
+    - resources: { kind: [elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read], indices: ["logs-*"] }
+---
+kind: role
+version: v1
+metadata: { name: logs-writer }
+spec:
+  allow:
+    - resources: { kind: [elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read, limen-write], classes: [read, write] }
+"#;
+
+fn search_policy() -> Policy {
+    Policy::parse_yaml([("p.yaml", SEARCH_POLICY)]).expect("valid search policy")
+}
+
+#[test]
+fn search_grants_come_from_every_role_that_names_the_engine_role() {
+    let p = search_policy();
+    let both = roles(&["logs-reader", "logs-writer"]);
+    let grants = p.search_grants(&both, "logs", "limen-read");
+    assert_eq!(grants.len(), 2);
+    // The default is read only; classes widen it.
+    assert_eq!(grants[0].allowed_classes(), [SearchClass::Read]);
+    assert_eq!(
+        grants[1].allowed_classes(),
+        [SearchClass::Read, SearchClass::Write]
+    );
+    assert_eq!(grants[0].indices, ["logs-*"]);
+    // Only the writer names limen-write; nobody else gets it.
+    assert_eq!(p.search_grants(&both, "logs", "limen-write").len(), 1);
+    let none = |g: Vec<SearchGrant>| g.is_empty().then_some(()).ok_or(g.len());
+    assert_eq!(
+        none(p.search_grants(&roles(&["logs-reader"]), "logs", "limen-write")),
+        Ok(())
+    );
+    assert_eq!(none(p.search_grants(&both, "ghost", "limen-read")), Ok(()));
+}
+
+#[test]
+fn search_access_is_decided_by_the_engine_role() {
+    let p = search_policy();
+    let r = roles(&["logs-reader"]);
+    let eval = |role: &str| {
+        p.evaluate(&AccessRequest {
+            roles: &r,
+            resource: "logs",
+            principal: Principal::SearchRole(role.into()),
+        })
+        .is_allowed()
+    };
+    assert!(eval("limen-read"));
+    assert!(!eval("limen-write"));
+}
+
+#[test]
+fn search_grants_reject_what_the_worker_could_not_enforce() {
+    for bad in [
+        "Logs-*",
+        "logs,other",
+        "-logs",
+        "remote:logs",
+        "a/b",
+        "",
+        "logs *",
+    ] {
+        let yaml = format!(
+            "kind: role\nversion: v1\nmetadata: {{name: a}}\nspec:\n  allow:\n    - resources: {{kind: [elasticsearch]}}\n      search: {{roles: [r], indices: ['{bad}']}}"
+        );
+        assert!(
+            Policy::parse_yaml([("p.yaml", yaml.as_str())]).is_err(),
+            "{bad:?} was accepted"
+        );
+    }
+    let unknown_class = "kind: role\nversion: v1\nmetadata: {name: a}\nspec:\n  allow:\n    - resources: {kind: [elasticsearch]}\n      search: {roles: [r], classes: [superuser]}";
+    assert!(Policy::parse_yaml([("p.yaml", unknown_class)]).is_err());
+}
+
+#[test]
+fn a_search_target_with_defaults_serializes_as_before() {
+    // Components from before Phase 10 reject unknown fields, so the new ones
+    // stay out of the snapshot until someone sets them.
+    let p = search_policy();
+    let json = serde_json::to_string(&p.resource("logs").expect("resource").spec).expect("json");
+    assert!(
+        !json.contains("tls") && !json.contains("audit") && !json.contains("serverless"),
+        "{json}"
+    );
+    let custom = "kind: resource\nversion: v1\nmetadata: {name: c}\nspec:\n  opensearch: {endpoint: 'h:9200', tls: false, audit: {redact_ids: true}}";
+    let p = Policy::parse_yaml([("p.yaml", custom)]).expect("valid");
+    let t = p
+        .resource("c")
+        .expect("resource")
+        .spec
+        .opensearch
+        .clone()
+        .expect("target");
+    assert!(!t.tls && t.audit.redact_ids && !t.audit.log_bodies);
 }

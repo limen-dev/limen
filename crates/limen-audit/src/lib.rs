@@ -46,6 +46,13 @@ pub enum EventKind {
     /// The worker created, changed, or found drift in a `limen_*` database role.
     #[serde(rename = "db.bootstrap")]
     DbBootstrap,
+    /// A request sent to `OpenSearch` or Elasticsearch. Written before the
+    /// request is forwarded (ADR-0036).
+    #[serde(rename = "search.request")]
+    SearchRequest,
+    /// How a `search.request` ended: status, duration, bytes. `data.request_id` is its event id.
+    #[serde(rename = "search.response")]
+    SearchResponse,
     #[serde(rename = "redis.command")]
     RedisCommand,
     /// A command sent to a MongoDB-compatible server, or one the worker

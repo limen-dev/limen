@@ -79,6 +79,8 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             "catalog-x509",
             "orders-mysql-staging",
             "orders-staging",
+            "search-opensearch",
+            "search-staging",
             "web-staging-1"
         ]
     );
