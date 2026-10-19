@@ -247,6 +247,7 @@ services:
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
+      - mongo-worker:/etc/limen/mongo:ro
 
   worker-1:
     container_name: limen-worker-1${LIMEN_SUFFIX:-}
@@ -258,6 +259,7 @@ services:
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
+      - mongo-worker:/etc/limen/mongo:ro
 
   worker-2:
     container_name: limen-worker-2${LIMEN_SUFFIX:-}
@@ -269,11 +271,13 @@ services:
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
+      - mongo-worker:/etc/limen/mongo:ro
 
 volumes:
   postgres: {}
   db-tls: {}
   db-secrets: {}
+  mongo-worker: {}
   s3-data: {}
   cp-ca: {}
   ca-public: {}

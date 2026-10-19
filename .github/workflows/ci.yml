@@ -231,9 +231,10 @@ jobs:
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/config/s3/s3.json:/etc/seaweedfs/s3.json:ro"
           "$SEAWEEDFS_IMAGE" server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
-      # PostgreSQL and MySQL for the database tests (Phase 6): started with plain
-      # docker like S3, and it exports LIMEN_TEST_PG_TARGET, LIMEN_TEST_MYSQL_TARGET,
-      # and LIMEN_TEST_PG_CA_FILE to the steps below.
+      # PostgreSQL and MySQL for the database tests (Phase 6) and MongoDB (Phase 9):
+      # started with plain docker like S3, and it exports LIMEN_TEST_PG_TARGET,
+      # LIMEN_TEST_MYSQL_TARGET, LIMEN_TEST_PG_CA_FILE, LIMEN_TEST_MONGO_TARGET,
+      # LIMEN_TEST_MONGO_CA_FILE, and LIMEN_TEST_MONGO_CLIENT_PEM to the steps below.
       - name: Start the database targets
         run: scripts/ci-db-targets.sh start
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2

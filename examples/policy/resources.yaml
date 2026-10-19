@@ -95,3 +95,68 @@ spec:
   # Valkey speaks the same protocol; the dev stack runs one next to Redis.
   redis: { endpoint: "valkey-target:6379", iam_auth: false, tls: false }
   worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: catalog-staging
+  labels: { env: staging, team: catalog }
+spec:
+  # Dev: SCRAM-SHA-256 with a password the worker holds (one file per role in
+  # credentials_dir) and TLS verified against the compose CA. For X.509, set
+  # `auth: x509` and put `<role>.pem` (certificate and key) in credentials_dir.
+  mongodb:
+    endpoint: "mongo-target:27017"
+    default_database: orders
+    credentials_dir: /etc/limen/mongo/catalog-staging
+    tls_ca_file: /etc/limen/mongo/ca.pem
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: catalog-x509
+  labels: { env: staging, team: catalog }
+spec:
+  # The same server, logged in with a client certificate: `<role>.pem`
+  # (certificate and key) in credentials_dir. The role name only selects the file.
+  mongodb:
+    endpoint: "mongo-target:27017"
+    auth: x509
+    default_database: orders
+    credentials_dir: /etc/limen/mongo/x509
+    tls_ca_file: /etc/limen/mongo/ca.pem
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: catalog-atlas
+  labels: { env: prod, team: catalog }
+spec:
+  # Atlas: list a replica set member (the worker follows the primary); the CA
+  # is the system bundle. Unverified against a real Atlas cluster.
+  mongodb:
+    endpoint: "catalog-shard-00-00.example.mongodb.net:27017"
+    flavor: atlas
+    auth: x509
+    default_database: shop
+    credentials_dir: /etc/limen/mongo/catalog-atlas
+    tls_ca_file: /etc/ssl/certs/ca-certificates.crt
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata:
+  name: reviews-docdb
+  labels: { env: prod, team: catalog }
+spec:
+  # DocumentDB: TLS with the AWS global bundle and IAM (`MONGODB-AWS`). The
+  # worker's IAM identity is the login. Unverified against a real cluster.
+  mongodb:
+    endpoint: "reviews.cluster-example.eu-west-1.docdb.amazonaws.com:27017"
+    flavor: documentdb
+    auth: aws
+    default_database: reviews
+    tls_ca_file: /etc/limen/mongo/global-bundle.pem
+  worker_selector: { pool: prod }

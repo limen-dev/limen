@@ -13,6 +13,7 @@
 # ssh      OpenSSH host that trusts Limen certificates          stacks/ssh.yml
 # db       PostgreSQL and MySQL with TLS, roles bootstrapped    stacks/db.yml
 # redis    Redis and Valkey with ACL users                      stacks/redis.yml
+# mongo    MongoDB with TLS, SCRAM and X.509                    stacks/mongo.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
@@ -38,7 +39,7 @@ while [ $# -gt 0 ]; do
     --scale) want_scale=true ;;
     --check) check=true ;;
     --stacks) picked="${2:?--stacks needs a comma-separated list, or none}"; shift ;;
-    -h|--help) sed -n 2,24p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n 2,25p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -144,6 +145,11 @@ if has redis; then
   wait_for "valkey" "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning ping
   "${compose[@]}" exec -T redis-target redis-cli --user limen-rw --pass rw-dev-only --no-auth-warning SET app:greeting hello >/dev/null
   "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning SET app:greeting hello-from-valkey >/dev/null
+fi
+
+if has mongo; then
+  step "MongoDB"
+  wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
 fi
 
 ui_done "Limen is ready"

@@ -29,7 +29,7 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
   </tr>
   <tr>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>Amazon EKS and any cluster<br>impersonation, recorded exec</sub><br><sub>✅ Working on kind<br>⚠️ not yet on EKS</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt="MongoDB"><br><br><b>MongoDB</b><br><sub>any server · Atlas · DocumentDB<br>SCRAM, X.509, IAM</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/12">Phase 9</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt="MongoDB"><br><br><b>MongoDB</b><br><sub>any server · Atlas · DocumentDB<br>SCRAM, X.509, IAM · values redacted in audit</sub><br><sub>✅ Working (Atlas, DocumentDB, and IAM unverified)</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opensearch" height="48" alt="OpenSearch"><br><br><b>OpenSearch</b><br><sub>Amazon OpenSearch Service<br>index-aware policy</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/13">Phase 10</a></sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt="Elasticsearch"></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>index-aware policy</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/13">Phase 10</a></sub><br><br></td>
   </tr>
@@ -149,7 +149,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
 | 7 | Redis and Valkey | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/10) (ElastiCache IAM unverified) |
 | 8 | Kubernetes (EKS) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/11) (verified on kind, not yet on EKS) |
-| 9 | MongoDB, Atlas, DocumentDB | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/12) |
+| 9 | MongoDB, Atlas, DocumentDB | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/12) (Atlas, DocumentDB, and IAM unverified) |
 | 10 | OpenSearch and Elasticsearch | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/13) |
 | 11 | RabbitMQ and Kafka | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/14) |
 | 12 | Internal web apps and TCP services | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
@@ -163,7 +163,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Kubernetes](docs/guides/kubernetes.md), and [bots for CI](docs/guides/bots.md)
+- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), and [bots for CI](docs/guides/bots.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs

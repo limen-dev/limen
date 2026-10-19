@@ -75,6 +75,8 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
         [
             "cache-staging",
             "cache-valkey",
+            "catalog-staging",
+            "catalog-x509",
             "orders-mysql-staging",
             "orders-staging",
             "web-staging-1"

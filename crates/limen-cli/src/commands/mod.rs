@@ -5,6 +5,7 @@ pub mod bot;
 pub mod db;
 pub mod kube;
 pub mod login;
+pub mod mongo;
 pub mod redis;
 pub mod ssh;
 

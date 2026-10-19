@@ -163,7 +163,7 @@ enum Command {
         #[command(subcommand)]
         command: KubeCommand,
     },
-    /// MongoDB, Atlas, and DocumentDB (planned, Phase 9).
+    /// MongoDB, Atlas, and DocumentDB: `limen mongo connect <resource>`.
     Mongo {
         #[command(subcommand)]
         command: MongoCommand,
@@ -264,15 +264,24 @@ enum KubeCommand {
 
 #[derive(Debug, Subcommand)]
 enum MongoCommand {
-    /// Open a local listener for mongosh and drivers.
+    /// Open a local listener that mongosh (or any MongoDB driver) connects to without a password.
     Connect {
         resource: String,
+        /// The MongoDB role to act as. Optional when policy allows only one.
         #[arg(long)]
         role: Option<String>,
+        /// The database to open. Defaults to the resource's default_database.
         #[arg(long)]
         database: Option<String>,
-        #[arg(long, value_name = "ADDR")]
+        /// Local address to listen on. Defaults to a free port on 127.0.0.1.
+        #[arg(long, value_name = "ADDR", conflicts_with = "socket")]
         listen: Option<String>,
+        /// Listen on a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+        #[arg(long, value_name = "PATH")]
+        socket: Option<std::path::PathBuf>,
+        /// Stop after this long with no connection, e.g. 30m. 0 never stops.
+        #[arg(long, value_name = "DURATION", default_value = "1h", value_parser = commands::redis::parse_idle)]
+        idle_timeout: std::time::Duration,
     },
 }
 
@@ -425,7 +434,28 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
             KubeCommand::Credentials => commands::kube::credentials(proxy),
         },
-        Command::Mongo { .. } => not_yet("limen mongo connect", "MongoDB access", "Phase 9"),
+        Command::Mongo {
+            command:
+                MongoCommand::Connect {
+                    resource,
+                    role,
+                    database,
+                    listen,
+                    socket,
+                    idle_timeout,
+                },
+        } => {
+            commands::mongo::connect(
+                proxy,
+                &resource,
+                role.as_deref(),
+                database.as_deref(),
+                listen.as_deref(),
+                socket.as_deref(),
+                idle_timeout,
+            )
+            .await
+        }
         Command::Search { .. } => not_yet("limen search connect", "search access", "Phase 10"),
         Command::Mq { .. } => not_yet("limen mq connect", "RabbitMQ access", "Phase 11"),
         Command::Kafka { .. } => not_yet("limen kafka connect", "Kafka access", "Phase 11"),
@@ -570,11 +600,34 @@ mod tests {
     }
 
     #[test]
+    fn mongo_connect_options_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen", "mongo", "connect"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["catalog", "--role", "limen-read", "--database", "orders"]).is_ok());
+        assert!(
+            ok(&[
+                "catalog",
+                "--listen",
+                "127.0.0.1:27018",
+                "--idle-timeout",
+                "30m"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["catalog", "--socket", "/tmp/limen/m.sock"]).is_ok());
+        assert!(ok(&["catalog", "--socket", "/tmp/s", "--listen", "127.0.0.1:1"]).is_err());
+        assert!(ok(&["catalog", "--idle-timeout", "soon"]).is_err());
+    }
+
+    #[test]
     fn planned_commands_say_when() {
-        let message = super::not_yet("limen mongo connect", "MongoDB access", "Phase 9")
+        let message = super::not_yet("limen search connect", "search access", "Phase 10")
             .expect_err("not available")
             .to_string();
-        assert!(message.contains("limen mongo connect") && message.contains("Phase 9"));
+        assert!(message.contains("limen search connect") && message.contains("Phase 10"));
     }
 
     #[test]

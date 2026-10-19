@@ -41,6 +41,7 @@ pub(crate) enum Protocol {
     Ssh,
     Db,
     Redis,
+    Mongo,
 }
 
 impl Protocol {
@@ -49,6 +50,7 @@ impl Protocol {
             Protocol::Ssh => "ssh",
             Protocol::Db => "db",
             Protocol::Redis => "redis",
+            Protocol::Mongo => "mongo",
         }
     }
 
@@ -57,7 +59,13 @@ impl Protocol {
         match self {
             Protocol::Ssh | Protocol::Db => "login",
             Protocol::Redis => "redis_user",
+            Protocol::Mongo => "mongo_role",
         }
+    }
+
+    /// Whether the request names a database to be checked.
+    fn has_database(self) -> bool {
+        matches!(self, Protocol::Db | Protocol::Mongo)
     }
 }
 
@@ -111,7 +119,7 @@ pub(crate) async fn handle(
         Err(denial) => {
             if denial.audit {
                 let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
-                if protocol == Protocol::Db {
+                if protocol.has_database() {
                     data["database"] = json!(request.database);
                 }
                 if let Some(code) = denial.code {
@@ -275,6 +283,17 @@ pub(crate) type Inbound = tonic::Streaming<TunnelFrame>;
 /// the proxy holding the tunnel).
 pub(crate) type Slot = Option<SessionSlot>;
 
+/// The client's group id for the sessions of one run, if it is well formed:
+/// it only labels rows in the console, so anything else is dropped, not refused.
+fn connection_group(group: &str) -> Option<&str> {
+    (!group.is_empty()
+        && group.len() <= 64
+        && group
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    .then_some(group)
+}
+
 /// The principal, resource kind, and database a request names.
 fn resolve_principal(
     policy: &limen_policy::Policy,
@@ -292,7 +311,7 @@ fn resolve_principal(
             "redis".to_owned(),
             String::new(),
         ),
-        Protocol::Db => {
+        Protocol::Db | Protocol::Mongo => {
             let refused = || {
                 denied(format!(
                     "access denied to {}@{}",
@@ -301,16 +320,28 @@ fn resolve_principal(
             };
             let resource = policy.resource(&request.resource).ok_or_else(refused)?;
             let kind = resource.spec.kinds()[0];
-            let target = match kind {
-                ResourceKind::Postgres => resource.spec.postgres.as_ref(),
-                ResourceKind::Mysql => resource.spec.mysql.as_ref(),
-                ResourceKind::Redshift => resource.spec.redshift.as_ref(),
+            // Each protocol serves its own kinds: a `limen db connect` can't
+            // open a MongoDB resource, and the other way round.
+            let spec = &resource.spec;
+            let default_database = match (protocol, kind) {
+                (Protocol::Db, ResourceKind::Postgres) => {
+                    spec.postgres.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Db, ResourceKind::Mysql) => {
+                    spec.mysql.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Db, ResourceKind::Redshift) => {
+                    spec.redshift.as_ref().map(|t| t.default_database.clone())
+                }
+                (Protocol::Mongo, ResourceKind::Mongodb) => {
+                    spec.mongodb.as_ref().map(|t| t.default_database.clone())
+                }
                 _ => None,
             }
             .ok_or_else(refused)?;
             let database = if request.database.is_empty() {
-                match &target.default_database {
-                    Some(d) => d.clone(),
+                match default_database {
+                    Some(d) => d,
                     None => {
                         return Err(failed(
                             "name a database: this resource has no default (--database)",
@@ -320,14 +351,18 @@ fn resolve_principal(
             } else {
                 request.database.clone()
             };
-            (
+            let principal = if protocol == Protocol::Mongo {
+                Principal::MongoRole {
+                    role: request.principal.clone(),
+                    database: database.clone(),
+                }
+            } else {
                 Principal::DbRole {
                     role: request.principal.clone(),
                     database: database.clone(),
-                },
-                kind.as_str().to_owned(),
-                database,
-            )
+                }
+            };
+            (principal, kind.as_str().to_owned(), database)
         }
     })
 }
@@ -626,9 +661,11 @@ async fn relay(
 ) {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
-    // Redis sessions name the upstream identity `redis_user`, not `login`.
+    // Redis and MongoDB sessions name the upstream identity differently.
     let principal_field = if kind == "redis" {
         "redis_user"
+    } else if kind == "mongodb" {
+        "mongo_role"
     } else {
         "login"
     };
@@ -641,6 +678,9 @@ async fn relay(
     add_names(&mut start, worker, proxy.name());
     if !database.is_empty() {
         start["database"] = json!(database);
+    }
+    if let Some(group) = connection_group(&request.group) {
+        start["group"] = json!(group);
     }
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
@@ -795,4 +835,19 @@ async fn relay(
         tracing::error!(error = %e, "failed to audit session end");
     }
     tracing::info!(session = %session_id, "session ended");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connection_group;
+
+    #[test]
+    fn group_ids_are_labels_only() {
+        assert_eq!(connection_group("0a1b-2C"), Some("0a1b-2C"));
+        assert_eq!(connection_group(""), None);
+        assert_eq!(connection_group("has space"), None);
+        assert_eq!(connection_group("<script>"), None);
+        assert_eq!(connection_group(&"a".repeat(65)), None);
+        assert!(connection_group(&"a".repeat(64)).is_some());
+    }
 }

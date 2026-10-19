@@ -6,7 +6,7 @@
   <tbody>
   {% for s in sessions %}
     <tr>
-      <td><div class="kind-cell"><span class="kind {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}{% if s.connections > 1 %} · {{ s.connections }} connections{% endif %}</div></div></div></td>
       <td>{{ s.user }}{% if s.bot %} <span class="pill bot">bot</span>{% endif %}</td>
       <td class="nowrap">{{ s.started }}</td>
       <td>{{ s.duration }}</td>

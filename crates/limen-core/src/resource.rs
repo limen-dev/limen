@@ -74,8 +74,9 @@ impl ResourceKind {
     }
 
     /// The command that opens this kind, and the phase that delivers it. SSH,
-    /// the SQL databases, and Redis are served; the other kinds can be written
-    /// in policy and listed, but nothing serves them yet (ADR-0018, ADR-0022).
+    /// the SQL databases, Redis, Kubernetes, and MongoDB are served; the other kinds can be
+    /// written in policy and listed, but nothing serves them yet (ADR-0018,
+    /// ADR-0022).
     #[must_use]
     pub fn access(self) -> Access {
         let (command, planned) = match self {
@@ -85,7 +86,7 @@ impl ResourceKind {
             }
             ResourceKind::Redis => ("limen redis connect {name}", None),
             ResourceKind::Kubernetes => ("limen kube login {name}", None),
-            ResourceKind::Mongodb => ("limen mongo connect {name}", Some("Phase 9")),
+            ResourceKind::Mongodb => ("limen mongo connect {name}", None),
             ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
                 ("limen search connect {name}", Some("Phase 10"))
             }
@@ -119,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_the_sql_databases_redis_and_kubernetes_are_available_today() {
+    fn ssh_the_sql_databases_redis_kubernetes_and_mongodb_are_available_today() {
         let available: Vec<_> = ResourceKind::ALL
             .into_iter()
             .filter(|k| k.is_available())
@@ -132,7 +133,8 @@ mod tests {
                 ResourceKind::Mysql,
                 ResourceKind::Redshift,
                 ResourceKind::Redis,
-                ResourceKind::Kubernetes
+                ResourceKind::Kubernetes,
+                ResourceKind::Mongodb
             ]
         );
     }

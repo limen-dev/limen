@@ -170,8 +170,11 @@ services:
       # Phase 6: the database CA and one password file per database role (filled by the db stack).
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
+      # Phase 9: the MongoDB CA, password files and client certificate (filled by the mongo stack).
+      - mongo-worker:/etc/limen/mongo:ro
 
 volumes:
+  mongo-worker: {}
   db-secrets: {}
   db-tls: {}
   postgres: {}

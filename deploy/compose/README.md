@@ -26,7 +26,7 @@ The scripts are plain bash, written for macOS (tested) and Linux (untested). On 
 deploy/compose/setup.sh
 ```
 
-It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with the ports in use, the command for each enabled resource (SSH, PostgreSQL, MySQL, Redis, Kubernetes), and the CLI sign-in and console URL.
+It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with the ports in use, the command for each enabled resource (SSH, PostgreSQL, MySQL, Redis, MongoDB, Kubernetes), and the CLI sign-in and console URL.
 
 Then log in as the developer and try a resource:
 
@@ -91,7 +91,7 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  observability.yml  bots.yml  kube.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  observability.yml  bots.yml  kube.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists)
@@ -113,6 +113,7 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `ssh` | `stacks/ssh.yml` | `sshd-target` |
 | `db` | `stacks/db.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`), the role bootstrap |
 | `redis` | `stacks/redis.yml` | `redis-target`, `valkey-target` (ACL users) |
+| `mongo` | `stacks/mongo.yml` | `mongo-target` (MongoDB 8 with TLS, SCRAM and X.509, seeded `orders` and `billing`) and the credentials the worker holds |
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
 | `kube` | `stacks/kube.yml` | `kubernetes` (a k3s cluster in one privileged container, so it belongs to the project and `down -v` removes it) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
@@ -140,6 +141,7 @@ demos/demo-phase2.sh          # end to end with OpenSSH, including a control pla
 demos/demo-phase3.sh          # audit to S3 and Datadog, sink outage, tamper check, Grafana
 demos/demo-phase35.sh         # web console, locking a user, ending a session
 demos/demo-phase7.sh          # Redis and Valkey through limen redis connect (own project and ports)
+demos/demo-phase9.sh          # MongoDB through limen mongo connect and mongosh (own project and ports)
 ```
 
 By hand, after `limen admin apply examples/policy`:
@@ -270,3 +272,13 @@ It asserts that the long session outlasted all of this without a stall, every ne
 The demo runs its own project (`limen-redis`, the core plus `stacks/redis.yml`) with its own volumes and host ports (proxy 33443/33444, Dex 35556, control plane health 33081, S3 38333), so it runs next to the dev stack. The stack adds a Redis 7.4 and a Valkey 8.0 target with the ACL in `config/targets/redis/users.acl`, and gives the worker the matching passwords from `config/targets/redis/credentials.json` (dev only). `demos/demo-phase7.sh` builds and starts it, seeds keys, and checks the exit criteria with `redis-cli` (or `config/targets/redis/resp-client.py` when `redis-cli` isn't installed). Stop it with `docker compose -p limen-redis down -v`. `scripts/dev-login.sh` takes `LIMEN_DEX_URL` (default `http://localhost:5556`) for a stack whose Dex has another port.
 
 `demos/demo-phase7.sh --scenarios` runs 26 more scenarios on the same stack, after the walkthrough, against the same targets plus a TLS-only Redis (RESP3, 20 MiB values, 60,000-command pipelines, refusals inside pipelines and `MULTI`, Pub/Sub, key-limit escapes, malformed input, 16 parallel sessions, a target dying mid-session, locking a user, a control plane outage with audit catching up, unix sockets, the idle timeout, secrets in logs and audit). Give scenario names after `--scenarios` to run only those whose name contains them; add `--down` to remove the stack afterwards. It is the same project (`limen-redis`) and ports as the demo; set `LIMEN_REDIS_PROJECT` and the `LIMEN_REDIS_*_PORT` variables to run another copy beside it.
+
+## MongoDB (Phase 9)
+
+`stacks/mongo.yml` (profile `mongo`) adds a MongoDB 8 target with TLS from a throwaway CA, SCRAM-SHA-256/SHA-1 and X.509 enabled, seeded by `config/targets/mongo/init.js` with `orders` and `billing`, the users `limen-read` and `limen-rw`, and an X.509 user for the worker's client certificate. `gen-tls.sh` makes the certificates and `worker-creds.sh` gives the worker only what it needs (the CA, a password file per role, the client certificate, in the `mongo-worker` volume the Limen worker mounts at `/etc/limen/mongo`): the server's key stays in its own volume. Try it with `deploy/compose/setup.sh --stacks mongo`, then `limen mongo connect catalog-staging`.
+
+```sh
+demos/demo-phase9.sh          # mongosh through `limen mongo connect`, SCRAM, X.509, refusals, redacted audit, console list, lock
+```
+
+The demo needs `mongosh` on the PATH (mise installs it) and runs its own project (`limen-mongo`) on ports 37xxx, so it can run next to the dev stack. The same server runs in CI and for the tests: `scripts/ci-db-targets.sh start` starts it next to PostgreSQL and MySQL on `127.0.0.1:17017` and exports `LIMEN_TEST_MONGO_TARGET`, `LIMEN_TEST_MONGO_CA_FILE`, and `LIMEN_TEST_MONGO_CLIENT_PEM`.

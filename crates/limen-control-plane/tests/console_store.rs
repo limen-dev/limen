@@ -617,3 +617,182 @@ async fn a_logout_is_remembered_as_long_as_the_certificate_lives() {
         .expect("recent");
     assert_eq!(remembered, ["long-lived"]);
 }
+
+/// A MongoDB session has no recording; the console lists its commands (their
+/// shape, never values), how each ended, and the ones the worker refused,
+/// whatever order the events arrive in.
+#[tokio::test(flavor = "multi_thread")]
+async fn mongodb_sessions_list_their_commands() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let find = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "forward", "resource": "catalog", "mongo_role": "limen-read", "command": "find", "database": "orders", "collection": "customers", "summary": "{\"filter\":{\"email\":\"?\"}}", "redacted": true }),
+    );
+    let find_end = event(
+        EventKind::MongoCommandEnd,
+        s,
+        DEVELOPER,
+        json!({ "command_id": find.event_id, "status": "ok", "duration_ms": 12, "docs": 3 }),
+    );
+    let insert = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "forward", "command": "insert", "database": "orders", "collection": "customers", "summary": "{\"documents\":{\"count\":1}}" }),
+    );
+    let insert_end = event(
+        EventKind::MongoCommandEnd,
+        s,
+        DEVELOPER,
+        json!({ "command_id": insert.event_id, "status": "error", "duration_ms": 3, "error_code": 13, "error_code_name": "Unauthorized" }),
+    );
+    let refused = event(
+        EventKind::MongoCommand,
+        s,
+        DEVELOPER,
+        json!({ "protocol": "mongodb", "phase": "refused", "command": "find", "database": "billing", "reason": "database_not_granted", "error_code": 13 }),
+    );
+    // The end events arrive first, the batch is redelivered.
+    store::project_events(
+        &db,
+        &[find_end.clone(), insert_end.clone(), refused.clone()],
+    )
+    .await
+    .expect("first batch");
+    store::project_events(&db, &[find, insert, refused, find_end, insert_end])
+        .await
+        .expect("second batch and redelivery");
+
+    let list = store::db_statements(&db, s, 100).await.expect("commands");
+    assert_eq!(list.len(), 3);
+    let by = |text: &str| {
+        list.iter()
+            .find(|r| r.statement.as_deref() == Some(text))
+            .unwrap_or_else(|| panic!("no row {text:?} in {list:?}"))
+    };
+    let found = by(r#"orders.customers {"filter":{"email":"?"}}"#);
+    assert_eq!(found.status.as_deref(), Some("ok"));
+    assert_eq!((found.rows, found.duration_ms), (Some(3), Some(12)));
+    assert_eq!(found.statement_type.as_deref(), Some("find"));
+    let failed = by(r#"orders.customers {"documents":{"count":1}}"#);
+    assert_eq!(failed.status.as_deref(), Some("error"));
+    assert_eq!(failed.error_code.as_deref(), Some("Unauthorized"));
+    let denied = by("billing");
+    assert_eq!(denied.status.as_deref(), Some("denied"));
+    assert_eq!(denied.error.as_deref(), Some("database_not_granted"));
+
+    let (total, errors) = store::db_session_counts(&db, s).await.expect("counts");
+    assert_eq!((total, errors), (3, 2), "an error and a refusal");
+}
+
+/// A driver opens several connections per run. They share a group, and the
+/// console shows one row for the run, with the commands of all of them. The
+/// startup check (no traffic) isn't a connection, and a group id that names
+/// someone else's sessions merges nothing, since it comes from the client.
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_of_one_run_are_one_row() {
+    let Some(db) = fresh_db().await else { return };
+    let group = "0123456789abcdef0123456789abcdef";
+    let mongo_start = |s: Uuid, user: &str, group: Option<&str>| {
+        let mut data = json!({ "kind": "mongodb", "resource": "catalog", "mongo_role": "limen-read", "worker_id": "w1", "proxy_id": "p1" });
+        if let Some(group) = group {
+            data["group"] = json!(group);
+        }
+        event(EventKind::SessionStart, s, user, data)
+    };
+    let mongo_end = |s: Uuid, user: &str, bytes: u64| {
+        event(
+            EventKind::SessionEnd,
+            s,
+            user,
+            json!({ "kind": "mongodb", "resource": "catalog", "reason": "ended", "duration_ms": 1000, "bytes_in": bytes, "bytes_out": bytes }),
+        )
+    };
+    let command = |s: Uuid, user: &str, name: &str| {
+        event(
+            EventKind::MongoCommand,
+            s,
+            user,
+            json!({ "protocol": "mongodb", "phase": "forward", "command": name, "database": "orders", "summary": "{}" }),
+        )
+    };
+    let (probe, main, monitor, rtt) = (
+        Uuid::now_v7(),
+        Uuid::now_v7(),
+        Uuid::now_v7(),
+        Uuid::now_v7(),
+    );
+    let (other_user, ungrouped) = (Uuid::now_v7(), Uuid::now_v7());
+    let events = vec![
+        mongo_start(probe, DEVELOPER, Some(group)),
+        mongo_end(probe, DEVELOPER, 0),
+        mongo_start(main, DEVELOPER, Some(group)),
+        command(main, DEVELOPER, "find"),
+        mongo_end(main, DEVELOPER, 500),
+        mongo_start(monitor, DEVELOPER, Some(group)),
+        command(monitor, DEVELOPER, "hello"),
+        mongo_end(monitor, DEVELOPER, 300),
+        mongo_start(rtt, DEVELOPER, Some(group)),
+        mongo_end(rtt, DEVELOPER, 200),
+        mongo_start(other_user, GUEST, Some(group)),
+        command(other_user, GUEST, "insert"),
+        mongo_end(other_user, GUEST, 100),
+        mongo_start(ungrouped, DEVELOPER, None),
+        mongo_end(ungrouped, DEVELOPER, 100),
+    ];
+    store::project_events(&db, &events).await.expect("project");
+
+    let rows = |user: &str| {
+        let filter = SessionFilter {
+            username: Some(user.to_owned()),
+            limit: 50,
+            ..SessionFilter::default()
+        };
+        let db = db.clone();
+        async move { store::list_sessions(&db, &filter).await.expect("list") }
+    };
+    let mine = rows(DEVELOPER).await;
+    assert_eq!(
+        mine.len(),
+        2,
+        "one row for the run, one for the ungrouped: {mine:?}"
+    );
+    let run = mine.iter().find(|r| r.connections == 3).expect("the run");
+    assert_ne!(run.session_id, probe, "the empty startup check never leads");
+    let ungrouped_row = mine
+        .iter()
+        .find(|r| r.session_id == ungrouped)
+        .expect("ungrouped");
+    assert_eq!(ungrouped_row.connections, 1);
+
+    let theirs = rows(GUEST).await;
+    assert_eq!(
+        (theirs.len(), theirs[0].connections),
+        (1, 1),
+        "not merged across users"
+    );
+
+    let list = store::db_statements(&db, run.session_id, 100)
+        .await
+        .expect("commands");
+    let mut names: Vec<_> = list
+        .iter()
+        .filter_map(|r| r.statement_type.clone())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["find", "hello"],
+        "all the run's commands, none of the other user's"
+    );
+    assert_eq!(
+        store::db_session_counts(&db, run.session_id)
+            .await
+            .expect("counts")
+            .0,
+        2
+    );
+}

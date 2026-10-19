@@ -168,9 +168,17 @@ pub struct RedisGrant {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MongoGrant {
+    /// Names the worker has a credential for (`credentials_dir` on the
+    /// resource). With `x509` or `aws` they are labels for the identity the
+    /// worker holds (ADR-0035).
     pub roles: Vec<String>,
     #[serde(default = "all")]
     pub databases: Vec<String>,
+    /// Command names (case-insensitive) a session on this grant may not run,
+    /// for example `drop`, `dropDatabase`, `createIndexes`. A session may do
+    /// whatever any one grant that covers its database permits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_commands: Vec<String>,
 }
 
 /// `OpenSearch` or `Elasticsearch` roles the session may act as.
@@ -479,13 +487,70 @@ pub enum MongoFlavor {
     Documentdb,
 }
 
+/// How the worker logs in to a MongoDB-compatible server (ADR-0035).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MongoAuth {
+    /// `SCRAM-SHA-256` with the role's password from `credentials_dir`.
+    #[default]
+    Scram,
+    /// `SCRAM-SHA-1`, for servers without SHA-256 (`DocumentDB` 4.0).
+    ScramSha1,
+    /// `MONGODB-X509`: a client certificate and key per role in `credentials_dir`.
+    X509,
+    /// `MONGODB-AWS`: the worker's IAM identity (Atlas and `DocumentDB`).
+    /// Unverified against the real services.
+    Aws,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MongoTarget {
-    /// `host:port`.
+    /// `host:port`. A replica set member is enough: the worker follows the
+    /// primary the member names (no `mongodb+srv` resolution yet).
     pub endpoint: String,
     #[serde(default)]
     pub flavor: MongoFlavor,
+    #[serde(default)]
+    pub auth: MongoAuth,
+    /// The database to use when the user doesn't name one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_database: Option<String>,
+    /// Where the users are defined (`authSource`). Default `admin`, or
+    /// `$external` for `x509` and `aws`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_source: Option<String>,
+    /// A directory on the worker: `<role>` holds that role's password
+    /// (`scram`, `scram_sha1`) and `<role>.pem` its client certificate and
+    /// key (`x509`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credentials_dir: Option<String>,
+    /// PEM bundle that signs the server's certificate. Required: for Atlas
+    /// use the system bundle, for `DocumentDB` the AWS global bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<String>,
+    /// The name the server's certificate must carry, when it differs from
+    /// the host in `endpoint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
+    /// Talk to the server without TLS. Only for `standard` servers, and refused
+    /// unless the worker runs with `--allow-insecure-db-targets`.
+    #[serde(default)]
+    pub insecure_dev: bool,
+    /// Keep the values of commands in the audit trail (`audit.full_commands`).
+    /// The default replaces every value in a filter, document, or pipeline
+    /// with `?` and keeps the shape.
+    #[serde(default)]
+    pub full_commands: bool,
+    /// Most commands per second one session may send. Over it, commands wait
+    /// their turn (a burst of 100 passes at once), so a client in a loop can't
+    /// flood the audit trail. 0 is no limit.
+    #[serde(default = "default_commands_per_second")]
+    pub max_commands_per_second: u32,
+}
+
+fn default_commands_per_second() -> u32 {
+    500
 }
 
 /// `OpenSearch` or `Elasticsearch` over HTTP(S).

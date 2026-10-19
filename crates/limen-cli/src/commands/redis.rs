@@ -18,17 +18,17 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::{api, ui};
 
-trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
-enum Listener {
+pub(crate) enum Listener {
     Tcp(tokio::net::TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener),
 }
 
 impl Listener {
-    async fn accept(&self) -> std::io::Result<Box<dyn Io>> {
+    pub(crate) async fn accept(&self) -> std::io::Result<Box<dyn Io>> {
         match self {
             Listener::Tcp(l) => {
                 let (stream, _) = l.accept().await?;
@@ -88,7 +88,7 @@ async fn default_user(proxy: Option<&str>, resource: &str) -> anyhow::Result<Str
 
 /// A listener only the current user can reach: a socket file in a private directory.
 #[cfg(unix)]
-fn bind_socket(path: &Path) -> anyhow::Result<Listener> {
+pub(crate) fn bind_socket(path: &Path) -> anyhow::Result<Listener> {
     use std::os::unix::fs::{
         DirBuilderExt as _, FileTypeExt as _, MetadataExt as _, PermissionsExt as _,
     };
@@ -125,7 +125,7 @@ fn bind_socket(path: &Path) -> anyhow::Result<Listener> {
 }
 
 #[cfg(not(unix))]
-fn bind_socket(_: &Path) -> anyhow::Result<Listener> {
+pub(crate) fn bind_socket(_: &Path) -> anyhow::Result<Listener> {
     bail!("--socket needs a unix system; use --listen")
 }
 

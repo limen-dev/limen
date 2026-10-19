@@ -58,6 +58,13 @@
   "Allowed" means policy let the command through to the server; the server's own answer is not recorded. Redis sessions have no terminal recording; this is the audited record of what was sent. Key names are shown (hashed if the resource asks for it); values are never kept.
   {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
 </p>
+{% else if s.is_mongo %}
+<h2>Commands</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> command{% if statement_total != 1 %}s{% endif %}{% if statement_errors != 0 %}, <strong>{{ statement_errors }}</strong> refused or with an error{% endif %}.
+  MongoDB sessions have no terminal recording; this is the audited record of what was sent. Each command shows the shape of its filter, update, or pipeline with every value replaced by <code>?</code> (unless the resource keeps values); inserted documents are only counted; "rows" are documents. Results are never kept.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
 {% else %}
 <h2>Statements</h2>
 <p class="hint">
@@ -67,10 +74,10 @@
 </p>
 {% endif %}
 {% if statements.is_empty() %}
-<div class="card empty"><div>{% if s.is_redis %}No commands yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
+<div class="card empty"><div>{% if s.is_redis || s.is_mongo %}No commands yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_redis %}Command{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
+  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_redis || s.is_mongo %}Command{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
   <tbody>
   {% for st in statements %}
   <tr>
@@ -112,6 +119,7 @@
   <tr><th>Started</th><td>{{ s.started }}</td></tr>
   <tr><th>Ended</th><td>{{ s.ended }}</td></tr>
   <tr><th>Duration</th><td>{{ s.duration }}</td></tr>
+  {% if s.connections > 1 %}<tr><th>Connections</th><td>{{ s.connections }} <span class="muted">(opened by one client run; the commands below are all of them)</span></td></tr>{% endif %}
   <tr><th>Traffic</th><td>{{ s.bytes }}</td></tr>
   {% if chrome.is_admin %}
   <tr><th>Client address</th><td class="mono">{{ s.client_addr }}</td></tr>
