@@ -38,6 +38,7 @@ pub(crate) const WORKER_DRAIN: &str = "worker_drain";
 
 /// `guard` holds the session's slot under the worker's cap: dropped on any
 /// early return, otherwise moved into the session task.
+#[allow(clippy::too_many_lines)] // one arm per protocol
 pub(crate) async fn open(
     worker: Worker,
     guard: SessionGuard,
