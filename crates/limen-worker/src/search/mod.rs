@@ -19,13 +19,14 @@ mod tests;
 
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use http_body_util::{BodyExt as _, Limited};
 use hyper::body::{Bytes, Incoming};
 use hyper::header::{self, HeaderMap, HeaderName, HeaderValue};
 use hyper::{Request, Response, StatusCode};
-use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::rt::TokioIo;
 use limen_audit::Emitter;
 use limen_policy::{SearchGrant, SearchTarget};
 use serde_json::json;
@@ -192,6 +193,9 @@ struct Inner {
     plan: Plan,
     audit: Auditor,
     upstream: Mutex<Option<Upstream>>,
+    /// Requests started on this connection, and the ones still running.
+    started: std::sync::atomic::AtomicU64,
+    running: std::sync::atomic::AtomicUsize,
 }
 
 /// Serve the client on `stream` until it closes.
@@ -225,23 +229,46 @@ where
         plan,
         audit,
         upstream: Mutex::new(Some(upstream)),
+        started: std::sync::atomic::AtomicU64::new(0),
+        running: std::sync::atomic::AtomicUsize::new(0),
     });
+    let watched = Arc::clone(&inner);
     let service = hyper::service::service_fn(move |req| {
         let inner = Arc::clone(&inner);
-        async move { Ok::<_, Infallible>(handle(&inner, req).await) }
+        async move {
+            inner.started.fetch_add(1, Ordering::SeqCst);
+            inner.running.fetch_add(1, Ordering::SeqCst);
+            let response = handle(&inner, req).await;
+            inner.running.fetch_sub(1, Ordering::SeqCst);
+            Ok::<_, Infallible>(response)
+        }
     });
     let mut builder = hyper::server::conn::http1::Builder::new();
-    builder
-        .timer(TokioTimer::new())
-        .header_read_timeout(idle)
-        .max_buf_size(64 * 1024)
-        .max_headers(100);
+    builder.max_buf_size(64 * 1024).max_headers(100);
     // A client that goes away mid-request is the ordinary end of a session.
-    if let Err(e) = builder
-        .serve_connection(TokioIo::new(stream), service)
-        .await
-    {
-        tracing::debug!(error = %e, "search client connection ended");
+    // A connection that has served requests and then sits idle ends, which
+    // frees its slot; one that has not yet sent any (the CLI keeps one open to
+    // show the run as active) lasts until the session's own time limit.
+    let conn = builder.serve_connection(TokioIo::new(stream), service);
+    tokio::pin!(conn);
+    let idle_watch = async {
+        let mut seen = 0;
+        loop {
+            tokio::time::sleep(idle).await;
+            let now = watched.started.load(Ordering::SeqCst);
+            if now > 0 && now == seen && watched.running.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            seen = now;
+        }
+    };
+    tokio::select! {
+        r = &mut conn => {
+            if let Err(e) = r {
+                tracing::debug!(error = %e, "search client connection ended");
+            }
+        }
+        () = idle_watch => tracing::debug!("search connection idle; ending it"),
     }
     Ok(SessionOutcome::default())
 }

@@ -141,10 +141,22 @@ pub async fn connect(
         Some(r) => r.to_owned(),
         None => default_role(proxy, resource).await?,
     };
+    // Every session of this run carries one group, so the console shows them as
+    // one row.
+    let group = uuid::Uuid::new_v4().simple().to_string();
     // Fail now, with a clear message, if the login is gone, the proxy is
-    // unreachable, or policy refuses: the session this opens is dropped
-    // before it sends a request.
-    drop(super::ssh::open_session(proxy, limen_tunnel::alpn::SEARCH, resource, &role).await?);
+    // unreachable, or policy refuses. The session stays open, idle, until this
+    // command stops: it is what keeps the run active in the console while
+    // clients come and go.
+    let _anchor = super::ssh::open_session_in(
+        proxy,
+        limen_tunnel::alpn::SEARCH,
+        resource,
+        &role,
+        "",
+        &group,
+    )
+    .await?;
 
     let (listener, how) = match socket {
         Some(path) => (
@@ -181,6 +193,7 @@ pub async fn connect(
     let proxy: Option<Arc<str>> = proxy.map(Arc::from);
     let resource: Arc<str> = Arc::from(resource);
     let role: Arc<str> = Arc::from(role);
+    let group: Arc<str> = Arc::from(group);
     let active = Arc::new(AtomicUsize::new(0));
     // When the last connection ended (or we started), for the idle timeout.
     let quiet_since = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
@@ -189,11 +202,16 @@ pub async fn connect(
         tokio::select! {
             accepted = listener.accept() => {
                 let local = accepted.context("accepting a connection")?;
-                let (proxy, resource, role) = (proxy.clone(), Arc::clone(&resource), Arc::clone(&role));
+                let (proxy, resource, role, group) = (
+                    proxy.clone(),
+                    Arc::clone(&resource),
+                    Arc::clone(&role),
+                    Arc::clone(&group),
+                );
                 let (active, quiet_since) = (Arc::clone(&active), Arc::clone(&quiet_since));
                 active.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    session(local, proxy.as_deref(), &resource, &role).await;
+                    session(local, proxy.as_deref(), &resource, &role, &group).await;
                     *quiet_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
                         tokio::time::Instant::now();
                     active.fetch_sub(1, Ordering::SeqCst);
@@ -218,8 +236,16 @@ pub async fn connect(
 /// One local connection = one session. A refusal reaches the client as an
 /// HTTP error with an engine-shaped JSON body, so `curl` and the clients
 /// show why instead of "connection closed".
-async fn session(mut local: Box<dyn Io>, proxy: Option<&str>, resource: &str, role: &str) {
-    match super::ssh::open_session(proxy, limen_tunnel::alpn::SEARCH, resource, role).await {
+async fn session(
+    mut local: Box<dyn Io>,
+    proxy: Option<&str>,
+    resource: &str,
+    role: &str,
+    group: &str,
+) {
+    match super::ssh::open_session_in(proxy, limen_tunnel::alpn::SEARCH, resource, role, "", group)
+        .await
+    {
         Ok(mut upstream) => {
             let _ = tokio::io::copy_bidirectional(&mut local, &mut upstream).await;
         }

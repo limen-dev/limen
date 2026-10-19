@@ -267,6 +267,11 @@ assert all("body" not in e["data"] for e in req), "bodies are not logged by defa
 starts = [e for e in events if e["kind"] == "session.start" and e["data"]["kind"] in ("elasticsearch", "opensearch")]
 ends = {e["session_id"] for e in events if e["kind"] == "session.end" and e["data"]["kind"] in ("elasticsearch", "opensearch")}
 assert starts and any(s["session_id"] in ends for s in starts), "session.start/end for search"
+assert all(s["data"].get("group") for s in starts), "every search session carries its run's group"
+by_user = collections.defaultdict(set)
+for s in starts:
+    by_user[(s["user"], s["data"]["resource"], s["data"]["login"])].add(s["data"]["group"])
+assert all(len(g) == 1 for g in by_user.values()), f"one group per limen search connect run: {dict(by_user)}"
 for e in req[:4]:
     d = e["data"]
     print(f"  search.request {e['user']} {d['engine_role']}: {d['method']} {d['path']} [{d['class']}] indices={d['indices']}")

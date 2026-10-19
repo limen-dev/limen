@@ -970,6 +970,24 @@ async fn an_idle_connection_ends_and_frees_its_slot() {
 }
 
 #[tokio::test]
+async fn a_connection_that_has_sent_nothing_stays_open() {
+    // The CLI keeps one open to show its run as active.
+    let h = start(Options {
+        idle: Some(std::time::Duration::from_millis(200)),
+        ..Options::default()
+    })
+    .await;
+    let Harness { client, served, .. } = h;
+    let _keep = client;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(900), served)
+            .await
+            .is_err(),
+        "a connection with no request yet must not be ended as idle"
+    );
+}
+
+#[tokio::test]
 async fn closing_the_client_ends_the_session() {
     let h = start(Options::default()).await;
     let Harness { client, served, .. } = h;
