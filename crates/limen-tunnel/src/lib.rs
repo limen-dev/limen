@@ -22,6 +22,8 @@ pub mod alpn {
     pub const REDIS: &[u8] = b"limen-redis/1";
     /// CLI local listener → proxy, for MongoDB sessions.
     pub const MONGO: &[u8] = b"limen-mongo/1";
+    /// CLI local listener → proxy, for `OpenSearch` and Elasticsearch sessions.
+    pub const SEARCH: &[u8] = b"limen-search/1";
     /// CLI → proxy, for SSH sessions.
     pub const SSH: &[u8] = b"limen-ssh/1";
     /// CLI API (relayed to the control plane) and the Kubernetes API, routed by path.
@@ -30,7 +32,7 @@ pub mod alpn {
     pub const HTTP1: &[u8] = b"http/1.1";
     pub const HTTP11: &[u8] = b"http/1.1";
 
-    pub const ALL: [&[u8]; 8] = [TUNNEL, PEER, DB, REDIS, MONGO, SSH, H2, HTTP11];
+    pub const ALL: [&[u8]; 9] = [TUNNEL, PEER, DB, REDIS, MONGO, SEARCH, SSH, H2, HTTP11];
 }
 
 /// Refusals a worker makes before it reads anything from a session stream,

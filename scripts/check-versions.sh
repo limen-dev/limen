@@ -37,7 +37,7 @@ done < <(grep -rnE '^[[:space:]]*(-[[:space:]]*)?image:' deploy/compose/docker-c
 
 # 2. literals elsewhere
 allowed_re='^(deploy/compose/\.env|\.github/workflows/ci\.yml|scripts/check-versions\.sh)$'
-for var in POSTGRES_IMAGE DEX_IMAGE SEAWEEDFS_IMAGE KMS_IMAGE MYSQL_IMAGE MONGO_IMAGE REDIS_IMAGE VALKEY_IMAGE K3S_IMAGE TRINO_IMAGE GRAFANA_IMAGE ALPINE_IMAGE SSHD_BASE_IMAGE RUST_IMAGE DISTROLESS_IMAGE; do
+for var in POSTGRES_IMAGE DEX_IMAGE SEAWEEDFS_IMAGE KMS_IMAGE MYSQL_IMAGE MONGO_IMAGE ELASTICSEARCH_IMAGE OPENSEARCH_IMAGE REDIS_IMAGE VALKEY_IMAGE K3S_IMAGE TRINO_IMAGE GRAFANA_IMAGE ALPINE_IMAGE SSHD_BASE_IMAGE RUST_IMAGE DISTROLESS_IMAGE; do
   ref="${!var}"
   while IFS= read -r file; do
     [[ "$file" =~ $allowed_re ]] && continue

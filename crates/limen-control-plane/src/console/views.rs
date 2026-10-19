@@ -220,7 +220,9 @@ pub struct SessionView {
     pub is_redis: bool,
     /// A MongoDB session: no recording, but audited commands.
     pub is_mongo: bool,
-    /// Either of the two: the page lists what was sent instead of a recording.
+    /// An `OpenSearch` or Elasticsearch session: no recording, but audited requests.
+    pub is_search: bool,
+    /// Any of those: the page lists what was sent instead of a recording.
     pub has_statements: bool,
     /// One login's kubectl requests on a cluster: the page lists them.
     pub is_kubectl: bool,
@@ -277,9 +279,18 @@ impl From<&SessionRow> for SessionView {
             is_redis: s.kind.as_deref() == Some("redis"),
             is_kubectl: s.kind.as_deref() == Some("kubectl"),
             is_mongo: s.kind.as_deref() == Some("mongodb"),
+            is_search: matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")),
             has_statements: matches!(
                 s.kind.as_deref(),
-                Some("postgres" | "mysql" | "redshift" | "redis" | "mongodb")
+                Some(
+                    "postgres"
+                        | "mysql"
+                        | "redshift"
+                        | "redis"
+                        | "mongodb"
+                        | "opensearch"
+                        | "elasticsearch"
+                )
             ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
             recording_note: if s.active {
@@ -292,6 +303,8 @@ impl From<&SessionRow> for SessionView {
                 "MongoDB sessions have no terminal recording. Every command is in the audit trail as mongo.command events that carry this session id (in S3 and Datadog)."
             } else if s.kind.as_deref() == Some("redis") {
                 "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
+            } else if matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")) {
+                "Search sessions have no terminal recording. Every request is in the audit trail as search.request and search.response events that carry this session id (in S3 and Datadog)."
             } else {
                 "This session wasn't recorded."
             },

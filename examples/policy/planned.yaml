@@ -30,20 +30,6 @@ spec:
 ---
 kind: resource
 version: v1
-metadata: { name: logs-opensearch, labels: { env: prod, team: platform } }
-spec:
-  opensearch: { endpoint: "search-logs-example.eu-west-1.es.amazonaws.com:443", region: eu-west-1, aws: true }
-  worker_selector: { pool: prod }
----
-kind: resource
-version: v1
-metadata: { name: search-staging, labels: { env: staging, team: catalog } }
-spec:
-  elasticsearch: { endpoint: "elasticsearch-target:9200" }
-  worker_selector: { pool: dev }
----
-kind: resource
-version: v1
 metadata: { name: events-rabbit-staging, labels: { env: staging, team: platform } }
 spec:
   rabbitmq: { endpoint: "rabbitmq-target:5672" }
@@ -94,8 +80,6 @@ spec:
   allow:
     - resources: { kind: [mysql, redshift], labels: { env: [staging] } }
       db: { roles: [limen_readonly] }
-    - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
-      search: { roles: [limen-read] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
       mq: { users: [limen-consumer] }
     - resources: { kind: [kafka], labels: { env: [staging] } }
@@ -114,8 +98,6 @@ spec:
   allow:
     - resources: { kind: [mysql, redshift], labels: { "*": ["*"] } }
       db: { roles: [limen_readonly, limen_rw] }
-    - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
-      search: { roles: [limen-read, limen-write] }
     - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }
       mq: { users: [limen-consumer, limen-admin] }
     - resources: { kind: [kafka], labels: { "*": ["*"] } }

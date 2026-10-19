@@ -181,11 +181,52 @@ pub struct MongoGrant {
     pub deny_commands: Vec<String>,
 }
 
-/// `OpenSearch` or `Elasticsearch` roles the session may act as.
+/// What a search request does (ADR-0036). `Admin` is also what the worker
+/// calls any API it doesn't recognise, so new APIs start closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchClass {
+    Read,
+    Write,
+    Admin,
+}
+
+impl SearchClass {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SearchClass::Read => "read",
+            SearchClass::Write => "write",
+            SearchClass::Admin => "admin",
+        }
+    }
+}
+
+/// `OpenSearch` or `Elasticsearch` roles the session may act as, and what it
+/// may do as them (ADR-0036).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SearchGrant {
     pub roles: Vec<String>,
+    /// Request classes this grant allows. Empty means `read` only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<SearchClass>,
+    /// Index patterns (`*` only) a request may name. Empty means any index
+    /// that isn't hidden (a name starting with `.` needs a pattern that does).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub indices: Vec<String>,
+}
+
+impl SearchGrant {
+    /// The classes this grant allows, with the default applied.
+    #[must_use]
+    pub fn allowed_classes(&self) -> &[SearchClass] {
+        if self.classes.is_empty() {
+            &[SearchClass::Read]
+        } else {
+            &self.classes
+        }
+    }
 }
 
 /// Broker users (`RabbitMQ`, `Kafka`).
@@ -564,6 +605,37 @@ pub struct SearchTarget {
     /// An AWS-managed domain (`OpenSearch` Service), reached with `SigV4`.
     #[serde(default)]
     pub aws: bool,
+    /// `OpenSearch` Serverless: `SigV4` service `aoss` instead of `es`. Unverified.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub serverless: bool,
+    /// TLS toward the target. On by default; `false` is for local servers only.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub tls: bool,
+    /// Left out of the snapshot when default, so components from before
+    /// Phase 10 (which reject unknown fields) still read it during an upgrade.
+    #[serde(default, skip_serializing_if = "SearchAudit::is_default")]
+    pub audit: SearchAudit,
+}
+
+/// What a `search.request` event may contain (ADR-0036). Request bodies are
+/// never logged unless `log_bodies` is set, and never for security APIs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchAudit {
+    #[serde(default)]
+    pub log_bodies: bool,
+    /// Log query-string values, not only the parameter names.
+    #[serde(default)]
+    pub log_query: bool,
+    /// Replace document ids in the path with a hash.
+    #[serde(default)]
+    pub redact_ids: bool,
+}
+
+impl SearchAudit {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// `RabbitMQ` or `Kafka`.

@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 pub use model::Document;
 pub use model::{MongoGrant, RedisAudit, RedisGrant, RedisTarget};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
+pub use model::{SearchAudit, SearchClass, SearchGrant, SearchTarget};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
 pub const DEFAULT_CERT_TTL: Duration = Duration::from_mins(10);
@@ -500,6 +501,31 @@ impl Policy {
             .collect()
     }
 
+    /// The search grants that let `roles` act as `engine_role` on `resource`.
+    /// A session may do whatever any one of them permits (ADR-0036). Call it
+    /// only after [`Policy::evaluate`] allowed the request, since deny rules
+    /// aren't checked here.
+    #[must_use]
+    pub fn search_grants(
+        &self,
+        roles: &[String],
+        resource: &str,
+        engine_role: &str,
+    ) -> Vec<SearchGrant> {
+        let Some(resource) = self.resources.get(resource) else {
+            return Vec::new();
+        };
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(|rule| selector_matches(&rule.resources, resource))
+            .filter_map(|rule| rule.search.as_ref())
+            .filter(|g| g.roles.iter().any(|r| r == engine_role))
+            .cloned()
+            .collect()
+    }
+
     /// Resources the roles grant at least one principal on, with those
     /// principals (minus any explicitly denied). Sorted by name.
     #[must_use]
@@ -613,6 +639,18 @@ fn labels_match(selector: &BTreeMap<String, Vec<String>>, labels: &Labels) -> bo
             None => false,
         }
     })
+}
+
+/// An index name pattern as the engines spell index names, plus `*`. No
+/// commas, colons, slashes, or a leading `-` or `+` (those are engine-side
+/// expression syntax that policy doesn't accept).
+fn valid_index_pattern(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= MAX_NAME_LEN
+        && !p.starts_with(['-', '+', '_'])
+        && p.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-' | b'*')
+        })
 }
 
 fn rule_has_no_principals(rule: &Rule) -> bool {
@@ -756,6 +794,17 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                     format!("invalid value {k:?} in redis.keys"),
                 ));
             }
+        }
+        if let Some(search) = &rule.search
+            && let Some(bad) = search.indices.iter().find(|p| !valid_index_pattern(p))
+        {
+            return Err(invalid(
+                "role",
+                name,
+                format!(
+                    "search.indices entry {bad:?} must be lowercase letters, digits, and . _ - or *"
+                ),
+            ));
         }
         if let Some(db) = &rule.db {
             // The prefix is reserved: bootstrap never touches other roles, and

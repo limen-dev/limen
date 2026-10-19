@@ -14,6 +14,7 @@
 # db       PostgreSQL and MySQL with TLS, roles bootstrapped    stacks/db.yml
 # redis    Redis and Valkey with ACL users                      stacks/redis.yml
 # mongo    MongoDB with TLS, SCRAM and X.509                    stacks/mongo.yml
+# search   Elasticsearch 8 and OpenSearch 2 (security on)        stacks/search.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
@@ -150,6 +151,13 @@ fi
 if has mongo; then
   step "MongoDB"
   wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
+fi
+
+if has search; then
+  step "Elasticsearch and OpenSearch"
+  wait_for "elasticsearch" "${compose[@]}" exec -T elasticsearch-target curl -sf -u elastic:elastic-dev-only "localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
+  wait_for "opensearch" "${compose[@]}" exec -T opensearch-target curl -sf --cacert /usr/share/opensearch/config/root-ca.pem --resolve node-0.example.com:9200:127.0.0.1 -u admin:Dev-only-Opensearch-1 "https://node-0.example.com:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
+  "$here/config/targets/search/provision.sh" "elasticsearch-search-${LIMEN_ENV}" "opensearch-search-${LIMEN_ENV}" >/dev/null
 fi
 
 ui_done "Limen is ready"

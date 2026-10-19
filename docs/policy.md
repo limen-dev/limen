@@ -34,11 +34,11 @@ spec:
       kube: { groups: ["limen:view"] }
     - resources: { kind: [redis], labels: { env: [staging] } }
       redis: { users: [limen-ro], keys: ["app:*"], deny_commands: [KEYS] }
+    - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
+      search: { roles: [limen-read], indices: ["app-*"] }
     # Planned integrations (nothing serves them yet; see below):
     - resources: { kind: [mongodb], labels: { env: [staging] } }
       mongo: { roles: [limen-read], databases: ["*"] }
-    - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
-      search: { roles: [limen-read] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
       mq: { users: [limen-consumer] }
     - resources: { kind: [kafka], labels: { env: [staging] } }
@@ -77,7 +77,7 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), `opensearch` / `elasticsearch` (`endpoint`, `region`, `aws`, `serverless`, `tls`, and `audit` with `log_bodies`, `log_query` and `redact_ids`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
 
 ### Redis grants
 
@@ -94,13 +94,21 @@ With several roles granting the same user, the session may do whatever any one g
 
 `mongo: { roles: [...], databases: [...] }` names the MongoDB roles a role may act as (names the worker has a credential for in the resource's `credentials_dir`) and the databases they may use (`*` for all; deny rules apply). `deny_commands: [dropDatabase, drop]` refuses named commands (case-insensitive) on those databases. Enforced by the worker on every command (ADR-0035); the server's own grants for the MongoDB user are the second layer. With several grants covering the same database, a session may do whatever any one of them permits. Role names are `[A-Za-z0-9_.-]` (up to 64), and database names must be valid MongoDB database names. [The MongoDB guide](guides/mongodb.md) has the details.
 
+### Search grants
+
+`search: { roles: [...] }` names the engine roles (the worker's logins to OpenSearch or Elasticsearch) a role may act as. Optional limits, enforced by the worker on every request (ADR-0036):
+
+- `classes: [read, write, admin]`: what requests may do. Default: `read` only. The classes are independent (`write` doesn't include `read`), and an API the worker doesn't recognise is `admin`.
+- `indices: [patterns]`: the index names and patterns (`*` only; lowercase letters, digits, `.`, `_`, `-`) a request may name. Empty means any index that isn't hidden; a name starting with `.` is covered only by a pattern that starts with `.`. A request that names every index needs a `*` pattern.
+
+With several roles granting the same engine role, the session may do whatever any one grant allows. [The search guide](guides/search.md) lists what each class covers and what the worker reads to find the indices.
+
 ### Planned integrations
 
 These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH, the SQL databases (`postgres`, `mysql`, `redshift`), Redis, Kubernetes, and MongoDB are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
 
 | Kind | Resource fields | Grant section | Command (planned) |
 |---|---|---|---|
-| `opensearch`, `elasticsearch` | `endpoint`, `region`, `aws` | `search: { roles }` | `limen search connect` (Phase 10) |
 | `rabbitmq` | `endpoint`, `region`, `aws` (Amazon MQ) | `mq: { users }` | `limen mq connect` (Phase 11) |
 | `kafka` | `endpoint`, `region`, `aws` (MSK) | `kafka: { users }` | `limen kafka connect` (Phase 11) |
 | `web` | `address`, `host`, `health_path` | `web: {}` | `limen web open` (Phase 12) |
