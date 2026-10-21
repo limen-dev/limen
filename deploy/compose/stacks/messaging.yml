@@ -1,0 +1,77 @@
+# RabbitMQ and Kafka targets (Phase 11, ADR-0037), profile `messaging`: real
+# RabbitMQ 4 and a real three-broker Kafka cluster (KRaft, SASL on, authorizer
+# on). Layered on a Limen stack by setup.sh messaging. Development only: fixed
+# broker passwords.
+#
+# The Kafka topics, ACLs, and SCRAM users the example policy names are created by
+# config/targets/messaging/provision.sh (setup.sh and the demo run it). The worker
+# holds the broker logins (config/targets/messaging/credentials.json, mounted by the
+# Limen stack at /etc/limen/broker-credentials.json). Amazon MQ and MSK are
+# unverified; this is the self-hosted path.
+#
+# Kafka clients are told to reach each broker at kafka-N:9092, which only exists on
+# this network: through Limen they use the CLI's loopback listeners instead (the
+# multi-broker design, ADR-0037).
+services:
+  # RabbitMQ with two users and three vhosts from a definitions file. The
+  # consumer's broker permissions are read-only: the second layer under Limen's.
+  rabbitmq-target:
+    container_name: rabbitmq-messaging-${LIMEN_ENV:-dev}
+    profiles: ["messaging"]
+    image: ${RABBITMQ_IMAGE}
+    volumes:
+      - ./config/targets/messaging/rabbitmq.conf:/etc/rabbitmq/conf.d/90-limen.conf:ro
+      - ./config/targets/messaging/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 40
+
+  # SASL_PLAINTEXT with PLAIN, and SCRAM added by provision.sh.
+  kafka-1: &kafka
+    container_name: kafka-1-messaging-${LIMEN_ENV:-dev}
+    profiles: ["messaging"]
+    image: ${KAFKA_IMAGE}
+    hostname: kafka-1
+    environment: &kafka-env
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CLIENT://:9092,INTER://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-1:9092,INTER://kafka-1:9094
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTER:PLAINTEXT,CLIENT:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN,SCRAM-SHA-256,SCRAM-SHA-512
+      KAFKA_LISTENER_NAME_CLIENT_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        user_limen-admin="admin-dev-only" user_limen-consumer="consumer-dev-only";
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___256_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required;
+      KAFKA_LISTENER_NAME_CLIENT_SCRAM___SHA___512_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required;
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_SUPER_USERS: User:limen-admin;User:limen-scram-admin;User:ANONYMOUS
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xmx400m -Xms200m
+  kafka-2:
+    <<: *kafka
+    container_name: kafka-2-messaging-${LIMEN_ENV:-dev}
+    hostname: kafka-2
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-2:9092,INTER://kafka-2:9094
+  kafka-3:
+    <<: *kafka
+    container_name: kafka-3-messaging-${LIMEN_ENV:-dev}
+    hostname: kafka-3
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: CLIENT://kafka-3:9092,INTER://kafka-3:9094

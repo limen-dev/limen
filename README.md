@@ -151,7 +151,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 8 | Kubernetes (EKS) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/11) (verified on kind, not yet on EKS) |
 | 9 | MongoDB, Atlas, DocumentDB | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/12) (Atlas, DocumentDB, and IAM unverified) |
 | 10 | OpenSearch and Elasticsearch | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/13) (Amazon OpenSearch Service and Elastic Cloud unverified) |
-| 11 | RabbitMQ and Kafka | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/14) |
+| 11 | RabbitMQ and Kafka | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/14) (Amazon MQ, MSK, and MSK IAM unverified) |
 | 12 | Internal web apps and TCP services | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
 | 13 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
 | 14 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |

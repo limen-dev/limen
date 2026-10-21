@@ -23,6 +23,12 @@ spec:
     # is the second layer (ADR-0036).
     - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
       search: { roles: [limen-read], indices: ["app-*"] }
+    # Read orders from the staging brokers (ADR-0037). The brokers' own
+    # permissions for limen-consumer are read-only as well.
+    - resources: { kind: [rabbitmq], labels: { env: [staging] } }
+      mq: { users: [limen-consumer], classes: [read], names: ["orders.*"], vhosts: ["/", "orders"] }
+    - resources: { kind: [kafka], labels: { env: [staging] } }
+      kafka: { users: [limen-consumer], topics: ["orders.*"], groups: ["dev-*"] }
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }
 ---
@@ -43,5 +49,9 @@ spec:
       mongo: { roles: [limen-read, limen-rw], databases: ["*"], deny_commands: [dropDatabase] }
     - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
       search: { roles: [limen-read, limen-write], classes: [read, write] }
+    - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }
+      mq: { users: [limen-consumer, limen-admin], vhosts: ["*"], classes: [read, write, configure] }
+    - resources: { kind: [kafka], labels: { "*": ["*"] } }
+      kafka: { users: [limen-consumer, limen-admin], classes: [read, write, admin], topics: ["*"] }
     - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
       kube: { groups: ["limen:edit"] }

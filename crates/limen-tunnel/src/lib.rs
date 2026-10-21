@@ -24,6 +24,10 @@ pub mod alpn {
     pub const MONGO: &[u8] = b"limen-mongo/1";
     /// CLI local listener → proxy, for `OpenSearch` and Elasticsearch sessions.
     pub const SEARCH: &[u8] = b"limen-search/1";
+    /// CLI local listener → proxy, for `RabbitMQ` (AMQP 0-9-1) sessions.
+    pub const MQ: &[u8] = b"limen-mq/1";
+    /// CLI local listener → proxy, for Kafka sessions.
+    pub const KAFKA: &[u8] = b"limen-kafka/1";
     /// CLI → proxy, for SSH sessions.
     pub const SSH: &[u8] = b"limen-ssh/1";
     /// CLI API (relayed to the control plane) and the Kubernetes API, routed by path.
@@ -32,7 +36,9 @@ pub mod alpn {
     pub const HTTP1: &[u8] = b"http/1.1";
     pub const HTTP11: &[u8] = b"http/1.1";
 
-    pub const ALL: [&[u8]; 9] = [TUNNEL, PEER, DB, REDIS, MONGO, SEARCH, SSH, H2, HTTP11];
+    pub const ALL: [&[u8]; 11] = [
+        TUNNEL, PEER, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, SSH, H2, HTTP11,
+    ];
 }
 
 /// Refusals a worker makes before it reads anything from a session stream,

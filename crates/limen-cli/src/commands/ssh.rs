@@ -159,7 +159,9 @@ pub(crate) async fn open_session(
     alpn: &[u8],
     resource: &str,
     principal: &str,
-) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
     open_session_in(proxy, alpn, resource, principal, "", "").await
 }
 
@@ -172,7 +174,9 @@ pub(crate) async fn open_session_in(
     principal: &str,
     database: &str,
     group: &str,
-) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;

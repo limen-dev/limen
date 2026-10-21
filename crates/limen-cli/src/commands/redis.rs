@@ -58,28 +58,36 @@ pub fn parse_idle(text: &str) -> Result<Duration, String> {
     }
 }
 
-/// The Redis user to act as when the person didn't name one: the only one policy allows.
-async fn default_user(proxy: Option<&str>, resource: &str) -> anyhow::Result<String> {
+/// The user to act as when the person didn't name one: the only one policy
+/// allows. `kind` is the resource kind, `noun` what the principal is called
+/// (for messages), and `command` the command that was run (`limen redis connect`).
+pub(crate) async fn default_principal(
+    proxy: Option<&str>,
+    resource: &str,
+    kind: &str,
+    noun: &str,
+    command: &str,
+) -> anyhow::Result<String> {
     let (_, channel) = api::authenticated(proxy)?;
     let resources = ResourcesClient::new(channel)
         .list_resources(ListResourcesRequest {})
         .await
-        .map_err(|s| api::status_error(&s).context(format!("couldn't look up your Redis users for {resource}; name one: limen redis connect {resource} --user <user>")))?
+        .map_err(|s| api::status_error(&s).context(format!("couldn't look up your {noun}s for {resource}; name one: {command} {resource} --user <user>")))?
         .into_inner()
         .resources;
     let found = resources
         .into_iter()
-        .find(|r| r.name == resource && r.kind == "redis")
-        .with_context(|| format!("you have no Redis access to {resource:?}; see `limen ls`"))?;
+        .find(|r| r.name == resource && r.kind == kind)
+        .with_context(|| format!("you have no access to {resource:?}; see `limen ls`"))?;
     match found.principals.as_slice() {
         [only] => Ok(only.clone()),
         many => {
             let options: Vec<String> = many
                 .iter()
-                .map(|u| format!("  limen redis connect {resource} --user {u}"))
+                .map(|u| format!("  {command} {resource} --user {u}"))
                 .collect();
             bail!(
-                "several Redis users are allowed on {resource}; pick one:\n{}",
+                "several {noun}s are allowed on {resource}; pick one:\n{}",
                 options.join("\n")
             )
         }
@@ -139,7 +147,16 @@ pub async fn connect(
 ) -> anyhow::Result<()> {
     let user = match user {
         Some(u) => u.to_owned(),
-        None => default_user(proxy, resource).await?,
+        None => {
+            default_principal(
+                proxy,
+                resource,
+                "redis",
+                "Redis user",
+                "limen redis connect",
+            )
+            .await?
+        }
     };
     // Fail now, with a clear message, if the login is gone or the proxy is unreachable.
     drop(super::ssh::open_session(proxy, limen_tunnel::alpn::REDIS, resource, &user).await?);

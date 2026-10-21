@@ -21,9 +21,9 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status, Streaming};
 
-use crate::redis;
 use crate::ssh::{SshSessionConfig, serve};
 use crate::{SessionGuard, Worker};
+use crate::{amqp, kafka, redis};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
@@ -135,6 +135,40 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Anchor(_) => {
+                    let mut end = end;
+                    let mut ours = ours;
+                    let mut sink = [0u8; 256];
+                    tokio::select! {
+                        () = async {
+                            while matches!(ours.read(&mut sink).await, Ok(n) if n > 0) {}
+                        } => Ok(crate::ssh::SessionOutcome::default()),
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Kafka(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = Box::pin(kafka::serve(ours, *prepared, audit)) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Mq(prepared) => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = Box::pin(amqp::serve(ours, *prepared, audit)) => r,
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 Admitted::Redis(prepared) => {
                     let mut end = end;
                     tokio::select! {
@@ -232,6 +266,10 @@ enum Admitted {
     Kube(Box<crate::kube::Admitted>),
     Mongo(Box<crate::mongo::Prepared>),
     Search(Box<crate::search::Prepared>),
+    Mq(Box<amqp::Prepared>),
+    Kafka(Box<kafka::Prepared>),
+    /// The run's anchor (`limen mq|kafka connect`): authorized, serves nothing.
+    Anchor(String),
 }
 
 impl Admitted {
@@ -243,6 +281,9 @@ impl Admitted {
             Admitted::Kube(k) => k.session_id.clone(),
             Admitted::Mongo(p) => p.session_id(),
             Admitted::Search(p) => p.session_id(),
+            Admitted::Mq(p) => p.session_id().to_owned(),
+            Admitted::Kafka(p) => p.session_id().to_owned(),
+            Admitted::Anchor(id) => id.clone(),
         }
     }
 }
@@ -302,6 +343,17 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "mongodb" => admit_mongo(worker, &checked)
             .await
             .map(|c| Admitted::Mongo(Box::new(c))),
+        "rabbitmq" | "kafka" if checked.verified.grant.database == limen_core::broker::ANCHOR => {
+            // Same checks as a real session (policy, and a credential exists).
+            let anchor = Admitted::Anchor(checked.verified.grant.session_id.clone());
+            if kind == "kafka" {
+                admit_kafka(worker, &checked, true).map(|_| anchor)
+            } else {
+                admit_mq(worker, &checked).map(|_| anchor)
+            }
+        }
+        "rabbitmq" => admit_mq(worker, &checked).map(|c| Admitted::Mq(Box::new(c))),
+        "kafka" => admit_kafka(worker, &checked, false).map(|c| Admitted::Kafka(Box::new(c))),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -340,6 +392,82 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
         ));
     }
     Ok(())
+}
+
+fn admit_kafka(
+    worker: &Worker,
+    checked: &Checked,
+    anchor: bool,
+) -> Result<kafka::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(
+        worker,
+        checked,
+        Principal::KafkaUser(grant.principal.clone()),
+    )?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.kafka.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a Kafka resource"))?;
+    // The CLI's listener table: which local port is which broker.
+    let slot = if anchor {
+        limen_core::broker::KafkaSlot::new(0, vec![1])
+    } else {
+        limen_core::broker::KafkaSlot::parse(&grant.database)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?
+    };
+    let grants = checked.snapshot.policy.kafka_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = kafka::SessionConfig::new(
+        grant.session_id.clone(),
+        grant.username.clone(),
+        grant.principal.clone(),
+        grant.resource.clone(),
+        target,
+        slot,
+    );
+    kafka::prepare(&worker.broker, grants, config).map_err(|e| {
+        // The detail names the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't prepare the Kafka session");
+        Status::unavailable(
+            "couldn't prepare the Kafka session; ask an admin to check the worker's log",
+        )
+    })
+}
+
+fn admit_mq(worker: &Worker, checked: &Checked) -> Result<amqp::Prepared, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(worker, checked, Principal::MqUser(grant.principal.clone()))?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|r| r.spec.rabbitmq.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a RabbitMQ resource"))?;
+    let grants = checked.snapshot.policy.mq_grants(
+        &checked.verified.user.roles,
+        &grant.resource,
+        &grant.principal,
+    );
+    let config = amqp::SessionConfig {
+        session_id: grant.session_id.clone(),
+        username: grant.username.clone(),
+        mq_user: grant.principal.clone(),
+        resource: grant.resource.clone(),
+        target,
+    };
+    amqp::prepare(&worker.broker, grants, config).map_err(|e| {
+        // The detail names the account: it stays in the log.
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't prepare the RabbitMQ session");
+        Status::unavailable(
+            "couldn't prepare the RabbitMQ session; ask an admin to check the worker's log",
+        )
+    })
 }
 
 /// The longest a Redis session may take to open its connection to the target.

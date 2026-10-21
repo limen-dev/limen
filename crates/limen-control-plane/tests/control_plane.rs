@@ -220,7 +220,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("dry run")
         .into_inner();
     assert!(!dry.applied);
-    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 17);
+    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 20);
     assert_eq!(dry.version, 0);
 
     let applied = admin
@@ -280,6 +280,9 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
             "cache-valkey",
             "catalog-staging",
             "catalog-x509",
+            "events-kafka-scram",
+            "events-kafka-staging",
+            "events-rabbit-staging",
             "orders-mysql-staging",
             "orders-staging",
             "search-opensearch",

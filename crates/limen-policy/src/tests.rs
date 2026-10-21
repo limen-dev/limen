@@ -147,6 +147,9 @@ fn accessible_lists_resources_and_principals() {
             ("cache-valkey", vec!["limen-ro"]),
             ("catalog-staging", vec!["limen-read"]),
             ("catalog-x509", vec!["limen-read"]),
+            ("events-kafka-scram", vec!["limen-consumer"]),
+            ("events-kafka-staging", vec!["limen-consumer"]),
+            ("events-rabbit-staging", vec!["limen-consumer"]),
             ("orders-mysql-staging", vec!["limen_readonly"]),
             ("orders-staging", vec!["limen_readonly"]),
             ("search-opensearch", vec!["limen-read"]),
@@ -166,6 +169,9 @@ fn accessible_lists_resources_and_principals() {
             "catalog-atlas",
             "catalog-staging",
             "catalog-x509",
+            "events-kafka-scram",
+            "events-kafka-staging",
+            "events-rabbit-staging",
             "logs-opensearch",
             "orders-mysql-staging",
             "orders-prod",
@@ -218,7 +224,7 @@ fn digest_and_diff() {
     let c =
         Policy::parse_yaml([("roles.yaml", ROLES), ("mappings.yaml", MAPPINGS)]).expect("valid");
     let diff = a.diff(&c);
-    assert_eq!(diff.removed.len(), 14);
+    assert_eq!(diff.removed.len(), 17);
     assert!(diff.added.is_empty() && diff.changed.is_empty());
     assert_ne!(a.digest(), c.digest());
 }
@@ -351,6 +357,7 @@ mod planned_integrations {
     #[test]
     fn principals_must_fit_the_kind() {
         let policy = with_planned();
+        // The brokers are served now, so their grants are in `sre`.
         let sre = roles(&["sre", "sre-planned"]);
         let eval = |resource: &str, principal: Principal| {
             policy.evaluate(&AccessRequest {
@@ -817,6 +824,130 @@ fn the_matcher_ignores_a_name_selector_even_if_one_gets_through() {
     let named: BTreeMap<String, String> =
         [("limen.io/name".to_owned(), "prod-a-worker-1".to_owned())].into();
     assert!(!p.worker_may_serve("web-staging-1", &named));
+}
+
+const BROKERS: &str = "kind: resource\nversion: v1\nmetadata: {name: orders-mq, labels: {env: staging}}\nspec:\n  rabbitmq: {endpoint: 'mq:5672'}\n---\nkind: resource\nversion: v1\nmetadata: {name: events-kafka, labels: {env: staging}}\nspec:\n  kafka: {endpoint: 'k:9092', sasl: scram-sha-512}\n";
+
+#[test]
+fn mq_and_kafka_grants_come_from_matching_allow_rules() {
+    let docs = "kind: role\nversion: v1\nmetadata: {name: brokers}\nspec:\n  allow:\n    - resources: {kind: [rabbitmq]}\n      mq: {users: [limen-app], vhosts: ['orders-*'], classes: [read, configure], names: ['orders.*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [limen-reader], topics: ['orders.*'], groups: ['reports-*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [limen-writer], classes: [write, admin]}";
+    let policy =
+        Policy::parse_yaml([("roles.yaml", docs), ("resources.yaml", BROKERS)]).expect("valid");
+    let r = roles(&["brokers"]);
+    let mq = policy.mq_grants(&r, "orders-mq", "limen-app");
+    assert_eq!(mq.len(), 1);
+    assert_eq!(mq[0].names, ["orders.*"]);
+    assert_eq!(
+        mq[0].effective_classes(),
+        [MqClass::Read, MqClass::Configure]
+    );
+    assert_eq!(mq[0].effective_vhosts(), ["orders-*"]);
+    assert_eq!(policy.mq_grants(&r, "orders-mq", "other"), []);
+    assert_eq!(policy.mq_grants(&r, "events-kafka", "limen-app"), []);
+    assert_eq!(
+        policy.mq_grants(&roles(&["ghost"]), "orders-mq", "limen-app"),
+        []
+    );
+
+    let kafka = policy.kafka_grants(&r, "events-kafka", "limen-reader");
+    assert_eq!(kafka.len(), 1);
+    assert_eq!(kafka[0].effective_classes(), [KafkaClass::Read]);
+    assert_eq!(kafka[0].groups, ["reports-*"]);
+    let writer = policy.kafka_grants(&r, "events-kafka", "limen-writer");
+    assert_eq!(
+        writer[0].effective_classes(),
+        [KafkaClass::Write, KafkaClass::Admin]
+    );
+    assert_eq!(policy.kafka_grants(&r, "orders-mq", "limen-reader"), []);
+
+    // Access itself is still decided by `evaluate`.
+    let allowed = |resource: &str, principal| {
+        policy
+            .evaluate(&AccessRequest {
+                roles: &r,
+                resource,
+                principal,
+            })
+            .is_allowed()
+    };
+    assert!(allowed("orders-mq", Principal::MqUser("limen-app".into())));
+    assert!(!allowed(
+        "orders-mq",
+        Principal::MqUser("limen-other".into())
+    ));
+    assert!(allowed(
+        "events-kafka",
+        Principal::KafkaUser("limen-reader".into())
+    ));
+}
+
+#[test]
+fn a_grant_without_the_new_fields_means_the_documented_defaults() {
+    let docs = "kind: role\nversion: v1\nmetadata: {name: brokers}\nspec:\n  allow:\n    - resources: {kind: [rabbitmq]}\n      mq: {users: [u]}\n    - resources: {kind: [kafka]}\n      kafka: {users: [u]}";
+    let policy =
+        Policy::parse_yaml([("roles.yaml", docs), ("resources.yaml", BROKERS)]).expect("valid");
+    let r = roles(&["brokers"]);
+    let mq = &policy.mq_grants(&r, "orders-mq", "u")[0];
+    assert_eq!(mq.effective_classes(), [MqClass::Read, MqClass::Write]);
+    assert_eq!(mq.effective_vhosts(), ["/"]);
+    assert_eq!(mq.names, Vec::<String>::new());
+    let kafka = &policy.kafka_grants(&r, "events-kafka", "u")[0];
+    assert_eq!(kafka.effective_classes(), [KafkaClass::Read]);
+    assert!(kafka.topics.is_empty() && kafka.groups.is_empty());
+}
+
+#[test]
+fn rejects_bad_broker_grants_and_targets() {
+    for bad in [
+        "mq: {users: [u], names: ['']}",
+        "mq: {users: [u], vhosts: ['']}",
+        "mq: {users: [u], classes: [admin]}",
+        "kafka: {users: [u], topics: ['a\u{7}b']}",
+        "kafka: {users: [u], groups: ['']}",
+        "kafka: {users: [u], classes: [configure]}",
+        "kafka: {users: [u], topcis: [a]}",
+        "mq: {users: []}",
+    ] {
+        let kind = if bad.starts_with("mq") {
+            "rabbitmq"
+        } else {
+            "kafka"
+        };
+        let doc = format!(
+            "kind: role\nversion: v1\nmetadata: {{name: a}}\nspec:\n  allow:\n    - resources: {{kind: [{kind}]}}\n      {bad}"
+        );
+        assert!(
+            Policy::parse_yaml([("r.yaml", doc.as_str())]).is_err(),
+            "{bad} should be rejected"
+        );
+    }
+    let sasl_on_rabbit = "kind: resource\nversion: v1\nmetadata: {name: x}\nspec:\n  rabbitmq: {endpoint: 'm:5672', sasl: plain}\n";
+    assert!(Policy::parse_yaml([("x.yaml", sasl_on_rabbit)]).is_err());
+    let bad_sasl = "kind: resource\nversion: v1\nmetadata: {name: x}\nspec:\n  kafka: {endpoint: 'k:9092', sasl: kerberos}\n";
+    assert!(Policy::parse_yaml([("x.yaml", bad_sasl)]).is_err());
+}
+
+#[test]
+fn broker_targets_keep_old_snapshots_readable() {
+    // A target that uses the defaults serialises without the Phase 11 fields,
+    // so components from before them (which reject unknown fields) read it.
+    let policy = Policy::parse_yaml([(
+        "r.yaml",
+        "kind: resource\nversion: v1\nmetadata: {name: q}\nspec:\n  rabbitmq: {endpoint: 'm:5672', aws: true}\n",
+    )])
+    .expect("valid");
+    let json = serde_json::to_string(policy.resource("q").expect("q")).expect("json");
+    assert!(!json.contains("tls") && !json.contains("sasl"), "{json}");
+    let off = Policy::parse_yaml([(
+        "r.yaml",
+        "kind: resource\nversion: v1\nmetadata: {name: q}\nspec:\n  kafka: {endpoint: 'k:9092', tls: false, sasl: aws-msk-iam}\n",
+    )])
+    .expect("valid");
+    let json = serde_json::to_string(off.resource("q").expect("q")).expect("json");
+    assert!(
+        json.contains("\"tls\":false") && json.contains("aws-msk-iam"),
+        "{json}"
+    );
 }
 
 mod mongodb {

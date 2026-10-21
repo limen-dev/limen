@@ -72,6 +72,13 @@
   Search sessions have no terminal recording; this is the audited record of what was sent: the method, the path, and the status the server answered. Request and response bodies are not kept unless the resource opts in (and then only in the audit sinks).
   {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
 </p>
+{% else if s.is_broker %}
+<h2>Operations</h2>
+<p class="hint">
+  <strong>{{ statement_total }}</strong> operation{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
+  "Allowed" means policy let it through to the broker; the broker's own answer is not recorded. RabbitMQ and Kafka sessions have no terminal recording; this is the audited record of what was done: names and sizes, never message content. Kafka produce and fetch traffic is listed at first contact with a topic and then about once a minute.
+  {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
+</p>
 {% else %}
 <h2>Statements</h2>
 <p class="hint">
@@ -81,10 +88,10 @@
 </p>
 {% endif %}
 {% if statements.is_empty() %}
-<div class="card empty"><div>{% if s.is_redis || s.is_mongo %}No commands yet.{% else if s.is_search %}No requests yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
+<div class="card empty"><div>{% if s.is_broker %}No operations yet.{% else if s.is_redis || s.is_mongo %}No commands yet.{% else if s.is_search %}No requests yet.{% else %}No statements yet.{% endif %} They appear here within a few seconds of being sent.</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_redis || s.is_mongo %}Command{% else if s.is_search %}Request{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
+  <thead><tr><th>Time</th><th>Type</th><th>{% if s.is_broker %}Operation{% else if s.is_redis || s.is_mongo %}Command{% else if s.is_search %}Request{% else %}Statement{% endif %}</th><th>Outcome</th></tr></thead>
   <tbody>
   {% for st in statements %}
   <tr>

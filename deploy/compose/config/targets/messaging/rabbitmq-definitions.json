@@ -1,0 +1,72 @@
+{
+  "rabbit_version": "4.0",
+  "users": [
+    {
+      "name": "limen-admin",
+      "password_hash": "AQIDBBOgpIlIEcOVMqK2ARkPwQIF+28LwjKsC13V3jKdUPEs",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [
+        "administrator"
+      ]
+    },
+    {
+      "name": "limen-consumer",
+      "password_hash": "BQYHCLXH9BzOdWrTFDb3hPXu3kjD+nfIUn/eHdLbIP7SyqCI",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    },
+    {
+      "name": "orders"
+    },
+    {
+      "name": "secret"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "limen-admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "limen-admin",
+      "vhost": "orders",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "limen-admin",
+      "vhost": "secret",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "limen-consumer",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^$",
+      "read": ".*"
+    },
+    {
+      "user": "limen-consumer",
+      "vhost": "orders",
+      "configure": "^$",
+      "write": "^$",
+      "read": ".*"
+    }
+  ],
+  "queues": [],
+  "exchanges": [],
+  "bindings": [],
+  "parameters": [],
+  "policies": []
+}

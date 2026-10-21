@@ -222,6 +222,8 @@ pub struct SessionView {
     pub is_mongo: bool,
     /// An `OpenSearch` or Elasticsearch session: no recording, but audited requests.
     pub is_search: bool,
+    /// A `RabbitMQ` or Kafka session: no recording, but audited operations.
+    pub is_broker: bool,
     /// Any of those: the page lists what was sent instead of a recording.
     pub has_statements: bool,
     /// One login's kubectl requests on a cluster: the page lists them.
@@ -280,6 +282,7 @@ impl From<&SessionRow> for SessionView {
             is_kubectl: s.kind.as_deref() == Some("kubectl"),
             is_mongo: s.kind.as_deref() == Some("mongodb"),
             is_search: matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")),
+            is_broker: matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")),
             has_statements: matches!(
                 s.kind.as_deref(),
                 Some(
@@ -290,6 +293,8 @@ impl From<&SessionRow> for SessionView {
                         | "mongodb"
                         | "opensearch"
                         | "elasticsearch"
+                        | "rabbitmq"
+                        | "kafka"
                 )
             ),
             recording_sha256: s.recording_sha256.clone().unwrap_or_default(),
@@ -305,6 +310,8 @@ impl From<&SessionRow> for SessionView {
                 "Redis sessions have no terminal recording. Every command is in the audit trail as redis.command events that carry this session id (in S3 and Datadog)."
             } else if matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")) {
                 "Search sessions have no terminal recording. Every request is in the audit trail as search.request and search.response events that carry this session id (in S3 and Datadog)."
+            } else if matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")) {
+                "RabbitMQ and Kafka sessions have no terminal recording. Every operation is in the audit trail as mq.operation or kafka.request events that carry this session id (in S3 and Datadog). Message content is never recorded."
             } else {
                 "This session wasn't recorded."
             },

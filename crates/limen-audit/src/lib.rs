@@ -64,6 +64,21 @@ pub enum EventKind {
     /// `data.command_id` is its event id.
     #[serde(rename = "mongo.command.end")]
     MongoCommandEnd,
+    /// An AMQP operation on a `RabbitMQ` session (publish, consume, declare, …),
+    /// written before it is forwarded. Never holds a message body (ADR-0037).
+    #[serde(rename = "mq.operation")]
+    MqOperation,
+    /// What a `RabbitMQ` session did in total, written when it ends.
+    #[serde(rename = "mq.summary")]
+    MqSummary,
+    /// A Kafka request (first contact with a topic, group and admin
+    /// operations, …), written before it is forwarded. Never holds a record.
+    #[serde(rename = "kafka.request")]
+    KafkaRequest,
+    /// Produce and fetch traffic per topic since the last event, written once a
+    /// minute and when the session ends.
+    #[serde(rename = "kafka.summary")]
+    KafkaSummary,
     #[serde(rename = "kube.request")]
     KubeRequest,
     #[serde(rename = "policy.change")]

@@ -203,6 +203,8 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
             alpn::REDIS,
             alpn::MONGO,
             alpn::SEARCH,
+            alpn::MQ,
+            alpn::KAFKA,
             alpn::H2,
             alpn::HTTP1,
         ],
@@ -372,6 +374,12 @@ async fn handle_connection(
         }
         Some(p) if p == alpn::SEARCH => {
             sessions::handle(proxy, tls, peer, sessions::Protocol::Search).await;
+        }
+        Some(p) if p == alpn::MQ => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Mq).await;
+        }
+        Some(p) if p == alpn::KAFKA => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Kafka).await;
         }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {

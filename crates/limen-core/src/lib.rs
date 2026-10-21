@@ -1,6 +1,7 @@
 //! Shared domain types used by every Limen component.
 
 pub mod backoff;
+pub mod broker;
 pub mod identity;
 pub mod labels;
 pub mod login;

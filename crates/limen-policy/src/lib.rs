@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
-pub use model::{MongoGrant, RedisAudit, RedisGrant, RedisTarget};
+pub use model::{
+    BrokerTarget, KafkaClass, KafkaGrant, KafkaSasl, MongoGrant, MqClass, MqGrant, RedisAudit,
+    RedisGrant, RedisTarget,
+};
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 pub use model::{SearchAudit, SearchClass, SearchGrant, SearchTarget};
 
@@ -482,6 +485,28 @@ impl Policy {
             .collect()
     }
 
+    /// The `RabbitMQ` grants that let `roles` act as `user` on `resource`
+    /// (ADR-0037). Same contract as [`Policy::redis_grants`].
+    #[must_use]
+    pub fn mq_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<MqGrant> {
+        self.rules_for(roles, resource)
+            .filter_map(|rule| rule.mq.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
+    }
+
+    /// The `Kafka` grants that let `roles` act as `user` on `resource`
+    /// (ADR-0037). Same contract as [`Policy::redis_grants`].
+    #[must_use]
+    pub fn kafka_grants(&self, roles: &[String], resource: &str, user: &str) -> Vec<KafkaGrant> {
+        self.rules_for(roles, resource)
+            .filter_map(|rule| rule.kafka.as_ref())
+            .filter(|g| g.users.iter().any(|u| u == user))
+            .cloned()
+            .collect()
+    }
+
     /// The MongoDB grants that let `roles` act as `role` on `resource`. Call it
     /// only after [`Policy::evaluate`] allowed the request, since deny rules
     /// aren't checked here (ADR-0035).
@@ -524,6 +549,20 @@ impl Policy {
             .filter(|g| g.roles.iter().any(|r| r == engine_role))
             .cloned()
             .collect()
+    }
+
+    /// The allow rules of `roles` whose selector matches `resource`.
+    fn rules_for<'a>(
+        &'a self,
+        roles: &'a [String],
+        resource: &str,
+    ) -> impl Iterator<Item = &'a Rule> {
+        let resource = self.resources.get(resource);
+        roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .flat_map(|r| &r.spec.allow)
+            .filter(move |rule| resource.is_some_and(|res| selector_matches(&rule.resources, res)))
     }
 
     /// Resources the roles grant at least one principal on, with those
@@ -795,6 +834,7 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
                 ));
             }
         }
+        validate_broker_grants(name, rule)?;
         if let Some(search) = &rule.search
             && let Some(bad) = search.indices.iter().find(|p| !valid_index_pattern(p))
         {
@@ -946,6 +986,35 @@ fn validate_selector(role: &str, selector: &Selector) -> Result<(), PolicyError>
     Ok(())
 }
 
+/// The patterns in a rule's `mq` and `kafka` grants (ADR-0037).
+fn validate_broker_grants(owner: &str, rule: &Rule) -> Result<(), PolicyError> {
+    if let Some(mq) = &rule.mq {
+        validate_patterns(owner, "mq.vhosts", &mq.vhosts)?;
+        validate_patterns(owner, "mq.names", &mq.names)?;
+    }
+    if let Some(kafka) = &rule.kafka {
+        validate_patterns(owner, "kafka.topics", &kafka.topics)?;
+        validate_patterns(owner, "kafka.groups", &kafka.groups)?;
+    }
+    Ok(())
+}
+
+/// Name patterns in a grant: `*` is the only wildcard, and nothing may be
+/// blank or hold control characters.
+fn validate_patterns(role: &str, field: &str, values: &[String]) -> Result<(), PolicyError> {
+    match values
+        .iter()
+        .find(|v| v.is_empty() || v.len() > MAX_NAME_LEN || v.chars().any(char::is_control))
+    {
+        Some(v) => Err(invalid(
+            "role",
+            role,
+            format!("invalid value {v:?} in {field}"),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn validate_mongo_target(name: &str, t: &model::MongoTarget) -> Result<(), PolicyError> {
     use model::{MongoAuth, MongoFlavor};
     let bad = |why: &str| Err(invalid("resource", name, why.to_owned()));
@@ -1029,6 +1098,18 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
         ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
+    if resource
+        .spec
+        .rabbitmq
+        .as_ref()
+        .is_some_and(|t| t.sasl.is_some())
+    {
+        return Err(invalid(
+            "resource",
+            name,
+            "sasl applies to Kafka resources only; a RabbitMQ broker user logs in with a password",
+        ));
+    }
     let db_target = resource
         .spec
         .postgres

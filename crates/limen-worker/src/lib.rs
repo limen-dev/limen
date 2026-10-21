@@ -2,7 +2,10 @@
 //! serves sessions over reverse tunnels (ADR-0003). Protocol handlers
 //! (SSH in Phase 2, Redis in Phase 7; databases and Kubernetes later).
 
+pub mod amqp;
+pub mod broker;
 pub mod db;
+pub mod kafka;
 mod kube;
 pub mod mongo;
 pub mod recording;
@@ -147,6 +150,17 @@ pub struct Config {
     #[arg(long, env = "LIMEN_SEARCH_IDLE_TIMEOUT", value_parser = parse_duration, default_value = "1h")]
     pub search_idle_timeout: Duration,
 
+    /// CA bundle for TLS to `RabbitMQ`, Amazon MQ, Kafka, and MSK targets (for
+    /// the AWS services, the AWS bundle).
+    #[arg(long, env = "LIMEN_BROKER_CA_FILE")]
+    pub broker_ca_file: Option<PathBuf>,
+
+    /// JSON file of broker logins: `{"<resource>": {"<broker user>": "<password>"}}`,
+    /// where a user may instead be `{"password": …, "client_cert_file": …, "client_key_file": …}`.
+    /// Read at start-up.
+    #[arg(long, env = "LIMEN_BROKER_CREDENTIALS_FILE")]
+    pub broker_credentials_file: Option<PathBuf>,
+
     /// Most sessions this worker serves at once. Over it, new sessions are
     /// refused (`resource_exhausted`), and proxies stop choosing this worker
     /// until it has room. 0: no cap.
@@ -242,6 +256,7 @@ pub struct Worker {
     pub(crate) audit: limen_audit::Emitter,
     pub(crate) redis: Arc<redis::target::Settings>,
     pub(crate) search: Arc<search::target::Settings>,
+    pub(crate) broker: Arc<broker::Settings>,
     pub(crate) db_registry: Arc<db::Registry>,
     aws: Arc<tokio::sync::OnceCell<Result<db::iam::CredentialSource, String>>>,
     /// The cluster this worker serves, if it is a kube worker (ADR-0038).
@@ -306,6 +321,11 @@ impl Worker {
         )?
         .with_max_body(config.search_max_body_bytes)
         .with_idle(config.search_idle_timeout);
+
+        let broker = broker::Settings::load(
+            config.broker_ca_file.as_deref(),
+            config.broker_credentials_file.as_deref(),
+        )?;
         let (tx, rx) = watch::channel(Arc::new(creds));
         let sessions = SessionSlots::new(config.max_sessions);
         Ok((
@@ -322,6 +342,7 @@ impl Worker {
                 audit,
                 redis: Arc::new(redis),
                 search: Arc::new(search),
+                broker: Arc::new(broker),
                 db_registry: Arc::default(),
                 aws: Arc::default(),
                 kube,

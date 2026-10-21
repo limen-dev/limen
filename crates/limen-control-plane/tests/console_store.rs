@@ -893,3 +893,62 @@ async fn search_sessions_list_their_requests() {
         3
     );
 }
+
+/// `RabbitMQ` and Kafka sessions are listed like Redis ones (ADR-0037): names and
+/// sizes, refused operations marked, and nothing that looks like content.
+#[tokio::test(flavor = "multi_thread")]
+async fn broker_sessions_list_their_operations() {
+    let Some(db) = fresh_db().await else { return };
+    let s = Uuid::now_v7();
+    let publish = event(
+        EventKind::MqOperation,
+        s,
+        DEVELOPER,
+        json!({ "action": "publish", "resource": "events-rabbit-staging", "mq_user": "limen-admin", "vhost": "/", "channel": 1, "exchange": "orders.x", "routing_key": "new", "size": 42 }),
+    );
+    let produce = event(
+        EventKind::KafkaRequest,
+        s,
+        DEVELOPER,
+        json!({ "api": "Produce", "api_key": 0, "version": 8, "kafka_user": "limen-admin", "topics": [{ "name": "orders.new", "partitions": 2, "requests": 3, "bytes": 900 }], "requests": 3 }),
+    );
+    let refused = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "kafka", "operation": "Produce", "kafka_user": "limen-consumer", "topics": ["payments"], "reason": "your role doesn't grant write on topic \"payments\"" }),
+    );
+    let other = event(
+        EventKind::AuthDenied,
+        s,
+        DEVELOPER,
+        json!({ "action": "ssh", "resource": "web", "login": "root", "reason": "no" }),
+    );
+    store::project_events(&db, &[refused.clone(), publish.clone()])
+        .await
+        .expect("first batch");
+    store::project_events(&db, &[produce, other, publish, refused])
+        .await
+        .expect("second batch and redelivery");
+    let list = store::db_statements(&db, s, 100).await.expect("operations");
+    let texts: Vec<_> = list
+        .iter()
+        .map(|r| r.statement.as_deref().unwrap_or_default())
+        .collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(
+        texts.contains(&"publish vhost=/ exchange=orders.x key=new 42 B"),
+        "{texts:?}"
+    );
+    assert!(texts.contains(&"Produce topics=orders.new"), "{texts:?}");
+    assert!(texts.contains(&"Produce topics=payments"), "{texts:?}");
+    let denied = list
+        .iter()
+        .find(|r| r.statement.as_deref() == Some("Produce topics=payments"))
+        .expect("refused");
+    assert_eq!(denied.status.as_deref(), Some("denied"));
+    assert_eq!(
+        store::db_session_counts(&db, s).await.expect("counts"),
+        (3, 1)
+    );
+}

@@ -15,6 +15,7 @@
 # redis    Redis and Valkey with ACL users                      stacks/redis.yml
 # mongo    MongoDB with TLS, SCRAM and X.509                    stacks/mongo.yml
 # search   Elasticsearch 8 and OpenSearch 2 (security on)        stacks/search.yml
+# messaging  RabbitMQ and a three-broker Kafka cluster          stacks/messaging.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
@@ -158,6 +159,12 @@ if has search; then
   wait_for "elasticsearch" "${compose[@]}" exec -T elasticsearch-target curl -sf -u elastic:elastic-dev-only "localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
   wait_for "opensearch" "${compose[@]}" exec -T opensearch-target curl -sf --cacert /usr/share/opensearch/config/root-ca.pem --resolve node-0.example.com:9200:127.0.0.1 -u admin:Dev-only-Opensearch-1 "https://node-0.example.com:9200/_cluster/health?wait_for_status=yellow&timeout=1s"
   "$here/config/targets/search/provision.sh" "elasticsearch-search-${LIMEN_ENV}" "opensearch-search-${LIMEN_ENV}" >/dev/null
+fi
+
+if has messaging; then
+  step "RabbitMQ and Kafka"
+  wait_for "rabbitmq" "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping
+  "$here/config/targets/messaging/provision.sh" "kafka-1-messaging-${LIMEN_ENV}" >/dev/null || fail "Kafka provisioning failed"
 fi
 
 ui_done "Limen is ready"

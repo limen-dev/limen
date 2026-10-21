@@ -43,6 +43,8 @@ pub(crate) enum Protocol {
     Redis,
     Mongo,
     Search,
+    Mq,
+    Kafka,
 }
 
 impl Protocol {
@@ -53,6 +55,8 @@ impl Protocol {
             Protocol::Redis => "redis",
             Protocol::Mongo => "mongo",
             Protocol::Search => "search",
+            Protocol::Mq => "mq",
+            Protocol::Kafka => "kafka",
         }
     }
 
@@ -62,6 +66,8 @@ impl Protocol {
             Protocol::Ssh | Protocol::Db | Protocol::Search => "login",
             Protocol::Redis => "redis_user",
             Protocol::Mongo => "mongo_role",
+            Protocol::Mq => "mq_user",
+            Protocol::Kafka => "kafka_user",
         }
     }
 
@@ -313,6 +319,29 @@ fn resolve_principal(
             "redis".to_owned(),
             String::new(),
         ),
+        Protocol::Mq => (
+            Principal::MqUser(request.principal.clone()),
+            "rabbitmq".to_owned(),
+            // Only the run's anchor names anything here.
+            if request.database == limen_core::broker::ANCHOR {
+                request.database.clone()
+            } else {
+                String::new()
+            },
+        ),
+        Protocol::Kafka => {
+            // The session request carries the CLI's listener table in the
+            // database field (ADR-0037); the worker needs it, policy doesn't.
+            if request.database != limen_core::broker::ANCHOR {
+                limen_core::broker::KafkaSlot::parse(&request.database)
+                    .map_err(|e| failed(e.to_string()))?;
+            }
+            (
+                Principal::KafkaUser(request.principal.clone()),
+                "kafka".to_owned(),
+                request.database.clone(),
+            )
+        }
         Protocol::Search => {
             let refused = || {
                 denied(format!(
@@ -681,13 +710,20 @@ async fn relay(
 ) {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
-    // Redis and MongoDB sessions name the upstream identity differently.
-    let principal_field = if kind == "redis" {
-        "redis_user"
-    } else if kind == "mongodb" {
-        "mongo_role"
+    // Redis, MongoDB, and the brokers name the upstream identity for what it is, not `login`.
+    let principal_field = match kind {
+        "redis" => "redis_user",
+        "mongodb" => "mongo_role",
+        "rabbitmq" => "mq_user",
+        "kafka" => "kafka_user",
+        _ => "login",
+    };
+    // The brokers' database field is the CLI's listener table or the anchor
+    // marker, not a database.
+    let database = if matches!(kind, "kafka" | "rabbitmq") {
+        ""
     } else {
-        "login"
+        database
     };
     let ctx = Context {
         user: Some(user.username.clone()),

@@ -13,7 +13,7 @@
 # Limen: docker-compose.yml (one of each component) or, with --scale,
 # stacks/scale.yml (3 control planes, 3 proxies, 3 workers).
 # Stacks (each a compose file and a profile of the same name):
-STACK_NAMES=(ssh db redis mongo search observability bots kube)
+STACK_NAMES=(ssh db redis mongo search messaging observability bots kube)
 compose=() STACK_FLAGS=() # set by stack_setup
 
 # ---- terminal output -----------------------------------------------------------
@@ -81,6 +81,8 @@ stack_setup() {
       mongo) files+=(-f "$here/stacks/mongo.yml") ;;
       search) files+=(-f "$here/stacks/search.yml")
               env+=(LIMEN_SEARCH_CREDENTIALS_FILE=/etc/limen/search-credentials.json LIMEN_SEARCH_CA_FILE=/etc/limen/search/opensearch-root-ca.pem) ;;
+      messaging) files+=(-f "$here/stacks/messaging.yml")
+                 env+=(LIMEN_BROKER_CREDENTIALS_FILE=/etc/limen/broker-credentials.json) ;;
       observability) files+=(-f "$here/stacks/observability.yml")
                env+=(LIMEN_DATADOG_LOGS_URL=http://fake-datadog:8126/api/v2/logs DD_API_KEY=dev-only-datadog-key) ;;
       bots) files+=(-f "$here/stacks/bots.yml")
@@ -111,6 +113,7 @@ stack_describe() {
     redis) echo "Redis and Valkey with ACL users (limen redis connect)" ;;
     mongo) echo "MongoDB with TLS, SCRAM and X.509 (limen mongo connect)" ;;
     search) echo "Elasticsearch 8 and OpenSearch 2 with security on (limen search connect)" ;;
+    messaging) echo "RabbitMQ and a three-broker Kafka cluster (limen mq connect, limen kafka connect)" ;;
     observability) echo "fake Datadog intake, plus Trino and Grafana over the audit log" ;;
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
     kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
@@ -340,19 +343,20 @@ YAML
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
 stack_endpoints() {
   ui_init
-  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_obs=false has_bots=false has_kube=false
+  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_bots=false has_kube=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
-    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; esac
+    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; esac
   done
   local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
-  if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_kube; then
+  if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube; then
     ui_section "Resources"
     $has_ssh && printf "$row" "SSH" "limen ssh web-staging-1"
     $has_db && printf "$row" "PostgreSQL" "limen db connect orders-staging" "MySQL" "limen db connect orders-mysql-staging"
     $has_redis && printf "$row" "Redis" "limen redis connect cache-staging" "Valkey" "limen redis connect cache-valkey"
     $has_mongo && printf "$row" "MongoDB" "limen mongo connect catalog-staging" "MongoDB (X.509)" "limen mongo connect catalog-x509"
     $has_search && printf "$row" "Elasticsearch" "limen search connect search-staging" "OpenSearch" "limen search connect search-opensearch"
+    $has_messaging && printf "$row" "RabbitMQ" "limen mq connect events-rabbit-staging" "Kafka" "limen kafka connect events-kafka-staging"
     $has_kube && printf "$row" "Kubernetes" "limen kube login eks-staging --kubeconfig $kc && kubectl --kubeconfig $kc get pods -A"
   fi
   if $has_obs || $has_bots; then

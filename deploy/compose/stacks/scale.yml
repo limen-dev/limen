@@ -245,6 +245,7 @@ services:
       - worker-0-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - ./config/targets/messaging/credentials.json:/etc/limen/broker-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
       - mongo-worker:/etc/limen/mongo:ro
@@ -257,6 +258,7 @@ services:
       - worker-1-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - ./config/targets/messaging/credentials.json:/etc/limen/broker-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
       - mongo-worker:/etc/limen/mongo:ro
@@ -269,6 +271,7 @@ services:
       - worker-2-data:/var/lib/limen/worker
       - ca-public:/var/lib/limen/ca-public:ro
       - ./config/targets/redis/credentials.json:/etc/limen/redis-credentials.json:ro
+      - ./config/targets/messaging/credentials.json:/etc/limen/broker-credentials.json:ro
       - db-tls:/var/lib/limen/db-tls:ro
       - db-secrets:/var/lib/limen/db-secrets
       - mongo-worker:/etc/limen/mongo:ro

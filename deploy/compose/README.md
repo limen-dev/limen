@@ -91,7 +91,7 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  observability.yml  bots.yml  kube.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists)
@@ -114,6 +114,7 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `db` | `stacks/db.yml` | `postgres-target`, `mysql-target` (TLS, seeded `orders`), the role bootstrap |
 | `redis` | `stacks/redis.yml` | `redis-target`, `valkey-target` (ACL users) |
 | `search` | `stacks/search.yml` | `elasticsearch-target` (Elasticsearch 8, security on) and `opensearch-target` (OpenSearch 2, security plugin, TLS with its demo certificate), the engine roles `provision.sh` creates, and the logins and CA the worker holds |
+| `messaging` | `stacks/messaging.yml` | `rabbitmq-target` (RabbitMQ 4) and `kafka-1`..`kafka-3` (a real three-broker Kafka 3.9 cluster, KRaft, SASL and the authorizer on); `provision.sh` creates the topics, ACLs and SCRAM users, and the worker holds the broker logins |
 | `mongo` | `stacks/mongo.yml` | `mongo-target` (MongoDB 8 with TLS, SCRAM and X.509, seeded `orders` and `billing`) and the credentials the worker holds |
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
@@ -144,6 +145,7 @@ demos/demo-phase35.sh         # web console, locking a user, ending a session
 demos/demo-phase7.sh          # Redis and Valkey through limen redis connect (own project and ports)
 demos/demo-phase9.sh          # MongoDB through limen mongo connect and mongosh (own project and ports)
 demos/demo-phase10.sh         # Elasticsearch and OpenSearch through limen search connect (own project and ports; pulls two ~1 GB images)
+demos/demo-phase11.sh         # RabbitMQ and a three-broker Kafka cluster through limen mq connect and limen kafka connect (own project and ports)
 ```
 
 By hand, after `limen admin apply examples/policy`:
@@ -294,3 +296,16 @@ demos/demo-phase10.sh         # curl through `limen search connect`: refusals, b
 ```
 
 The demo runs its own project (`limen-search`) on ports 34xxx. It pulls about 2.4 GB of images and the engines take a minute or two to start; it is not run in CI. Amazon OpenSearch Service, OpenSearch Serverless, and Elastic Cloud are unverified.
+
+## Messaging (Phase 11)
+
+`stacks/messaging.yml` (profile `messaging`) adds real **RabbitMQ 4** (two users and three vhosts from a definitions file) and a real **three-broker Kafka 3.9 cluster** (KRaft, SASL `PLAIN` with SCRAM added, the authorizer on). `config/targets/messaging/provision.sh` creates the topics, ACLs and SCRAM users, and the worker holds the broker logins (`config/targets/messaging/credentials.json`). Kafka clients are told to reach each broker at `kafka-N:9092`, which only exists on the Docker network: through Limen they use the loopback listeners `limen kafka connect` opens, which is what the demo proves.
+
+```sh
+deploy/compose/setup.sh --stacks messaging
+limen mq connect events-rabbit-staging         # an amqp:// URL with no real password
+limen kafka connect events-kafka-staging       # prints a bootstrap address for kcat and the clients
+demos/demo-phase11.sh         # pika and librdkafka: refusals, a consumer group across brokers, a broker down, audit, one console row per run
+```
+
+The demo runs its own project (`limen-messaging`) on ports 39xxx and needs `python3` (it installs `pika` and `confluent-kafka` into a virtualenv under `.state/`). The first image build takes several minutes; it is not run in CI. Amazon MQ, Amazon MSK, and the `AWS_MSK_IAM` login are unverified.

@@ -101,9 +101,9 @@ pub struct Rule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search: Option<SearchGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mq: Option<UserGrant>,
+    pub mq: Option<MqGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kafka: Option<UserGrant>,
+    pub kafka: Option<KafkaGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<OpenGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,11 +229,96 @@ impl SearchGrant {
     }
 }
 
-/// Broker users (`RabbitMQ`, `Kafka`).
+/// What a `RabbitMQ` session may do (ADR-0037), in the shape of the broker's
+/// own permissions: configure, write, read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UserGrant {
+pub struct MqGrant {
+    /// Broker users the session may act as (the credential selector).
     pub users: Vec<String>,
+    /// Virtual hosts (`*` patterns). Empty means only `/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vhosts: Vec<String>,
+    /// Empty means `read` and `write`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<MqClass>,
+    /// Exchange and queue name patterns (`*` only). Empty means any name
+    /// except the reserved `amq.*` ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+}
+
+impl MqGrant {
+    /// The classes in force: `read` and `write` unless the grant says more.
+    #[must_use]
+    pub fn effective_classes(&self) -> Vec<MqClass> {
+        if self.classes.is_empty() {
+            vec![MqClass::Read, MqClass::Write]
+        } else {
+            self.classes.clone()
+        }
+    }
+
+    /// The vhost patterns in force: only `/` unless the grant lists some.
+    #[must_use]
+    pub fn effective_vhosts(&self) -> Vec<String> {
+        if self.vhosts.is_empty() {
+            vec!["/".to_owned()]
+        } else {
+            self.vhosts.clone()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MqClass {
+    /// Consume, get, acknowledge.
+    Read,
+    /// Publish.
+    Write,
+    /// Declare, delete, bind, and purge exchanges and queues.
+    Configure,
+}
+
+/// What a `Kafka` session may do (ADR-0037), in the shape of Kafka's ACLs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KafkaGrant {
+    /// Broker users the session may act as (the credential selector).
+    pub users: Vec<String>,
+    /// Empty means `read`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<KafkaClass>,
+    /// Topic patterns (`*` only). Empty means any topic that is not internal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topics: Vec<String>,
+    /// Consumer group patterns (`*` only). Empty means any group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+}
+
+impl KafkaGrant {
+    /// The classes in force: `read` unless the grant says more.
+    #[must_use]
+    pub fn effective_classes(&self) -> Vec<KafkaClass> {
+        if self.classes.is_empty() {
+            vec![KafkaClass::Read]
+        } else {
+            self.classes.clone()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KafkaClass {
+    /// Fetch, offsets, consumer groups, metadata.
+    Read,
+    /// Produce.
+    Write,
+    /// Create and delete topics.
+    Admin,
 }
 
 /// Web apps and TCP services have no upstream identity to choose: the grant is
@@ -649,6 +734,30 @@ pub struct BrokerTarget {
     /// Amazon MQ or `MSK`.
     #[serde(default)]
     pub aws: bool,
+    /// TLS toward the broker. On by default; `false` is for local brokers only.
+    /// Left out of the snapshot when default, so components from before
+    /// Phase 11 (which reject unknown fields) still read it during an upgrade.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub tls: bool,
+    /// How the worker logs in to a `Kafka` cluster. Absent: `aws-msk-iam`
+    /// for `aws: true`, else `plain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl: Option<KafkaSasl>,
+}
+
+/// The SASL mechanism the worker uses toward a Kafka cluster (ADR-0037).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KafkaSasl {
+    /// No SASL: an open listener, or mutual TLS alone.
+    None,
+    Plain,
+    #[serde(rename = "scram-sha-256")]
+    ScramSha256,
+    #[serde(rename = "scram-sha-512")]
+    ScramSha512,
+    /// Amazon MSK IAM (`AWS_MSK_IAM`).
+    AwsMskIam,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
