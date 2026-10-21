@@ -322,13 +322,20 @@ fn resolve_principal(
         Protocol::Mq => (
             Principal::MqUser(request.principal.clone()),
             "rabbitmq".to_owned(),
-            String::new(),
+            // Only the run's anchor names anything here.
+            if request.database == limen_core::broker::ANCHOR {
+                request.database.clone()
+            } else {
+                String::new()
+            },
         ),
         Protocol::Kafka => {
             // The session request carries the CLI's listener table in the
             // database field (ADR-0037); the worker needs it, policy doesn't.
-            limen_core::broker::KafkaSlot::parse(&request.database)
-                .map_err(|e| failed(e.to_string()))?;
+            if request.database != limen_core::broker::ANCHOR {
+                limen_core::broker::KafkaSlot::parse(&request.database)
+                    .map_err(|e| failed(e.to_string()))?;
+            }
             (
                 Principal::KafkaUser(request.principal.clone()),
                 "kafka".to_owned(),
@@ -711,8 +718,13 @@ async fn relay(
         "kafka" => "kafka_user",
         _ => "login",
     };
-    // Kafka's database field is the CLI's listener table, not a database.
-    let database = if kind == "kafka" { "" } else { database };
+    // The brokers' database field is the CLI's listener table or the anchor
+    // marker, not a database.
+    let database = if matches!(kind, "kafka" | "rabbitmq") {
+        ""
+    } else {
+        database
+    };
     let ctx = Context {
         user: Some(user.username.clone()),
         session_id: Some(session_id),

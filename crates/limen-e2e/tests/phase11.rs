@@ -129,6 +129,8 @@ spec:
   allow:
     - resources: {{ kind: [rabbitmq], labels: {{ env: [test] }} }}
       mq: {{ users: [limen-app], classes: [read, write], names: ["orders.*"] }}
+    - resources: {{ kind: [kafka], labels: {{ env: [test] }} }}
+      kafka: {{ users: [limen-app] }}
 ---
 kind: role_mapping
 version: v1
@@ -376,6 +378,29 @@ async fn amqp_through_limen() {
     })
     .await;
     assert!(bad_refused.lock().expect("lock")[0].contains("access denied"));
+
+    // The anchor a `limen mq|kafka connect` run holds: authorized, and then
+    // open and idle (so the console shows the run active) until the CLI stops.
+    for (alpn, resource) in [
+        (limen_tunnel::alpn::MQ, "orders-mq"),
+        (limen_tunnel::alpn::KAFKA, "events-kafka"),
+    ] {
+        let (anchor, anchor_refused) = db_client::listen_on(
+            &proxy_addr,
+            &ca_pem,
+            dev.clone(),
+            alpn,
+            resource,
+            "limen-app",
+            limen_core::broker::ANCHOR,
+        )
+        .await;
+        let mut held = TcpStream::connect(anchor).await.expect("anchor");
+        let mut byte = [0u8; 1];
+        let idle = tokio::time::timeout(Duration::from_secs(2), held.read(&mut byte)).await;
+        assert!(idle.is_err(), "{resource}: the anchor should stay open");
+        assert!(anchor_refused.lock().expect("lock").is_empty());
+    }
 
     // A Kafka session needs the CLI's listener table, and a malformed one is refused.
     let (kbad, kbad_refused) = db_client::listen_on(

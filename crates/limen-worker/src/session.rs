@@ -135,6 +135,20 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Anchor(_) => {
+                    let mut end = end;
+                    let mut ours = ours;
+                    let mut sink = [0u8; 256];
+                    tokio::select! {
+                        () = async {
+                            while matches!(ours.read(&mut sink).await, Ok(n) if n > 0) {}
+                        } => Ok(crate::ssh::SessionOutcome::default()),
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 Admitted::Kafka(prepared) => {
                     let mut end = end;
                     tokio::select! {
@@ -254,6 +268,8 @@ enum Admitted {
     Search(Box<crate::search::Prepared>),
     Mq(Box<amqp::Prepared>),
     Kafka(Box<kafka::Prepared>),
+    /// The run's anchor (`limen mq|kafka connect`): authorized, serves nothing.
+    Anchor(String),
 }
 
 impl Admitted {
@@ -267,6 +283,7 @@ impl Admitted {
             Admitted::Search(p) => p.session_id(),
             Admitted::Mq(p) => p.session_id().to_owned(),
             Admitted::Kafka(p) => p.session_id().to_owned(),
+            Admitted::Anchor(id) => id.clone(),
         }
     }
 }
@@ -326,8 +343,17 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         "mongodb" => admit_mongo(worker, &checked)
             .await
             .map(|c| Admitted::Mongo(Box::new(c))),
+        "rabbitmq" | "kafka" if checked.verified.grant.database == limen_core::broker::ANCHOR => {
+            // Same checks as a real session (policy, and a credential exists).
+            let anchor = Admitted::Anchor(checked.verified.grant.session_id.clone());
+            if kind == "kafka" {
+                admit_kafka(worker, &checked, true).map(|_| anchor)
+            } else {
+                admit_mq(worker, &checked).map(|_| anchor)
+            }
+        }
         "rabbitmq" => admit_mq(worker, &checked).map(|c| Admitted::Mq(Box::new(c))),
-        "kafka" => admit_kafka(worker, &checked).map(|c| Admitted::Kafka(Box::new(c))),
+        "kafka" => admit_kafka(worker, &checked, false).map(|c| Admitted::Kafka(Box::new(c))),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
@@ -368,7 +394,11 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
     Ok(())
 }
 
-fn admit_kafka(worker: &Worker, checked: &Checked) -> Result<kafka::Prepared, Status> {
+fn admit_kafka(
+    worker: &Worker,
+    checked: &Checked,
+    anchor: bool,
+) -> Result<kafka::Prepared, Status> {
     let grant = &checked.verified.grant;
     check_policy(
         worker,
@@ -382,8 +412,12 @@ fn admit_kafka(worker: &Worker, checked: &Checked) -> Result<kafka::Prepared, St
         .and_then(|r| r.spec.kafka.clone())
         .ok_or_else(|| Status::failed_precondition("resource is not a Kafka resource"))?;
     // The CLI's listener table: which local port is which broker.
-    let slot = limen_core::broker::KafkaSlot::parse(&grant.database)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+    let slot = if anchor {
+        limen_core::broker::KafkaSlot::new(0, vec![1])
+    } else {
+        limen_core::broker::KafkaSlot::parse(&grant.database)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?
+    };
     let grants = checked.snapshot.policy.kafka_grants(
         &checked.verified.user.roles,
         &grant.resource,

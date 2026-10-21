@@ -7,6 +7,12 @@
 
 use std::fmt;
 
+/// The `database` of a session that only holds the run open: `limen mq connect`
+/// and `limen kafka connect` keep one for as long as they listen, so the
+/// console shows the run as active between client connections. The worker
+/// checks the grant and the credential, then serves no protocol on it.
+pub const ANCHOR: &str = "anchor";
+
 /// The most local listeners (the bootstrap one plus one per broker).
 pub const MAX_LISTENERS: usize = 65;
 

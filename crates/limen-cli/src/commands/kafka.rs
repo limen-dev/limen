@@ -81,17 +81,19 @@ pub async fn connect(
         .iter()
         .map(|l| l.local_addr().map(|a| a.port()))
         .collect::<Result<_, _>>()?;
-    // Fail now, with a clear message, if the login is gone or the proxy is unreachable.
-    drop(
-        open(
-            proxy,
-            resource,
-            &user,
-            &KafkaSlot::new(0, ports.clone()),
-            &group,
-        )
-        .await?,
-    );
+    // Fail now, with a clear message, if the login is gone, the proxy is
+    // unreachable, or policy refuses. The session stays open, idle, until this
+    // command stops: it keeps the run active in the console while clients come
+    // and go.
+    let _anchor = super::ssh::open_session_in(
+        proxy,
+        limen_tunnel::alpn::KAFKA,
+        resource,
+        &user,
+        limen_core::broker::ANCHOR,
+        &group,
+    )
+    .await?;
 
     ui::success(&format!(
         "Listening for {} as {} ({} broker slot{}).",

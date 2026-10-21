@@ -39,8 +39,11 @@ pub async fn connect(
     // Every session of this run carries one group, so the console shows them
     // as one row.
     let group: Arc<str> = Arc::from(uuid::Uuid::new_v4().simple().to_string());
-    // Fail now, with a clear message, if the login is gone or the proxy is unreachable.
-    drop(open(proxy, resource, &user, &group).await?);
+    // Fail now, with a clear message, if the login is gone, the proxy is
+    // unreachable, or policy refuses. The session stays open, idle, until this
+    // command stops: it keeps the run active in the console while clients come
+    // and go.
+    let _anchor = open_anchor(proxy, resource, &user, &group).await?;
 
     let addr = listen.unwrap_or("127.0.0.1:0");
     let listener = tokio::net::TcpListener::bind(addr)
@@ -108,6 +111,25 @@ fn amqp_url(port: u16, vhost: &str) -> String {
         vhost.trim_start_matches('/').replace('/', "%2F")
     };
     format!("amqp://limen:limen@127.0.0.1:{port}/{path}")
+}
+
+async fn open_anchor(
+    proxy: Option<&str>,
+    resource: &str,
+    user: &str,
+    group: &str,
+) -> anyhow::Result<
+    impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
+> {
+    super::ssh::open_session_in(
+        proxy,
+        limen_tunnel::alpn::MQ,
+        resource,
+        user,
+        limen_core::broker::ANCHOR,
+        group,
+    )
+    .await
 }
 
 async fn open(
