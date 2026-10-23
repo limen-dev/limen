@@ -312,7 +312,7 @@ LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca
 
 It asserts that the long session outlasted all of this without a stall, every new session worked, `limen-audit-verify` finds every chain intact and no producer sequence gap, there is one chain per replica id, and S3 holds exactly one `ssh.exec`, `session.start`, and `session.end` per session the demo ran. It never SIGKILLs an ephemeral replica: that loses what it had acked but not shipped (ADR-0020), which `limen-audit-verify` would report as a gap. `LIMEN_SCALE_PROXY_LOG` sets the proxies' `RUST_LOG` (for example `info,h2=debug`).
 
-**If an image build looks stale.** The Dockerfile keeps Cargo's `target` directory in a BuildKit cache that all checkouts and worktrees on the machine share, and Cargo decides what to rebuild from file times. Building two different branches one after the other can link old code into the new image (a build fails, or a fix seems to have no effect). If that happens, rebuild with `--no-cache`, or clear the builder's cache (`docker builder prune`); either makes the next build compile from scratch.
+**Cargo build cache.** `setup.sh` and the demos give each checkout its own BuildKit `target` cache, avoiding stale artifacts when multiple worktrees share a Docker host. If you invoke Compose directly, set a distinct `LIMEN_BUILD_CACHE` for each checkout (for example, `LIMEN_BUILD_CACHE=limen-my-worktree docker compose ...`).
 
 ## Redis and Valkey (Phase 7)
 

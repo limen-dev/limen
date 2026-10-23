@@ -72,6 +72,13 @@ stack_setup() {
   local scale=false
   if [ "${1:-}" = --scale ]; then scale=true; shift; fi
   local s files=() env=()
+  if [ -z "${LIMEN_BUILD_CACHE:-}" ]; then
+    local build_root build_cache
+    build_root="$(cd "$here/../.." && pwd -P)"
+    build_cache="$(printf '%s' "$build_root" | cksum | cut -d' ' -f1)"
+    LIMEN_BUILD_CACHE="limen-target-$build_cache"
+  fi
+  export LIMEN_BUILD_CACHE
   if $scale; then
     files=(-f "$here/stacks/scale.yml")
     STACK_PROXY=localhost:23443 STACK_HEALTH=localhost:23444 STACK_DEX=http://localhost:25556
