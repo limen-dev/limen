@@ -1,0 +1,13 @@
+kind: resource
+version: v1
+metadata: { name: orders-mq, labels: { env: prod, team: payments } }
+spec:
+  rabbitmq: { endpoint: "b-example.mq.eu-west-1.amazonaws.com:5671", region: eu-west-1, aws: true }
+  worker_selector: { pool: prod }
+---
+kind: resource
+version: v1
+metadata: { name: payments-msk, labels: { env: prod, team: payments } }
+spec:
+  kafka: { endpoint: "b-1.payments.example.kafka.eu-west-1.amazonaws.com:9098", region: eu-west-1, aws: true }
+  worker_selector: { pool: prod }

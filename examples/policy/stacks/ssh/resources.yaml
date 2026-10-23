@@ -1,0 +1,21 @@
+kind: resource
+version: v1
+metadata:
+  name: web-staging-1
+  labels: { env: staging }
+spec:
+  # The dev sshd target (deploy/compose/config/targets/sshd). The host key is pinned:
+  # the worker refuses to connect if the target presents any other key.
+  ssh:
+    address: "sshd-target:22"
+    host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAkWE808+SBJ5tbkLTrbcpmj4Qg2UvqRG/CYJgBwP1S"
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: bastion-staging
+  labels: { env: staging, tier: bastion }
+spec:
+  ssh: { address: "bastion:22" }
+  worker_selector: { pool: dev }

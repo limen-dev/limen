@@ -15,18 +15,38 @@ use limen_proto::v1::{
 use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use tonic::Code;
 
-const POLICY: [(&str, &str); 3] = [
+const POLICY: [(&str, &str); 8] = [
     (
         "roles.yaml",
-        include_str!("../../../examples/policy/roles.yaml"),
+        include_str!("../../../examples/policy/shared/roles.yaml"),
     ),
     (
         "mappings.yaml",
-        include_str!("../../../examples/policy/mappings.yaml"),
+        include_str!("../../../examples/policy/shared/mappings.yaml"),
     ),
     (
-        "resources.yaml",
-        include_str!("../../../examples/policy/resources.yaml"),
+        "ssh.yaml",
+        include_str!("../../../examples/policy/stacks/ssh/resources.yaml"),
+    ),
+    (
+        "database.yaml",
+        include_str!("../../../examples/policy/stacks/database/resources.yaml"),
+    ),
+    (
+        "redis.yaml",
+        include_str!("../../../examples/policy/stacks/redis/resources.yaml"),
+    ),
+    (
+        "mongo.yaml",
+        include_str!("../../../examples/policy/stacks/mongo/resources.yaml"),
+    ),
+    (
+        "messaging.yaml",
+        include_str!("../../../examples/policy/stacks/messaging/resources.yaml"),
+    ),
+    (
+        "search.yaml",
+        include_str!("../../../examples/policy/stacks/search/resources.yaml"),
     ),
 ];
 

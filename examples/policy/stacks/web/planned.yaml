@@ -1,0 +1,10 @@
+kind: resource
+version: v1
+metadata: { name: grafana, labels: { env: staging, team: platform } }
+spec:
+  web:
+    address: "grafana.internal.example:443"
+    host: grafana.apps.example.com
+    tls_ca_file: /etc/ssl/certs/ca-certificates.crt
+    health_path: /api/health
+  worker_selector: { pool: dev }

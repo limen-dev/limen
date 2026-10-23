@@ -1,0 +1,36 @@
+kind: role
+version: v1
+metadata:
+  name: dev-planned
+  description: Staging access to the example integrations, for developers.
+spec:
+  cert_ttl: 10m
+  allow:
+    - resources: { kind: [mysql, redshift], labels: { env: [staging] } }
+      db: { roles: [limen_readonly] }
+    - resources: { kind: [web], labels: { env: [staging] } }
+      web: {}
+---
+kind: role
+version: v1
+metadata:
+  name: sre-planned
+  description: Everything the planned integrations will reach, for SRE.
+spec:
+  cert_ttl: 30m
+  max_session_ttl: 12h
+  allow:
+    - resources: { kind: [mysql, redshift], labels: { "*": ["*"] } }
+      db: { roles: [limen_readonly, limen_rw] }
+    - resources: { kind: [web], labels: { "*": ["*"] } }
+      web: {}
+    - resources: { kind: [tcp], labels: { "*": ["*"] } }
+      tcp: {}
+---
+kind: role_mapping
+version: v1
+metadata:
+  name: planned-idp
+spec:
+  - { idp_group: developers, roles: [dev-planned] }
+  - { idp_group: sre, roles: [sre-planned] }

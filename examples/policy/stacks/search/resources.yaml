@@ -1,0 +1,37 @@
+kind: resource
+version: v1
+metadata:
+  name: search-staging
+  labels: { env: staging }
+spec:
+  # Dev: plain HTTP and a password the worker holds (--search-credentials-file).
+  # Elastic Cloud would be `tls: true` (the default) with an `api_key`.
+  elasticsearch: { endpoint: "elasticsearch-target:9200", tls: false }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: search-opensearch
+  labels: { env: staging }
+spec:
+  # OpenSearch speaks the same REST API; the dev stack runs one next to
+  # Elasticsearch, reached over TLS (its demo certificate carries this name)
+  # and verified against the worker's --search-ca-file.
+  opensearch: { endpoint: "node-0.example.com:9200" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: logs-opensearch
+  labels: { env: prod, team: platform }
+spec:
+  # Amazon OpenSearch Service: requests are signed with SigV4 using the
+  # worker's AWS credentials. Unverified against the real service (ADR-0036).
+  opensearch:
+    endpoint: "search-logs-example.eu-west-1.es.amazonaws.com:443"
+    region: eu-west-1
+    aws: true
+    audit: { redact_ids: true }
+  worker_selector: { pool: prod }

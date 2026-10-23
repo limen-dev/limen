@@ -22,9 +22,21 @@ use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use limen_tunnel::tls::Identity;
 use tonic::Code;
 
-const ROLES: &str = include_str!("../../../examples/policy/roles.yaml");
-const MAPPINGS: &str = include_str!("../../../examples/policy/mappings.yaml");
-const RESOURCES: &str = include_str!("../../../examples/policy/resources.yaml");
+const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
+const MAPPINGS: &str = include_str!("../../../examples/policy/shared/mappings.yaml");
+const RESOURCES: &str = concat!(
+    include_str!("../../../examples/policy/stacks/ssh/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/database/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/redis/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/mongo/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/messaging/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/search/resources.yaml"),
+);
 
 fn sources() -> Vec<PolicySource> {
     [

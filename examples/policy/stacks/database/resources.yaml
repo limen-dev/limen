@@ -1,0 +1,54 @@
+kind: resource
+version: v1
+metadata:
+  name: orders-staging
+  labels: { env: staging, team: payments }
+spec:
+  # The dev PostgreSQL target (deploy/compose, profile "db"). Secret mode: the
+  # worker reads each role's password from <password_dir>/<role>, and verifies
+  # the database's certificate against the throwaway CA in the db-tls volume.
+  postgres:
+    endpoint: "postgres-target:5432"
+    iam_auth: false
+    default_database: orders
+    tls_ca_file: /var/lib/limen/db-tls/ca.pem
+    password_dir: /var/lib/limen/db-secrets/postgres
+    admin_user: limen_admin
+    admin_password_file: /var/lib/limen/db-secrets/.admin
+    bootstrap:
+      - role: limen_readonly
+        grants: [{ database: orders, access: read }]
+      - role: limen_rw
+        grants: [{ database: orders, access: write }]
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: orders-mysql-staging
+  labels: { env: staging, team: payments }
+spec:
+  # The dev MySQL target, the same way.
+  mysql:
+    endpoint: "mysql-target:3306"
+    iam_auth: false
+    default_database: orders
+    tls_ca_file: /var/lib/limen/db-tls/ca.pem
+    password_dir: /var/lib/limen/db-secrets/mysql
+    admin_user: limen_admin
+    admin_password_file: /var/lib/limen/db-secrets/.admin
+    bootstrap:
+      - role: limen_readonly
+        grants: [{ database: orders, access: read }]
+      - role: limen_rw
+        grants: [{ database: orders, access: write }]
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata:
+  name: orders-prod
+  labels: { env: prod, team: payments }
+spec:
+  postgres: { endpoint: "orders.cluster-example.eu-west-1.rds.amazonaws.com:5432", region: eu-west-1 }
+  worker_selector: { pool: prod }

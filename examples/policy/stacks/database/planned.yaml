@@ -1,0 +1,16 @@
+# Examples for integrations and deployment variants (ADR-0018). Some entries
+# represent services not yet verified against their real cloud provider; the
+# local protocol implementations are available. The addresses are placeholders.
+kind: resource
+version: v1
+metadata: { name: billing-mysql-staging, labels: { env: staging, team: payments } }
+spec:
+  mysql: { endpoint: "billing.cluster-example.eu-west-1.rds.amazonaws.com:3306", region: eu-west-1 }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: warehouse-prod, labels: { env: prod, team: data } }
+spec:
+  redshift: { endpoint: "warehouse.example.eu-west-1.redshift.amazonaws.com:5439", region: eu-west-1 }
+  worker_selector: { pool: prod }

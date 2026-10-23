@@ -2,6 +2,15 @@
 
 Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are four document kinds. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
 
+The examples are grouped into `shared/` policy and `stacks/<kind>/` files.
+Applying the `examples/policy/` directory still recursively applies the full
+example policy. To apply one stack's examples, include the shared policy and
+that stack's directory, for example:
+
+```sh
+limen admin apply examples/policy/shared examples/policy/stacks/redis
+```
+
 ## Evaluation
 
 Access is **denied by default**. A request names a resource and the principal to use on it (an SSH login, DB role, Kubernetes group, Redis user, or MongoDB role).
@@ -123,7 +132,7 @@ authorized resource list. See the [web apps guide](guides/web-apps.md).
 Some kinds are accepted by policy before their integration is implemented, so
 policy can be reviewed ahead of time. Web apps and raw TCP are served today
 alongside SSH, SQL databases, Redis, Kubernetes, MongoDB, search, RabbitMQ, and
-Kafka. Remaining examples are in [`examples/policy/planned.yaml`](../examples/policy/planned.yaml).
+Kafka. Stack-specific examples are organized under [`examples/policy/stacks/`](../examples/policy/stacks/), including deployment variants that remain unverified against their real cloud services.
 Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. Web and TCP grants are access itself (`web: {}` and `tcp: {}`); neither lets a client choose an upstream identity or destination.
 
 ## `bot`
@@ -154,4 +163,4 @@ The bot logs in as `bot:<name>`. Rules the validator enforces, so a bot can't be
 - `roles` must exist, and can't be built-in (`limen:…`). At most one hour of lifetime.
 - When a token matches more than one bot the login is refused, so an overlap can't pick a winner.
 
-Default issuers: `https://token.actions.githubusercontent.com` for GitHub Actions and `https://gitlab.com` for GitLab (set `issuer` for GitHub Enterprise Server and self-managed GitLab). Examples: [`examples/policy/bots.yaml`](../examples/policy/bots.yaml).
+Default issuers: `https://token.actions.githubusercontent.com` for GitHub Actions and `https://gitlab.com` for GitLab (set `issuer` for GitHub Enterprise Server and self-managed GitLab). Examples: [`examples/policy/stacks/bots/policy.yaml`](../examples/policy/stacks/bots/policy.yaml).
