@@ -26,7 +26,7 @@ The scripts are plain bash, written for macOS (tested) and Linux (untested). On 
 deploy/compose/setup.sh
 ```
 
-It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy` and the matching TCP/web policies for selected stacks, then prints the ports, commands for enabled resources, CLI sign-in, and console URL.
+It asks whether to scale Limen and which stacks to enable, starts everything, applies shared policy and only the selected stacks' policies, then prints the ports, commands for enabled resources, CLI sign-in, and console URL.
 
 For example, to run the TCP and web fixtures:
 
@@ -128,7 +128,7 @@ Limen is one stack and everything it connects to or reports to is another, each 
 
 **Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the k3s cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
 
-`setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies `examples/policy`, bootstraps the database roles, and seeds Redis, so `limen ls` shows every resource:
+`setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies shared policy plus only the selected stacks' policies, bootstraps the database roles, and seeds Redis. Consequently, `limen ls` shows resources for the enabled stacks rather than every example:
 
 ```sh
 deploy/compose/setup.sh --yes               # limen + every stack, no questions

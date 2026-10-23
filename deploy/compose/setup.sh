@@ -23,7 +23,7 @@
 # web      an HTTP app target for browser SSO                    stacks/web.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
-# the admin, applies examples/policy plus the selected TCP/web policies, and
+# the admin, applies shared policy plus the selected stack policies, and
 # seeds the targets. Development only: static tokens, Dex static passwords,
 # file-backed CA keys. The per-phase demos are in demos/.
 set -euo pipefail
@@ -115,6 +115,7 @@ has() { case " ${stacks[*]:-} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # ---- start ----------------------------------------------------------------------
 stack_setup ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
+stack_policy_files "$root" "${stacks[@]}" || fail "could not select policy examples"
 stack_lock
 state="$STACK_STATE"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
@@ -132,10 +133,7 @@ wait_for "proxy readiness" curl -sf "http://$STACK_HEALTH/readyz"
 "${compose[@]}" cp "$STACK_CP:/var/lib/limen/ca-public/internal-ca.pem" "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
-policy_files=("$root/examples/policy")
-if has tcp; then policy_files+=("$here/config/targets/tcp/policy.yaml"); fi
-if has web; then policy_files+=("$here/config/targets/web/policy.yaml"); fi
-"$LIMEN_BIN" admin apply "${policy_files[@]}" --source-ref setup.sh >/dev/null
+"$LIMEN_BIN" admin apply "${POLICY_FILES[@]}" --source-ref setup.sh >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://$STACK_HEALTH/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null # roles are fixed at login: sign in again to get the applied ones

@@ -80,8 +80,6 @@ rm -rf "$home_admin" "$home_dev"
 LIMEN_HOME="$home_admin" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
 LIMEN_HOME="$home_admin" "$LIMEN_BIN" admin apply \
   "$root/examples/policy" \
-  "$here/config/targets/tcp/policy.yaml" \
-  "$here/config/targets/web/policy.yaml" \
   --source-ref demo-phase12 >/dev/null
 LIMEN_HOME="$home_dev" "$here/scripts/dev-login.sh" "$DEVELOPER" >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:$LIMEN_PORT_HEALTH/tunnels | grep -q worker_id"
