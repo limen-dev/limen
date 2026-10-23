@@ -5,9 +5,9 @@ Connect with `curl`, or any Elasticsearch or OpenSearch client, through Limen. Y
 ## Connect
 
 ```sh
-limen ls                                   # search-staging   ● elasticsearch   limen-read
+limen ls                                   # search-staging   ● elasticsearch   read
 limen search connect search-staging        # the role is picked from policy when there's only one
-# Listening for search-staging as limen-read.
+# Listening for search-staging as read.
 # Run: curl http://127.0.0.1:51234/
 curl http://127.0.0.1:51234/app-orders/_search -H 'content-type: application/json' -d '{"query":{"match_all":{}}}'
 ```
@@ -21,7 +21,7 @@ es.search(index="app-orders", query={"match_all": {}})
 ```
 
 - Each connection to the listener is its own audited session. Clients that pool connections (all of them) open several: that is several sessions, each with its own session ID in the trail. Leave `limen search connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
-- `--role limen-write` picks the engine role when policy allows several. `--listen 127.0.0.1:9200` fixes the port (loopback only). `--socket ~/.limen/run/search.sock` uses a unix socket (mode 0600, in a directory only you can enter): `curl --unix-socket ~/.limen/run/search.sock http://localhost/`.
+- `--role write` picks the engine role when policy allows several. `--listen 127.0.0.1:9200` fixes the port (loopback only). `--socket ~/.limen/run/search.sock` uses a unix socket (mode 0600, in a directory only you can enter): `curl --unix-socket ~/.limen/run/search.sock http://localhost/`.
 - Anyone who can reach the listener acts as you. That is why it binds loopback only and the socket is private. Don't forward the port.
 - A refusal reaches your client as an Elasticsearch-shaped error: `403` or `400` with `{"error": {"type": "limen_security_exception", "reason": "Limen: ..."}}`, and an `x-limen-refused: true` header. The connection stays open after a refusal.
 - Headers your client sends are not forwarded, except a short list of harmless ones (`Accept`, `Content-Type`, `Content-Encoding`, `User-Agent`, the Elastic client metadata headers, `traceparent`). `Authorization`, API keys, `es-security-runas-user`, `opensearch_security_impersonate_as`, and `x-forwarded-*` are dropped. The worker adds its own credential and `X-Opaque-Id: limen:<session id>`.
@@ -33,7 +33,7 @@ A role grants engine roles with limits (`docs/policy.md` has the full syntax):
 ```yaml
 - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
   search:
-    roles: [limen-read]                    # the engine-side login the worker uses
+    roles: [read]                            # the engine-side login the worker uses
     classes: [read]                        # read | write | admin. Default: read
     indices: ["app-*", "logs-2026.*"]      # empty: any index that isn't hidden
 ```
@@ -127,10 +127,10 @@ spec:
 ```json
 {
   "catalog-search": {
-    "limen-read":  { "basic": { "username": "limen-read", "password": "..." } },
-    "limen-write": { "api_key": "VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw==" },
-    "limen-batch": { "bearer": "<token>" },
-    "limen-mtls":  { "client_cert_file": "/etc/limen/client.pem", "client_key_file": "/etc/limen/client.key" }
+    "read":  { "basic": { "username": "read", "password": "..." } },
+    "write": { "api_key": "VnVhQ2ZHY0JDZGJrUW0tZTVhT3g6dWkybHAyYXhUTm1zeWFrdzl0dk5udw==" },
+    "batch": { "bearer": "<token>" },
+    "mtls":  { "client_cert_file": "/etc/limen/client.pem", "client_key_file": "/etc/limen/client.key" }
   }
 }
 ```
@@ -141,7 +141,7 @@ Each entry has at most one of `basic`, `api_key` (the encoded key Elasticsearch 
 
 **Self-hosted Elasticsearch or OpenSearch:** create the engine users and roles in the engine (`deploy/compose/config/targets/search/provision.sh` shows both), and list the logins in the credentials file. The dev stack's OpenSearch is reached over TLS with its demo certificate, verified in full.
 
-The engine sees `limen-read`, not the person. Every request carries `X-Opaque-Id: limen:<session id>`, so the engine's slow log, the tasks API, and deprecation logs join to Limen's audit.
+The engine sees `read`, not the person. Every request carries `X-Opaque-Id: limen:<session id>`, so the engine's slow log, the tasks API, and deprecation logs join to Limen's audit.
 
 **Metrics** (the worker's `/metrics`): `limen_search_requests_total{class, result}` (`result` is `ok`, `error`, `denied`, `upstream_error`, or `audit_failed`) and `limen_search_upstream_seconds` (time to the response head).
 

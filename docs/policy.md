@@ -27,22 +27,22 @@ spec:
   max_session_ttl: 8h      # cap on a single session; the shortest across a user's roles wins
   allow:
     - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
-      db: { roles: [limen_readonly], databases: ["*"] }
+      db: { roles: [limen_read], databases: ["*"] }
     - resources: { kind: [ssh], labels: { env: [staging] }, names: [web-staging-1] }
       ssh: { logins: [ubuntu], port_forwarding: false }
     - resources: { kind: [kubernetes], labels: { env: [staging] } }
       kube: { groups: ["limen:view"] }
     - resources: { kind: [redis], labels: { env: [staging] } }
-      redis: { users: [limen-ro], keys: ["app:*"], deny_commands: [KEYS] }
+      redis: { users: [read], keys: ["app:*"], deny_commands: [KEYS] }
     - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
-      search: { roles: [limen-read], indices: ["app-*"] }
+      search: { roles: [read], indices: ["app-*"] }
     # Planned integrations (nothing serves them yet; see below):
     - resources: { kind: [mongodb], labels: { env: [staging] } }
-      mongo: { roles: [limen-read], databases: ["*"] }
+      mongo: { roles: [read], databases: ["*"] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
-      mq: { users: [limen-consumer] }
+      mq: { users: [consumer] }
     - resources: { kind: [kafka], labels: { env: [staging] } }
-      kafka: { users: [limen-consumer] }
+      kafka: { users: [consumer] }
     - resources: { kind: [web], labels: { env: [staging] } }
       web: {}
   deny:
@@ -50,6 +50,8 @@ spec:
 ```
 
 `db.roles` names the database roles people may use. **They must start with `limen_`** (followed by lowercase letters, digits, or underscores): the prefix is reserved for roles Limen creates and manages, and policy validation rejects any other. `db.databases` lists the databases (`"*"` for any).
+
+For Redis, MongoDB, search, RabbitMQ, and Kafka, the `users` and `roles` fields select upstream identities; they do not require a Limen prefix. Use concise names such as `read`, `write`, `consumer`, or `admin`.
 
 ## `role_mapping`
 
@@ -85,7 +87,7 @@ Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, w
 
 ### Redis grants
 
-`redis: { users: [...] }` names the Redis users a role may act as. Optional limits, enforced by the worker on every command (ADR-0034):
+`redis: { users: [...] }` names the target Redis users a role may act as; no Limen prefix is required. Optional limits, enforced by the worker on every command (ADR-0034):
 
 - `keys: [patterns]`: only keys matching a pattern (`*`, `?`). Also refuses `KEYS`, `SCAN`, `RANDOMKEY`, and scripts.
 - `deny_commands: [NAME or "NAME SUB"]`: refuse these as well as the built-in deny list. Wins over `allow_commands`.
@@ -96,11 +98,11 @@ With several roles granting the same user, the session may do whatever any one g
 
 ### MongoDB grants
 
-`mongo: { roles: [...], databases: [...] }` names the MongoDB roles a role may act as (names the worker has a credential for in the resource's `credentials_dir`) and the databases they may use (`*` for all; deny rules apply). `deny_commands: [dropDatabase, drop]` refuses named commands (case-insensitive) on those databases. Enforced by the worker on every command (ADR-0035); the server's own grants for the MongoDB user are the second layer. With several grants covering the same database, a session may do whatever any one of them permits. Role names are `[A-Za-z0-9_.-]` (up to 64), and database names must be valid MongoDB database names. [The MongoDB guide](guides/mongodb.md) has the details.
+`mongo: { roles: [...], databases: [...] }` names the target MongoDB users a role may act as (names the worker has a credential for in the resource's `credentials_dir`; no Limen prefix is required) and the databases they may use (`*` for all; deny rules apply). `deny_commands: [dropDatabase, drop]` refuses named commands (case-insensitive) on those databases. Enforced by the worker on every command (ADR-0035); the server's own grants for the MongoDB user are the second layer. With several grants covering the same database, a session may do whatever any one of them permits. Role names are `[A-Za-z0-9_.-]` (up to 64), and database names must be valid MongoDB database names. [The MongoDB guide](guides/mongodb.md) has the details.
 
 ### Search grants
 
-`search: { roles: [...] }` names the engine roles (the worker's logins to OpenSearch or Elasticsearch) a role may act as. Optional limits, enforced by the worker on every request (ADR-0036):
+`search: { roles: [...] }` names the target engine roles (the worker's logins to OpenSearch or Elasticsearch) a role may act as; no Limen prefix is required. Optional limits, enforced by the worker on every request (ADR-0036):
 
 - `classes: [read, write, admin]`: what requests may do. Default: `read` only. The classes are independent (`write` doesn't include `read`), and an API the worker doesn't recognise is `admin`.
 - `indices: [patterns]`: the index names and patterns (`*` only; lowercase letters, digits, `.`, `_`, `-`) a request may name. Empty means any index that isn't hidden; a name starting with `.` is covered only by a pattern that starts with `.`. A request that names every index needs a `*` pattern.

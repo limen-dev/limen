@@ -109,35 +109,35 @@ grep -A1 "ready for" "$state/db-my.log" | sed 's/^/  /'
 pass "both listeners are up (the role was chosen from policy; no password anywhere)"
 
 step "psql and mysql work, as the database role policy allows"
-out="$(psql_in limen_readonly orders -At -c 'select count(*) from orders' -c "select current_user, current_database(), left(current_setting('application_name'), 6)")"
+out="$(psql_in limen_read orders -At -c 'select count(*) from orders' -c "select current_user, current_database(), left(current_setting('application_name'), 6)")"
 echo "$out" | sed 's/^/  postgres: /'
 grep -q '^3$' <<<"$out" || fail "unexpected psql output: $out"
-grep -q 'limen_readonly|orders|limen:' <<<"$out" || fail "the session isn't visible to the database: $out"
-out="$(mysql_in limen_readonly orders -N -e 'select count(*) from orders; select current_user()' 2>/dev/null)"
+grep -q 'limen_read|orders|limen:' <<<"$out" || fail "the session isn't visible to the database: $out"
+out="$(mysql_in limen_read orders -N -e 'select count(*) from orders; select current_user()' 2>/dev/null)"
 echo "$out" | sed 's/^/  mysql:    /'
 grep -q '^3$' <<<"$out" || fail "unexpected mysql output: $out"
-grep -q 'limen_readonly@' <<<"$out" || fail "unexpected mysql user: $out"
-pass "3 orders through each; the databases see the limen_readonly role and (PostgreSQL) the Limen session id"
+grep -q 'limen_read@' <<<"$out" || fail "unexpected mysql user: $out"
+pass "3 orders through each; the databases see the limen_read role and (PostgreSQL) the Limen session id"
 
 step "The database's own grants decide what the role may do"
-if psql_in limen_readonly orders -c "insert into orders (total_cents) values (1)" 2>"$state/pg-deny.err"; then fail "read-only role must not insert"; fi
+if psql_in limen_read orders -c "insert into orders (total_cents) values (1)" 2>"$state/pg-deny.err"; then fail "read-only role must not insert"; fi
 grep -o "permission denied.*" "$state/pg-deny.err" | head -1 | sed 's/^/  postgres: /'
-if mysql_in limen_readonly orders -e "insert into orders (total_cents) values (1)" 2>"$state/my-deny.err"; then fail "read-only user must not insert"; fi
+if mysql_in limen_read orders -e "insert into orders (total_cents) values (1)" 2>"$state/my-deny.err"; then fail "read-only user must not insert"; fi
 grep -o "ERROR 1142.*" "$state/my-deny.err" | head -1 | sed 's/^/  mysql:    /'
 pass "inserts are refused by PostgreSQL and MySQL themselves, and audited"
 
 step "Denials at Limen"
-if limen db connect orders-staging --db-role limen_rw --listen 127.0.0.1:0 2>"$state/role.err"; then fail "developer must not get limen_rw"; fi
+if limen db connect orders-staging --db-role limen_write --listen 127.0.0.1:0 2>"$state/role.err"; then fail "developer must not get limen_write"; fi
 grep -o "you may not use.*" "$state/role.err" | head -1 | sed 's/^/  /'
 if limen db connect orders-prod 2>"$state/prod.err"; then fail "developer has no access to orders-prod"; fi
 grep -o "you have no database access.*" "$state/prod.err" | head -1 | sed 's/^/  /'
-if psql_in limen_rw orders -c 'select 1' 2>"$state/user.err"; then fail "the session is for limen_readonly only"; fi
+if psql_in limen_write orders -c 'select 1' 2>"$state/user.err"; then fail "the session is for limen_read only"; fi
 grep -o "this session is for.*" "$state/user.err" | head -1 | sed 's/^/  /'
 pass "another role, another resource, and another login are all refused"
 
 step "Cancel: a client's cancel request (Ctrl-C in psql) works through Limen"
 docker rm -f limen-demo-sleep >/dev/null 2>&1 || true
-( psql_named limen-demo-sleep limen_readonly orders -c 'select pg_sleep(60)' >"$state/sleep.out" 2>&1 || true ) &
+( psql_named limen-demo-sleep limen_read orders -c 'select pg_sleep(60)' >"$state/sleep.out" 2>&1 || true ) &
 sleeper=$!
 sleep 4
 docker kill --signal=INT limen-demo-sleep >/dev/null
@@ -147,7 +147,7 @@ pass "the cancel reached the database: $(grep -o 'canceling statement[^.]*' "$st
 
 step "Locking the developer ends an open session at once"
 docker rm -f limen-demo-lock >/dev/null 2>&1 || true
-( psql_named limen-demo-lock limen_readonly orders -c 'select pg_sleep(120)' >"$state/lock.out" 2>&1 || true ) &
+( psql_named limen-demo-lock limen_read orders -c 'select pg_sleep(120)' >"$state/lock.out" 2>&1 || true ) &
 locked=$!
 sleep 4
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
@@ -167,8 +167,8 @@ pass "the open session ended $((SECONDS - started)) s after the lock"
 step "Audit trail: sessions, every statement, errors, bootstrap; no secrets"
 sleep 8   # components ship events through their spools
 "${compose[@]}" cp control-plane:/var/lib/limen/audit/control-plane.jsonl "$state/audit.jsonl" >/dev/null
-pw_pg="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/postgres/limen_readonly)"
-pw_my="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/mysql/limen_readonly)"
+pw_pg="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/postgres/limen_read)"
+pw_my="$(docker run --rm -v limen-dbdemo_db-secrets:/s "$ALPINE_IMAGE" cat /s/mysql/limen_read)"
 python3 - "$state/audit.jsonl" "$DEVELOPER" "$pw_pg" "$pw_my" <<'PY'
 import collections, json, sys
 path, dev, pw_pg, pw_my = sys.argv[1:5]
@@ -191,7 +191,7 @@ pg = stmt("select count(*) from orders", "postgres")
 my = stmt("select count(*) from orders", "mysql")
 session_ids = {e["session_id"] for e in starts}
 assert pg["session_id"] in session_ids and my["session_id"] in session_ids, "statements link to proxy sessions"
-assert pg["producer"]["component"] == "worker" and pg["data"]["db_role"] == "limen_readonly"
+assert pg["producer"]["component"] == "worker" and pg["data"]["db_role"] == "limen_read"
 ok = [e for e in qends if e["data"]["query_id"] == pg["event_id"]]
 assert ok and ok[0]["data"]["status"] == "ok" and ok[0]["data"]["rows"] == 1, "rows and status on the end event"
 denied_pg = [e for e in qends if e["data"].get("error_code") == "42501"]

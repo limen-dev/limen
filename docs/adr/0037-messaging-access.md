@@ -53,7 +53,7 @@ The pattern from ADR-0002, ADR-0015, ADR-0034 holds: the **worker terminates the
 17. **Policy**, in the shape of Kafka ACLs:
     ```yaml
     kafka:
-      users: [limen-consumer]       # broker user (credential selector)
+      users: [consumer]       # broker user (credential selector)
       classes: [read]               # read | write | admin. Default [read]
       topics: ["orders.*"]          # `*` only. Default: any non-internal topic
       groups: ["reports-*"]         # consumer groups. Default: any
@@ -140,3 +140,6 @@ The branch was brought up to date with Phases 8, 9, and 10 and the reorganised d
 - Per-session memory is still up to 128 MiB for a request, 256 MiB for a response, and a 512 MiB backlog for a client that isn't reading (64 MiB for AMQP); size workers by sessions times that, or lower it when there are many clients.
 - **The run stays active while the CLI listens.** The CLI's startup session is kept open (`database: anchor`, the same idea as the search command's anchor). The proxy and worker authorize it like any session (policy, a credential exists) and the worker then serves no protocol on it, so it ends when the CLI stops, at `max_session_ttl`, on a lock, or on a drain. Without it a run was active only while a client was connected, so an idle listener looked ended in the console.
 
+## Amendment: concise broker-user selectors (2026-10-23)
+
+`mq.users` and `kafka.users` select broker users directly and do not require a Limen prefix. The guides and examples use `consumer` and `admin`.

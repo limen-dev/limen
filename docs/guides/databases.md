@@ -9,8 +9,8 @@
 ```sh
 limen ls                                   # shows orders-staging (postgres) with your DB roles
 limen db connect orders-staging            # picks your role if policy allows only one
-# Limen is ready for orders-staging as limen_readonly. In another terminal:
-#   psql "host=127.0.0.1 port=54623 user=limen_readonly dbname=orders sslmode=disable"
+# Limen is ready for orders-staging as limen_read. In another terminal:
+#   psql "host=127.0.0.1 port=54623 user=limen_read dbname=orders sslmode=disable"
 ```
 
 | Option | Meaning |
@@ -44,7 +44,7 @@ Joining your database's own logs to Limen: Limen sets `application_name` (Postgr
 
 ## What Limen enforces, and what the database does
 
-Limen decides **who may use which role on which database**: policy grants (`db: { roles, databases }`) are checked at the proxy and again at the worker. Everything *inside* the session is limited by **the database's own grants for that role**. Limen does not parse statements to allow or deny them (ADR-0012), so a role that can `DROP TABLE` lets its users do it, and they are audited doing it. Keep roles narrow (`limen_readonly`), and let [bootstrap](../runbooks/database-onboarding.md#bootstrap) manage the grants.
+Limen decides **who may use which role on which database**: policy grants (`db: { roles, databases }`) are checked at the proxy and again at the worker. Everything *inside* the session is limited by **the database's own grants for that role**. Limen does not parse statements to allow or deny them (ADR-0012), so a role that can `DROP TABLE` lets its users do it, and they are audited doing it. Keep roles narrow (`limen_read`), and let [bootstrap](../runbooks/database-onboarding.md#bootstrap) manage the grants.
 
 The worker adds a few guards the wire protocol makes cheap:
 
@@ -78,9 +78,9 @@ spec:
     admin_user: limen_admin
     admin_password_file: /run/limen/db-secrets/.admin
     bootstrap:
-      - role: limen_readonly
+      - role: limen_read
         grants: [{ database: orders, access: read }]
-      - role: limen_rw
+      - role: limen_write
         grants: [{ database: orders, access: write }]
   worker_selector: { pool: staging-vpc }
 ```
@@ -104,7 +104,7 @@ Grants in a role:
 ```yaml
 allow:
   - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
-    db: { roles: [limen_readonly], databases: [orders] }   # "*" for any database
+    db: { roles: [limen_read], databases: [orders] }   # "*" for any database
 ```
 
 Database role names must be `limen_` followed by lowercase letters, digits, or underscores. The prefix is reserved: Limen never creates or changes any other role.

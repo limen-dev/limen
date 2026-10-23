@@ -68,7 +68,7 @@ ready=false
 for _ in $(seq 1 120); do
   if docker exec "$pg" psql -U limen_admin -d orders -tAc 'select 1' >/dev/null 2>&1 \
     && docker exec "$my" mysql -ulimen_admin -plimen-admin-dev-only orders -e 'select 1' >/dev/null 2>&1 \
-    && docker exec "$mongo" mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()' >/dev/null 2>&1; then
+    && docker exec "$mongo" mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()' >/dev/null 2>&1; then
     ready=true; break
   fi
   sleep 1

@@ -16,9 +16,9 @@ spec:
     admin_user: limen_admin
     admin_password_file: /var/lib/limen/db-secrets/.admin
     bootstrap:
-      - role: limen_readonly
+      - role: limen_read
         grants: [{ database: orders, access: read }]
-      - role: limen_rw
+      - role: limen_write
         grants: [{ database: orders, access: write }]
   worker_selector: { pool: dev }
 ---
@@ -38,9 +38,9 @@ spec:
     admin_user: limen_admin
     admin_password_file: /var/lib/limen/db-secrets/.admin
     bootstrap:
-      - role: limen_readonly
+      - role: limen_read
         grants: [{ database: orders, access: read }]
-      - role: limen_rw
+      - role: limen_write
         grants: [{ database: orders, access: write }]
   worker_selector: { pool: dev }
 ---

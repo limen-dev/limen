@@ -15,12 +15,12 @@ db.getSiblingDB("billing").ledger.insertOne({ entry: 1, amount: 500 });
 
 const admin = db.getSiblingDB("admin");
 admin.createUser({
-  user: "limen-read",
+  user: "read",
   pwd: "limen-read-dev-only",
   roles: [{ role: "read", db: "orders" }],
 });
 admin.createUser({
-  user: "limen-rw",
+  user: "write",
   pwd: "limen-rw-dev-only",
   roles: [{ role: "readWrite", db: "orders" }, { role: "read", db: "billing" }],
 });

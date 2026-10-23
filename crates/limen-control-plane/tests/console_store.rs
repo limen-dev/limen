@@ -197,7 +197,7 @@ async fn database_sessions_list_their_statements() {
             EventKind::DbQuery,
             s,
             DEVELOPER,
-            json!({ "protocol": "mysql", "phase": "simple", "statement_type": "select", "statement": text, "db_role": "limen_rw", "database": "orders" }),
+            json!({ "protocol": "mysql", "phase": "simple", "statement_type": "select", "statement": text, "db_role": "limen_write", "database": "orders" }),
         )
     };
     let end_of = |q: &Event, status: &str, rows: i64| {
@@ -299,7 +299,7 @@ async fn redis_sessions_list_their_commands() {
         EventKind::RedisCommand,
         s,
         DEVELOPER,
-        json!({ "command": "GET", "subcommand": null, "keys": ["app:greeting"], "keys_total": 1, "keys_known": true, "arity": 2, "resource": "cache-staging", "redis_user": "limen-ro" }),
+        json!({ "command": "GET", "subcommand": null, "keys": ["app:greeting"], "keys_total": 1, "keys_known": true, "arity": 2, "resource": "cache-staging", "redis_user": "read" }),
     );
     let del = event(
         EventKind::RedisCommand,
@@ -311,7 +311,7 @@ async fn redis_sessions_list_their_commands() {
         EventKind::AuthDenied,
         s,
         DEVELOPER,
-        json!({ "action": "redis", "resource": "cache-staging", "redis_user": "limen-ro", "command": "FLUSHALL", "subcommand": null, "reason": "FLUSHALL is denied unless the role lists it in redis.allow_commands" }),
+        json!({ "action": "redis", "resource": "cache-staging", "redis_user": "read", "command": "FLUSHALL", "subcommand": null, "reason": "FLUSHALL is denied unless the role lists it in redis.allow_commands" }),
     );
     // An auth.denied that is not about Redis is not a command.
     let other = event(
@@ -629,7 +629,7 @@ async fn mongodb_sessions_list_their_commands() {
         EventKind::MongoCommand,
         s,
         DEVELOPER,
-        json!({ "protocol": "mongodb", "phase": "forward", "resource": "catalog", "mongo_role": "limen-read", "command": "find", "database": "orders", "collection": "customers", "summary": "{\"filter\":{\"email\":\"?\"}}", "redacted": true }),
+        json!({ "protocol": "mongodb", "phase": "forward", "resource": "catalog", "mongo_role": "read", "command": "find", "database": "orders", "collection": "customers", "summary": "{\"filter\":{\"email\":\"?\"}}", "redacted": true }),
     );
     let find_end = event(
         EventKind::MongoCommandEnd,
@@ -697,7 +697,7 @@ async fn connections_of_one_run_are_one_row() {
     let Some(db) = fresh_db().await else { return };
     let group = "0123456789abcdef0123456789abcdef";
     let mongo_start = |s: Uuid, user: &str, group: Option<&str>| {
-        let mut data = json!({ "kind": "mongodb", "resource": "catalog", "mongo_role": "limen-read", "worker_id": "w1", "proxy_id": "p1" });
+        let mut data = json!({ "kind": "mongodb", "resource": "catalog", "mongo_role": "read", "worker_id": "w1", "proxy_id": "p1" });
         if let Some(group) = group {
             data["group"] = json!(group);
         }
@@ -807,7 +807,7 @@ async fn search_sessions_list_their_requests() {
         EventKind::SearchRequest,
         s,
         DEVELOPER,
-        json!({ "method": "POST", "path": "/logs-1/_search", "api": "search", "class": "read", "indices": ["logs-1"], "resource": "logs", "engine_role": "limen-read" }),
+        json!({ "method": "POST", "path": "/logs-1/_search", "api": "search", "class": "read", "indices": ["logs-1"], "resource": "logs", "engine_role": "read" }),
     );
     let ok_end = event(
         EventKind::SearchResponse,
@@ -904,19 +904,19 @@ async fn broker_sessions_list_their_operations() {
         EventKind::MqOperation,
         s,
         DEVELOPER,
-        json!({ "action": "publish", "resource": "events-rabbit-staging", "mq_user": "limen-admin", "vhost": "/", "channel": 1, "exchange": "orders.x", "routing_key": "new", "size": 42 }),
+        json!({ "action": "publish", "resource": "events-rabbit-staging", "mq_user": "admin", "vhost": "/", "channel": 1, "exchange": "orders.x", "routing_key": "new", "size": 42 }),
     );
     let produce = event(
         EventKind::KafkaRequest,
         s,
         DEVELOPER,
-        json!({ "api": "Produce", "api_key": 0, "version": 8, "kafka_user": "limen-admin", "topics": [{ "name": "orders.new", "partitions": 2, "requests": 3, "bytes": 900 }], "requests": 3 }),
+        json!({ "api": "Produce", "api_key": 0, "version": 8, "kafka_user": "admin", "topics": [{ "name": "orders.new", "partitions": 2, "requests": 3, "bytes": 900 }], "requests": 3 }),
     );
     let refused = event(
         EventKind::AuthDenied,
         s,
         DEVELOPER,
-        json!({ "action": "kafka", "operation": "Produce", "kafka_user": "limen-consumer", "topics": ["payments"], "reason": "your role doesn't grant write on topic \"payments\"" }),
+        json!({ "action": "kafka", "operation": "Produce", "kafka_user": "consumer", "topics": ["payments"], "reason": "your role doesn't grant write on topic \"payments\"" }),
     );
     let other = event(
         EventKind::AuthDenied,

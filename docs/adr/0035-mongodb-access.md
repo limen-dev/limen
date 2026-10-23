@@ -78,3 +78,7 @@ Accepted by the owner on 2026-10-19, as built:
 - − Command shapes in audit still show field and collection names.
 - − The statement-level policy is by command name only; there is no per-collection or per-operation allow list.
 - Amends ADR-0018: the MongoDB row's field names are now confirmed, and SRV resolution is deferred.
+
+## Amendment: concise role selectors (2026-10-23)
+
+`mongo.roles` selects a target MongoDB user whose credential the worker has; it does not require a Limen prefix. The guides and examples use `read` and `write` for these users.

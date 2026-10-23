@@ -92,7 +92,7 @@ struct Rig {
 
 fn grant(keys: &[&str], deny: &[&str]) -> RedisGrant {
     RedisGrant {
-        users: vec!["limen-rw".into()],
+        users: vec!["write".into()],
         deny_commands: deny.iter().map(|s| (*s).to_owned()).collect(),
         allow_commands: Vec::new(),
         keys: keys.iter().map(|s| (*s).to_owned()).collect(),
@@ -119,7 +119,7 @@ fn rig_with(grants: Vec<RedisGrant>, config: impl FnOnce(&mut SessionConfig)) ->
     let mut cfg = SessionConfig::new(
         Uuid::now_v7().to_string(),
         "ana@example.com".into(),
-        "limen-rw".into(),
+        "write".into(),
         "cache".into(),
         target(false),
     );

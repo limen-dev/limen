@@ -31,9 +31,9 @@ mod tests {
     #[tokio::test]
     async fn reads_the_role_file_and_trims_the_newline() {
         let dir = tempfile::tempdir().expect("dir");
-        std::fs::write(dir.path().join("limen_readonly"), "s3cret\n").expect("write");
+        std::fs::write(dir.path().join("limen_read"), "s3cret\n").expect("write");
         let dir_str = dir.path().to_str().expect("utf8");
-        let pw = role_password(dir_str, "limen_readonly").await.expect("pw");
+        let pw = role_password(dir_str, "limen_read").await.expect("pw");
         assert_eq!(pw.expose(), "s3cret");
         assert_eq!(format!("{pw:?}"), "[REDACTED]");
     }

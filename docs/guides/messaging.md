@@ -6,7 +6,7 @@ Connect with any AMQP 0-9-1 client (pika, amqplib, Bunny, the Java client) or an
 
 ```sh
 limen mq connect events-rabbit-staging        # the user is picked from policy when there's only one
-# Listening for events-rabbit-staging as limen-consumer.
+# Listening for events-rabbit-staging as consumer.
 # Run: amqp://limen:limen@127.0.0.1:51234/%2F
 ```
 
@@ -17,7 +17,7 @@ A role grants broker users with limits shaped like RabbitMQ's own permissions:
 ```yaml
 - resources: { kind: [rabbitmq], labels: { env: [staging] } }
   mq:
-    users: [limen-consumer]
+    users: [consumer]
     vhosts: ["/", "orders"]        # default: only "/"
     classes: [read]                # read | write | configure. Default: read and write
     names: ["orders.*"]            # exchange and queue name patterns. Default: any name
@@ -32,7 +32,7 @@ A role grants broker users with limits shaped like RabbitMQ's own permissions:
 
 ```sh
 limen kafka connect events-kafka-staging --brokers 4
-# Listening for events-kafka-staging as limen-consumer (4 broker slots).
+# Listening for events-kafka-staging as consumer (4 broker slots).
 # Run: kcat -b 127.0.0.1:51234 -L
 ```
 
@@ -41,7 +41,7 @@ Use `127.0.0.1:51234` as the bootstrap server with `security.protocol=PLAINTEXT`
 ```yaml
 - resources: { kind: [kafka], labels: { env: [staging] } }
   kafka:
-    users: [limen-consumer]
+    users: [consumer]
     classes: [read]                # read | write | admin. Default: read
     topics: ["orders.*"]           # default: any topic that isn't internal
     groups: ["dev-*"]              # consumer groups. Default: any
@@ -62,8 +62,8 @@ limen-worker ... \
 ```
 
 ```json
-{ "events-rabbit-staging": { "limen-consumer": "password" },
-  "events-kafka-staging":  { "limen-consumer": "password",
+{ "events-rabbit-staging": { "consumer": "password" },
+  "events-kafka-staging":  { "consumer": "password",
                              "svc": { "password": "…", "client_cert_file": "/c.pem", "client_key_file": "/k.pem" } } }
 ```
 

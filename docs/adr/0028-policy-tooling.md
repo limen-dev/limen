@@ -21,7 +21,7 @@ Policy is deny-by-default YAML kept in Git, with a console dry run that shows a 
         expect: deny
       - who: { groups: [sre] }
         resource: orders-prod
-        principal: { db_role: limen_readonly }
+        principal: { db_role: limen_read }
         expect: allow
         via_role: sre-prod-readonly
   ```

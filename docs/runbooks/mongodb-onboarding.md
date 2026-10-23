@@ -2,7 +2,7 @@
 
 How to put a self-hosted MongoDB, an Atlas cluster, or a DocumentDB cluster behind `limen mongo connect`, and what to check when it doesn't work. The model is in [ADR-0035](../adr/0035-mongodb-access.md); the user side is in [the MongoDB guide](../guides/mongodb.md).
 
-Limen logs in to MongoDB as one **user per policy role** (`limen-read`, `limen-rw`, ...), with a credential only the worker holds. People never get one. There is no bootstrap for MongoDB users yet: you create them, with the least privilege that works. The server's own grants are the real boundary; Limen's checks (database, command name, cursors) are a second lock.
+Limen logs in to MongoDB as one **user per policy role** (`read`, `write`, ...), with a credential only the worker holds. People never get one. There is no bootstrap for MongoDB users yet: you create them, with the least privilege that works. The server's own grants are the real boundary; Limen's checks (database, command name, cursors) are a second lock.
 
 ## 1. Reach the server from a worker
 
@@ -18,12 +18,12 @@ Limen logs in to MongoDB as one **user per policy role** (`limen-read`, `limen-r
 ```js
 // mongosh, as an admin
 db.getSiblingDB("admin").createUser({
-  user: "limen-read", pwd: passwordPrompt(),
+  user: "read", pwd: passwordPrompt(),
   roles: [{ role: "read", db: "orders" }],
 });
 ```
 
-Write the password to the worker as a file named for the role, mode `0400`, in the resource's `credentials_dir` (`/etc/limen/mongo/catalog-prod/limen-read`). Use ASCII passwords only. For servers without SCRAM-SHA-256 (DocumentDB 4.0) set `auth: scram_sha1`.
+Write the password to the worker as a file named for the role, mode `0400`, in the resource's `credentials_dir` (`/etc/limen/mongo/catalog-prod/read`). Use ASCII passwords only. For servers without SCRAM-SHA-256 (DocumentDB 4.0) set `auth: scram_sha1`.
 
 **X.509**: issue a client certificate from a CA the server trusts (`--tlsCAFile`, or the Atlas X.509 CA) with `extendedKeyUsage=clientAuth`, create the user in `$external` named for the subject in RFC 2253 order, and put the certificate followed by its key in `<credentials_dir>/<role>.pem`:
 
@@ -56,7 +56,7 @@ metadata: { name: catalog-readers }
 spec:
   allow:
     - resources: { kind: [mongodb], labels: { env: [prod] } }
-      mongo: { roles: [limen-read], databases: [shop], deny_commands: [dropDatabase] }
+      mongo: { roles: [read], databases: [shop], deny_commands: [dropDatabase] }
 ```
 
 Check it before applying: `limen admin apply <dir> --dry-run`. Then `limen ls` as a member of the role shows the resource.

@@ -666,7 +666,7 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full)
         };
-        assert!(ok(&["cache", "--user", "limen-ro", "--listen", "127.0.0.1:6380"]).is_ok());
+        assert!(ok(&["cache", "--user", "read", "--listen", "127.0.0.1:6380"]).is_ok());
         assert!(
             ok(&[
                 "cache",
@@ -688,7 +688,7 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full)
         };
-        assert!(ok(&["logs", "--role", "limen-read", "--listen", "127.0.0.1:9200"]).is_ok());
+        assert!(ok(&["logs", "--role", "read", "--listen", "127.0.0.1:9200"]).is_ok());
         assert!(
             ok(&[
                 "logs",
@@ -752,7 +752,7 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full)
         };
-        assert!(ok(&["catalog", "--role", "limen-read", "--database", "orders"]).is_ok());
+        assert!(ok(&["catalog", "--role", "read", "--database", "orders"]).is_ok());
         assert!(
             ok(&[
                 "catalog",

@@ -8,27 +8,24 @@ spec:
   cert_ttl: 10m
   allow:
     - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
-      db: { roles: [limen_readonly] }
+      db: { roles: [limen_read] }
     - resources: { kind: [ssh], labels: { env: [staging] } }
       ssh: { logins: [ubuntu] }
-    # Read the app's keys on staging caches. The server's own ACL for limen-ro
-    # is the second layer (ADR-0034).
+    # The server ACL for `read` is the second layer (ADR-0034).
     - resources: { kind: [redis], labels: { env: [staging] } }
-      redis: { users: [limen-ro], keys: ["app:*"] }
-    # Read the orders database on staging MongoDB. The server's own grants for
-    # limen-read are the second layer (ADR-0035).
+      redis: { users: [read], keys: ["app:*"] }
+    # The server grants for MongoDB user `read` are the second layer (ADR-0035).
     - resources: { kind: [mongodb], labels: { env: [staging] } }
-      mongo: { roles: [limen-read], databases: [orders] }
-    # Search the app's indices on staging. The engine's own role for limen-read
-    # is the second layer (ADR-0036).
+      mongo: { roles: [read], databases: [orders] }
+    # The engine role for `read` is the second layer (ADR-0036).
     - resources: { kind: [elasticsearch, opensearch], labels: { env: [staging] } }
-      search: { roles: [limen-read], indices: ["app-*"] }
+      search: { roles: [read], indices: ["app-*"] }
     # Read orders from the staging brokers (ADR-0037). The brokers' own
-    # permissions for limen-consumer are read-only as well.
+    # permissions for consumer are read-only as well.
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
-      mq: { users: [limen-consumer], classes: [read], names: ["orders.*"], vhosts: ["/", "orders"] }
+      mq: { users: [consumer], classes: [read], names: ["orders.*"], vhosts: ["/", "orders"] }
     - resources: { kind: [kafka], labels: { env: [staging] } }
-      kafka: { users: [limen-consumer], topics: ["orders.*"], groups: ["dev-*"] }
+      kafka: { users: [consumer], topics: ["orders.*"], groups: ["dev-*"] }
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }
 ---
@@ -43,15 +40,15 @@ spec:
     - resources: { kind: [ssh], labels: { "*": ["*"] } }
       ssh: { logins: [ubuntu, ec2-user], port_forwarding: true }
     - resources: { kind: [postgres, mysql, redis], labels: { "*": ["*"] } }
-      db: { roles: [limen_readonly, limen_rw] }
-      redis: { users: [limen-rw] }
+      db: { roles: [limen_read, limen_write] }
+      redis: { users: [write] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read, limen-rw], databases: ["*"], deny_commands: [dropDatabase] }
+      mongo: { roles: [read, write], databases: ["*"], deny_commands: [dropDatabase] }
     - resources: { kind: [elasticsearch, opensearch], labels: { "*": ["*"] } }
-      search: { roles: [limen-read, limen-write], classes: [read, write] }
+      search: { roles: [read, write], classes: [read, write] }
     - resources: { kind: [rabbitmq], labels: { "*": ["*"] } }
-      mq: { users: [limen-consumer, limen-admin], vhosts: ["*"], classes: [read, write, configure] }
+      mq: { users: [consumer, admin], vhosts: ["*"], classes: [read, write, configure] }
     - resources: { kind: [kafka], labels: { "*": ["*"] } }
-      kafka: { users: [limen-consumer, limen-admin], classes: [read, write, admin], topics: ["*"] }
+      kafka: { users: [consumer, admin], classes: [read, write, admin], topics: ["*"] }
     - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
       kube: { groups: ["limen:edit"] }

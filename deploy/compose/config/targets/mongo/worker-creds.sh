@@ -8,8 +8,8 @@ set -eu
 umask 022
 mkdir -p /worker/catalog-staging /worker/x509
 cp /tls/ca.pem /worker/ca.pem
-# The role name picks the certificate: limen-read acts as the X.509 user.
-cp /tls/client.pem /worker/x509/limen-read.pem
-printf 'limen-read-dev-only\n' > /worker/catalog-staging/limen-read
-printf 'limen-rw-dev-only\n' > /worker/catalog-staging/limen-rw
+# The role name picks the certificate: read acts as the X.509 user.
+cp /tls/client.pem /worker/x509/read.pem
+printf 'limen-read-dev-only\n' > /worker/catalog-staging/read
+printf 'limen-rw-dev-only\n' > /worker/catalog-staging/write
 echo "worker credentials written"

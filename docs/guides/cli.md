@@ -19,7 +19,7 @@ What `limen ls` looks like:
 ```text
 NAME             KIND        ACCESS AS                 LABELS
 bastion-staging  ● ssh       ec2-user, ubuntu          env=staging tier=bastion
-orders-staging   ● postgres  limen_readonly, limen_rw  env=staging team=payments
+orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
 web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
   3 resources · connect with `limen ssh <name>`
 ```

@@ -1021,13 +1021,13 @@ mod tests {
         let rules = Rules::new(vec![grant(&[], &[], &[])], specs());
         let a = args(&["SET", "user:1", "hunter2"]);
         let insp = rules.inspect(&a);
-        let data = Rules::audit_data(&insp, &a, &RedisAudit::default(), "cache", "limen-rw");
+        let data = Rules::audit_data(&insp, &a, &RedisAudit::default(), "cache", "write");
         let text = data.to_string();
         assert!(!text.contains("hunter2"), "{text}");
         assert_eq!(data["command"], "SET");
         assert_eq!(data["keys"], json!(["user:1"]));
         assert_eq!(data["arity"], 3);
-        assert_eq!(data["redis_user"], "limen-rw");
+        assert_eq!(data["redis_user"], "write");
     }
 
     #[test]

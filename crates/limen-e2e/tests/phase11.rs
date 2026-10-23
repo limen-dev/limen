@@ -368,7 +368,7 @@ async fn amqp_through_limen() {
         dev.clone(),
         limen_tunnel::alpn::MQ,
         "orders-mq",
-        "limen-admin",
+        "admin",
         "",
     )
     .await;

@@ -289,21 +289,15 @@ mod tests {
 
     #[test]
     fn prints_a_command_without_a_password() {
-        let c = client_command(
-            "postgres",
-            "127.0.0.1",
-            5433,
-            "limen_readonly",
-            Some("orders"),
-        );
+        let c = client_command("postgres", "127.0.0.1", 5433, "limen_read", Some("orders"));
         assert_eq!(
             c,
-            "psql \"host=127.0.0.1 port=5433 user=limen_readonly dbname=orders sslmode=disable\""
+            "psql \"host=127.0.0.1 port=5433 user=limen_read dbname=orders sslmode=disable\""
         );
         assert!(!c.contains("password"));
         assert_eq!(
-            client_command("mysql", "127.0.0.1", 3307, "limen_rw", None),
-            "mysql --host=127.0.0.1 --port=3307 --user=limen_rw --ssl-mode=DISABLED"
+            client_command("mysql", "127.0.0.1", 3307, "limen_write", None),
+            "mysql --host=127.0.0.1 --port=3307 --user=limen_write --ssl-mode=DISABLED"
         );
     }
 }

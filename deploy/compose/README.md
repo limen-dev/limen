@@ -279,7 +279,7 @@ The demo runs its own project (`limen-redis`, the core plus `stacks/redis.yml`) 
 
 ## MongoDB (Phase 9)
 
-`stacks/mongo.yml` (profile `mongo`) adds a MongoDB 8 target with TLS from a throwaway CA, SCRAM-SHA-256/SHA-1 and X.509 enabled, seeded by `config/targets/mongo/init.js` with `orders` and `billing`, the users `limen-read` and `limen-rw`, and an X.509 user for the worker's client certificate. `gen-tls.sh` makes the certificates and `worker-creds.sh` gives the worker only what it needs (the CA, a password file per role, the client certificate, in the `mongo-worker` volume the Limen worker mounts at `/etc/limen/mongo`): the server's key stays in its own volume. Try it with `deploy/compose/setup.sh --stacks mongo`, then `limen mongo connect catalog-staging`.
+`stacks/mongo.yml` (profile `mongo`) adds a MongoDB 8 target with TLS from a throwaway CA, SCRAM-SHA-256/SHA-1 and X.509 enabled, seeded by `config/targets/mongo/init.js` with `orders` and `billing`, the users `read` and `write`, and an X.509 user for the worker's client certificate. `gen-tls.sh` makes the certificates and `worker-creds.sh` gives the worker only what it needs (the CA, a password file per role, the client certificate, in the `mongo-worker` volume the Limen worker mounts at `/etc/limen/mongo`): the server's key stays in its own volume. Try it with `deploy/compose/setup.sh --stacks mongo`, then `limen mongo connect catalog-staging`.
 
 ```sh
 demos/demo-phase9.sh          # mongosh through `limen mongo connect`, SCRAM, X.509, refusals, redacted audit, console list, lock

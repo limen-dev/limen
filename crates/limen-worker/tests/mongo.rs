@@ -56,9 +56,9 @@ metadata: { name: dev }
 spec:
   allow:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read, limen-x509], databases: [orders] }
+      mongo: { roles: [read, limen-x509], databases: [orders] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-rw], databases: [orders], deny_commands: [dropDatabase] }
+      mongo: { roles: [write], databases: [orders], deny_commands: [dropDatabase] }
 "#;
 
 fn spec_json(env: &Env, creds: &std::path::Path, auth: &str) -> serde_json::Value {
@@ -167,8 +167,8 @@ async fn open_with(
     extra: serde_json::Value,
 ) -> Result<Harness, UpstreamError> {
     let creds = tempfile::tempdir().expect("dir");
-    std::fs::write(creds.path().join("limen-read"), "limen-read-dev-only\n").expect("secret");
-    std::fs::write(creds.path().join("limen-rw"), "limen-rw-dev-only\n").expect("secret");
+    std::fs::write(creds.path().join("read"), "limen-read-dev-only\n").expect("secret");
+    std::fs::write(creds.path().join("write"), "limen-rw-dev-only\n").expect("secret");
     std::fs::copy(&env.client_pem, creds.path().join("limen-x509.pem")).expect("pem");
     let mut spec_value = spec_json(env, creds.path(), auth);
     if let (Some(m), Some(e)) = (spec_value.as_object_mut(), extra.as_object()) {
@@ -245,7 +245,7 @@ async fn admin(env: &Env) -> limen_worker::mongo::Upstream {
 #[tokio::test(flavor = "multi_thread")]
 async fn commands_flow_and_every_command_is_audited() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
 
     // The handshake is answered by the worker.
     let hello = h
@@ -293,10 +293,7 @@ async fn commands_flow_and_every_command_is_audited() {
     let Some(Ok((_, Value::Doc(user)))) = users.iter().next() else {
         panic!("no user");
     };
-    assert_eq!(
-        user.get("user").expect("ok"),
-        Some(Value::Str("limen-read"))
-    );
+    assert_eq!(user.get("user").expect("ok"), Some(Value::Str("read")));
 
     // A real query comes back whole.
     let found = h
@@ -330,7 +327,7 @@ async fn commands_flow_and_every_command_is_audited() {
     );
     let find = &commands[1];
     assert_eq!(find["user"], "dev@example.com");
-    assert_eq!(find["data"]["mongo_role"], "limen-read");
+    assert_eq!(find["data"]["mongo_role"], "read");
     assert_eq!(find["data"]["database"], "orders");
     assert_eq!(find["data"]["collection"], "customers");
     assert_eq!(find["data"]["summary"], r#"{"filter":{"tier":"?"}}"#);
@@ -349,7 +346,7 @@ async fn commands_flow_and_every_command_is_audited() {
 #[tokio::test(flavor = "multi_thread")]
 async fn values_never_reach_the_audit_trail_by_default() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-rw").await;
+    let mut h = session(&env, "write").await;
     let marker = "4111-1111-1111-1111";
     let mut admin = admin(&env).await;
     // A run that died before its cleanup must not poison this one.
@@ -442,7 +439,7 @@ async fn values_never_reach_the_audit_trail_by_default() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_database_policy_does_not_grant_is_refused_and_audited() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
 
     let denied = h
         .client
@@ -491,8 +488,8 @@ async fn a_database_policy_does_not_grant_is_refused_and_audited() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_servers_own_grants_still_apply_inside_a_database() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
-    // `limen-read` has the read role on orders: the server refuses the write,
+    let mut h = session(&env, "read").await;
+    // `read` has the read role on orders: the server refuses the write,
     // and the audit trail says so.
     let doc = Builder::new().str("x", "y").finish();
     let command = cmd("insert", "customers", "orders").finish();
@@ -525,7 +522,7 @@ async fn the_servers_own_grants_still_apply_inside_a_database() {
 #[tokio::test(flavor = "multi_thread")]
 async fn deny_commands_in_a_grant_are_enforced() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-rw").await;
+    let mut h = session(&env, "write").await;
     let r = h
         .client
         .run(cmd("dropDatabase", "1", "orders").finish())
@@ -539,7 +536,7 @@ async fn deny_commands_in_a_grant_are_enforced() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_cannot_log_in_as_someone_else() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     for name in ["authenticate", "saslStart", "logout"] {
         let r = h
             .client
@@ -552,8 +549,8 @@ async fn a_client_cannot_log_in_as_someone_else() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cursors_stay_with_the_session_that_opened_them() {
     let Some(env) = env() else { return };
-    let mut a = session(&env, "limen-read").await;
-    let mut b = session(&env, "limen-read").await;
+    let mut a = session(&env, "read").await;
+    let mut b = session(&env, "read").await;
 
     let first = a
         .client
@@ -630,9 +627,7 @@ async fn x509_login_uses_the_certificate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn scram_sha1_login_works_for_servers_without_sha256() {
     let Some(env) = env() else { return };
-    let mut h = open(&env, "limen-read", "scram_sha1")
-        .await
-        .expect("sha1 login");
+    let mut h = open(&env, "read", "scram_sha1").await.expect("sha1 login");
     let found = h
         .client
         .run(cmd("find", "customers", "orders").finish())
@@ -644,12 +639,10 @@ async fn scram_sha1_login_works_for_servers_without_sha256() {
 async fn a_wrong_password_fails_before_the_session_opens() {
     let Some(env) = env() else { return };
     let creds = tempfile::tempdir().expect("dir");
-    std::fs::write(creds.path().join("limen-read"), "not-the-password\n").expect("secret");
+    std::fs::write(creds.path().join("read"), "not-the-password\n").expect("secret");
     let spec: MongoTarget =
         serde_json::from_value(spec_json(&env, creds.path(), "scram")).expect("spec");
-    let (login, _) = credentials(&spec, "limen-read", None)
-        .await
-        .expect("credentials");
+    let (login, _) = credentials(&spec, "read", None).await.expect("credentials");
     let target = Target::from_mongo(&spec, false, None)
         .await
         .expect("target");
@@ -667,7 +660,7 @@ async fn a_wrong_password_fails_before_the_session_opens() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unacknowledged_write_gets_no_reply_and_the_session_goes_on() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-rw").await;
+    let mut h = session(&env, "write").await;
     let mut admin = admin(&env).await;
     let _ = admin
         .run(cmd("drop", "unack_test", "orders").finish())
@@ -708,7 +701,7 @@ async fn an_unacknowledged_write_gets_no_reply_and_the_session_goes_on() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_command_that_cannot_be_audited_does_not_run() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     let ok_first = h
         .client
         .run(cmd("find", "customers", "orders").finish())
@@ -739,7 +732,7 @@ async fn a_command_that_cannot_be_audited_does_not_run() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_legacy_handshake_still_works() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     let query = Builder::new()
         .i32("isMaster", 1)
         .bool("helloOk", true)
@@ -782,7 +775,7 @@ async fn the_legacy_handshake_still_works() {
 #[tokio::test(flavor = "multi_thread")]
 async fn pipelines_stay_in_the_granted_databases() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     let aggregate = |stages: &[Vec<u8>]| {
         cmd("aggregate", "customers", "orders")
             .docs_array("pipeline", stages)
@@ -868,7 +861,7 @@ async fn assert_every_command_has_one_end(h: &Harness) {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_cancelled_mid_command_records_that_it_did_not_complete() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     let ok_reply = h
         .client
         .run(cmd("find", "customers", "orders").finish())
@@ -916,7 +909,7 @@ async fn a_session_cancelled_mid_command_records_that_it_did_not_complete() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mixed_session_leaves_one_end_per_command() {
     let Some(env) = env() else { return };
-    let mut h = session(&env, "limen-read").await;
+    let mut h = session(&env, "read").await;
     let admin_ping = Builder::new().i32("ping", 1).str("$db", "admin").finish();
     // ok, server error, refused (no end event), a cursor, and a bad command.
     for command in [
@@ -948,7 +941,7 @@ async fn a_client_in_a_loop_is_paced_instead_of_flooding_the_trail() {
     // 20 commands a second after a burst of 100.
     let mut h = open_with(
         &env,
-        "limen-read",
+        "read",
         "scram",
         serde_json::json!({ "max_commands_per_second": 20 }),
     )

@@ -65,7 +65,7 @@ spec:
   cert_ttl: 10m
   allow:
     - resources: { kind: [mysql, redshift], labels: { env: [staging] } }
-      db: { roles: [limen_readonly] }
+      db: { roles: [limen_read] }
     - resources: { kind: [web], labels: { env: [staging] } }
       web: {}
 ---
@@ -79,7 +79,7 @@ spec:
   max_session_ttl: 12h
   allow:
     - resources: { kind: [mysql, redshift], labels: { "*": ["*"] } }
-      db: { roles: [limen_readonly, limen_rw] }
+      db: { roles: [limen_read, limen_write] }
     - resources: { kind: [web], labels: { "*": ["*"] } }
       web: {}
     - resources: { kind: [tcp], labels: { "*": ["*"] } }
