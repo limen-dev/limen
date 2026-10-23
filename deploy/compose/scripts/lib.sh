@@ -15,6 +15,25 @@
 # Stacks (each a compose file and a profile of the same name):
 STACK_NAMES=(ssh db redis mongo search messaging observability bots kube tcp web)
 compose=() STACK_FLAGS=() # set by stack_setup
+POLICY_FILES=()
+
+# Select shared policy and the examples for each enabled resource stack.
+stack_policy_files() {
+  local root="$1" s kind selected=" "
+  shift
+  POLICY_FILES=("$root/examples/policy/shared")
+  for s in "$@"; do
+    case "$s" in
+      db) kind=database ;;
+      ssh|redis|mongo|search|messaging|bots|kube|tcp|web) kind="$s" ;;
+      observability) continue ;;
+      *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
+    esac
+    case "$selected" in *" $kind "*) continue ;; esac
+    selected+="$kind "
+    POLICY_FILES+=("$root/examples/policy/stacks/$kind")
+  done
+}
 
 # ---- terminal output -----------------------------------------------------------
 # Colours and symbols; plain text when stdout is not a terminal or NO_COLOR is set.

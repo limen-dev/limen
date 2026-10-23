@@ -2,6 +2,8 @@ use super::*;
 
 const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
 const MAPPINGS: &str = include_str!("../../../examples/policy/shared/mappings.yaml");
+const TCP_PHASE12: &str = include_str!("../../../examples/policy/stacks/tcp/phase12.yaml");
+const WEB_PHASE12: &str = include_str!("../../../examples/policy/stacks/web/phase12.yaml");
 const PLANNED: &str = concat!(
     include_str!("../../../examples/policy/shared/planned-access.yaml"),
     "\n---\n",
@@ -36,6 +38,19 @@ fn example() -> Policy {
         ("resources.yaml", RESOURCES),
     ])
     .expect("example policy is valid")
+}
+
+#[test]
+fn phase12_stack_policies_are_valid() {
+    Policy::parse_yaml([
+        ("roles.yaml", ROLES),
+        ("mappings.yaml", MAPPINGS),
+        ("planned.yaml", PLANNED),
+        ("resources.yaml", RESOURCES),
+        ("tcp-phase12.yaml", TCP_PHASE12),
+        ("web-phase12.yaml", WEB_PHASE12),
+    ])
+    .expect("Phase 12 stack policies are valid");
 }
 
 fn roles(r: &[&str]) -> Vec<String> {
