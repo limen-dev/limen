@@ -15,6 +15,7 @@ use limen_proto::v1::{
 };
 use limen_session::grant::verify_grant;
 use russh::keys::{Algorithm, Certificate, PrivateKey, PublicKey};
+use rustls_pki_types::pem::PemObject;
 use time::OffsetDateTime;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_stream::StreamExt;
@@ -27,6 +28,10 @@ use crate::{amqp, kafka, redis};
 
 type FrameStream =
     std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TunnelFrame, Status>> + Send>>;
+
+trait WebIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> WebIo for T {}
+type BoxedWebIo = Box<dyn WebIo>;
 
 const FRAME_CHUNK: usize = 32 * 1024;
 
@@ -69,7 +74,7 @@ pub(crate) async fn open(
             frame: Some(Frame::Opened(SessionOpened {})),
         }))
         .await;
-    let (ours, theirs) = tokio::io::duplex(256 * 1024);
+    let (mut ours, theirs) = tokio::io::duplex(256 * 1024);
     let (mut theirs_read, mut theirs_write) = tokio::io::split(theirs);
 
     // Proxy → SSH server.
@@ -193,6 +198,32 @@ pub(crate) async fn open(
                         }),
                     }
                 }
+                Admitted::Tcp { mut upstream, .. } => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = tokio::io::copy_bidirectional(&mut ours, &mut upstream) => {
+                            r.map(|_| crate::ssh::SessionOutcome::default())
+                                .map_err(anyhow::Error::from)
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
+                Admitted::Web { mut upstream, .. } => {
+                    let mut end = end;
+                    tokio::select! {
+                        r = tokio::io::copy_bidirectional(&mut ours, &mut upstream) => {
+                            r.map(|_| crate::ssh::SessionOutcome::default())
+                                .map_err(anyhow::Error::from)
+                        }
+                        _ = end.wait_for(|ended| *ended) => Ok(crate::ssh::SessionOutcome {
+                            ended_by_drain: true,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 Admitted::Search(prepared) => {
                     let mut end = end;
                     tokio::select! {
@@ -268,6 +299,14 @@ enum Admitted {
     Search(Box<crate::search::Prepared>),
     Mq(Box<amqp::Prepared>),
     Kafka(Box<kafka::Prepared>),
+    Tcp {
+        session_id: String,
+        upstream: tokio::net::TcpStream,
+    },
+    Web {
+        session_id: String,
+        upstream: BoxedWebIo,
+    },
     /// The run's anchor (`limen mq|kafka connect`): authorized, serves nothing.
     Anchor(String),
 }
@@ -283,6 +322,9 @@ impl Admitted {
             Admitted::Search(p) => p.session_id(),
             Admitted::Mq(p) => p.session_id().to_owned(),
             Admitted::Kafka(p) => p.session_id().to_owned(),
+            Admitted::Tcp { session_id, .. } | Admitted::Web { session_id, .. } => {
+                session_id.clone()
+            }
             Admitted::Anchor(id) => id.clone(),
         }
     }
@@ -354,10 +396,133 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         }
         "rabbitmq" => admit_mq(worker, &checked).map(|c| Admitted::Mq(Box::new(c))),
         "kafka" => admit_kafka(worker, &checked, false).map(|c| Admitted::Kafka(Box::new(c))),
+        "tcp" => admit_tcp(worker, &checked)
+            .await
+            .map(|(session_id, upstream)| Admitted::Tcp {
+                session_id,
+                upstream,
+            }),
+        "web" => admit_web(worker, &checked)
+            .await
+            .map(|upstream| Admitted::Web {
+                session_id: checked.verified.grant.session_id.clone(),
+                upstream,
+            }),
         other => Err(Status::unimplemented(format!(
             "{other} sessions arrive in a later phase"
         ))),
     }
+}
+
+async fn admit_tcp(
+    worker: &Worker,
+    checked: &Checked,
+) -> Result<(String, tokio::net::TcpStream), Status> {
+    let grant = &checked.verified.grant;
+    check_policy(worker, checked, Principal::TcpAccess)?;
+    let address = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|resource| resource.spec.tcp.as_ref())
+        .map(|target| target.address.clone())
+        .ok_or_else(|| Status::failed_precondition("resource is not a TCP resource"))?;
+    let stream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect(&address),
+    )
+    .await
+    .map_err(|_| Status::unavailable("timed out connecting to the TCP service"))?
+    .map_err(|e| {
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't connect to TCP service");
+        Status::unavailable("couldn't connect to the TCP service")
+    })?;
+    stream
+        .set_nodelay(true)
+        .map_err(|_| Status::unavailable("couldn't configure the TCP connection"))?;
+    Ok((grant.session_id.clone(), stream))
+}
+
+async fn admit_web(worker: &Worker, checked: &Checked) -> Result<BoxedWebIo, Status> {
+    let grant = &checked.verified.grant;
+    check_policy(worker, checked, Principal::WebAccess)?;
+    let target = checked
+        .snapshot
+        .policy
+        .resource(&grant.resource)
+        .and_then(|resource| resource.spec.web.as_ref())
+        .ok_or_else(|| Status::failed_precondition("resource is not a web app"))?;
+    let tcp = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect(&target.address),
+    )
+    .await
+    .map_err(|_| Status::unavailable("timed out connecting to the web app"))?
+    .map_err(|e| {
+        tracing::warn!(error = %e, resource = %grant.resource, "couldn't connect to web app");
+        Status::unavailable("couldn't connect to the web app")
+    })?;
+    tcp.set_nodelay(true)
+        .map_err(|_| Status::unavailable("couldn't configure the web app connection"))?;
+    if target.insecure_dev {
+        if !worker.allow_insecure_web_targets() {
+            return Err(Status::permission_denied(
+                "plain HTTP web target requires --allow-insecure-web-targets",
+            ));
+        }
+        return Ok(Box::new(tcp));
+    }
+    let path = target
+        .tls_ca_file
+        .as_deref()
+        .ok_or_else(|| Status::failed_precondition("web.tls_ca_file is required"))?;
+    let pem = tokio::fs::read(path)
+        .await
+        .map_err(|e| Status::failed_precondition(format!("reading web TLS CA bundle: {e}")))?;
+    let mut roots = rustls::RootCertStore::empty();
+    let mut count = 0;
+    for cert in rustls_pki_types::CertificateDer::pem_slice_iter(&pem) {
+        let cert = cert
+            .map_err(|e| Status::failed_precondition(format!("parsing web TLS CA bundle: {e}")))?;
+        roots.add(cert).map_err(|e| {
+            Status::failed_precondition(format!("adding web TLS CA certificate: {e}"))
+        })?;
+        count += 1;
+    }
+    if count == 0 {
+        return Err(Status::failed_precondition(
+            "web TLS CA bundle contains no certificates",
+        ));
+    }
+    let config = rustls::ClientConfig::builder_with_provider(limen_tunnel::tls::provider())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| Status::failed_precondition(format!("web TLS configuration: {e}")))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = target
+        .tls_server_name
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| {
+            target
+                .address
+                .rsplit_once(':')
+                .map(|(host, _)| host.trim_matches(['[', ']']).to_owned())
+        })
+        .ok_or_else(|| Status::failed_precondition("web address must be host:port"))?;
+    let server_name = rustls_pki_types::ServerName::try_from(server_name)
+        .map_err(|e| Status::failed_precondition(format!("invalid web TLS server name: {e}")))?;
+    let upstream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio_rustls::TlsConnector::from(std::sync::Arc::new(config)).connect(server_name, tcp),
+    )
+    .await
+    .map_err(|_| Status::unavailable("timed out establishing web upstream TLS"))?
+    .map_err(|e| {
+        tracing::warn!(error = %e, resource = %grant.resource, "web upstream TLS failed");
+        Status::unavailable("web upstream TLS failed")
+    })?;
+    Ok(Box::new(upstream))
 }
 
 /// The policy checks every kind shares: locks, the principal, and whether

@@ -11,6 +11,8 @@ pub mod mq;
 pub mod redis;
 pub mod search;
 pub mod ssh;
+pub mod tcp;
+pub mod web;
 
 use limen_proto::v1::ListResourcesRequest;
 use limen_proto::v1::resources_client::ResourcesClient;

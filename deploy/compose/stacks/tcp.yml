@@ -1,0 +1,14 @@
+# A raw TCP echo target for the Phase 12 demo.
+services:
+  tcp-target:
+    container_name: tcp-target-${LIMEN_ENV:-dev}
+    profiles: ["tcp"]
+    image: ${PYTHON_IMAGE}
+    command: ["python", "-u", "/opt/limen/tcp_echo.py"]
+    volumes:
+      - ./config/targets/tcp/tcp_echo.py:/opt/limen/tcp_echo.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), timeout=1).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

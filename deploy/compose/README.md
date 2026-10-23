@@ -26,16 +26,20 @@ The scripts are plain bash, written for macOS (tested) and Linux (untested). On 
 deploy/compose/setup.sh
 ```
 
-It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy`, and ends with the ports in use, the command for each enabled resource (SSH, PostgreSQL, MySQL, Redis, MongoDB, Kubernetes), and the CLI sign-in and console URL.
+It asks whether to scale Limen and which stacks to enable, starts everything, applies `examples/policy` and the matching TCP/web policies for selected stacks, then prints the ports, commands for enabled resources, CLI sign-in, and console URL.
 
-Then log in as the developer and try a resource:
+For example, to run the TCP and web fixtures:
 
 ```sh
-export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443 LIMEN_HOME=deploy/compose/.state/home-dev
-LIMEN_DEV_CA=deploy/compose/.state/internal-ca.pem deploy/compose/scripts/dev-login.sh developer@example.com
+deploy/compose/setup.sh --stacks tcp,web
+export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443
+limen login --ca-file deploy/compose/.state/internal-ca.pem
 limen ls
-limen ssh web-staging-1 -- uptime
+limen tcp tcp-echo
+limen web open --no-browser web-demo
 ```
+
+Sign in as `developer@example.com` / `password` so the Phase 12 grants apply. `limen tcp tcp-echo` prints a local port; connect to it with `nc 127.0.0.1 <port>`. `limen web open --no-browser web-demo` prints the app URL. To load it locally, resolve `app.apps.test` to `127.0.0.1`; the local certificate is signed by the dev CA and should not be added to the system trust store.
 
 To check a phase's exit criteria instead, run its demo, which builds and resets its own stack: `demos/demo-phase1.sh`.
 
@@ -119,6 +123,8 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
 | `kube` | `stacks/kube.yml` | `kubernetes` (a k3s cluster in one privileged container, so it belongs to the project and `down -v` removes it) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
+| `tcp` | `stacks/tcp.yml` | `tcp-target`, a raw TCP echo fixture for `limen tcp` |
+| `web` | `stacks/web.yml` plus the single/scale worker opt-in overlay | `web-target`, an HTTP fixture for browser SSO, request policy, and auditing |
 
 **Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the k3s cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
 
@@ -146,6 +152,7 @@ demos/demo-phase7.sh          # Redis and Valkey through limen redis connect (ow
 demos/demo-phase9.sh          # MongoDB through limen mongo connect and mongosh (own project and ports)
 demos/demo-phase10.sh         # Elasticsearch and OpenSearch through limen search connect (own project and ports; pulls two ~1 GB images)
 demos/demo-phase11.sh         # RabbitMQ and a three-broker Kafka cluster through limen mq connect and limen kafka connect (own project and ports)
+demos/demo-phase12.sh        # browser SSO, HTTP request policy/audit, WebSockets, and TCP
 ```
 
 By hand, after `limen admin apply examples/policy`:

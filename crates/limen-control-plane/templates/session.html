@@ -50,7 +50,34 @@
   </tbody>
 </table></div>
 {% endif %}
-{% else if s.has_statements %}
+  {% else if s.is_web %}
+  <h2>Requests</h2>
+  <p class="hint">
+    <strong>{{ web_request_total }}</strong> request{% if web_request_total != 1 %}s{% endif %}{% if web_request_problems != 0 %}, <strong>{{ web_request_problems }}</strong> failed{% endif %}.
+    The request path, response status, byte counts, and latency are retained. Query strings, headers, cookies, credentials, and bodies are never kept.
+    {% if web_request_total > 500 %}Showing the first 500.{% endif %}
+  </p>
+  {% if web_requests.is_empty() %}
+  <div class="card empty"><div>No requests yet. The timeline appears here within a few seconds.</div></div>
+  {% else %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>Traffic</th><th>Time taken</th><th>Outcome</th></tr></thead>
+    <tbody>
+    {% for r in web_requests %}
+    <tr>
+      <td class="nowrap">{{ r.time }}</td>
+      <td class="nowrap mono">{{ r.method }}</td>
+      <td class="mono">{{ r.path }}</td>
+      <td class="nowrap"><span class="pill {{ r.status_class }}">{{ r.status }}</span></td>
+      <td class="nowrap">{{ r.traffic }}</td>
+      <td class="nowrap">{{ r.latency }}</td>
+      <td>{{ r.outcome }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+  {% else if s.has_statements %}
 {% if s.is_redis %}
 <h2>Commands</h2>
 <p class="hint">

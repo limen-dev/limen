@@ -34,14 +34,14 @@ Limen is a self-hosted, open-source platform for identity-aware access to infras
     <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt="Elasticsearch"></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>index-aware policy</sub><br><sub>✅ Working<br>⚠️ Not yet tested on the AWS or Elastic Cloud services</sub><br><br></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/rabbitmq" height="48" alt="RabbitMQ"><br><br><b>RabbitMQ</b><br><sub>any broker · Amazon MQ<br>no message bodies in audit</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/14">Phase 11</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/apachekafka/white"><img src="https://cdn.simpleicons.org/apachekafka" height="48" alt="Kafka"></picture><br><br><b>Kafka</b><br><sub>any cluster · Amazon MSK<br>IAM, SCRAM, mTLS</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/14">Phase 11</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/globe.svg" height="48" alt="Internal web apps"><br><br><b>Internal web apps</b><br><sub>SSO in front of any web UI<br>every request audited</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/network.svg" height="48" alt="TCP services"><br><br><b>TCP services</b><br><sub>anything else, through a local port<br>same policy, same audit</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/rabbitmq" height="48" alt="RabbitMQ"><br><br><b>RabbitMQ</b><br><sub>any broker · Amazon MQ<br>no message bodies in audit</sub><br><sub>✅ Working with local RabbitMQ<br>⚠️ Amazon MQ unverified</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/apachekafka/white"><img src="https://cdn.simpleicons.org/apachekafka" height="48" alt="Kafka"></picture><br><br><b>Kafka</b><br><sub>any cluster · Amazon MSK<br>SCRAM and PLAIN; record values never audited</sub><br><sub>✅ Working with local Kafka<br>⚠️ MSK and IAM unverified</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/globe.svg" height="48" alt="Internal web apps"><br><br><b>Internal web apps</b><br><sub>SSO in front of any web UI<br>every request audited</sub><br><sub>✅ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/network.svg" height="48" alt="TCP services"><br><br><b>TCP services</b><br><sub>anything else, through a local port<br>same policy, same audit</sub><br><sub>✅ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
   </tr>
 </table>
 
-Each target works with the managed AWS service **and** any compatible self-hosted server. ✅ working and tested, ⏳ planned (the link goes to its milestone). Everything is tested against local stand-ins. Nothing has been verified against real AWS, Okta, or Datadog yet.
+Where a managed AWS service exists, each target works with it and compatible self-hosted servers. ✅ working and tested, ⏳ planned (the link goes to its milestone). Everything is tested against local stand-ins. Nothing has been verified against real AWS, Okta, or Datadog yet.
 
 ## Who and what can log in
 
@@ -152,7 +152,7 @@ The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/mil
 | 9 | MongoDB, Atlas, DocumentDB | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/12) (Atlas, DocumentDB, and IAM unverified) |
 | 10 | OpenSearch and Elasticsearch | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/13) (Amazon OpenSearch Service and Elastic Cloud unverified) |
 | 11 | RabbitMQ and Kafka | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/14) (Amazon MQ, MSK, and MSK IAM unverified) |
-| 12 | Internal web apps and TCP services | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
+| 12 | Internal web apps and TCP services | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
 | 13 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
 | 14 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |
 | Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |

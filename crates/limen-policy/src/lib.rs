@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub use model::Document;
+use model::WebGrant;
 pub use model::{
     BrokerTarget, KafkaClass, KafkaGrant, KafkaSasl, MongoGrant, MqClass, MqGrant, RedisAudit,
     RedisGrant, RedisTarget,
@@ -239,6 +240,21 @@ impl Policy {
                 }
             }
         }
+        let mut web_hosts = BTreeMap::new();
+        for (name, resource) in &policy.resources {
+            if let Some(web) = &resource.spec.web
+                && let Some(previous) = web_hosts.insert(&web.host, name)
+            {
+                return Err(invalid(
+                    "resource",
+                    name,
+                    format!(
+                        "web.host {:?} is already assigned to resource {previous:?}",
+                        web.host
+                    ),
+                ));
+            }
+        }
         Ok(policy)
     }
 
@@ -440,7 +456,9 @@ impl Policy {
 
         let denied = roles.iter().flat_map(|r| &r.spec.deny).any(|rule| {
             selector_matches(&rule.resources, resource)
-                && (rule_has_no_principals(rule) || rule_grants(rule, &req.principal))
+                && (rule_has_no_principals(rule)
+                    || (!matches!(req.principal, Principal::WebAccess)
+                        && rule_grants(rule, &req.principal)))
         });
         if denied {
             return Decision::Deny {
@@ -464,6 +482,47 @@ impl Policy {
         } else {
             Decision::Allow { matched_roles }
         }
+    }
+
+    /// Whether a web request is allowed after the resource-level grant. Path
+    /// prefixes match path segments, not arbitrary string fragments.
+    #[must_use]
+    pub fn web_request_allowed(
+        &self,
+        roles: &[String],
+        resource_name: &str,
+        method: &str,
+        path: &str,
+    ) -> bool {
+        let Some(resource) = self.resources.get(resource_name) else {
+            return false;
+        };
+        if resource_kind(resource) != ResourceKind::Web {
+            return false;
+        }
+        let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
+        let matches_request = |grant: &WebGrant| {
+            (grant.methods.is_empty() || grant.methods.iter().any(|m| m == method))
+                && (grant.path_prefixes.is_empty()
+                    || grant.path_prefixes.iter().any(|prefix| {
+                        path == prefix
+                            || prefix == "/"
+                            || path
+                                .strip_prefix(prefix)
+                                .is_some_and(|suffix| suffix.starts_with('/'))
+                    }))
+        };
+        let denied = roles.iter().flat_map(|r| &r.spec.deny).any(|rule| {
+            selector_matches(&rule.resources, resource)
+                && (rule_has_no_principals(rule) || rule.web.as_ref().is_some_and(matches_request))
+        });
+        if denied {
+            return false;
+        }
+        roles.iter().flat_map(|r| &r.spec.allow).any(|rule| {
+            selector_matches(&rule.resources, resource)
+                && rule.web.as_ref().is_some_and(matches_request)
+        })
     }
 
     /// The Redis grants that let `roles` act as `user` on `resource`. A session
@@ -766,7 +825,7 @@ fn validate_name(kind: &'static str, doc: &str, name: &str) -> Result<(), Policy
 fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
     let name = &role.metadata.name;
     validate_name("role", name, name)?;
-    if role.spec.allow.is_empty() && role.spec.deny.is_empty() {
+    if !role_has_rules(role) {
         return Err(invalid(
             "role",
             name,
@@ -775,38 +834,10 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
     }
     for rule in role.spec.allow.iter().chain(&role.spec.deny) {
         validate_selector(name, &rule.resources)?;
-        let principal_lists: [(&str, Option<&Vec<String>>); 10] = [
-            ("ssh.logins", rule.ssh.as_ref().map(|g| &g.logins)),
-            ("db.roles", rule.db.as_ref().map(|g| &g.roles)),
-            ("db.databases", rule.db.as_ref().map(|g| &g.databases)),
-            ("kube.groups", rule.kube.as_ref().map(|g| &g.groups)),
-            ("redis.users", rule.redis.as_ref().map(|g| &g.users)),
-            ("mongo.roles", rule.mongo.as_ref().map(|g| &g.roles)),
-            ("mongo.databases", rule.mongo.as_ref().map(|g| &g.databases)),
-            ("search.roles", rule.search.as_ref().map(|g| &g.roles)),
-            ("mq.users", rule.mq.as_ref().map(|g| &g.users)),
-            ("kafka.users", rule.kafka.as_ref().map(|g| &g.users)),
-        ];
-        for (field, values) in principal_lists {
-            let Some(values) = values else { continue };
-            if values.is_empty() {
-                return Err(invalid("role", name, format!("{field} must not be empty")));
-            }
-            for v in values {
-                let wildcard_ok = field == "db.databases" || field == "mongo.databases";
-                if v.is_empty()
-                    || v.len() > MAX_NAME_LEN
-                    || v.chars().any(char::is_control)
-                    || (v.contains('*') && !(wildcard_ok && v == "*"))
-                {
-                    return Err(invalid(
-                        "role",
-                        name,
-                        format!("invalid value {v:?} in {field}"),
-                    ));
-                }
-            }
+        if let Some(web) = &rule.web {
+            validate_web_grant(name, web)?;
         }
+        validate_principal_values(name, rule)?;
         if let Some(redis) = &rule.redis {
             for (field, values) in [
                 ("redis.deny_commands", &redis.deny_commands),
@@ -914,6 +945,99 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
         }
     }
     Ok(())
+}
+
+fn role_has_rules(role: &RoleDoc) -> bool {
+    !role.spec.allow.is_empty() || !role.spec.deny.is_empty()
+}
+
+fn validate_principal_values(role_name: &str, rule: &Rule) -> Result<(), PolicyError> {
+    let principal_lists: [(&str, Option<&Vec<String>>); 10] = [
+        ("ssh.logins", rule.ssh.as_ref().map(|g| &g.logins)),
+        ("db.roles", rule.db.as_ref().map(|g| &g.roles)),
+        ("db.databases", rule.db.as_ref().map(|g| &g.databases)),
+        ("kube.groups", rule.kube.as_ref().map(|g| &g.groups)),
+        ("redis.users", rule.redis.as_ref().map(|g| &g.users)),
+        ("mongo.roles", rule.mongo.as_ref().map(|g| &g.roles)),
+        ("mongo.databases", rule.mongo.as_ref().map(|g| &g.databases)),
+        ("search.roles", rule.search.as_ref().map(|g| &g.roles)),
+        ("mq.users", rule.mq.as_ref().map(|g| &g.users)),
+        ("kafka.users", rule.kafka.as_ref().map(|g| &g.users)),
+    ];
+    for (field, values) in principal_lists {
+        let Some(values) = values else { continue };
+        if values.is_empty() {
+            return Err(invalid(
+                "role",
+                role_name,
+                format!("{field} must not be empty"),
+            ));
+        }
+        for value in values {
+            let wildcard_ok = field == "db.databases" || field == "mongo.databases";
+            if value.is_empty()
+                || value.len() > MAX_NAME_LEN
+                || value.chars().any(char::is_control)
+                || (value.contains('*') && !(wildcard_ok && value == "*"))
+            {
+                return Err(invalid(
+                    "role",
+                    role_name,
+                    format!("invalid value {value:?} in {field}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_web_grant(role_name: &str, web: &WebGrant) -> Result<(), PolicyError> {
+    if let Some(method) = web.methods.iter().find(|method| {
+        method.is_empty()
+            || method.len() > 32
+            || !method.bytes().all(|b| b.is_ascii_uppercase() || b == b'-')
+    }) {
+        return Err(invalid(
+            "role",
+            role_name,
+            format!("web method {method:?} must be an uppercase HTTP method"),
+        ));
+    }
+    if let Some(path) = web.path_prefixes.iter().find(|path| !valid_web_path(path)) {
+        return Err(invalid(
+            "role",
+            role_name,
+            format!("web path prefix {path:?} is not a normalized absolute path"),
+        ));
+    }
+    Ok(())
+}
+
+fn valid_web_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 1024
+        && path.starts_with('/')
+        && !path.contains("//")
+        && path
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~'))
+        && path
+            .split('/')
+            .all(|segment| segment != "." && segment != "..")
+}
+
+fn valid_dns_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && label.as_bytes()[0].is_ascii_alphanumeric()
+                && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+        })
 }
 
 /// `limen_` plus 1 to 40 of `[a-z0-9_]`.
@@ -1098,6 +1222,51 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
         ResourceKind::Web => resource.spec.web.as_ref().map(|t| t.address.as_str()),
         ResourceKind::Tcp => resource.spec.tcp.as_ref().map(|t| t.address.as_str()),
     };
+    if let Some(web) = &resource.spec.web {
+        if !valid_dns_host(&web.host) || web.host != web.host.to_ascii_lowercase() {
+            return Err(invalid(
+                "resource",
+                name,
+                format!("web.host {:?} must be a lowercase DNS host name", web.host),
+            ));
+        }
+        if !web.insecure_dev && web.tls_ca_file.as_deref().is_none_or(str::is_empty) {
+            return Err(invalid(
+                "resource",
+                name,
+                "web.tls_ca_file is required for verified HTTPS upstreams",
+            ));
+        }
+        if web.insecure_dev && web.tls_ca_file.is_some() {
+            return Err(invalid(
+                "resource",
+                name,
+                "web.tls_ca_file cannot be set when insecure_dev is enabled",
+            ));
+        }
+        if web
+            .tls_server_name
+            .as_deref()
+            .is_some_and(|host| !valid_dns_host(host))
+        {
+            return Err(invalid(
+                "resource",
+                name,
+                "web.tls_server_name must be a DNS host name",
+            ));
+        }
+        if web
+            .health_path
+            .as_deref()
+            .is_some_and(|path| !valid_web_path(path))
+        {
+            return Err(invalid(
+                "resource",
+                name,
+                "web.health_path must be a normalized absolute path",
+            ));
+        }
+    }
     if resource
         .spec
         .rabbitmq

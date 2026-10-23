@@ -124,13 +124,25 @@ impl BrowserOidc {
         nonce: &str,
         code_challenge: &str,
     ) -> Result<String, OidcError> {
+        self.authorization_url_with_redirect(state, nonce, code_challenge, &self.redirect_uri)
+            .await
+    }
+
+    /// Start a login using another registered callback URI on the same client.
+    pub async fn authorization_url_with_redirect(
+        &self,
+        state: &str,
+        nonce: &str,
+        code_challenge: &str,
+        redirect_uri: &str,
+    ) -> Result<String, OidcError> {
         let endpoints = self.endpoints().await?;
         let mut url = Url::parse(&endpoints.authorization)
             .map_err(|e| OidcError::Unavailable(format!("authorization endpoint: {e}")))?;
         url.query_pairs_mut()
             .append_pair("response_type", "code")
             .append_pair("client_id", &self.client_id)
-            .append_pair("redirect_uri", &self.redirect_uri)
+            .append_pair("redirect_uri", redirect_uri)
             .append_pair("scope", &self.scopes.join(" "))
             .append_pair("state", state)
             .append_pair("nonce", nonce)
@@ -147,6 +159,18 @@ impl BrowserOidc {
         code_verifier: &str,
         nonce: &str,
     ) -> Result<VerifiedIdentity, OidcError> {
+        self.complete_with_redirect(code, code_verifier, nonce, &self.redirect_uri)
+            .await
+    }
+
+    /// Exchange an authorization code issued for another registered callback URI.
+    pub async fn complete_with_redirect(
+        &self,
+        code: &str,
+        code_verifier: &str,
+        nonce: &str,
+        redirect_uri: &str,
+    ) -> Result<VerifiedIdentity, OidcError> {
         let endpoints = self.endpoints().await?;
         let response = self
             .http
@@ -155,7 +179,7 @@ impl BrowserOidc {
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", code),
-                ("redirect_uri", self.redirect_uri.as_str()),
+                ("redirect_uri", redirect_uri),
                 ("client_id", self.client_id.as_str()),
                 ("client_secret", self.client_secret.expose().as_str()),
                 ("code_verifier", code_verifier),

@@ -45,6 +45,8 @@ pub(crate) enum Protocol {
     Search,
     Mq,
     Kafka,
+    Tcp,
+    Web,
 }
 
 impl Protocol {
@@ -57,6 +59,8 @@ impl Protocol {
             Protocol::Search => "search",
             Protocol::Mq => "mq",
             Protocol::Kafka => "kafka",
+            Protocol::Tcp => "tcp",
+            Protocol::Web => "web",
         }
     }
 
@@ -68,6 +72,8 @@ impl Protocol {
             Protocol::Mongo => "mongo_role",
             Protocol::Mq => "mq_user",
             Protocol::Kafka => "kafka_user",
+            Protocol::Tcp => "principal",
+            Protocol::Web => "host",
         }
     }
 
@@ -104,7 +110,7 @@ pub(crate) async fn handle(
         };
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
-    match establish(proxy, &user, user_cert_der, &request, protocol).await {
+    match establish(proxy, &user, user_cert_der, &request, protocol, None).await {
         Ok((session_id, worker, inbound, outbound, _slot, resolved)) => {
             // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
@@ -342,6 +348,8 @@ fn resolve_principal(
                 request.database.clone(),
             )
         }
+        Protocol::Tcp => (Principal::TcpAccess, "tcp".to_owned(), String::new()),
+        Protocol::Web => (Principal::WebAccess, "web".to_owned(), String::new()),
         Protocol::Search => {
             let refused = || {
                 denied(format!(
@@ -422,6 +430,7 @@ async fn establish(
     user_cert_der: Vec<u8>,
     request: &SessionRequest,
     protocol: Protocol,
+    session_id: Option<Uuid>,
 ) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot, Resolved), Denial> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
@@ -453,6 +462,7 @@ async fn establish(
         principal: &request.principal,
         database: &database,
         groups: Vec::new(),
+        session_id,
     };
     let (session_id, worker, inbound, outbound, slot) =
         open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
@@ -466,6 +476,52 @@ async fn establish(
     ))
 }
 
+/// Open a worker-backed HTTP/1 byte stream for one already-authenticated web
+/// request. The request and session share an ID in the audit projection.
+pub(crate) async fn open_web_stream(
+    proxy: &Proxy,
+    user: &UserIdentity,
+    user_cert_der: Vec<u8>,
+    resource: &str,
+    host: &str,
+    client_addr: Option<String>,
+    session_id: Uuid,
+) -> Result<tokio::io::DuplexStream, Denial> {
+    let request = SessionRequest {
+        resource: resource.to_owned(),
+        principal: host.to_owned(),
+        ..Default::default()
+    };
+    let (session_id, worker, inbound, outbound, _slot, resolved) = establish(
+        proxy,
+        user,
+        user_cert_der,
+        &request,
+        Protocol::Web,
+        Some(session_id),
+    )
+    .await?;
+    let (client, relay_io) = tokio::io::duplex(256 * 1024);
+    let proxy = proxy.clone();
+    let user = user.clone();
+    tokio::spawn(async move {
+        relay(
+            &proxy,
+            relay_io,
+            &user,
+            &request,
+            session_id,
+            &worker,
+            client_addr,
+            inbound,
+            outbound,
+            &resolved,
+        )
+        .await;
+    });
+    Ok(client)
+}
+
 /// What a session is for. The caller has already decided policy allows it.
 pub(crate) struct Target<'a> {
     pub resource: &'a str,
@@ -476,6 +532,9 @@ pub(crate) struct Target<'a> {
     pub database: &'a str,
     /// The Kubernetes groups to impersonate.
     pub groups: Vec<String>,
+    /// Reuse a caller-generated ID so protocol-specific audit events share
+    /// the ordinary session timeline.
+    pub session_id: Option<Uuid>,
 }
 
 /// Pick a worker that may serve the resource, sign a grant for it, and open
@@ -490,7 +549,7 @@ pub(crate) async fn open_session(
     target: &Target<'_>,
     now: OffsetDateTime,
 ) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
-    let session_id = Uuid::now_v7();
+    let session_id = target.session_id.unwrap_or_else(Uuid::now_v7);
     let ttl = policy.max_session_ttl(&user.roles);
     let creds = proxy.credentials();
     // Load figures are a little stale, so the chosen worker (or the peer
@@ -696,9 +755,9 @@ async fn open_on(
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-async fn relay(
+async fn relay<IO>(
     proxy: &Proxy,
-    tls: TlsStream<TcpStream>,
+    io: IO,
     user: &UserIdentity,
     request: &SessionRequest,
     session_id: Uuid,
@@ -707,7 +766,9 @@ async fn relay(
     mut inbound: Inbound,
     outbound: Outbound,
     resolved: &Resolved,
-) {
+) where
+    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
     // Redis, MongoDB, and the brokers name the upstream identity for what it is, not `login`.
@@ -754,7 +815,7 @@ async fn relay(
 
     let started = Instant::now();
     metrics::gauge!("limen_sessions_active", "kind" => kind.to_owned()).increment(1.0);
-    let (mut reader, mut writer) = tokio::io::split(tls);
+    let (mut reader, mut writer) = tokio::io::split(io);
     let upload = async {
         let mut bytes = 0u64;
         let mut buf = vec![0u8; CHUNK];
