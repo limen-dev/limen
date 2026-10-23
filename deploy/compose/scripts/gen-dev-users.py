@@ -17,7 +17,7 @@ data = tomllib.loads((COMPOSE / "config/dev-users.toml").read_text())
 users = data["user"]
 
 # Which roles do the example policy's mappings give each group?
-mappings = (ROOT / "examples/policy/mappings.yaml").read_text()
+mappings = (ROOT / "examples/policy/shared/mappings.yaml").read_text()
 roles_for = {}
 for group, roles in re.findall(r"idp_group:\s*([\w:-]+)\s*,\s*roles:\s*\[(.*?)\]", mappings):
     roles_for[group] = [r.strip().strip('"') for r in roles.split(",") if r.strip()]
