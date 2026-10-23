@@ -18,8 +18,8 @@ A dependency is adopted only if all of these hold:
 |---|---|---|---|---|
 | Runtime | tokio | 1.53.3 | 2026-10-13 | Adopt |
 | HTTP | hyper 1.12 / axum 0.8.9 / tower 0.5.3 | | 2026-10 / 2026-04 / 2026-01 | Adopt |
-| gRPC | tonic, tonic-prost(-build) 0.14.6, prost 0.14.4 | | 2026-05 / 2026-06 | Adopt. Needs `protoc` at build time (pinned through mise) |
-| TLS | rustls 0.23.45, tokio-rustls 0.26.6 | | 2026-09 | Adopt |
+| gRPC | tonic, tonic-prost(-build) 0.14.6, prost 0.14.4 | | 2026-05 / 2026-06 | Adopt. `prost` is also used directly by the control plane for Phase 12 web-session handoff messages. Needs `protoc` at build time (pinned through mise) |
+| TLS | rustls 0.23.46, tokio-rustls 0.26.6 | | 2026-10 / 2026-09 | Adopt. Locked `rustls-webpki` and root-store crates are at patched versions 0.103.16 / 1.0.10 after the 2026-10 RustSec advisories |
 | X.509 | rcgen 0.14.10, x509-parser 0.18.1 | | 2026-08 / 2026-02 | Adopt. Remote-signing spike in Phase 1 (ADR-0007) |
 | PEM | rustls-pemfile | 2.2.0 | 2024-09 | **Reject**: RUSTSEC-2025-0134 (unmaintained). Use `rustls-pki-types` PEM support. Banned in deny.toml |
 | AWS | aws-config 1.12, aws-sdk-{kms,s3,secretsmanager,rds} | | 2026-10 | Adopt |
@@ -48,7 +48,9 @@ A dependency is adopted only if all of these hold:
 | YAML | serde_yml | 0.0.13 | | **Reject**: RUSTSEC-2025-0068 (unsound, unmaintained) |
 | YAML | serde-saphyr | 2.0.0 | 2026-10-13 | **Adopt** (pure Rust, active) |
 | Rate limiting | governor 0.10.4 | | 2025-12 | Adopt |
-| HTML templates | askama 0.16.1 | | 2026-09 | **Adopt** (compile-time templates, escapes by default). maud 0.27.0 (last release 2025-02) passed over for that reason |
+| HTML templates | askama 0.16.1 | | 2026-09 | **Adopt** (compile-time templates, escapes by default). Enable only `derive` and `std`; no Askama config file is used, so its unused `config` feature and unmaintained `basic-toml` are excluded. maud 0.27.0 (last release 2025-02) passed over for that reason |
+| URL parsing | url 2.5.8 | | 2026-01-05 | **Adopt** (WHATWG URL parser; already used by OIDC, now also parses Phase 12 app origins and upstream targets). No RustSec advisory in the 2026-10 audit |
+| Base64 encoding | base64 0.23.1 | | 2026-08-04 | **Adopt** (URL-safe, unpadded encoding for signed Phase 12 assertions and app sessions). No RustSec advisory in the 2026-10 audit |
 | Constant-time compare | subtle 2.6.1 | | 2025 | Adopt (already in the tree through rustls and RustCrypto). Used for CSRF and login-state comparisons |
 | Fonts and icons (vendored) | Inter 5.3.0 and JetBrains Mono 5.3.0 (`@fontsource-variable`, OFL-1.1), Lucide 1.57.0 (ISC) | | 2026 | **Adopt, vendored** with licenses under `crates/limen-control-plane/assets/vendor/` |
 | Recording player (JS, vendored) | asciinema-player 3.17.0 | | 2026-06-30 | **Adopt, vendored** into `crates/limen-control-plane/assets/vendor/` with hash and license. Apache-2.0, no advisories on 2026-10-14, plays asciicast v3. Needs `'wasm-unsafe-eval'` (WebAssembly terminal), see ADR-0017 |

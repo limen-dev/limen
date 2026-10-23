@@ -434,6 +434,18 @@ pub struct DbStatementRow {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WebRequestRow {
+    pub at: OffsetDateTime,
+    pub method: String,
+    pub path: String,
+    pub status: Option<i32>,
+    pub bytes_in: Option<i64>,
+    pub bytes_out: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub outcome: Option<String>,
+}
+
 /// The longest statement text kept in the console's table.
 const MAX_STATEMENT_TEXT: usize = 16 * 1024;
 
@@ -496,6 +508,47 @@ pub async fn db_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Er
     .fetch_one(db)
     .await?;
     Ok((row.try_get("statements")?, row.try_get("errors")?))
+}
+
+pub async fn web_requests(
+    db: &Db,
+    id: Uuid,
+    limit: i64,
+) -> Result<Vec<WebRequestRow>, sqlx::Error> {
+    sqlx::query(
+        "SELECT at, method, path, status, bytes_in, bytes_out, duration_ms, outcome
+         FROM web_requests WHERE request_id = $1 ORDER BY at LIMIT $2",
+    )
+    .bind(id)
+    .bind(limit)
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(|row| {
+        Ok(WebRequestRow {
+            at: row.try_get("at")?,
+            method: row.try_get("method")?,
+            path: row.try_get("path")?,
+            status: row.try_get("status")?,
+            bytes_in: row.try_get("bytes_in")?,
+            bytes_out: row.try_get("bytes_out")?,
+            duration_ms: row.try_get("duration_ms")?,
+            outcome: row.try_get("outcome")?,
+        })
+    })
+    .collect()
+}
+
+pub async fn web_session_counts(db: &Db, id: Uuid) -> Result<(i64, i64), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT count(*) AS requests,
+                count(*) FILTER (WHERE status >= 400) AS errors
+         FROM web_requests WHERE request_id = $1",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await?;
+    Ok((row.try_get("requests")?, row.try_get("errors")?))
 }
 
 fn cut(text: &str, max: usize) -> (&str, bool) {
@@ -628,6 +681,15 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             }
             EventKind::SearchResponse => {
                 project_search_response(&mut tx, e, session_id).await?;
+            }
+            EventKind::WebRequest => {
+                project_web_request(&mut tx, e, session_id).await?;
+            }
+            EventKind::WebResponse => {
+                project_web_response(&mut tx, e, session_id).await?;
+            }
+            EventKind::WebSocket => {
+                project_websocket(&mut tx, e, session_id).await?;
             }
             EventKind::AuthDenied if text(&e.data, "action") == Some("search") => {
                 project_search_denied(&mut tx, e, session_id).await?;
@@ -1107,6 +1169,136 @@ async fn project_search_denied(
     Ok(())
 }
 
+async fn project_web_request(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    request_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let method = text(&e.data, "method").unwrap_or_default();
+    let path = text(&e.data, "path").unwrap_or_default();
+    sqlx::query(
+        "INSERT INTO sessions (session_id, username, kind, resource, login, started_at, actor_type)
+         VALUES ($1, $2, 'web', $3, 'browser', $4, $5)
+         ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
+           resource = EXCLUDED.resource, login = EXCLUDED.login,
+           started_at = LEAST(COALESCE(sessions.started_at, EXCLUDED.started_at), EXCLUDED.started_at),
+           actor_type = EXCLUDED.actor_type",
+    )
+    .bind(request_id)
+    .bind(&e.user)
+    .bind(text(&e.data, "resource"))
+    .bind(e.time)
+    .bind(text(&e.data, "actor_type").unwrap_or("user"))
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO web_requests (request_id, request_event_id, at, username, resource, host, method, path)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (request_id) DO UPDATE SET request_event_id = EXCLUDED.request_event_id,
+           at = EXCLUDED.at, username = EXCLUDED.username, resource = EXCLUDED.resource,
+           host = EXCLUDED.host, method = EXCLUDED.method, path = EXCLUDED.path",
+    )
+    .bind(request_id)
+    .bind(e.event_id)
+    .bind(e.time)
+    .bind(&e.user)
+    .bind(text(&e.data, "resource").unwrap_or_default())
+    .bind(text(&e.data, "host").unwrap_or_default())
+    .bind(method)
+    .bind(path)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_web_response(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    request_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let duration_ms = number(&e.data, "duration_ms");
+    let at = e.time;
+    let started_at = duration_ms.map_or(at, |ms| at - time::Duration::milliseconds(ms));
+    let status = number(&e.data, "status").and_then(|value| i32::try_from(value).ok());
+    sqlx::query(
+        "INSERT INTO sessions (session_id, username, kind, resource, login, started_at, ended_at,
+                               end_reason, duration_ms, bytes_in, bytes_out, actor_type)
+         VALUES ($1, $2, 'web', $3, 'browser', $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (session_id) DO UPDATE SET username = COALESCE(sessions.username, EXCLUDED.username),
+           kind = COALESCE(sessions.kind, EXCLUDED.kind), resource = COALESCE(sessions.resource, EXCLUDED.resource),
+           login = COALESCE(sessions.login, EXCLUDED.login), started_at = COALESCE(sessions.started_at, EXCLUDED.started_at),
+           ended_at = EXCLUDED.ended_at, end_reason = EXCLUDED.end_reason, duration_ms = EXCLUDED.duration_ms,
+           bytes_in = EXCLUDED.bytes_in, bytes_out = EXCLUDED.bytes_out, actor_type = EXCLUDED.actor_type",
+    )
+    .bind(request_id)
+    .bind(&e.user)
+    .bind(text(&e.data, "resource"))
+    .bind(started_at)
+    .bind(at)
+    .bind(text(&e.data, "reason"))
+    .bind(duration_ms)
+    .bind(number(&e.data, "bytes_in"))
+    .bind(number(&e.data, "bytes_out"))
+    .bind(text(&e.data, "actor_type").unwrap_or("user"))
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO web_requests (request_id, request_event_id, response_event_id, at, username,
+                                   resource, host, method, path, status, bytes_in, bytes_out, duration_ms, outcome)
+         VALUES ($1, $2, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, $11, $12)
+         ON CONFLICT (request_id) DO UPDATE SET response_event_id = EXCLUDED.response_event_id,
+           status = EXCLUDED.status, bytes_in = EXCLUDED.bytes_in, bytes_out = EXCLUDED.bytes_out,
+           duration_ms = EXCLUDED.duration_ms, outcome = EXCLUDED.outcome",
+    )
+    .bind(request_id)
+    .bind(e.event_id)
+    .bind(at)
+    .bind(&e.user)
+    .bind(text(&e.data, "resource").unwrap_or_default())
+    .bind(text(&e.data, "host").unwrap_or_default())
+    .bind(text(&e.data, "method").unwrap_or_default())
+    .bind(status)
+    .bind(number(&e.data, "bytes_in"))
+    .bind(number(&e.data, "bytes_out"))
+    .bind(duration_ms)
+    .bind(text(&e.data, "reason"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn project_websocket(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    e: &limen_audit::Event,
+    request_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE sessions SET bytes_in = $2, bytes_out = $3, duration_ms = $4, end_reason = $5,
+                              ended_at = $6
+         WHERE session_id = $1",
+    )
+    .bind(request_id)
+    .bind(number(&e.data, "bytes_in"))
+    .bind(number(&e.data, "bytes_out"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(text(&e.data, "reason"))
+    .bind(e.time)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE web_requests SET bytes_in = $2, bytes_out = $3, duration_ms = $4, outcome = $5
+         WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .bind(number(&e.data, "bytes_in"))
+    .bind(number(&e.data, "bytes_out"))
+    .bind(number(&e.data, "duration_ms"))
+    .bind(text(&e.data, "reason"))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 // ---- browser sessions and logins -------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -1174,6 +1366,149 @@ pub async fn delete_console_sessions_of(db: &Db, username: &str) -> Result<u64, 
         .execute(db)
         .await
         .map(|r| r.rows_affected())
+}
+
+#[derive(Debug, Clone)]
+pub struct WebAppLogin {
+    pub resource: String,
+    pub host: String,
+    pub return_path: String,
+    pub browser_nonce_hash: Vec<u8>,
+    pub nonce: String,
+    pub pkce_verifier: String,
+    pub expires_at: OffsetDateTime,
+}
+
+pub(super) struct WebAppHandoff {
+    pub(super) token_hash: Vec<u8>,
+    pub(super) resource: String,
+    pub(super) host: String,
+    pub(super) return_path: String,
+    pub(super) browser_nonce_hash: Vec<u8>,
+    pub(super) session: Vec<u8>,
+    pub(super) expires_at: OffsetDateTime,
+}
+
+pub async fn insert_web_app_login(
+    db: &Db,
+    state_hash: &[u8],
+    login: &WebAppLogin,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO web_app_logins (state_hash, resource, host, return_path, browser_nonce_hash, nonce, pkce_verifier, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(state_hash)
+    .bind(&login.resource)
+    .bind(&login.host)
+    .bind(&login.return_path)
+    .bind(&login.browser_nonce_hash)
+    .bind(&login.nonce)
+    .bind(&login.pkce_verifier)
+    .bind(login.expires_at)
+    .execute(db)
+    .await
+    .map(|_| ())
+}
+
+/// Take and delete OIDC state exactly once.
+pub async fn take_web_app_login(
+    db: &Db,
+    state_hash: &[u8],
+) -> Result<Option<WebAppLogin>, sqlx::Error> {
+    let row = sqlx::query(
+        "DELETE FROM web_app_logins WHERE state_hash = $1
+         RETURNING resource, host, return_path, browser_nonce_hash, nonce, pkce_verifier, expires_at",
+    )
+    .bind(state_hash)
+    .fetch_optional(db)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    let expires_at: OffsetDateTime = row.try_get("expires_at")?;
+    if expires_at <= OffsetDateTime::now_utc() {
+        return Ok(None);
+    }
+    Ok(Some(WebAppLogin {
+        resource: row.try_get("resource")?,
+        host: row.try_get("host")?,
+        return_path: row.try_get("return_path")?,
+        browser_nonce_hash: row.try_get("browser_nonce_hash")?,
+        nonce: row.try_get("nonce")?,
+        pkce_verifier: row.try_get("pkce_verifier")?,
+        expires_at,
+    }))
+}
+
+pub(super) async fn insert_web_app_handoff(
+    db: &Db,
+    handoff: &WebAppHandoff,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO web_app_handoffs (token_hash, resource, host, return_path, browser_nonce_hash, session, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(&handoff.token_hash)
+    .bind(&handoff.resource)
+    .bind(&handoff.host)
+    .bind(&handoff.return_path)
+    .bind(&handoff.browser_nonce_hash)
+    .bind(&handoff.session)
+    .bind(handoff.expires_at)
+    .execute(db)
+    .await
+    .map(|_| ())
+}
+
+/// Atomically consume a handoff only for its configured app and host.
+pub async fn take_web_app_handoff(
+    db: &Db,
+    token_hash: &[u8],
+    resource: &str,
+    host: &str,
+    browser_nonce_hash: &[u8],
+) -> Result<Option<(Vec<u8>, String)>, sqlx::Error> {
+    let row = sqlx::query(
+        "DELETE FROM web_app_handoffs
+         WHERE token_hash = $1 AND resource = $2 AND host = $3
+           AND browser_nonce_hash = $4 AND expires_at > now()
+         RETURNING session, return_path",
+    )
+    .bind(token_hash)
+    .bind(resource)
+    .bind(host)
+    .bind(browser_nonce_hash)
+    .fetch_optional(db)
+    .await?;
+    row.map(|row| Ok((row.try_get("session")?, row.try_get("return_path")?)))
+        .transpose()
+}
+
+pub async fn register_web_identity_jwk(
+    db: &Db,
+    kid: &str,
+    jwk: &serde_json::Value,
+    not_after: OffsetDateTime,
+) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
+    sqlx::query("DELETE FROM web_identity_jwks WHERE not_after <= now()")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO web_identity_jwks (kid, jwk, not_after) VALUES ($1, $2, $3)
+         ON CONFLICT (kid) DO UPDATE SET jwk = EXCLUDED.jwk, not_after = EXCLUDED.not_after",
+    )
+    .bind(kid)
+    .bind(jwk)
+    .bind(not_after)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
+}
+
+pub async fn web_identity_jwks(db: &Db) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+    sqlx::query_scalar("SELECT jwk FROM web_identity_jwks WHERE not_after > now() ORDER BY kid")
+        .fetch_all(db)
+        .await
 }
 
 pub async fn insert_login(

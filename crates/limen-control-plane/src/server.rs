@@ -64,6 +64,18 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
     // The same key signs policy snapshots, so they rotate together.
     let signer =
         limen_session::envelope::EnvelopeSigner::new(&key.serialize_pem(), issued.der.to_vec())?;
+    let jwks = signer.jwks()?;
+    let signing_jwk = jwks
+        .get("keys")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|keys| keys.first())
+        .ok_or_else(|| anyhow::anyhow!("control-plane signer has no public JWK"))?;
+    let kid = signing_jwk
+        .get("kid")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("control-plane signer JWK has no key id"))?;
+    crate::console::store::register_web_identity_jwk(&state.db, kid, signing_jwk, issued.not_after)
+        .await?;
     *state
         .snapshot_signer
         .write()

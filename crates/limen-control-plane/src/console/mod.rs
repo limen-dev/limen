@@ -22,6 +22,7 @@ pub mod oidc_flow;
 mod pages;
 pub mod store;
 mod views;
+pub(crate) mod web_auth;
 
 use std::net::IpAddr;
 
@@ -75,6 +76,9 @@ pub fn router(state: AppState) -> Router {
         .route("/console/signin", get(pages::signin))
         .route("/console/login", get(auth::login_start))
         .route("/console/callback", get(auth::callback))
+        .route("/console/web/login", get(web_auth::login_start))
+        .route("/console/web/callback", get(web_auth::login_callback))
+        .route("/console/web/jwks.json", get(web_auth::jwks))
         .route("/console/logout", get(pages::signout).post(auth::logout))
         .route("/console/static/{name}", get(assets::serve))
         .route("/console/resources", get(pages::resources))

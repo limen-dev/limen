@@ -36,7 +36,7 @@ spec:
       redis: { users: [limen-ro], keys: ["app:*"], deny_commands: [KEYS] }
     - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
       search: { roles: [limen-read], indices: ["app-*"] }
-    # Planned integrations (nothing serves them yet; see below):
+    # More target examples:
     - resources: { kind: [mongodb], labels: { env: [staging] } }
       mongo: { roles: [limen-read], databases: ["*"] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
@@ -77,7 +77,7 @@ spec:
 
 `worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
 
-Exactly one of `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), `opensearch` / `elasticsearch` (`endpoint`, `region`, `aws`, `serverless`, `tls`, and `audit` with `log_bodies`, `log_query` and `redact_ids`), or `kubernetes` (`cluster_name`) must be set. Names and label keys use lowercase `[a-z0-9._-]`.
+Exactly one target must be set: `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), `opensearch` / `elasticsearch` (`endpoint`, `region`, `aws`, `serverless`, `tls`, and `audit` with `log_bodies`, `log_query` and `redact_ids`), `kubernetes` (`cluster_name`), `web` (`address`, `host`, optional `tls_ca_file`, `tls_server_name`, `health_path`, `insecure_dev`, and `identity_headers`; see [the web apps guide](guides/web-apps.md)), or `tcp` (`address`; see [the TCP guide](guides/tcp.md)). Names and label keys use lowercase `[a-z0-9._-]`.
 
 ### RabbitMQ and Kafka grants
 
@@ -107,16 +107,22 @@ With several roles granting the same user, the session may do whatever any one g
 
 With several roles granting the same engine role, the session may do whatever any one grant allows. [The search guide](guides/search.md) lists what each class covers and what the worker reads to find the indices.
 
+### Web app grants
+
+`web: {}` allows access to the selected web resource. Optional `methods` and
+`path_prefixes` restrict each request; an empty list leaves that dimension
+unrestricted. Deny rules still take precedence. Browser sign-in uses OIDC, and
+Limen checks the current policy and user lock on every request.
+`limen web open <resource>` opens only an app already returned by the
+authorized resource list. See the [web apps guide](guides/web-apps.md).
+
 ### Planned integrations
 
-These kinds are accepted by policy, listed by `limen ls` and the console, and tested, so the shape of the product is visible and policy can be written ahead of the integrations. SSH, the SQL databases (`postgres`, `mysql`, `redshift`), Redis, Kubernetes, MongoDB, search (OpenSearch and Elasticsearch), RabbitMQ, and Kafka are served today. **Nothing serves the kinds below yet**: the matching `limen` command says which phase delivers it. Examples: [`examples/policy/planned.yaml`](../examples/policy/planned.yaml). The field names are provisional until each phase confirms its ADR.
-
-| Kind | Resource fields | Grant section | Command (planned) |
-|---|---|---|---|
-| `web` | `address`, `host`, `health_path` | `web: {}` | `limen web open` (Phase 12) |
-| `tcp` | `address` | `tcp: {}` | `limen tcp` (Phase 12) |
-
-Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. `web` and `tcp` have no upstream identity to choose, so their grant is access itself (`web: {}`).
+Some kinds are accepted by policy before their integration is implemented, so
+policy can be reviewed ahead of time. Web apps and raw TCP are served today
+alongside SSH, SQL databases, Redis, Kubernetes, MongoDB, search, RabbitMQ, and
+Kafka. Remaining examples are in [`examples/policy/planned.yaml`](../examples/policy/planned.yaml).
+Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. Web and TCP grants are access itself (`web: {}` and `tcp: {}`); neither lets a client choose an upstream identity or destination.
 
 ## `bot`
 

@@ -105,7 +105,7 @@ pub struct Rule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kafka: Option<KafkaGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web: Option<OpenGrant>,
+    pub web: Option<WebGrant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tcp: Option<OpenGrant>,
 }
@@ -321,11 +321,22 @@ pub enum KafkaClass {
     Admin,
 }
 
-/// Web apps and TCP services have no upstream identity to choose: the grant is
-/// access itself, written `web: {}` or `tcp: {}`.
+/// TCP services have no upstream identity to choose: the grant is access
+/// itself, written `tcp: {}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenGrant {}
+
+/// Request-level restrictions for a browser web app. Empty lists leave that
+/// dimension unrestricted; deny rules still take precedence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebGrant {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub methods: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_prefixes: Vec<String>,
+}
 
 fn all() -> Vec<String> {
     vec!["*".to_owned()]
@@ -767,8 +778,22 @@ pub struct WebTarget {
     pub address: String,
     /// The public host name users open, such as `grafana.apps.example.com`.
     pub host: String,
+    /// CA bundle on the worker used to verify the HTTPS upstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca_file: Option<String>,
+    /// TLS certificate name when it differs from the address host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_path: Option<String>,
+    /// Permit plain HTTP only for a development target, and only when the
+    /// worker is started with its insecure web-target opt-in.
+    #[serde(default)]
+    pub insecure_dev: bool,
+    /// Explicitly enable trusted identity headers for an app that consumes
+    /// Limen's signed identity assertion. Disabled by default.
+    #[serde(default)]
+    pub identity_headers: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

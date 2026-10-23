@@ -19,11 +19,13 @@
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
+# tcp      a raw TCP echo target for `limen tcp`                 stacks/tcp.yml
+# web      an HTTP app target for browser SSO                    stacks/web.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
-# the admin, applies examples/policy, and seeds the targets, so `limen ls` shows
-# everything straight away. Development only: static tokens, Dex static
-# passwords, file-backed CA keys. The per-phase demos are in demos/.
+# the admin, applies examples/policy plus the selected TCP/web policies, and
+# seeds the targets. Development only: static tokens, Dex static passwords,
+# file-backed CA keys. The per-phase demos are in demos/.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -130,7 +132,10 @@ wait_for "proxy readiness" curl -sf "http://$STACK_HEALTH/readyz"
 "${compose[@]}" cp "$STACK_CP:/var/lib/limen/ca-public/internal-ca.pem" "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
-"$LIMEN_BIN" admin apply "$root/examples/policy" --source-ref setup.sh >/dev/null
+policy_files=("$root/examples/policy")
+if has tcp; then policy_files+=("$here/config/targets/tcp/policy.yaml"); fi
+if has web; then policy_files+=("$here/config/targets/web/policy.yaml"); fi
+"$LIMEN_BIN" admin apply "${policy_files[@]}" --source-ref setup.sh >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://$STACK_HEALTH/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null # roles are fixed at login: sign in again to get the applied ones

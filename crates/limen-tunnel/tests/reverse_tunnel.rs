@@ -158,6 +158,7 @@ async fn worker_serves_grpc_over_outbound_connection() {
     .prepare();
     let peer = PeerInfo {
         remote_addr: Some(addr),
+        server_name: None,
         client_certs: vec![],
     };
     let served = tokio::time::timeout(

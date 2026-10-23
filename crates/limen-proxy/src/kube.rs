@@ -316,6 +316,7 @@ async fn open(
             principal: "",
             database: "",
             groups,
+            session_id: None,
         },
         now,
     )

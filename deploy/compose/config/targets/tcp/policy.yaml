@@ -1,0 +1,30 @@
+kind: role
+version: v1
+metadata: { name: phase12-tcp }
+spec:
+  allow:
+    - resources: { kind: [tcp], labels: { env: [phase12] } }
+      tcp: {}
+  deny:
+    - resources: { kind: [tcp], labels: { team: [blocked] } }
+      tcp: {}
+---
+kind: role_mapping
+version: v1
+metadata: { name: phase12-tcp }
+spec:
+  - { idp_group: developers, roles: [phase12-tcp] }
+---
+kind: resource
+version: v1
+metadata: { name: tcp-echo, labels: { env: phase12, team: platform } }
+spec:
+  tcp: { address: "tcp-target:8080" }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: tcp-blocked, labels: { env: phase12, team: blocked } }
+spec:
+  tcp: { address: "tcp-target:8080" }
+  worker_selector: { pool: dev }

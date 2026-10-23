@@ -36,6 +36,7 @@ staticClients:
     secret: dev-only-console-client-secret
     redirectURIs:
       - https://localhost:3443/console/callback
+      - https://localhost:3443/console/web/callback
 
 enablePasswordDB: true
 staticPasswords:
@@ -56,3 +57,9 @@ staticPasswords:
     userID: 5f0e8c2a-9a47-4a0b-8a51-6a0e0f8d2c11
     groups: [marketing]
   # END dev-users
+  # Browser SSO fixture: the reserved username prefix must be refused as a bot.
+  - email: bot:phase12@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: bot:phase12
+    userID: a8a24824-d8c0-4c4b-80a2-7f36b43d09e7
+    groups: [developers]

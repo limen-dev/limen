@@ -1,7 +1,7 @@
 //! `limen`: log in through your identity provider and get short-lived access
-//! to SSH hosts, SQL databases, Redis or Valkey, Kubernetes clusters, and search
-//! (`OpenSearch` and Elasticsearch), and (planned) MongoDB, message brokers, web
-//! apps, and TCP services.
+//! to SSH hosts, SQL databases, Redis or Valkey, Kubernetes clusters, search
+//! (`OpenSearch` and Elasticsearch), MongoDB, message brokers, and TCP services;
+//! internal web apps open in a browser after single sign-on.
 
 // A CLI's job is printing to stdout.
 #![allow(clippy::print_stdout)]
@@ -146,9 +146,7 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    // The commands below are planned integrations (ADR-0018, ADR-0022). Their
-    // arguments are settled so scripts and docs can be written now; each one
-    // says plainly that it isn't available yet.
+    // Integration command groups.
     /// PostgreSQL, MySQL, Aurora, and Redshift.
     Db {
         #[command(subcommand)]
@@ -184,12 +182,12 @@ enum Command {
         #[command(subcommand)]
         command: KafkaCommand,
     },
-    /// Internal web apps (planned, Phase 12).
+    /// Internal web apps behind browser SSO.
     Web {
         #[command(subcommand)]
         command: WebCommand,
     },
-    /// Raw TCP services (planned, Phase 12): `limen tcp <resource>`.
+    /// Open a local TCP forward to an authorized resource.
     Tcp {
         resource: String,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.
@@ -542,13 +540,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Web { .. } => not_yet("limen web open", "web app access", "Phase 12"),
-        Command::Tcp { .. } => not_yet("limen tcp", "TCP service access", "Phase 12"),
+        Command::Web {
+            command: WebCommand::Open { app, no_browser },
+        } => commands::web::open(proxy, &app, no_browser).await,
+        Command::Tcp { resource, listen } => {
+            commands::tcp::connect(proxy, &resource, listen.as_deref()).await
+        }
     }
 }
 
-/// The planned integrations are in policy and in the console already, but no
+/// Planned integrations are in policy and in the console already, but no
 /// worker serves them. Say so, and say when.
+#[cfg(test)]
 fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
     anyhow::bail!(
         "`{command}` isn't available yet: {what} is planned for {phase}. \
@@ -562,10 +565,9 @@ mod tests {
 
     use super::{Cli, Command, DbCommand};
 
-    /// Every planned integration has a command whose arguments parse, and that
-    /// fails with the phase and no side effects.
+    /// Resource commands have a stable, parseable CLI shape.
     #[test]
-    fn planned_commands_parse() {
+    fn resource_commands_parse() {
         for args in [
             &[
                 "db",

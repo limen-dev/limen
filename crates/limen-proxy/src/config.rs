@@ -24,6 +24,10 @@ pub struct Config {
     #[arg(long, env = "LIMEN_CONTROL_PLANE_NAME", default_value = "localhost")]
     pub control_plane_name: String,
 
+    /// Public origin of the console, used to start browser SSO for web apps.
+    #[arg(long, env = "LIMEN_CONSOLE_PUBLIC_URL")]
+    pub console_public_url: Option<String>,
+
     /// Internal CA certificate to trust when contacting the control plane
     /// before enrollment. After enrollment, the CA bundle it returned is used.
     #[arg(long, env = "LIMEN_CA_FILE")]

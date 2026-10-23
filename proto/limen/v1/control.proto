@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package limen.v1;
 
+import "limen/v1/session.proto";
+
 // Control plane API. Proxies call it directly over mTLS. The CLI and workers
 // reach it through a proxy, which forwards their verified client
 // certificate. The control plane re-verifies that certificate (design §3).
@@ -20,6 +22,8 @@ service Auth {
   // Ends the calling certificate's login: proxies and workers refuse it from
   // then on, within one policy refresh. Idempotent.
   rpc Logout(LogoutRequest) returns (LogoutResponse);
+  // Atomically consumes a one-use browser SSO handoff. Direct proxy mTLS only.
+  rpc RedeemWebHandoff(RedeemWebHandoffRequest) returns (RedeemWebHandoffResponse);
 }
 
 service Resources {
@@ -118,6 +122,31 @@ message LogoutResponse {
   bool revoked = 2;
 }
 
+message RedeemWebHandoffRequest {
+  string token = 1;
+  string resource = 2;
+  string host = 3;
+  string browser_nonce = 4;
+}
+
+message RedeemWebHandoffResponse {
+  Signed session = 1;
+  string return_path = 2;
+}
+
+// Signed by the control plane; the proxy binds it to the host-only app cookie.
+message WebAppSession {
+  string username = 1;
+  repeated string roles = 2;
+  string login_id = 3;
+  string resource = 4;
+  string host = 5;
+  int64 expires_at_unix = 6;
+  bytes user_cert_der = 7;
+  reserved 8;
+  string identity_assertion = 9;
+}
+
 message WhoAmIRequest {}
 
 message WhoAmIResponse {
@@ -136,6 +165,9 @@ message Resource {
   repeated string principals = 4;
   // SQL resources: the database used when the user names none. Empty if there is none.
   string default_database = 5;
+  // Browser URL for an authorized web app. Empty for other resources or if
+  // browser SSO is not configured.
+  string web_url = 6;
 }
 
 message ListResourcesResponse {

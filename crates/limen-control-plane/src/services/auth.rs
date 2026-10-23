@@ -148,6 +148,13 @@ impl Auth for AuthService {
             expires_at_unix: unix(user.not_after),
         }))
     }
+
+    async fn redeem_web_handoff(
+        &self,
+        request: Request<limen_proto::v1::RedeemWebHandoffRequest>,
+    ) -> Result<Response<limen_proto::v1::RedeemWebHandoffResponse>, Status> {
+        crate::console::web_auth::redeem(&self.0, request).await
+    }
 }
 
 /// The CSR's SubjectPublicKeyInfo DER. A plain function so the parsed CSR
