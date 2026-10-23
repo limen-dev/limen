@@ -336,7 +336,7 @@ mod tests {
             let text = String::from_utf8(refusal(&anyhow::anyhow!("{m}"))).expect("utf8");
             text.split_whitespace().nth(1).expect("status").to_owned()
         };
-        assert_eq!(status("access denied to limen-read@logs"), "403");
+        assert_eq!(status("access denied to read@logs"), "403");
         assert_eq!(status("user is locked: left the company"), "403");
         assert_eq!(status("no worker is connected that can reach logs"), "503");
         assert_eq!(

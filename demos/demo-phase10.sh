@@ -147,7 +147,7 @@ call "$PORT_dev" GET "/app-orders/_doc/1"
 [ "$STATUS" = 200 ] || fail "doc get: $STATUS"
 call "$PORT_dev" POST "/app-*/_count" '{}'
 [ "$STATUS" = 200 ] && grep -q '"count":1' <<<"$BODY" || fail "count over a pattern the grant covers: $STATUS $BODY"
-pass "limen search connect picked the only role (limen-read); search, get, and count worked"
+pass "limen search connect picked the only role (read); search, get, and count worked"
 
 step "Limen refuses what the role doesn't allow, before the engine sees it"
 call "$PORT_dev" POST /secret-hr/_search '{}';            expect_limen_refusal "index outside the grant (secret-hr)"
@@ -177,11 +177,11 @@ step "Credentials the client sends are dropped"
 # the check that matters is on the next step (sre). Here: the header is ignored.
 call "$PORT_dev" POST /app-orders/_search '{}' -u elastic:elastic-dev-only -H 'es-security-runas-user: elastic'
 [ "$STATUS" = 200 ] || fail "extra credentials should be ignored: $STATUS"
-pass "request with client-side credentials still ran as limen-read"
+pass "request with client-side credentials still ran as read"
 
 step "sre writes; the engine's own role is the second layer"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
-listen sre search-staging --role limen-write
+listen sre search-staging --role write
 call "$PORT_sre" PUT '/app-orders/_doc/7?refresh=true' '{"item":"gadget","note":"written via limen"}'
 echo "PUT /app-orders/_doc/7 -> $STATUS"
 [ "$STATUS" = 201 ] || [ "$STATUS" = 200 ] || fail "sre write: $STATUS $BODY"
@@ -206,7 +206,7 @@ call "$PORT_sre" DELETE /app-orders;                       expect_limen_refusal 
 pass "writes and bulk worked; the engine refused what its role forbids; the client's superuser login was dropped"
 
 step "OpenSearch works the same way, over TLS verified in full"
-listen os search-opensearch --role limen-read
+listen os search-opensearch --role read
 call "$PORT_os" POST /app-orders/_search '{"query":{"match":{"item":"widget-os"}}}'
 echo "POST /app-orders/_search -> $STATUS"
 [ "$STATUS" = 200 ] && grep -q 'widget-os' <<<"$BODY" || fail "opensearch search: $STATUS $BODY"

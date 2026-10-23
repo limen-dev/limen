@@ -161,11 +161,11 @@ metadata: { name: dev }
 spec:
   allow:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read], databases: [orders] }
+      mongo: { roles: [read], databases: [orders] }
 "#;
     const RESOURCE: &str = "kind: resource\nversion: v1\nmetadata: { name: m }\nspec:\n  mongodb: { endpoint: \"m:1\", credentials_dir: /c }\n";
     let policy = Policy::parse_yaml([("r.yaml", POLICY), ("m.yaml", RESOURCE)]).expect("policy");
-    Access::new(Arc::new(policy), vec!["dev".into()], "m", "limen-read")
+    Access::new(Arc::new(policy), vec!["dev".into()], "m", "read")
 }
 
 /// Everything that reads client bytes, on one input.

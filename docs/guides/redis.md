@@ -5,15 +5,15 @@ Connect with `redis-cli` (or any Redis or Valkey client) through Limen. "Redis" 
 ## Connect
 
 ```sh
-limen ls                                   # cache-staging   ● redis   limen-ro
+limen ls                                   # cache-staging   ● redis   read
 limen redis connect cache-staging          # the user is picked from policy when there's only one
-# Listening for cache-staging as limen-ro.
+# Listening for cache-staging as read.
 # Run: redis-cli -h 127.0.0.1 -p 51234
 redis-cli -h 127.0.0.1 -p 51234 GET app:greeting
 ```
 
 - Each connection to the listener is its own audited session. Leave `limen redis connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
-- `--user limen-rw` picks the Redis user when policy allows several. `--listen 127.0.0.1:6380` fixes the port (loopback only). `--socket ~/.limen/run/cache.sock` uses a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
+- `--user write` picks the Redis user when policy allows several. `--listen 127.0.0.1:6380` fixes the port (loopback only). `--socket ~/.limen/run/cache.sock` uses a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
 - Anyone who can reach the listener acts as you. That is why it binds loopback only and the socket is private. Don't forward the port.
 - A refusal reaches your client as a Redis error: `-NOPERM Limen: ...` for a command, or `-ERR Limen: access denied ...` if you can't use the resource at all.
 - Your client's own `AUTH` is accepted and ignored. The worker's login stays.
@@ -25,7 +25,7 @@ A role grants Redis users with optional limits (`docs/policy.md` has the full sy
 ```yaml
 - resources: { kind: [redis], labels: { env: [staging] } }
   redis:
-    users: [limen-ro]
+    users: [read]
     keys: ["app:*", "session:*"]      # only these keys (empty: any)
     deny_commands: [KEYS]             # refuse more
     allow_commands: ["CONFIG GET"]    # open one of the default-denied commands
@@ -71,9 +71,9 @@ spec:
 
 **IAM (ElastiCache)** needs Redis OSS 7.0+ or Valkey 7.2+ with in-transit encryption, a user created with `authentication-mode Type=iam` whose name equals its ID and which belongs to the replication group's user group, and an IAM policy on the worker's role allowing `elasticache:Connect` on the replication group and the user. The worker signs a 15-minute token with its AWS credentials (the SDK's usual chain) and logs in again at 11 hours, because ElastiCache drops IAM connections after 12. Limen does not create ElastiCache users: create them in Terraform. The ACL on those users is your first control.
 
-**Self-hosted** Redis or Valkey: create one ACL user per Redis user your roles name (`user limen-ro on >... ~* +@read +@connection +command`), and list their passwords in the credentials file. `+command` is needed (the worker reads `COMMAND INFO` once per session) and so is `+@connection` (`HELLO`, `CLIENT SETNAME`). The dev stack's ACL is in `deploy/compose/config/targets/redis/users.acl` (the default user is off; ACL files take no comments). `limen-ro` is read-only, and `limen-rw` has everything except the admin and dangerous categories.
+**Self-hosted** Redis or Valkey: create one ACL user per Redis user your roles name (`user read on >... ~* +@read +@connection +command`), and list their passwords in the credentials file. `+command` is needed (the worker reads `COMMAND INFO` once per session) and so is `+@connection` (`HELLO`, `CLIENT SETNAME`). The dev stack's ACL is in `deploy/compose/config/targets/redis/users.acl` (the default user is off; ACL files take no comments). `read` is read-only, and `write` has everything except the admin and dangerous categories.
 
-The server sees `limen-ro`, not the person. The worker names each connection `limen:<session id>` (`CLIENT LIST` and the slow log show it), so server-side logs join to Limen's audit.
+The server sees `read`, not the person. The worker names each connection `limen:<session id>` (`CLIENT LIST` and the slow log show it), so server-side logs join to Limen's audit.
 
 ## Limits
 

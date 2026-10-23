@@ -26,7 +26,7 @@ metadata: {{ name: analysts }}
 spec:
   allow:
     - resources: {{ kind: [mongodb], labels: {{ env: [test] }} }}
-      mongo: {{ roles: [limen-read], databases: [orders] }}
+      mongo: {{ roles: [read], databases: [orders] }}
 ---
 kind: role_mapping
 version: v1
@@ -119,7 +119,7 @@ async fn mongodb_through_limen() {
     };
     let creds = d.dir.path().join("mongo-creds");
     std::fs::create_dir_all(&creds).expect("dir");
-    std::fs::write(creds.join("limen-read"), "limen-read-dev-only\n").expect("secret");
+    std::fs::write(creds.join("read"), "limen-read-dev-only\n").expect("secret");
 
     let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
     let proxy_addr = d.proxy_addr.to_string();
@@ -162,7 +162,7 @@ async fn mongodb_through_limen() {
         analyst.clone(),
         limen_tunnel::alpn::MONGO,
         "catalog-test",
-        "limen-read",
+        "read",
         "orders",
     )
     .await;
@@ -225,7 +225,7 @@ async fn mongodb_through_limen() {
         analyst.clone(),
         limen_tunnel::alpn::MONGO,
         "catalog-test",
-        "limen-read",
+        "read",
         "billing",
     )
     .await;
@@ -236,7 +236,7 @@ async fn mongodb_through_limen() {
         &ca_pem,
         analyst.clone(),
         "catalog-test",
-        "limen-read",
+        "read",
         "orders",
     )
     .await;
@@ -276,7 +276,7 @@ async fn mongodb_through_limen() {
         .expect("session.start");
     assert_eq!(start["user"], DEVELOPER);
     assert_eq!(start["data"]["database"], "orders");
-    assert_eq!(start["data"]["mongo_role"], "limen-read");
+    assert_eq!(start["data"]["mongo_role"], "read");
     let find = events
         .iter()
         .find(|e| {

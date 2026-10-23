@@ -158,7 +158,7 @@ def server(service, *cmd):
     """A command straight to a target, as its read-write ACL user (bypasses Limen)."""
     cli = "valkey-cli" if service == "valkey-target" else "redis-cli"
     extra = ["--tls", "--cacert", "/tls/ca.crt"] if service == "redis-tls" else []
-    r = compose("exec", "-T", service, cli, *extra, "--user", "limen-rw", "--pass", "rw-dev-only",
+    r = compose("exec", "-T", service, cli, *extra, "--user", "write", "--pass", "rw-dev-only",
                 "--no-auth-warning", *cmd)
     return r.stdout.strip()
 
@@ -170,7 +170,7 @@ def limen(who, *args):
 class Listener:
     """`limen redis connect` as a person; `.port` (or `.path`) once it is listening."""
 
-    def __init__(self, resource, who="admin", user="limen-rw", extra=()):
+    def __init__(self, resource, who="admin", user="write", extra=()):
         self.lines = []
         self.p = subprocess.Popen(
             [LIMEN, "redis", "connect", resource, "--user", user, *extra],
@@ -211,7 +211,7 @@ class Listener:
             self.p.kill()
 
 
-def failed_listener(resource, who="admin", user="limen-rw"):
+def failed_listener(resource, who="admin", user="write"):
     """The text `limen redis connect` fails with (it must fail, not listen)."""
     r = run([LIMEN, "redis", "connect", resource, "--user", user],
             env={**E, "LIMEN_HOME": HOME[who]}, timeout=60)
@@ -421,9 +421,9 @@ def blocking_commands_do_not_wedge_the_session():
 
 @scenario
 def multi_key_and_pattern_commands_cannot_escape_the_key_limits():
-    # developer: limen-rw through the redis-lab role (keys lab:* only)
+    # developer: write through the redis-lab role (keys lab:* only)
     server("redis-target", "SET", "secret:k", "classified")
-    with Listener("cache-staging", who="dev", user="limen-rw") as l:
+    with Listener("cache-staging", who="dev", user="write") as l:
         c = l.conn()
         check(c.call("SET", "lab:a", "1") == "OK")
         check(c.call("MSET", "lab:b", "2", "lab:c", "3") == "OK")
@@ -462,7 +462,7 @@ def multi_key_and_pattern_commands_cannot_escape_the_key_limits():
 def container_commands_and_key_events_respect_the_key_limits():
     server("redis-target", "SET", "secret:k", "classified")
     server("redis-target", "XADD", "secret:s", "*", "f", "v")
-    with Listener("cache-staging", who="dev", user="limen-rw") as l:
+    with Listener("cache-staging", who="dev", user="write") as l:
         c = l.conn()
         check(c.call("SET", "lab:a", "1") == "OK")
         check(c.call("OBJECT", "ENCODING", "lab:a") is not None, "inside the limit")
@@ -515,7 +515,7 @@ def subscribing_after_pipelined_commands_keeps_order():
 @scenario
 def the_console_lists_the_commands_of_a_redis_session():
     marker = f"console{int(time.time())}"
-    with Listener("cache-staging", who="dev", user="limen-rw") as l:
+    with Listener("cache-staging", who="dev", user="write") as l:
         c = l.conn()
         check(c.call("SET", f"lab:{marker}", "the-secret-value") == "OK")
         check(c.call("GET", f"lab:{marker}") == b"the-secret-value")
@@ -537,7 +537,7 @@ def the_console_lists_the_commands_of_a_redis_session():
 
 @scenario
 def developer_readonly_user_gets_two_layers_of_control():
-    with Listener("cache-staging", who="dev", user="limen-ro") as l:
+    with Listener("cache-staging", who="dev", user="read") as l:
         c = l.conn()
         server("redis-target", "SET", "app:s1", "ok")
         check(c.call("GET", "app:s1") == b"ok")
@@ -705,19 +705,19 @@ def target_dying_mid_session_closes_the_client_not_hangs_it():
 
 @scenario
 def locking_a_user_ends_their_redis_session():
-    with Listener("cache-staging", who="dev", user="limen-ro") as l:
+    with Listener("cache-staging", who="dev", user="read") as l:
         c = l.conn()
         check(c.call("PING") == "PONG")
         r = limen("admin", "admin", "lock", "developer@example.com", "--reason", "scenario test")
         check(r.returncode == 0, r.stderr)
         try:
             check(c.closed_within(40), "locked user's session ends")
-            out = failed_listener("cache-staging", who="dev", user="limen-ro")
+            out = failed_listener("cache-staging", who="dev", user="read")
             check("lock" in out.lower() or "denied" in out.lower(), out)
         finally:
             limen("admin", "admin", "unlock", "developer@example.com")
         time.sleep(12)
-    with Listener("cache-staging", who="dev", user="limen-ro") as l:
+    with Listener("cache-staging", who="dev", user="read") as l:
         check(l.conn().call("PING") == "PONG", "works after unlock")
 
 
@@ -768,18 +768,18 @@ def unix_socket_listener_is_private_and_works():
         check(Conn(path).call("PING") == "PONG", "stale socket replaced")
     loose = tempfile.mkdtemp(prefix="lr", dir="/tmp")
     os.chmod(loose, 0o755)
-    r = run([LIMEN, "redis", "connect", "cache-staging", "--user", "limen-rw", "--socket", f"{loose}/r.sock"],
+    r = run([LIMEN, "redis", "connect", "cache-staging", "--user", "write", "--socket", f"{loose}/r.sock"],
             env={**E, "LIMEN_HOME": HOME["admin"]}, timeout=60)
     check(r.returncode != 0 and "open to other users" in r.stderr + r.stdout, r.stderr)
 
 
 @scenario
 def listener_rules_and_idle_timeout():
-    r = run([LIMEN, "redis", "connect", "cache-staging", "--user", "limen-rw", "--listen", "0.0.0.0:0"],
+    r = run([LIMEN, "redis", "connect", "cache-staging", "--user", "write", "--listen", "0.0.0.0:0"],
             env={**E, "LIMEN_HOME": HOME["admin"]}, timeout=60)
     check(r.returncode != 0 and "loopback" in r.stderr + r.stdout, "non-loopback refused: " + r.stderr)
     t0 = time.time()
-    p = subprocess.Popen([LIMEN, "redis", "connect", "cache-staging", "--user", "limen-rw", "--idle-timeout", "4s"],
+    p = subprocess.Popen([LIMEN, "redis", "connect", "cache-staging", "--user", "write", "--idle-timeout", "4s"],
                          env={**E, "LIMEN_HOME": HOME["admin"]}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     port = None
     for line in p.stdout:

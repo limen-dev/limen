@@ -99,3 +99,7 @@ One reviewer, one pass, over the finished diff and the demo run.
 5. *Drain and lock cut a request in flight*, as for databases.
 6. *No per-session rate limit.* The engine's own throttling applies.
 7. *The real-engine demo is manual* (it pulls about 2.4 GB of images and takes minutes to start the engines). CI runs the unit, session, console, and end-to-end tests, which need no engine.
+
+## Amendment: concise role selectors (2026-10-23)
+
+`search.roles` selects an existing OpenSearch or Elasticsearch identity and does not require a Limen prefix. The guides and examples use `read` and `write` for these engine roles; the prefixed example in the original decision is historical, not a current requirement.

@@ -85,7 +85,7 @@ pub fn rds_auth_token(
 /// A database login from a Redshift credential API.
 #[derive(Debug)]
 pub struct RedshiftLogin {
-    /// The user to log in as, such as `IAM:limen_readonly`.
+    /// The user to log in as, such as `IAM:limen_read`.
     pub user: String,
     pub password: Secret<String>,
 }
@@ -315,12 +315,12 @@ mod tests {
             &creds(),
             "eu-west-1",
             "orders.cluster-x.eu-west-1.rds.amazonaws.com:5432",
-            "limen_readonly",
+            "limen_read",
             at(),
         );
         let t = token.expose();
         assert!(
-            t.starts_with("orders.cluster-x.eu-west-1.rds.amazonaws.com:5432/?Action=connect&DBUser=limen_readonly&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261017%2Feu-west-1%2Frds-db%2Faws4_request&X-Amz-Date=20261017T090000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature="),
+            t.starts_with("orders.cluster-x.eu-west-1.rds.amazonaws.com:5432/?Action=connect&DBUser=limen_read&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261017%2Feu-west-1%2Frds-db%2Faws4_request&X-Amz-Date=20261017T090000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature="),
             "{t}"
         );
         assert!(!t.starts_with("https://"));

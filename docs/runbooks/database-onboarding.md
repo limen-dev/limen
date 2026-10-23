@@ -2,7 +2,7 @@
 
 How to put a PostgreSQL, MySQL, Aurora, or Redshift database behind `limen db connect`, keep its `limen_*` roles in line with policy, and fix drift. The model is in [ADR-0015](../adr/0015-database-credentials.md) and [ADR-0033](../adr/0033-sql-database-access.md); the user side is in [the databases guide](../guides/databases.md).
 
-Limen logs in to the database as one **`limen_*` role per policy role** (`limen_readonly`, `limen_rw`, ...). People never get a credential. A dedicated **admin login** (`limen_admin`) creates those roles. Never give Limen the master user.
+Limen logs in to the database as one **`limen_*` role per policy role** (`limen_read`, `limen_write`, ...). People never get a credential. A dedicated **admin login** (`limen_admin`) creates those roles. Never give Limen the master user.
 
 ## 1. Reach the database from a worker
 
@@ -53,14 +53,14 @@ spec:
     admin_user: limen_admin
     admin_password_file: /run/limen/admin-password
     bootstrap:
-      - role: limen_readonly
+      - role: limen_read
         grants: [{ database: orders, access: read }]
-      - role: limen_rw
+      - role: limen_write
         grants: [{ database: orders, access: write }]
   worker_selector: { pool: prod-vpc }
 ```
 
-Then a role that lets people use them (`db: { roles: [limen_readonly], databases: [orders] }`). Apply with `limen admin apply`. Role names must start with `limen_`.
+Then a role that lets people use them (`db: { roles: [limen_read], databases: [orders] }`). Apply with `limen admin apply`. Role names must start with `limen_`.
 
 `access: read` is `SELECT`; `write` is `SELECT, INSERT, UPDATE, DELETE` (and sequence use) on every table in the listed `schemas` (default `public`; for MySQL the database). Tables created later get the same grants (PostgreSQL default privileges; MySQL schema-level grants).
 
@@ -89,8 +89,8 @@ It is **idempotent**: it compares first and changes only the difference, so a se
 
 ```sh
 limen ls                                   # the resource and its roles
-limen db connect orders-prod --db-role limen_readonly
-psql "host=127.0.0.1 port=… user=limen_readonly dbname=orders sslmode=disable" -c 'select 1'
+limen db connect orders-prod --db-role limen_read
+psql "host=127.0.0.1 port=… user=limen_read dbname=orders sslmode=disable" -c 'select 1'
 ```
 
 In the audit trail: `session.start`, `db.query`, `db.query.end`, `session.end` with the same session id.
@@ -115,7 +115,7 @@ IAM database authentication needs the engine and instance class to support it, a
 
 ## Rotating a role's password
 
-Delete `password_dir/limen_readonly` and run the bootstrap. It generates a new password, writes the file, and sets it on the database. Open sessions keep working; new ones use the new password. To make the database match a file you changed by hand, just run the bootstrap: it finds the mismatch and aligns the database to the file.
+Delete `password_dir/limen_read` and run the bootstrap. It generates a new password, writes the file, and sets it on the database. Open sessions keep working; new ones use the new password. To make the database match a file you changed by hand, just run the bootstrap: it finds the mismatch and aligns the database to the file.
 
 ## Drift
 

@@ -89,7 +89,7 @@ limen admin apply "$root/examples/policy" --source-ref demo-phase9 >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:$LIMEN_MONGO_HEALTH_PORT/tunnels | grep -q worker_id"
 # Proxy and worker pick up the new policy within their 10s refresh.
 sleep 11
-wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
+wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
 pass "stack up, policy applied, MongoDB seeded"
 
 step "developer reads their database with mongosh and no password"
@@ -101,13 +101,13 @@ out="$(ms dev 'db.customers.countDocuments()')"; echo "countDocuments -> $out"
 out="$(ms dev 'db.customers.find({email: "ada@example.com"}).toArray().map(d => d.name).join()')"; echo "find by email -> $out"
 [ "$out" = "Ada" ] || fail "unexpected find: $out"
 out="$(ms dev 'db.runCommand({connectionStatus: 1}).authInfo.authenticatedUsers[0].user')"; echo "logged in as -> $out"
-[ "$out" = "limen-read" ] || fail "the worker should have logged in as limen-read: $out"
-pass "limen mongo connect picked the only allowed role (limen-read) and the default database (orders)"
+[ "$out" = "read" ] || fail "the worker should have logged in as read: $out"
+pass "limen mongo connect picked the only allowed role (read) and the default database (orders)"
 
 step "The server's own grants are the second layer"
 out="$(ms dev 'db.customers.insertOne({name: "Mallory"})' || true)"; echo "insertOne -> $out"
 grep -qi "not authorized" <<<"$out" || fail "the server should refuse the write: $out"
-pass "Limen let the command through; MongoDB's read role for limen-read refused the write"
+pass "Limen let the command through; MongoDB's read role for read refused the write"
 
 step "Limen refuses a database policy does not grant, before the server sees it"
 out="$(ms dev 'db.getSiblingDB("billing").ledger.find().toArray()' || true)"; echo "billing -> $out"
@@ -121,12 +121,12 @@ port="${URI_dev#mongodb://127.0.0.1:}"; port="${port%%/*}"
 out="$(mongosh "mongodb://root:hunter2@127.0.0.1:$port/orders?directConnection=true&authSource=admin" --quiet --eval 'db.customers.countDocuments()' 2>&1 || true)"
 echo "$out" | head -3
 grep -q "Limen has already authenticated" <<<"$out" || fail "credentials in the URI should be refused: $out"
-pass "saslStart refused; the session still acts as limen-read"
+pass "saslStart refused; the session still acts as read"
 
 step "An unlisted role is refused at the door"
-if limen mongo connect catalog-staging --role limen-rw >"$state/deny.out" 2>"$state/deny.err"; then fail "developer must not get limen-rw"; fi
+if limen mongo connect catalog-staging --role write >"$state/deny.out" 2>"$state/deny.err"; then fail "developer must not get write"; fi
 grep -o "you may not use.*" "$state/deny.err" | head -1
-pass "developer cannot act as limen-rw"
+pass "developer cannot act as write"
 
 step "X.509: the worker logs in with a client certificate"
 listen x509 catalog-x509
@@ -137,14 +137,14 @@ pass "MONGODB-X509 through the same relay"
 
 step "sre writes a value and can't drop the database"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
-listen sre catalog-staging --role limen-rw
+listen sre catalog-staging --role write
 out="$(ms sre 'db.audit_demo.insertOne({token: "hunter2-demo-value"}).acknowledged')"; echo "insertOne -> $out"
 [ "$out" = "true" ] || fail "sre insert: $out"
 out="$(ms sre 'db.audit_demo.find({token: "hunter2-demo-value"}).toArray().length')"; [ "$out" = "1" ] || fail "sre find: $out"
 out="$(ms sre 'db.dropDatabase()' || true)"; echo "dropDatabase -> $out"
 grep -q "Limen policy does not allow the dropDatabase command" <<<"$out" || fail "dropDatabase should be denied by policy: $out"
 ms sre 'db.audit_demo.drop()' >/dev/null
-pass "limen-rw can write; dropDatabase is in the grant's deny_commands"
+pass "write can write; dropDatabase is in the grant's deny_commands"
 
 step "Locking a user ends their open session"
 "$here/scripts/dev-login.sh" "$DEVELOPER" >/dev/null
@@ -183,7 +183,7 @@ assert forwarded, "mongo.command events"
 find = [e for e in forwarded if e["user"] == "developer@example.com" and e["data"]["command"] == "find" and e["data"]["collection"] == "customers"]
 assert any(e["data"]["summary"] == '{"filter":{"email":"?"}}' for e in find), "developer find with a redacted filter"
 assert all(e["data"]["redacted"] for e in forwarded), "values are redacted"
-assert {e["data"]["mongo_role"] for e in cmds} >= {"limen-read", "limen-rw"}
+assert {e["data"]["mongo_role"] for e in cmds} >= {"read", "write"}
 reasons = {e["data"]["reason"] for e in refused}
 assert reasons >= {"database_not_granted", "auth_command", "command_denied"}, reasons
 end_ids = [e["data"]["command_id"] for e in events if e["kind"] == "mongo.command.end"]

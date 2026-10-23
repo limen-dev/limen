@@ -68,7 +68,7 @@ def kafka_conf(port, **extra):
 
 # ---------------------------------------------------------------- RabbitMQ
 step("RabbitMQ: sre configures, publishes, and reads back, with no password")
-sre = listen("sre", "mq", "events-rabbit-staging", "--user", "limen-admin")
+sre = listen("sre", "mq", "events-rabbit-staging", "--user", "admin")
 dev = listen("dev", "mq", "events-rabbit-staging")
 conn = amqp(sre)
 ch = conn.channel()
@@ -132,7 +132,7 @@ conn.close()
 
 # ---------------------------------------------------------------- Kafka
 step("Kafka: a real 3-broker cluster behind one bootstrap listener")
-sre_k = listen("sre", "kafka", "events-kafka-staging", "--user", "limen-admin", "--brokers", "4")
+sre_k = listen("sre", "kafka", "events-kafka-staging", "--user", "admin", "--brokers", "4")
 dev_k = listen("dev", "kafka", "events-kafka-staging")
 admin = AdminClient(kafka_conf(sre_k))
 md = admin.list_topics(timeout=20)
@@ -204,7 +204,7 @@ check(gerr is not None, f"a consumer group outside dev-* is refused: {gerr}")
 c3.close()
 
 step("Kafka: the SCRAM resource works the same way")
-scram = listen("sre", "kafka", "events-kafka-scram", "--user", "limen-admin", "--brokers", "4")
+scram = listen("sre", "kafka", "events-kafka-scram", "--user", "admin", "--brokers", "4")
 sp = Producer(kafka_conf(scram))
 res = []
 sp.produce("orders.new", b"via-scram", callback=lambda e, m: res.append(e))

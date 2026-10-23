@@ -143,15 +143,15 @@ if has db; then
 fi
 if has redis; then
   step "Seed Redis and Valkey"
-  wait_for "redis" "${compose[@]}" exec -T redis-target redis-cli --user limen-rw --pass rw-dev-only --no-auth-warning ping
-  wait_for "valkey" "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning ping
-  "${compose[@]}" exec -T redis-target redis-cli --user limen-rw --pass rw-dev-only --no-auth-warning SET app:greeting hello >/dev/null
-  "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning SET app:greeting hello-from-valkey >/dev/null
+  wait_for "redis" "${compose[@]}" exec -T redis-target redis-cli --user write --pass rw-dev-only --no-auth-warning ping
+  wait_for "valkey" "${compose[@]}" exec -T valkey-target valkey-cli --user write --pass rw-dev-only --no-auth-warning ping
+  "${compose[@]}" exec -T redis-target redis-cli --user write --pass rw-dev-only --no-auth-warning SET app:greeting hello >/dev/null
+  "${compose[@]}" exec -T valkey-target valkey-cli --user write --pass rw-dev-only --no-auth-warning SET app:greeting hello-from-valkey >/dev/null
 fi
 
 if has mongo; then
   step "MongoDB"
-  wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
+  wait_for "mongodb" "${compose[@]}" exec -T mongo-target mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()'
 fi
 
 if has search; then

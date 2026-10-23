@@ -274,7 +274,7 @@ impl Default for Options {
 
 fn grant(classes: &[SearchClass], indices: &[&str]) -> SearchGrant {
     SearchGrant {
-        roles: vec!["limen-read".into()],
+        roles: vec!["read".into()],
         classes: classes.to_vec(),
         indices: indices.iter().map(|s| (*s).to_owned()).collect(),
     }
@@ -293,7 +293,7 @@ fn settings(login: Option<(&str, &str)>) -> Settings {
     let path = dir.path().join("creds.json");
     let json = match login {
         Some((u, p)) => format!(
-            r#"{{"logs": {{"limen-read": {{"basic": {{"username": "{u}", "password": "{p}"}}}}}}}}"#
+            r#"{{"logs": {{"read": {{"basic": {{"username": "{u}", "password": "{p}"}}}}}}}}"#
         ),
         None => "{}".to_owned(),
     };
@@ -309,7 +309,7 @@ async fn try_start(o: Options, fake: Arc<Fake>, addr: String) -> anyhow::Result<
         session_id: session,
         username: "alice@example.com".into(),
         resource: "logs".into(),
-        engine_role: "limen-read".into(),
+        engine_role: "read".into(),
         engine: "elasticsearch",
         target: SearchTarget {
             endpoint: addr,
@@ -433,7 +433,7 @@ async fn a_read_is_forwarded_with_the_workers_credential_and_audited() {
     assert_eq!(d["api"], "search");
     assert_eq!(d["class"], "read");
     assert_eq!(d["indices"], serde_json::json!(["logs-1"]));
-    assert_eq!(d["engine_role"], "limen-read");
+    assert_eq!(d["engine_role"], "read");
     assert_eq!(d["query_params"], serde_json::json!(["size", "pretty"]));
     assert!(d.get("query").is_none() && d.get("body").is_none(), "{d}");
     assert_eq!(req[0].user.as_deref(), Some("alice@example.com"));

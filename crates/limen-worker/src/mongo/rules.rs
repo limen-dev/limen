@@ -312,12 +312,12 @@ metadata: { name: dev }
 spec:
   allow:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read], databases: [orders], deny_commands: [dropDatabase, Drop] }
+      mongo: { roles: [read], databases: [orders], deny_commands: [dropDatabase, Drop] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-rw], databases: [orders, billing] }
+      mongo: { roles: [write], databases: [orders, billing] }
   deny:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-rw], databases: [billing] }
+      mongo: { roles: [write], databases: [billing] }
 "#;
     const RESOURCE: &str = "kind: resource\nversion: v1\nmetadata: { name: m }\nspec:\n  mongodb: { endpoint: \"m:1\", credentials_dir: /c }\n";
 
@@ -347,14 +347,10 @@ spec:
     #[test]
     fn granted_databases_pass_and_others_are_refused_like_the_server_would() {
         assert_eq!(
-            verdict("limen-read", &cmd("find", "customers", "orders"), &[]),
+            verdict("read", &cmd("find", "customers", "orders"), &[]),
             Verdict::Forward
         );
-        let r = refused(verdict(
-            "limen-read",
-            &cmd("find", "ledger", "billing"),
-            &[],
-        ));
+        let r = refused(verdict("read", &cmd("find", "ledger", "billing"), &[]));
         assert_eq!(
             (r.code, r.code_name, r.reason),
             (13, "Unauthorized", "database_not_granted")
@@ -364,37 +360,28 @@ spec:
 
     #[test]
     fn deny_rules_beat_grants() {
-        // limen-rw is granted billing and denied it by the deny rule.
+        // write is granted billing and denied it by the deny rule.
         assert_eq!(
-            verdict("limen-rw", &cmd("find", "customers", "orders"), &[]),
+            verdict("write", &cmd("find", "customers", "orders"), &[]),
             Verdict::Forward
         );
         assert_eq!(
-            refused(verdict("limen-rw", &cmd("find", "ledger", "billing"), &[])).reason,
+            refused(verdict("write", &cmd("find", "ledger", "billing"), &[])).reason,
             "database_not_granted"
         );
     }
 
     #[test]
     fn denied_commands_are_matched_without_regard_to_case() {
-        let r = refused(verdict(
-            "limen-read",
-            &cmd("drop", "customers", "orders"),
-            &[],
-        ));
+        let r = refused(verdict("read", &cmd("drop", "customers", "orders"), &[]));
         assert_eq!(r.reason, "command_denied");
         assert_eq!(
-            refused(verdict(
-                "limen-read",
-                &cmd("dropDatabase", "1", "orders"),
-                &[]
-            ))
-            .reason,
+            refused(verdict("read", &cmd("dropDatabase", "1", "orders"), &[])).reason,
             "command_denied"
         );
         // The same command is fine for a role whose grant doesn't deny it.
         assert_eq!(
-            verdict("limen-rw", &cmd("drop", "customers", "orders"), &[]),
+            verdict("write", &cmd("drop", "customers", "orders"), &[]),
             Verdict::Forward
         );
     }
@@ -403,7 +390,7 @@ spec:
     fn the_handshake_is_answered_locally() {
         for name in ["hello", "isMaster", "ismaster"] {
             let doc = Builder::new().i32(name, 1).str("$db", "admin").finish();
-            assert_eq!(verdict("limen-read", &doc, &[]), Verdict::Hello, "{name}");
+            assert_eq!(verdict("read", &doc, &[]), Verdict::Hello, "{name}");
         }
     }
 
@@ -411,7 +398,7 @@ spec:
     fn login_commands_are_refused_so_a_client_cannot_swap_the_identity() {
         for name in ["authenticate", "saslStart", "saslContinue", "logout"] {
             let doc = Builder::new().i32(name, 1).str("$db", "admin").finish();
-            let r = refused(verdict("limen-read", &doc, &[]));
+            let r = refused(verdict("read", &doc, &[]));
             assert_eq!((r.code, r.reason), (18, "auth_command"), "{name}");
         }
     }
@@ -426,7 +413,7 @@ spec:
             "connectionStatus",
         ] {
             let doc = Builder::new().i32(name, 1).str("$db", "admin").finish();
-            assert_eq!(verdict("limen-read", &doc, &[]), Verdict::Forward, "{name}");
+            assert_eq!(verdict("read", &doc, &[]), Verdict::Forward, "{name}");
         }
         for name in [
             "createUser",
@@ -436,7 +423,7 @@ spec:
         ] {
             let doc = Builder::new().str(name, "x").str("$db", "admin").finish();
             assert_eq!(
-                refused(verdict("limen-read", &doc, &[])).reason,
+                refused(verdict("read", &doc, &[])).reason,
                 "database_not_granted",
                 "{name}"
             );
@@ -446,16 +433,13 @@ spec:
             .i32("listDatabases", 1)
             .str("$db", "billing")
             .finish();
-        assert!(matches!(
-            verdict("limen-read", &doc, &[]),
-            Verdict::Refuse(_)
-        ));
+        assert!(matches!(verdict("read", &doc, &[]), Verdict::Refuse(_)));
     }
 
     #[test]
     fn external_and_implausible_databases_are_refused() {
         for db in ["$external", "", "a.b", "a/b", &"x".repeat(64)] {
-            let r = refused(verdict("limen-read", &cmd("find", "c", db), &[]));
+            let r = refused(verdict("read", &cmd("find", "c", db), &[]));
             assert_eq!(r.reason, "database_not_granted", "{db:?}");
         }
     }
@@ -512,23 +496,19 @@ spec:
         };
         let stages: [Stage<'_>; 3] = [Box::new(out), Box::new(merge), Box::new(lookup)];
         for stage in &stages {
-            let refused = refused(verdict(
-                "limen-read",
-                &aggregate_with(&stage("billing")),
-                &[],
-            ));
+            let refused = refused(verdict("read", &aggregate_with(&stage("billing")), &[]));
             assert_eq!(refused.reason, "database_not_granted");
             assert!(refused.message.contains("billing"));
             // The same stage inside the granted database is the server's call.
             assert_eq!(
-                verdict("limen-read", &aggregate_with(&stage("orders")), &[]),
+                verdict("read", &aggregate_with(&stage("orders")), &[]),
                 Verdict::Forward
             );
         }
         // A plain collection name stays in the command's own database.
         let same = Builder::new().str("$out", "copy");
         assert_eq!(
-            verdict("limen-read", &aggregate_with(&same), &[]),
+            verdict("read", &aggregate_with(&same), &[]),
             Verdict::Forward
         );
         // `find` is not walked: its filter may hold any field names.
@@ -540,7 +520,7 @@ spec:
             )
             .str("$db", "orders")
             .finish();
-        assert_eq!(verdict("limen-read", &find, &[]), Verdict::Forward);
+        assert_eq!(verdict("read", &find, &[]), Verdict::Forward);
     }
 
     #[test]
@@ -552,11 +532,8 @@ spec:
                 .str("$db", "orders")
                 .finish()
         };
-        assert_eq!(
-            verdict("limen-read", &get_more(42), &[42]),
-            Verdict::Forward
-        );
-        let r = refused(verdict("limen-read", &get_more(43), &[42]));
+        assert_eq!(verdict("read", &get_more(42), &[42]), Verdict::Forward);
+        let r = refused(verdict("read", &get_more(43), &[42]));
         assert_eq!(
             (r.code, r.code_name, r.reason),
             (43, "CursorNotFound", "unknown_cursor")
@@ -574,10 +551,7 @@ spec:
         raw.push(0);
         let len = i32::try_from(raw.len()).expect("len");
         raw[..4].copy_from_slice(&len.to_le_bytes());
-        assert!(matches!(
-            verdict("limen-read", &raw, &[42]),
-            Verdict::Refuse(_)
-        ));
-        assert_eq!(verdict("limen-read", &raw, &[42, 99]), Verdict::Forward);
+        assert!(matches!(verdict("read", &raw, &[42]), Verdict::Refuse(_)));
+        assert_eq!(verdict("read", &raw, &[42, 99]), Verdict::Forward);
     }
 }

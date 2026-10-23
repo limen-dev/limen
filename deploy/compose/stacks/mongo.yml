@@ -1,6 +1,6 @@
 # MongoDB target (Phase 9, ADR-0035), profile `mongo`: MongoDB 8 with TLS from a
 # throwaway CA, SCRAM-SHA-256/SHA-1 and X.509 enabled, seeded by init.js with
-# `orders` and `billing`, the users `limen-read` and `limen-rw`, and an X.509
+# `orders` and `billing`, the users `read` and `write`, and an X.509
 # user for the worker's client certificate. Layered on a Limen stack by
 # setup.sh mongo. Development only.
 #
@@ -54,7 +54,7 @@ services:
       - mongo-tls:/tls:ro
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u limen-read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()' | grep -q '^3$$'"]
+      test: ["CMD-SHELL", "mongosh --quiet --tls --tlsCAFile /tls/ca.pem --host localhost -u read -p limen-read-dev-only --authenticationDatabase admin orders --eval 'db.customers.countDocuments()' | grep -q '^3$$'"]
       interval: 3s
       timeout: 5s
       retries: 40

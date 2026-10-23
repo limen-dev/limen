@@ -53,15 +53,15 @@ fn allow_requires_matching_labels_kind_and_principal() {
         })
     };
 
-    assert!(eval("orders-staging", db("limen_readonly")).is_allowed());
+    assert!(eval("orders-staging", db("limen_read")).is_allowed());
     assert_eq!(
-        eval("orders-staging", db("limen_rw")),
+        eval("orders-staging", db("limen_write")),
         Decision::Deny {
             reason: DenyReason::NoMatchingRole
         }
     );
     assert_eq!(
-        eval("orders-prod", db("limen_readonly")),
+        eval("orders-prod", db("limen_read")),
         Decision::Deny {
             reason: DenyReason::NoMatchingRole
         }
@@ -143,17 +143,17 @@ fn accessible_lists_resources_and_principals() {
     assert_eq!(
         summary,
         [
-            ("cache-staging", vec!["limen-ro"]),
-            ("cache-valkey", vec!["limen-ro"]),
-            ("catalog-staging", vec!["limen-read"]),
-            ("catalog-x509", vec!["limen-read"]),
-            ("events-kafka-scram", vec!["limen-consumer"]),
-            ("events-kafka-staging", vec!["limen-consumer"]),
-            ("events-rabbit-staging", vec!["limen-consumer"]),
-            ("orders-mysql-staging", vec!["limen_readonly"]),
-            ("orders-staging", vec!["limen_readonly"]),
-            ("search-opensearch", vec!["limen-read"]),
-            ("search-staging", vec!["limen-read"]),
+            ("cache-staging", vec!["read"]),
+            ("cache-valkey", vec!["read"]),
+            ("catalog-staging", vec!["read"]),
+            ("catalog-x509", vec!["read"]),
+            ("events-kafka-scram", vec!["consumer"]),
+            ("events-kafka-staging", vec!["consumer"]),
+            ("events-rabbit-staging", vec!["consumer"]),
+            ("orders-mysql-staging", vec!["limen_read"]),
+            ("orders-staging", vec!["limen_read"]),
+            ("search-opensearch", vec!["read"]),
+            ("search-staging", vec!["read"]),
             ("web-staging-1", vec!["ubuntu"])
         ]
     );
@@ -351,7 +351,7 @@ mod planned_integrations {
             .iter()
             .find(|r| r.name == "catalog-staging")
             .expect("seen");
-        assert_eq!(mongo.principals, ["limen-read"]);
+        assert_eq!(mongo.principals, ["read"]);
     }
 
     #[test]
@@ -370,7 +370,7 @@ mod planned_integrations {
             eval(
                 "catalog-atlas",
                 Principal::MongoRole {
-                    role: "limen-rw".into(),
+                    role: "write".into(),
                     database: "shop".into()
                 }
             )
@@ -380,22 +380,16 @@ mod planned_integrations {
             .evaluate(&AccessRequest {
                 roles: &roles(&["sre"]),
                 resource: "logs-opensearch",
-                principal: Principal::SearchRole("limen-write".into()),
+                principal: Principal::SearchRole("write".into()),
             })
             .is_allowed();
         assert!(search, "search moved out of the planned file in Phase 10");
-        assert!(eval("orders-mq", Principal::MqUser("limen-admin".into())).is_allowed());
-        assert!(
-            eval(
-                "payments-msk",
-                Principal::KafkaUser("limen-consumer".into())
-            )
-            .is_allowed()
-        );
+        assert!(eval("orders-mq", Principal::MqUser("admin".into())).is_allowed());
+        assert!(eval("payments-msk", Principal::KafkaUser("consumer".into())).is_allowed());
         assert!(eval("grafana", Principal::WebAccess).is_allowed());
         assert!(eval("legacy-ftp", Principal::TcpAccess).is_allowed());
         assert!(
-            eval("warehouse-prod", db("limen_rw")).is_allowed(),
+            eval("warehouse-prod", db("limen_write")).is_allowed(),
             "redshift uses the db grant"
         );
         // The wrong kind of principal for a resource is an invalid request, not a quiet allow.
@@ -406,7 +400,7 @@ mod planned_integrations {
             }
         );
         assert_eq!(
-            eval("catalog-atlas", Principal::SearchRole("limen-read".into())),
+            eval("catalog-atlas", Principal::SearchRole("read".into())),
             Decision::Deny {
                 reason: DenyReason::InvalidRequest
             }
@@ -770,20 +764,20 @@ spec:
 
 #[test]
 fn redis_grants_come_from_matching_allow_rules() {
-    let docs = "kind: role\nversion: v1\nmetadata: {name: cachers}\nspec:\n  allow:\n    - resources: {kind: [redis], labels: {env: [staging]}}\n      redis: {users: [limen-ro], keys: ['session:*'], deny_commands: [KEYS]}\n    - resources: {kind: [redis], labels: {env: [prod]}}\n      redis: {users: [limen-ro]}";
+    let docs = "kind: role\nversion: v1\nmetadata: {name: cachers}\nspec:\n  allow:\n    - resources: {kind: [redis], labels: {env: [staging]}}\n      redis: {users: [read], keys: ['session:*'], deny_commands: [KEYS]}\n    - resources: {kind: [redis], labels: {env: [prod]}}\n      redis: {users: [read]}";
     let policy =
         Policy::parse_yaml([("roles.yaml", docs), ("resources.yaml", RESOURCES)]).expect("valid");
     let r = roles(&["cachers"]);
-    let grants = policy.redis_grants(&r, "cache-staging", "limen-ro");
+    let grants = policy.redis_grants(&r, "cache-staging", "read");
     assert_eq!(grants.len(), 1);
     assert_eq!(grants[0].keys, ["session:*"]);
     assert_eq!(grants[0].deny_commands, ["KEYS"]);
     let none = |roles: &[String], resource: &str, user: &str| {
         policy.redis_grants(roles, resource, user).len()
     };
-    assert_eq!(none(&r, "cache-staging", "limen-rw"), 0);
-    assert_eq!(none(&r, "nope", "limen-ro"), 0);
-    assert_eq!(none(&roles(&["ghost"]), "cache-staging", "limen-ro"), 0);
+    assert_eq!(none(&r, "cache-staging", "write"), 0);
+    assert_eq!(none(&r, "nope", "read"), 0);
+    assert_eq!(none(&roles(&["ghost"]), "cache-staging", "read"), 0);
 }
 
 #[test]
@@ -830,11 +824,11 @@ const BROKERS: &str = "kind: resource\nversion: v1\nmetadata: {name: orders-mq, 
 
 #[test]
 fn mq_and_kafka_grants_come_from_matching_allow_rules() {
-    let docs = "kind: role\nversion: v1\nmetadata: {name: brokers}\nspec:\n  allow:\n    - resources: {kind: [rabbitmq]}\n      mq: {users: [limen-app], vhosts: ['orders-*'], classes: [read, configure], names: ['orders.*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [limen-reader], topics: ['orders.*'], groups: ['reports-*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [limen-writer], classes: [write, admin]}";
+    let docs = "kind: role\nversion: v1\nmetadata: {name: brokers}\nspec:\n  allow:\n    - resources: {kind: [rabbitmq]}\n      mq: {users: [app], vhosts: ['orders-*'], classes: [read, configure], names: ['orders.*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [reader], topics: ['orders.*'], groups: ['reports-*']}\n    - resources: {kind: [kafka]}\n      kafka: {users: [writer], classes: [write, admin]}";
     let policy =
         Policy::parse_yaml([("roles.yaml", docs), ("resources.yaml", BROKERS)]).expect("valid");
     let r = roles(&["brokers"]);
-    let mq = policy.mq_grants(&r, "orders-mq", "limen-app");
+    let mq = policy.mq_grants(&r, "orders-mq", "app");
     assert_eq!(mq.len(), 1);
     assert_eq!(mq[0].names, ["orders.*"]);
     assert_eq!(
@@ -843,22 +837,19 @@ fn mq_and_kafka_grants_come_from_matching_allow_rules() {
     );
     assert_eq!(mq[0].effective_vhosts(), ["orders-*"]);
     assert_eq!(policy.mq_grants(&r, "orders-mq", "other"), []);
-    assert_eq!(policy.mq_grants(&r, "events-kafka", "limen-app"), []);
-    assert_eq!(
-        policy.mq_grants(&roles(&["ghost"]), "orders-mq", "limen-app"),
-        []
-    );
+    assert_eq!(policy.mq_grants(&r, "events-kafka", "app"), []);
+    assert_eq!(policy.mq_grants(&roles(&["ghost"]), "orders-mq", "app"), []);
 
-    let kafka = policy.kafka_grants(&r, "events-kafka", "limen-reader");
+    let kafka = policy.kafka_grants(&r, "events-kafka", "reader");
     assert_eq!(kafka.len(), 1);
     assert_eq!(kafka[0].effective_classes(), [KafkaClass::Read]);
     assert_eq!(kafka[0].groups, ["reports-*"]);
-    let writer = policy.kafka_grants(&r, "events-kafka", "limen-writer");
+    let writer = policy.kafka_grants(&r, "events-kafka", "writer");
     assert_eq!(
         writer[0].effective_classes(),
         [KafkaClass::Write, KafkaClass::Admin]
     );
-    assert_eq!(policy.kafka_grants(&r, "orders-mq", "limen-reader"), []);
+    assert_eq!(policy.kafka_grants(&r, "orders-mq", "reader"), []);
 
     // Access itself is still decided by `evaluate`.
     let allowed = |resource: &str, principal| {
@@ -870,14 +861,11 @@ fn mq_and_kafka_grants_come_from_matching_allow_rules() {
             })
             .is_allowed()
     };
-    assert!(allowed("orders-mq", Principal::MqUser("limen-app".into())));
-    assert!(!allowed(
-        "orders-mq",
-        Principal::MqUser("limen-other".into())
-    ));
+    assert!(allowed("orders-mq", Principal::MqUser("app".into())));
+    assert!(!allowed("orders-mq", Principal::MqUser("other".into())));
     assert!(allowed(
         "events-kafka",
-        Principal::KafkaUser("limen-reader".into())
+        Principal::KafkaUser("reader".into())
     ));
 }
 
@@ -1034,7 +1022,7 @@ mod mongodb {
 
     #[test]
     fn names_that_reach_the_filesystem_or_the_server_are_checked() {
-        assert!(valid_mongo_role("limen-read") && valid_mongo_role("limen_rw.1"));
+        assert!(valid_mongo_role("read") && valid_mongo_role("write.1"));
         assert!(
             !valid_mongo_role("../etc") && !valid_mongo_role(".hidden") && !valid_mongo_role("")
         );
@@ -1046,10 +1034,10 @@ mod mongodb {
                 && !valid_mongo_database("$x")
         );
         assert!(role("roles: [\"../x\"]").is_err());
-        assert!(role("roles: [limen-read], databases: [\"a.b\"]").is_err());
-        assert!(role("roles: [limen-read], databases: [orders, \"*\"]").is_ok());
-        assert!(role("roles: [limen-read], deny_commands: [\"drop;\"]").is_err());
-        assert!(role("roles: [limen-read], deny_commands: [drop, dropDatabase]").is_ok());
+        assert!(role("roles: [read], databases: [\"a.b\"]").is_err());
+        assert!(role("roles: [read], databases: [orders, \"*\"]").is_ok());
+        assert!(role("roles: [read], deny_commands: [\"drop;\"]").is_err());
+        assert!(role("roles: [read], deny_commands: [drop, dropDatabase]").is_ok());
     }
 
     #[test]
@@ -1061,14 +1049,14 @@ metadata: { name: dev }
 spec:
   allow:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-read], databases: [orders], deny_commands: [drop] }
+      mongo: { roles: [read], databases: [orders], deny_commands: [drop] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
-      mongo: { roles: [limen-rw], databases: ["*"] }
+      mongo: { roles: [write], databases: ["*"] }
 "#;
         let res = "kind: resource\nversion: v1\nmetadata: { name: m }\nspec:\n  mongodb: { endpoint: \"m:1\", credentials_dir: /c }\n";
         let p = Policy::parse_yaml([("r.yaml", roles_doc), ("m.yaml", res)]).expect("policy");
         let dev = roles(&["dev"]);
-        let grants = p.mongo_grants(&dev, "m", "limen-read");
+        let grants = p.mongo_grants(&dev, "m", "read");
         assert_eq!(grants.len(), 1);
         assert_eq!(grants[0].deny_commands, ["drop"]);
         assert!(matches!(
@@ -1076,7 +1064,7 @@ spec:
             []
         ));
         assert!(matches!(
-            p.mongo_grants(&dev, "nope", "limen-read").as_slice(),
+            p.mongo_grants(&dev, "nope", "read").as_slice(),
             []
         ));
         let eval = |role: &str, database: &str| {
@@ -1090,9 +1078,9 @@ spec:
             })
             .is_allowed()
         };
-        assert!(eval("limen-read", "orders"));
-        assert!(!eval("limen-read", "billing"), "only the granted databases");
-        assert!(eval("limen-rw", "billing"));
+        assert!(eval("read", "orders"));
+        assert!(!eval("read", "billing"), "only the granted databases");
+        assert!(eval("write", "billing"));
     }
 }
 
@@ -1109,7 +1097,7 @@ metadata: { name: logs-reader }
 spec:
   allow:
     - resources: { kind: [elasticsearch], labels: { env: [staging] } }
-      search: { roles: [limen-read], indices: ["logs-*"] }
+      search: { roles: [read], indices: ["logs-*"] }
 ---
 kind: role
 version: v1
@@ -1117,7 +1105,7 @@ metadata: { name: logs-writer }
 spec:
   allow:
     - resources: { kind: [elasticsearch], labels: { env: [staging] } }
-      search: { roles: [limen-read, limen-write], classes: [read, write] }
+      search: { roles: [read, write], classes: [read, write] }
 "#;
 
 fn search_policy() -> Policy {
@@ -1128,7 +1116,7 @@ fn search_policy() -> Policy {
 fn search_grants_come_from_every_role_that_names_the_engine_role() {
     let p = search_policy();
     let both = roles(&["logs-reader", "logs-writer"]);
-    let grants = p.search_grants(&both, "logs", "limen-read");
+    let grants = p.search_grants(&both, "logs", "read");
     assert_eq!(grants.len(), 2);
     // The default is read only; classes widen it.
     assert_eq!(grants[0].allowed_classes(), [SearchClass::Read]);
@@ -1137,14 +1125,14 @@ fn search_grants_come_from_every_role_that_names_the_engine_role() {
         [SearchClass::Read, SearchClass::Write]
     );
     assert_eq!(grants[0].indices, ["logs-*"]);
-    // Only the writer names limen-write; nobody else gets it.
-    assert_eq!(p.search_grants(&both, "logs", "limen-write").len(), 1);
+    // Only the writer names write; nobody else gets it.
+    assert_eq!(p.search_grants(&both, "logs", "write").len(), 1);
     let none = |g: Vec<SearchGrant>| g.is_empty().then_some(()).ok_or(g.len());
     assert_eq!(
-        none(p.search_grants(&roles(&["logs-reader"]), "logs", "limen-write")),
+        none(p.search_grants(&roles(&["logs-reader"]), "logs", "write")),
         Ok(())
     );
-    assert_eq!(none(p.search_grants(&both, "ghost", "limen-read")), Ok(()));
+    assert_eq!(none(p.search_grants(&both, "ghost", "read")), Ok(()));
 }
 
 #[test]
@@ -1159,8 +1147,8 @@ fn search_access_is_decided_by_the_engine_role() {
         })
         .is_allowed()
     };
-    assert!(eval("limen-read"));
-    assert!(!eval("limen-write"));
+    assert!(eval("read"));
+    assert!(!eval("write"));
 }
 
 #[test]

@@ -99,7 +99,7 @@ metadata: {{ name: searchers }}
 spec:
   allow:
     - resources: {{ kind: [elasticsearch], labels: {{ env: [test] }} }}
-      search: {{ roles: [limen-read], indices: ["app-*"] }}
+      search: {{ roles: [read], indices: ["app-*"] }}
 ---
 kind: role_mapping
 version: v1
@@ -141,7 +141,7 @@ async fn search_through_limen() {
     let creds = d.dir.path().join("search-credentials.json");
     std::fs::write(
         &creds,
-        r#"{"logs-test": {"limen-read": {"basic": {"username": "limen", "password": "worker-held-pw"}}}}"#,
+        r#"{"logs-test": {"read": {"basic": {"username": "limen", "password": "worker-held-pw"}}}}"#,
     )
     .expect("credentials");
 
@@ -195,7 +195,7 @@ async fn search_through_limen() {
         dev.clone(),
         limen_tunnel::alpn::SEARCH,
         "logs-test",
-        "limen-read",
+        "read",
         "",
     )
     .await;
@@ -312,7 +312,7 @@ async fn search_through_limen() {
     assert_eq!(request["data"]["path"], "/app-1/_search");
     assert_eq!(request["data"]["class"], "read");
     assert_eq!(request["data"]["indices"], serde_json::json!(["app-1"]));
-    assert_eq!(request["data"]["engine_role"], "limen-read");
+    assert_eq!(request["data"]["engine_role"], "read");
     assert!(
         events.iter().any(|e| e["kind"] == "search.response"
             && e["data"]["request_id"] == request["event_id"]

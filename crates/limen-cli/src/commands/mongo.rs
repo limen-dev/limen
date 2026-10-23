@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn a_refusal_is_a_well_formed_mongodb_error() {
         for (opcode, expect_opcode) in [(2013, 2013), (2004, 1)] {
-            let msg = error_message(7, opcode, "Limen: access denied to limen-rw@orders");
+            let msg = error_message(7, opcode, "Limen: access denied to write@orders");
             let len = i32::from_le_bytes(msg[0..4].try_into().expect("4"));
             assert_eq!(usize::try_from(len).expect("len"), msg.len());
             assert_eq!(i32::from_le_bytes(msg[8..12].try_into().expect("4")), 7);
@@ -353,7 +353,7 @@ mod tests {
                 expect_opcode
             );
             let text = String::from_utf8_lossy(&msg);
-            assert!(text.contains("access denied to limen-rw@orders"));
+            assert!(text.contains("access denied to write@orders"));
             assert!(text.contains("AuthenticationFailed"));
         }
         // The BSON document inside is internally consistent.

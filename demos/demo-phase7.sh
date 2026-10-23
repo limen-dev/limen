@@ -94,7 +94,7 @@ listen() {
   done
   cat "$log"; fail "no listener for $name"
 }
-target() { "${compose[@]}" exec -T "$1" "$2" --user limen-rw --pass rw-dev-only --no-auth-warning "${@:3}"; }
+target() { "${compose[@]}" exec -T "$1" "$2" --user write --pass rw-dev-only --no-auth-warning "${@:3}"; }
 
 step "Build and start the stack"
 # The image build caches cargo output across checkouts by file time; fresh times
@@ -114,8 +114,8 @@ limen admin apply "$root/examples/policy" --source-ref demo-phase7 >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:$LIMEN_REDIS_HEALTH_PORT/tunnels | grep -q worker_id"
 # Proxy and worker pick up the new policy within their 10s refresh.
 sleep 11
-wait_for "redis" "${compose[@]}" exec -T redis-target redis-cli --user limen-rw --pass rw-dev-only --no-auth-warning ping
-wait_for "valkey" "${compose[@]}" exec -T valkey-target valkey-cli --user limen-rw --pass rw-dev-only --no-auth-warning ping
+wait_for "redis" "${compose[@]}" exec -T redis-target redis-cli --user write --pass rw-dev-only --no-auth-warning ping
+wait_for "valkey" "${compose[@]}" exec -T valkey-target valkey-cli --user write --pass rw-dev-only --no-auth-warning ping
 target redis-target redis-cli SET app:greeting hello >/dev/null
 target redis-target redis-cli SET secret:1 classified-data >/dev/null
 target valkey-target valkey-cli SET app:greeting hello-from-valkey >/dev/null
@@ -126,7 +126,7 @@ step "developer reads an allowed key on Redis, with no password"
 listen dev cache-staging
 out="$(rc "$PORT_dev" GET app:greeting)"; echo "GET app:greeting -> $out"
 [ "$out" = "hello" ] || fail "unexpected reply: $out"
-pass "limen redis connect inferred the only allowed user (limen-ro) and GET worked"
+pass "limen redis connect inferred the only allowed user (read) and GET worked"
 
 step "Limen refuses what the role doesn't allow, before the server sees it"
 for cmd in "GET secret:1" "KEYS *" "FLUSHALL" "CONFIG GET maxmemory" "EVAL return-1 0" "MONITOR"; do
@@ -139,7 +139,7 @@ pass "key pattern, KEYS, FLUSHALL, CONFIG, EVAL, MONITOR all refused"
 step "The server's own ACL is the second layer"
 out="$(rc "$PORT_dev" SET app:x 1)"; echo "SET app:x 1 -> $out"
 grep -qi "NOPERM" <<<"$out" && ! grep -q "Limen" <<<"$out" || fail "the server should have refused the write: $out"
-pass "Limen allowed the key; Redis' ACL for limen-ro refused the write"
+pass "Limen allowed the key; Redis' ACL for read refused the write"
 
 step "Replies stay in order when a pipelined command is refused"
 out="$(python3 -I "$here/config/targets/redis/resp-client.py" "$PORT_dev" --pipeline GET app:greeting \; FLUSHALL \; GET app:greeting)"
@@ -151,7 +151,7 @@ step "The client's own AUTH is accepted and never reaches the server"
 out="$(rc "$PORT_dev" AUTH default not-the-password)"; echo "AUTH -> $out"
 [ "$out" = "OK" ] || fail "AUTH reply: $out"
 out="$(rc "$PORT_dev" GET app:greeting)"
-[ "$out" = "hello" ] || fail "still authenticated as limen-ro: $out"
+[ "$out" = "hello" ] || fail "still authenticated as read: $out"
 pass "AUTH swallowed; the session still acts as the role's user"
 
 step "Valkey works the same way"
@@ -161,13 +161,13 @@ out="$(rc "$PORT_valkey" GET app:greeting)"; echo "GET app:greeting -> $out"
 pass "cache-valkey (Valkey 8) served through the same code"
 
 step "An unlisted Redis user is refused at the door"
-if limen redis connect cache-staging --user limen-rw >"$state/deny.out" 2>"$state/deny.err"; then fail "developer must not get limen-rw"; fi
+if limen redis connect cache-staging --user write >"$state/deny.out" 2>"$state/deny.err"; then fail "developer must not get write"; fi
 grep -o "access denied.*" "$state/deny.err" | head -1
-pass "developer cannot act as limen-rw"
+pass "developer cannot act as write"
 
 step "sre writes a secret value; it must stay out of the audit trail"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
-listen sre cache-staging --user limen-rw
+listen sre cache-staging --user write
 rc "$PORT_sre" SET app:token hunter2-demo-value | grep -q OK || fail "sre SET"
 out="$(rc "$PORT_sre" GET app:token)"; [ "$out" = "hunter2-demo-value" ] || fail "sre GET: $out"
 out="$(rc "$PORT_sre" FLUSHALL)"; echo "FLUSHALL -> $out"
@@ -186,7 +186,7 @@ cmds = [e for e in events if e["kind"] == "redis.command"]
 assert cmds, "redis.command events"
 assert any(e["user"] == "developer@example.com" and e["data"]["command"] == "GET" and e["data"]["keys"] == ["app:greeting"] for e in cmds), "developer GET with its key"
 assert any(e["data"]["command"] == "SET" and e["data"]["keys"] == ["app:token"] for e in cmds), "sre SET with its key"
-assert all(e["data"]["redis_user"] in ("limen-ro", "limen-rw") for e in cmds)
+assert all(e["data"]["redis_user"] in ("read", "write") for e in cmds)
 denied = [e for e in events if e["kind"] == "auth.denied" and e["data"].get("action") == "redis"]
 assert {e["data"].get("command") for e in denied} >= {"FLUSHALL", "KEYS", "CONFIG", "GET"}, "denied commands audited"
 for secret in ("hunter2-demo-value", "classified-data", "not-the-password"):
@@ -232,7 +232,7 @@ if $scenarios; then
   for svc in "redis-target redis-cli" "valkey-target valkey-cli" "redis-tls redis-cli"; do
     read -r name cli <<<"$svc"
     extra=(); [ "$name" = redis-tls ] && extra=(--tls --cacert /tls/ca.crt)
-    wait_for "$name" "${compose[@]}" exec -T "$name" "$cli" ${extra[@]+"${extra[@]}"} --user limen-rw --pass rw-dev-only --no-auth-warning ping
+    wait_for "$name" "${compose[@]}" exec -T "$name" "$cli" ${extra[@]+"${extra[@]}"} --user write --pass rw-dev-only --no-auth-warning ping
   done
 
   step "Scenarios"

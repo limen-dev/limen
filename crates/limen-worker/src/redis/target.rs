@@ -384,10 +384,10 @@ mod tests {
             session_token: Some("TOKEN/abc+=".into()),
         };
         let now = time::macros::datetime!(2026-10-17 12:00:00 UTC);
-        let token = presign_connect(&creds, "us-east-1", "my-group", "limen-ro", now);
+        let token = presign_connect(&creds, "us-east-1", "my-group", "read", now);
         assert_eq!(
             token,
-            "my-group/?Action=connect&User=limen-ro&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261017%2Fus-east-1%2Felasticache%2Faws4_request&X-Amz-Date=20261017T120000Z&X-Amz-Expires=900&X-Amz-Security-Token=TOKEN%2Fabc%2B%3D&X-Amz-SignedHeaders=host&X-Amz-Signature=e8b659516dd104d8316d1d96a28fd04a682e9c5a051f41d927cc5a881f9b7fbb"
+            "my-group/?Action=connect&User=read&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261017%2Fus-east-1%2Felasticache%2Faws4_request&X-Amz-Date=20261017T120000Z&X-Amz-Expires=900&X-Amz-Security-Token=TOKEN%2Fabc%2B%3D&X-Amz-SignedHeaders=host&X-Amz-Signature=21dbecb55eecb27a1bcd4ddaba0eb3c502b309e5c2960eba6521fe47d807ac4f"
         );
     }
 
@@ -408,8 +408,8 @@ mod tests {
 
     #[test]
     fn reads_the_credentials_file_without_printing_it() {
-        let parsed = parse_passwords(r#"{"cache":{"limen-rw":"s3cret"}}"#).expect("parse");
-        assert_eq!(parsed["cache"]["limen-rw"].expose(), "s3cret");
+        let parsed = parse_passwords(r#"{"cache":{"write":"s3cret"}}"#).expect("parse");
+        assert_eq!(parsed["cache"]["write"].expose(), "s3cret");
         assert!(!format!("{parsed:?}").contains("s3cret"));
         assert!(parse_passwords("[1]").is_err());
     }

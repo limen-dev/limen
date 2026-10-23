@@ -289,7 +289,7 @@ async fn serve_fake(mut stream: TcpStream, broker: FakeBroker, cluster: Cluster)
 
 fn grant(classes: &[KafkaClass], topics: &[&str], groups: &[&str]) -> KafkaGrant {
     KafkaGrant {
-        users: vec!["limen-consumer".into()],
+        users: vec!["consumer".into()],
         classes: classes.to_vec(),
         topics: topics.iter().map(|s| (*s).to_owned()).collect(),
         groups: groups.iter().map(|s| (*s).to_owned()).collect(),
@@ -364,11 +364,7 @@ async fn start(
     let brokers = fake_cluster(2).await;
     let dir = tempfile::tempdir().expect("dir");
     let creds = dir.path().join("creds.json");
-    std::fs::write(
-        &creds,
-        r#"{"events-kafka": {"limen-consumer": "broker-secret"}}"#,
-    )
-    .expect("creds");
+    std::fs::write(&creds, r#"{"events-kafka": {"consumer": "broker-secret"}}"#).expect("creds");
     let settings = Arc::new(Settings::load(None, Some(&creds)).expect("settings"));
     let target: BrokerTarget = serde_json::from_value(serde_json::json!({
         "endpoint": brokers[0].addr, "tls": false, "sasl": "plain",
@@ -377,7 +373,7 @@ async fn start(
     let mut config = SessionConfig::new(
         Uuid::now_v7().to_string(),
         "dev@example.com".into(),
-        "limen-consumer".into(),
+        "consumer".into(),
         "events-kafka".into(),
         target,
         KafkaSlot::new(slot, ports.to_vec()),
@@ -495,7 +491,7 @@ async fn the_worker_logs_in_with_its_own_credential_and_answers_api_versions_its
             .lock()
             .expect("lock")
             .iter()
-            .any(|l| l == &("limen-consumer".to_owned(), "broker-secret".to_owned())),
+            .any(|l| l == &("consumer".to_owned(), "broker-secret".to_owned())),
         "the broker saw the worker's login"
     );
     // The client's ApiVersions never reached the broker (only the worker's own did).
@@ -624,7 +620,7 @@ async fn record_contents_never_reach_the_audit_trail() {
         .collect();
     assert_eq!(produced.len(), 1);
     assert_eq!(produced[0]["topics"][0]["name"], "orders.new");
-    assert_eq!(produced[0]["kafka_user"], "limen-consumer");
+    assert_eq!(produced[0]["kafka_user"], "consumer");
     assert!(produced[0]["topics"][0]["bytes"].as_u64().expect("bytes") > 0);
 }
 
@@ -1038,7 +1034,7 @@ async fn sasl_from_the_client_is_accepted_and_discarded() {
     assert!(
         logins
             .iter()
-            .all(|(u, p)| u == "limen-consumer" && p == "broker-secret"),
+            .all(|(u, p)| u == "consumer" && p == "broker-secret"),
         "{logins:?}"
     );
     let all = format!("{:?}", rig.sink.events());
@@ -1106,7 +1102,7 @@ fn a_missing_password_is_caught_when_the_session_is_prepared() {
     let config = SessionConfig::new(
         "s".into(),
         "u".into(),
-        "limen-consumer".into(),
+        "consumer".into(),
         "events-kafka".into(),
         target.clone(),
         KafkaSlot::new(0, vec![1, 2]),
@@ -1120,7 +1116,7 @@ fn a_missing_password_is_caught_when_the_session_is_prepared() {
     let config = SessionConfig::new(
         "s".into(),
         "u".into(),
-        "limen-consumer".into(),
+        "consumer".into(),
         "events-kafka".into(),
         open,
         KafkaSlot::new(0, vec![1, 2]),
