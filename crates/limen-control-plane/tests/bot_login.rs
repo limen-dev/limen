@@ -11,7 +11,7 @@ use limen_testkit::idp::WorkloadToken;
 use limen_testkit::users::DEVELOPER;
 use tonic::Code;
 
-const ROLES: &str = include_str!("../../../examples/policy/roles.yaml");
+const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
 
 fn bots_yaml(issuer: &str) -> String {
     format!(

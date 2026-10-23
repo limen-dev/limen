@@ -59,7 +59,7 @@ step "Roles come from IdP groups at login: admin logs in again to pick up 'sre'"
 "$here/scripts/dev-login.sh" "$ADMIN"
 limen ls
 # Every resource document in examples/policy, so the number follows the policy instead of a constant.
-expected="$(grep -h '^kind: resource' "$root"/examples/policy/*.yaml | wc -l | tr -d ' ')"
+expected="$(find "$root/examples/policy" -type f \( -name '*.yaml' -o -name '*.yml' \) -exec grep -h '^kind: resource' {} + | wc -l | tr -d ' ')"
 [ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = "$expected" ] || fail "admin should see all $expected resources of examples/policy"
 pass "sre sees every resource"
 

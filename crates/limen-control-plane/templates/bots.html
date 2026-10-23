@@ -9,7 +9,7 @@
 </div>
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% if bots.is_empty() %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#bot"/></svg><div>No bots are defined. Add a <code>kind: bot</code> document to policy (see <code>examples/policy/bots.yaml</code>).</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#bot"/></svg><div>No bots are defined. Add a <code>kind: bot</code> document to policy (see <code>examples/policy/stacks/bots/policy.yaml</code>).</div></div>
 {% else %}
 {% for b in bots %}
 <div class="card bot-card">

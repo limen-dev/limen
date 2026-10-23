@@ -1,0 +1,8 @@
+kind: resource
+version: v1
+metadata: { name: eks-staging, labels: { env: staging } }
+spec:
+  # Served today (Phase 8) by a worker started with --kube-cluster=staging, in
+  # its own pool so the SSH and database workers are never asked to serve it.
+  kubernetes: { cluster_name: staging }
+  worker_selector: { pool: kube }

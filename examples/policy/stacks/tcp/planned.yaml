@@ -1,0 +1,6 @@
+kind: resource
+version: v1
+metadata: { name: legacy-ftp, labels: { env: staging } }
+spec:
+  tcp: { address: "legacy-ftp:21" }
+  worker_selector: { pool: dev }

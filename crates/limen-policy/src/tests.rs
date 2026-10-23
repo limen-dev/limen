@@ -1,8 +1,33 @@
 use super::*;
 
-const ROLES: &str = include_str!("../../../examples/policy/roles.yaml");
-const MAPPINGS: &str = include_str!("../../../examples/policy/mappings.yaml");
-const RESOURCES: &str = include_str!("../../../examples/policy/resources.yaml");
+const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
+const MAPPINGS: &str = include_str!("../../../examples/policy/shared/mappings.yaml");
+const PLANNED: &str = concat!(
+    include_str!("../../../examples/policy/shared/planned-access.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/database/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/kube/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/messaging/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/web/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/tcp/planned.yaml"),
+);
+const RESOURCES: &str = concat!(
+    include_str!("../../../examples/policy/stacks/ssh/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/database/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/redis/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/mongo/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/messaging/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/search/resources.yaml"),
+);
 
 fn example() -> Policy {
     Policy::parse_yaml([
@@ -312,8 +337,6 @@ fn worker_selector_matching() {
 mod integration_examples {
     use super::*;
 
-    const PLANNED: &str = include_str!("../../../examples/policy/planned.yaml");
-
     fn with_examples() -> Policy {
         Policy::parse_yaml([
             ("roles.yaml", ROLES),
@@ -486,10 +509,7 @@ fn every_example_resource_has_a_target_to_show() {
         ("roles.yaml", ROLES),
         ("mappings.yaml", MAPPINGS),
         ("resources.yaml", RESOURCES),
-        (
-            "planned.yaml",
-            include_str!("../../../examples/policy/planned.yaml"),
-        ),
+        ("planned.yaml", PLANNED),
     ])
     .expect("valid");
     for (name, resource) in &policy.resources {
@@ -504,7 +524,7 @@ mod bots {
     use super::*;
     use crate::bot::JoinMethod;
 
-    const BOTS: &str = include_str!("../../../examples/policy/bots.yaml");
+    const BOTS: &str = include_str!("../../../examples/policy/stacks/bots/policy.yaml");
 
     fn with_bots() -> Policy {
         Policy::parse_yaml([
