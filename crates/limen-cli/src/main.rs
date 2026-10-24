@@ -477,6 +477,9 @@ async fn main() {
     });
     // Logs go to stderr and default to warnings, so command output stays clean.
     telemetry::init_with_default(LogFormat::Text, "warn");
+    if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
+        tokio::spawn(commands::conns::watch_expiry(id, cli.proxy.clone()));
+    }
     let result = run(cli).await;
     if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
         commands::conns::forget(&id);
@@ -517,9 +520,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             "--detach applies to commands that open a local listener, such as `limen redis connect`"
         );
         return commands::conns::detach(proxy).await;
-    }
-    if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
-        tokio::spawn(commands::conns::watch_expiry(id, cli.proxy.clone()));
     }
     match cli.command {
         Command::Login {
@@ -562,12 +562,15 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
         Command::Completions { shell } => {
+            // Render first: writing straight to a closed pipe (`| head`) would panic.
+            let mut script = Vec::new();
             clap_complete::generate(
                 shell,
                 &mut <Cli as clap::CommandFactory>::command(),
                 "limen",
-                &mut std::io::stdout(),
+                &mut script,
             );
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
             Ok(())
         }
         Command::Show { resource, json } => commands::show(proxy, &resource, json).await,

@@ -883,7 +883,7 @@ pub struct ResourcesPage {
     pub active_labels: Vec<LabelLink>,
     pub clear_href: String,
     pub kind_value: String,
-    pub label_value: String,
+    pub label_values: Vec<String>,
     pub query: String,
     pub rows: Vec<(ResourceRow, Vec<LabelLink>)>,
 }

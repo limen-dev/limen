@@ -35,6 +35,10 @@ fn dir() -> anyhow::Result<PathBuf> {
 }
 
 fn state_path(id: &str) -> anyhow::Result<PathBuf> {
+    anyhow::ensure!(
+        valid_id(id),
+        "`{id}` is not a connection id; see `limen conns ls`"
+    );
     Ok(dir()?.join(format!("{id}.json")))
 }
 
@@ -47,9 +51,22 @@ fn signal(pid: u32, sig: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Whether `pid` is a live `limen` process. A bare liveness check isn't enough: after a
+/// reboot or a crash the pid may belong to something else, which `stop` must never signal.
 #[cfg(unix)]
 fn alive(pid: u32) -> bool {
-    signal(pid, "-0")
+    if !signal(pid, "-0") {
+        return false;
+    }
+    std::process::Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("limen"))
+}
+
+/// Ids are the six hex digits we generate; anything else could escape the directory.
+fn valid_id(id: &str) -> bool {
+    id.len() == 6 && id.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Whether `args` contain a flag that is `--detach` or `-d`.
@@ -174,10 +191,11 @@ pub async fn watch_expiry(id: String, proxy: Option<String>) {
 
 /// Remove a detached connection's state and log (the process is gone or going).
 pub fn forget(id: &str) {
-    if let Ok(p) = state_path(id) {
-        let _ = std::fs::remove_file(p);
+    if !valid_id(id) {
+        return;
     }
     if let Ok(d) = dir() {
+        let _ = std::fs::remove_file(d.join(format!("{id}.json")));
         let _ = std::fs::remove_file(d.join(format!("{id}.log")));
     }
 }
@@ -293,6 +311,15 @@ pub fn stop_command(proxy: Option<&str>, ids: &[String], all: bool) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ids_cannot_escape_the_directory() {
+        assert!(valid_id("0a1b2c"));
+        assert!(!valid_id("../x"));
+        assert!(!valid_id("0a1b2c/.."));
+        assert!(!valid_id(""));
+        assert!(state_path("../../etc/passwd").is_err());
+    }
 
     #[test]
     fn strips_only_the_detach_flag() {

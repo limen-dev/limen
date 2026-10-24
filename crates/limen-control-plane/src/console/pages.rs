@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use askama::Template;
-use axum::extract::{Form, Path, Query, State};
+use axum::extract::{Form, Path, Query, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -268,8 +268,17 @@ fn matching_workers(
 pub struct ResourcesQuery {
     kind: Option<String>,
     q: Option<String>,
-    /// Comma-separated `key=value` pairs; a resource must carry all of them.
-    label: Option<String>,
+}
+
+/// Every `label=key=value` in the query string (repeatable; a value may contain commas).
+fn label_filters(raw: Option<&str>) -> Vec<String> {
+    let mut labels: Vec<String> = url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes())
+        .filter(|(k, v)| k == "label" && v.split_once('=').is_some_and(|(key, _)| !key.is_empty()))
+        .map(|(_, v)| v.into_owned())
+        .collect();
+    labels.sort();
+    labels.dedup();
+    labels
 }
 
 /// A `/console/resources` link for one filter combination, so every filter is shareable.
@@ -281,8 +290,8 @@ fn resources_href(kind: Option<&str>, q: &str, labels: &[String]) -> String {
     if !q.is_empty() {
         ser.append_pair("q", q);
     }
-    if !labels.is_empty() {
-        ser.append_pair("label", &labels.join(","));
+    for l in labels {
+        ser.append_pair("label", l);
     }
     let query = ser.finish();
     if query.is_empty() {
@@ -296,6 +305,7 @@ pub async fn resources(
     State(state): State<AppState>,
     auth: Auth,
     Query(q): Query<ResourcesQuery>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
     let loaded = state.policy.current();
     let (components, tunnels) = if auth.is_admin {
@@ -360,17 +370,7 @@ pub async fn resources(
             .map(str::to_lowercase)
             .filter(|s| !s.is_empty());
     let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
-    let mut label_filter: Vec<String> = q
-        .label
-        .as_deref()
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|l| l.contains('='))
-        .map(str::to_owned)
-        .collect();
-    label_filter.sort();
-    label_filter.dedup();
+    let label_filter = label_filters(raw.as_deref());
     let query_text = q.q.clone().unwrap_or_default();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
@@ -418,7 +418,7 @@ pub async fn resources(
                 .collect(),
             clear_href: resources_href(kind_filter.as_deref(), &query_text, &[]),
             kind_value: kind_filter.clone().unwrap_or_default(),
-            label_value: label_filter.join(","),
+            label_values: label_filter.clone(),
             query: query_text.clone(),
             rows: rows
                 .into_iter()
@@ -1566,4 +1566,25 @@ pub async fn audit(
         }
         .render(),
     )
+}
+
+#[cfg(test)]
+mod label_filter_tests {
+    use super::*;
+
+    #[test]
+    fn collects_repeated_labels_and_keeps_commas() {
+        let got = label_filters(Some(
+            "kind=ssh&label=env%3Dprod&label=note%3Da%2Cb&label=bad&label=env%3Dprod",
+        ));
+        assert_eq!(got, ["env=prod", "note=a,b"]);
+        assert_eq!(label_filters(None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn href_round_trips() {
+        let href = resources_href(Some("ssh"), "web", &["note=a,b".into(), "env=prod".into()]);
+        let (_, query) = href.split_once('?').expect("query string");
+        assert_eq!(label_filters(Some(query)), ["env=prod", "note=a,b"]);
+    }
 }

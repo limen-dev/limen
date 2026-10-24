@@ -217,7 +217,10 @@ pub async fn ls(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::
         if tty {
             print!("\x1b[2J\x1b[H");
         }
-        ls_once(proxy, f, kinds).await?;
+        // A blip (proxy restart, expired login) shouldn't end a watch; show it and retry.
+        if let Err(e) = ls_once(proxy, f, kinds).await {
+            ui::error(&e);
+        }
         tokio::time::sleep(std::time::Duration::from_secs(secs.max(1))).await;
     }
 }
