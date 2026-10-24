@@ -1,0 +1,8 @@
+# Minimal values that render the chart (used by `helm lint` and `helm template` in CI).
+image: { registry: example.com/limen, tag: test }
+controlPlane:
+  oidc: { issuer: "https://idp.example.com", clientId: limen }
+  auditS3Bucket: limen-audit
+  kms: { internalCaKey: a, userCaKey: b, sshUserCaKey: c, sshHostCaKey: d }
+proxy: { namePrefix: prod, dnsNames: limen.example.com }
+worker: { namePrefix: prod, proxyAddr: "limen.example.com:443", proxyName: limen.example.com }

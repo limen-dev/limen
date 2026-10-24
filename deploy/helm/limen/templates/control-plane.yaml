@@ -1,0 +1,116 @@
+{{- with .Values.controlPlane }}{{- if .enabled }}
+{{- $kms := .kms }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels: {{ include "limen.labels" "control-plane" | nindent 4 }}
+spec:
+  # Headless: the name resolves to the ready replicas (ADR-0020).
+  clusterIP: None
+  selector: {{ include "limen.selector" "control-plane" | nindent 4 }}
+  ports:
+    - { name: grpc, port: 3080, targetPort: grpc }
+---
+{{- if .serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: control-plane
+  labels: {{ include "limen.labels" "control-plane" | nindent 4 }}
+  {{- with .serviceAccount.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: control-plane
+  labels: {{ include "limen.labels" "control-plane" | nindent 4 }}
+spec:
+  serviceName: control-plane
+  replicas: {{ .replicas }}
+  podManagementPolicy: OrderedReady
+  updateStrategy: { type: RollingUpdate }
+  selector:
+    matchLabels: {{ include "limen.selector" "control-plane" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "limen.labels" "control-plane" | nindent 8 }}
+    spec:
+      {{- if .serviceAccount.create }}
+      serviceAccountName: control-plane
+      {{- end }}
+      {{- include "limen.pullSecrets" $ | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds }}
+      {{- with .nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: topology.kubernetes.io/zone
+                labelSelector:
+                  matchLabels: {{ include "limen.selector" "control-plane" | nindent 18 }}
+      containers:
+        - name: control-plane
+          image: {{ include "limen.image" (dict "root" $ "component" "control-plane") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: grpc, containerPort: 3080 }
+            - { name: admin, containerPort: 3081 }
+          env:
+            # Stable pod names make a restarted replica resume its own spool.
+            - name: LIMEN_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: LIMEN_SPOOL_MODE, value: durable }
+            - { name: LIMEN_AUDIT_SPOOL_DIR, value: /var/lib/limen/spool }
+            - { name: LIMEN_DNS_NAMES, value: "control-plane,$(LIMEN_ID).control-plane" }
+            - { name: LIMEN_ADVERTISE_URL, value: "https://$(LIMEN_ID).control-plane:3080" }
+            - { name: LIMEN_DRAIN_TIMEOUT, value: {{ .drainTimeout | quote }} }
+            - { name: LIMEN_CA_BACKEND, value: kms }
+            - { name: LIMEN_KMS_INTERNAL_CA_KEY, value: {{ required "controlPlane.kms.internalCaKey is required" $kms.internalCaKey | quote }} }
+            - { name: LIMEN_KMS_USER_CA_KEY, value: {{ required "controlPlane.kms.userCaKey is required" $kms.userCaKey | quote }} }
+            - { name: LIMEN_KMS_SSH_USER_CA_KEY, value: {{ required "controlPlane.kms.sshUserCaKey is required" $kms.sshUserCaKey | quote }} }
+            - { name: LIMEN_KMS_SSH_HOST_CA_KEY, value: {{ required "controlPlane.kms.sshHostCaKey is required" $kms.sshHostCaKey | quote }} }
+            - name: LIMEN_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: {{ $.Values.existingSecrets.database | quote }}, key: url } }
+            - { name: LIMEN_OIDC_ISSUER, value: {{ required "controlPlane.oidc.issuer is required" .oidc.issuer | quote }} }
+            - { name: LIMEN_OIDC_CLIENT_ID, value: {{ required "controlPlane.oidc.clientId is required" .oidc.clientId | quote }} }
+            - { name: LIMEN_AUDIT_S3_BUCKET, value: {{ required "controlPlane.auditS3Bucket is required" .auditS3Bucket | quote }} }
+            {{- with .extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: spool, mountPath: /var/lib/limen/spool }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+          resources: {{ toYaml .resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata: { name: spool }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if .spool.storageClassName }}
+        storageClassName: {{ .spool.storageClassName | quote }}
+        {{- end }}
+        resources: { requests: { storage: {{ .spool.size | quote }} } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: control-plane
+spec:
+  minAvailable: {{ .pdb.minAvailable }}
+  selector:
+    matchLabels: {{ include "limen.selector" "control-plane" | nindent 6 }}
+{{- end }}{{- end }}

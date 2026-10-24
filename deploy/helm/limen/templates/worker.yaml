@@ -1,0 +1,62 @@
+{{- with .Values.worker }}{{- if .enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels: {{ include "limen.labels" "worker" | nindent 4 }}
+spec:
+  replicas: {{ .replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{ include "limen.selector" "worker" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "limen.labels" "worker" | nindent 8 }}
+    spec:
+      {{- include "limen.pullSecrets" $ | nindent 6 }}
+      {{- if le (int .terminationGracePeriodSeconds) (int .drainTimeoutSecs) }}
+      {{- fail "worker.terminationGracePeriodSeconds must exceed worker.drainTimeoutSecs" }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds }}
+      {{- with .nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "limen.image" (dict "root" $ "component" "worker") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: admin, containerPort: 3090 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: LIMEN_NAME, value: "{{ required "worker.namePrefix is required" .namePrefix }}-$(POD_NAME)" }
+            - { name: LIMEN_PROXY_ADDR, value: {{ required "worker.proxyAddr is required" .proxyAddr | quote }} }
+            - { name: LIMEN_PROXY_NAME, value: {{ required "worker.proxyName is required" .proxyName | quote }} }
+            - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
+            - { name: LIMEN_MAX_SESSIONS, value: {{ .maxSessions | quote }} }
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: {{ .drainTimeoutSecs | quote }} }
+            - name: LIMEN_JOIN_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $.Values.existingSecrets.workerJoin | quote }}, key: token } }
+            - { name: LIMEN_DATA_DIR, value: /var/lib/limen/worker }
+            {{- with .extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: ca, mountPath: /etc/limen, readOnly: true }
+            - { name: data, mountPath: /var/lib/limen/worker }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          resources: {{ toYaml .resources | nindent 12 }}
+      volumes:
+        - name: ca
+          configMap: { name: {{ $.Values.internalCA.configMap | quote }} }
+        - name: data
+          emptyDir: {}
+{{- end }}{{- end }}

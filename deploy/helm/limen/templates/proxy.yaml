@@ -1,0 +1,90 @@
+{{- with .Values.proxy }}{{- if .enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy
+  labels: {{ include "limen.labels" "proxy" | nindent 4 }}
+  {{- with .service.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .service.type }}
+  selector: {{ include "limen.selector" "proxy" | nindent 4 }}
+  ports:
+    - { name: public, port: {{ .service.port }}, targetPort: public }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy
+  labels: {{ include "limen.labels" "proxy" | nindent 4 }}
+spec:
+  replicas: {{ .replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 1, maxSurge: 1 }
+  selector:
+    matchLabels: {{ include "limen.selector" "proxy" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "limen.labels" "proxy" | nindent 8 }}
+    spec:
+      {{- include "limen.pullSecrets" $ | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds }}
+      {{- with .nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: proxy
+          image: {{ include "limen.image" (dict "root" $ "component" "proxy") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: public, containerPort: 3443 }
+            - { name: admin, containerPort: 3444 }
+          env:
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: LIMEN_PEER_ADDRESS, value: "$(POD_IP):3443" }
+            - { name: LIMEN_NAME, value: "{{ required "proxy.namePrefix is required" .namePrefix }}-$(POD_NAME)" }
+            - { name: LIMEN_CONTROL_PLANE_ADDR, value: "control-plane:3080" }
+            - { name: LIMEN_CONTROL_PLANE_NAME, value: control-plane }
+            - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
+            - { name: LIMEN_DNS_NAMES, value: {{ required "proxy.dnsNames is required" .dnsNames | quote }} }
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: {{ .drainTimeoutSecs | quote }} }
+            - name: LIMEN_JOIN_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $.Values.existingSecrets.proxyJoin | quote }}, key: token } }
+            - { name: LIMEN_DATA_DIR, value: /var/lib/limen/proxy }
+            {{- with .extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: ca, mountPath: /etc/limen, readOnly: true }
+            - { name: data, mountPath: /var/lib/limen/proxy }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+          resources: {{ toYaml .resources | nindent 12 }}
+      volumes:
+        - name: ca
+          configMap: { name: {{ $.Values.internalCA.configMap | quote }} }
+        # emptyDir: a replaced pod enrolls again; use a multi-use join token.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: proxy
+spec:
+  minAvailable: {{ .pdb.minAvailable }}
+  selector:
+    matchLabels: {{ include "limen.selector" "proxy" | nindent 6 }}
+{{- end }}{{- end }}

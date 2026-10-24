@@ -1,0 +1,79 @@
+# Limen chart values. Everything marked REQUIRED has no default; `helm
+# install` fails with a message naming the missing value.
+
+image:
+  registry: ""          # e.g. ghcr.io/your-org
+  tag: ""               # REQUIRED: the Limen release to run
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Secrets and ConfigMaps you create beforehand (see README.md).
+existingSecrets:
+  database: limen-database          # key: url
+  proxyJoin: limen-proxy-join       # key: token
+  workerJoin: limen-worker-join     # key: token
+internalCA:
+  configMap: limen-internal-ca      # key: internal-ca.pem
+
+controlPlane:
+  enabled: true
+  replicas: 3
+  drainTimeout: 20s
+  # Must exceed drainTimeout by enough to finish the drain and the handoff.
+  terminationGracePeriodSeconds: 45
+  oidc:
+    issuer: ""                      # REQUIRED
+    clientId: ""                    # REQUIRED
+  auditS3Bucket: ""                 # REQUIRED
+  kms:                              # REQUIRED: the KMS CA backend (ADR-0020)
+    internalCaKey: ""
+    userCaKey: ""
+    sshUserCaKey: ""
+    sshHostCaKey: ""
+  spool:
+    size: 10Gi
+    storageClassName: ""
+  pdb: { minAvailable: 2 }
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  serviceAccount: { create: true, annotations: {} }   # IRSA role for KMS and S3
+
+proxy:
+  enabled: true
+  replicas: 3
+  drainTimeoutSecs: 20
+  terminationGracePeriodSeconds: 40
+  namePrefix: ""                    # REQUIRED: the join token must approve it
+  dnsNames: ""                      # REQUIRED: the public DNS name(s) of the load balancer
+  service:
+    type: LoadBalancer
+    port: 443
+    annotations:
+      # AWS: a Network Load Balancer in TCP mode. TLS is end to end (ADR-0005).
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+  pdb: { minAvailable: 2 }
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+
+worker:
+  enabled: true
+  replicas: 3
+  maxSessions: 200
+  drainTimeoutSecs: 300
+  # Above drainTimeoutSecs plus about 20 s to upload recordings.
+  terminationGracePeriodSeconds: 330
+  namePrefix: ""                    # REQUIRED
+  proxyAddr: ""                     # REQUIRED: host:port, e.g. proxy.example.com:443
+  proxyName: ""                     # REQUIRED: the proxy's certificate name
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
