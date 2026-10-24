@@ -19,6 +19,7 @@ Open **`https://<your proxy>/console/`** (locally `https://localhost:3443/consol
 A few things worth knowing:
 - **Policy stays in Git.** The console shows and checks policy but doesn't edit it. Apply with `limen admin apply`.
 - **Everything you change is audited** as you, marked as coming from the console.
+- **List pages refresh themselves** every 10 seconds (Overview, Resources, Sessions, Users, Bots, Workers, Audit trail, Dashboards). Refreshing pauses while the tab is hidden, while you have text selected, and while anything on the page has focus or a form has unsaved input, so it never eats what you are typing.
 - **Switch theme** with the sun/moon buttons at the bottom of the sidebar (it follows your system by default).
 - **Browser sign-ins last 8 hours** by default (never longer than the maximum certificate lifetime), or until you sign out or an admin locks you. This is separate from the CLI's short-lived certificate.
 - Setup for your own deployment (OIDC client, public URL): [`docs/runbooks/console.md`](../runbooks/console.md).
