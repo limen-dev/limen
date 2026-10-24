@@ -894,6 +894,33 @@ async fn console_end_to_end() {
         assert!(page.body.contains("<svg class=\"chart\""), "{range}");
         assert!(page.body.contains("Busiest resources"));
     }
+    // Every view and every panel runs its query against the real schema.
+    for view in [
+        "overview", "security", "sre", "bots", "usage", "all", "nonsense",
+    ] {
+        let page = admin_user
+            .get(&format!("/console/dashboards?view={view}"))
+            .await;
+        assert_eq!(page.status, 200, "{view}: {}", page.body);
+    }
+    let all = admin_user.get("/console/dashboards?view=all").await;
+    for title in [
+        "Components gone quiet",
+        "Kubernetes API errors",
+        "Out-of-hours access",
+        "Data transferred",
+    ] {
+        assert!(all.body.contains(&format!("<h2>{title}</h2>")), "{title}");
+    }
+    let picked = admin_user
+        .get("/console/dashboards?p=kinds&p=worker-load")
+        .await;
+    assert!(
+        picked.body.contains("<h2>Sessions by kind</h2>")
+            && picked.body.contains("<h2>Tunnels per worker</h2>")
+            && !picked.body.contains("<h2>Busiest resources</h2>"),
+        "only the chosen panels are drawn"
+    );
     let dash = admin_user.get("/console/dashboards").await;
     assert!(
         dash.body.contains("web-1"),

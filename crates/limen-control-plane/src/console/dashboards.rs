@@ -240,7 +240,7 @@ pub struct RankPanel {
 // ---- views ---------------------------------------------------------------------
 
 /// The pickable panels, in page order: `(id, title)`.
-const CATALOG: [(&str, &str); 11] = [
+const CATALOG: [(&str, &str); 22] = [
     ("sessions", "Sessions over time"),
     ("signins", "Sign-ins and denials"),
     ("busiest-resources", "Busiest resources"),
@@ -252,10 +252,21 @@ const CATALOG: [(&str, &str); 11] = [
     ("kinds", "Sessions by kind"),
     ("endings", "How sessions ended"),
     ("traffic", "Data transferred"),
+    ("denied-people", "Most refused people"),
+    ("off-hours", "Out-of-hours access"),
+    ("long-sessions", "Longest sessions"),
+    ("logins", "Accounts used"),
+    ("sources", "Where sessions came from"),
+    ("unrecorded", "Finished without a recording"),
+    ("quiet-components", "Components gone quiet"),
+    ("worker-load", "Tunnels per worker"),
+    ("db-errors", "Database statement errors"),
+    ("kube-errors", "Kubernetes API errors"),
+    ("web-errors", "Web app server errors"),
 ];
 
 /// Named selections of panels; `all` is every one.
-const VIEWS: [(&str, &str, &[&str]); 5] = [
+const VIEWS: [(&str, &str, &[&str]); 6] = [
     (
         "overview",
         "Overview",
@@ -264,6 +275,7 @@ const VIEWS: [(&str, &str, &[&str]); 5] = [
             "signins",
             "busiest-resources",
             "active-people",
+            "bot-repos",
             "session-length",
             "admin-actions",
         ],
@@ -274,8 +286,28 @@ const VIEWS: [(&str, &str, &[&str]); 5] = [
         &[
             "signins",
             "denial-reasons",
+            "denied-people",
+            "off-hours",
+            "long-sessions",
+            "logins",
+            "sources",
+            "unrecorded",
             "admin-actions",
-            "active-people",
+        ],
+    ),
+    (
+        "sre",
+        "Reliability",
+        &[
+            "sessions",
+            "endings",
+            "session-length",
+            "quiet-components",
+            "worker-load",
+            "db-errors",
+            "kube-errors",
+            "web-errors",
+            "traffic",
         ],
     ),
     (
@@ -388,17 +420,6 @@ fn slot(starts: &[PrimitiveDateTime], t: PrimitiveDateTime) -> Option<usize> {
     starts.iter().position(|s| *s == t)
 }
 
-async fn counts(
-    db: &Db,
-    sql: &'static str,
-    since: OffsetDateTime,
-) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    let rows = sqlx::query(sql).bind(since).fetch_all(db).await?;
-    rows.iter()
-        .map(|r| Ok((r.try_get::<String, _>(0)?, r.try_get::<i64, _>(1)?)))
-        .collect()
-}
-
 pub struct Tile {
     pub value: String,
     pub label: &'static str,
@@ -448,7 +469,7 @@ pub async fn dashboards(
     }
     let range = Range::parse(q.range.as_deref());
     let selection = Selection::parse(raw.as_deref());
-    match build(&state, range).await {
+    match build(&state, range, &selection).await {
         Ok((tiles, mut panels, mut ranked)) => {
             panels.retain(|p| selection.has(p.id));
             ranked.retain(|p| selection.has(p.id));
@@ -554,157 +575,275 @@ struct TimeSeries {
     denied: Vec<i64>,
 }
 
-/// The ranked lists: busiest resources and people, session length, denials, admin actions.
-async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx::Error> {
-    let top_resources = counts(
-        db,
-        "SELECT resource, count(*) FROM sessions WHERE started_at >= $1 AND resource IS NOT NULL
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let top_users = counts(
-        db,
-        "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let bot_repos = counts(
-        db,
-        "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
-         WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let denials = counts(
-        db,
-        "SELECT summary, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
-        since,
-    )
-    .await?;
-    let actions = counts(
-        db,
-        "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
-         ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change')
-         GROUP BY 1 ORDER BY 2 DESC, 1",
-        since,
-    )
-    .await?;
-    let lengths = counts(
-        db,
-        "SELECT CASE WHEN duration_ms < 60000 THEN '0 under 1 min' WHEN duration_ms < 300000 THEN '1 1 to 5 min'
-                     WHEN duration_ms < 1800000 THEN '2 5 to 30 min' WHEN duration_ms < 7200000 THEN '3 30 min to 2 h'
-                     ELSE '4 over 2 h' END AS b, count(*)
-         FROM sessions WHERE started_at >= $1 AND duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1",
-        since,
-    )
-    .await?
-    .into_iter()
-    .map(|(k, n)| (k.split_once(' ').map_or(k.clone(), |(_, t)| t.to_owned()), n))
-    .collect::<Vec<_>>();
+#[derive(Clone, Copy)]
+enum Link {
+    None,
+    Resource,
+    User,
+}
 
-    let kinds = counts(
-        db,
-        "SELECT COALESCE(kind, 'unknown'), count(*) FROM sessions WHERE started_at >= $1
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let endings = counts(
-        db,
-        "SELECT end_reason, count(*) FROM sessions WHERE started_at >= $1 AND end_reason IS NOT NULL
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let traffic = counts(
-        db,
-        "SELECT resource, (sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) / 1024)::bigint FROM sessions
-         WHERE started_at >= $1 AND resource IS NOT NULL GROUP BY 1 HAVING sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) > 0
-         ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
+/// One ranked list: the SQL returns `(label, count)`. `windowed` queries take the
+/// start of the period as `$1`; the others describe the fleet right now.
+struct Spec {
+    id: &'static str,
+    title: &'static str,
+    sub: &'static str,
+    class: &'static str,
+    link: Link,
+    windowed: bool,
+    sql: &'static str,
+}
 
-    let ranked = vec![
-        RankPanel {
-            id: "kinds",
-            title: "Sessions by kind",
-            sub: "Protocol or integration",
-            rows: rank(kinds, |_| None),
-            class: "bar-b",
-        },
-        RankPanel {
-            id: "endings",
-            title: "How sessions ended",
-            sub: "Finished sessions",
-            rows: rank(endings, |_| None),
-            class: "bar-d",
-        },
-        RankPanel {
-            id: "traffic",
-            title: "Data transferred",
-            sub: "KiB in both directions, by resource",
-            rows: rank(traffic, |name| {
-                Some(format!("/console/resources/{}", path_segment(name)))
+const RANKINGS: [Spec; 20] = [
+    Spec {
+        id: "busiest-resources",
+        title: "Busiest resources",
+        sub: "Sessions",
+        class: "bar-a",
+        link: Link::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM sessions WHERE started_at >= $1 AND resource IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "active-people",
+        title: "Most active people",
+        sub: "Sessions",
+        class: "bar-b",
+        link: Link::User,
+        windowed: true,
+        sql: "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "bot-repos",
+        title: "Bot sessions by repository",
+        sub: "CI jobs, by the repository or project that ran them",
+        class: "bar-bot",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
+              WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "session-length",
+        title: "Session length",
+        sub: "Finished sessions",
+        class: "bar-c",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT CASE WHEN duration_ms < 60000 THEN 'under 1 min' WHEN duration_ms < 300000 THEN '1 to 5 min'
+                          WHEN duration_ms < 1800000 THEN '5 to 30 min' WHEN duration_ms < 7200000 THEN '30 min to 2 h'
+                          ELSE 'over 2 h' END AS b, count(*)
+              FROM sessions WHERE started_at >= $1 AND duration_ms IS NOT NULL
+              GROUP BY 1 ORDER BY min(duration_ms)",
+    },
+    Spec {
+        id: "denial-reasons",
+        title: "Why access was denied",
+        sub: "Denied attempts",
+        class: "bar-bad",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT summary, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
+    },
+    Spec {
+        id: "admin-actions",
+        title: "Admin actions",
+        sub: "Locks, kills, revokes, tokens, policy",
+        class: "bar-d",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
+              ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change')
+              GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "kinds",
+        title: "Sessions by kind",
+        sub: "Protocol or integration",
+        class: "bar-b",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT COALESCE(kind, 'unknown'), count(*) FROM sessions WHERE started_at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "endings",
+        title: "How sessions ended",
+        sub: "Finished sessions",
+        class: "bar-d",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT end_reason, count(*) FROM sessions WHERE started_at >= $1 AND end_reason IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "traffic",
+        title: "Data transferred",
+        sub: "KiB in both directions, by resource",
+        class: "bar-c",
+        link: Link::Resource,
+        windowed: true,
+        sql: "SELECT resource, (sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) / 1024)::bigint FROM sessions
+              WHERE started_at >= $1 AND resource IS NOT NULL
+              GROUP BY 1 HAVING sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) > 0 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "denied-people",
+        title: "Most refused people",
+        sub: "Denied attempts: repeated refusals can be guessing or a stale role",
+        class: "bar-bad",
+        link: Link::User,
+        windowed: true,
+        sql: "SELECT username, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1 AND username IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "off-hours",
+        title: "Out-of-hours access",
+        sub: "People's sessions started outside 07:00 to 19:00 UTC",
+        class: "bar-d",
+        link: Link::User,
+        windowed: true,
+        sql: "SELECT username, count(*) FROM sessions
+              WHERE started_at >= $1 AND actor_type = 'user' AND username IS NOT NULL
+                AND (EXTRACT(hour FROM started_at AT TIME ZONE 'UTC') < 7 OR EXTRACT(hour FROM started_at AT TIME ZONE 'UTC') >= 19)
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "long-sessions",
+        title: "Longest sessions",
+        sub: "Minutes, person and resource",
+        class: "bar-c",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT COALESCE(username, '?') || ' on ' || COALESCE(resource, '?'), (duration_ms / 60000)::bigint FROM sessions
+              WHERE started_at >= $1 AND duration_ms IS NOT NULL ORDER BY duration_ms DESC LIMIT 8",
+    },
+    Spec {
+        id: "logins",
+        title: "Accounts used",
+        sub: "Sessions by the account they logged in as on the target",
+        class: "bar-a",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT COALESCE(login, 'n/a'), count(*) FROM sessions WHERE started_at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "sources",
+        title: "Where sessions came from",
+        sub: "Client address",
+        class: "bar-b",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT client_addr, count(*) FROM sessions WHERE started_at >= $1 AND client_addr IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "unrecorded",
+        title: "Finished without a recording",
+        sub: "Sessions by resource. Not every kind is recorded",
+        class: "bar-bad",
+        link: Link::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM sessions
+              WHERE started_at >= $1 AND ended_at IS NOT NULL AND recording_uri IS NULL AND resource IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "quiet-components",
+        title: "Components gone quiet",
+        sub: "Minutes since last seen, over 5 (proxies and workers, not revoked)",
+        class: "bar-bad",
+        link: Link::None,
+        windowed: false,
+        sql: "SELECT id || ' (' || kind || ')', (EXTRACT(epoch FROM now() - last_seen_at) / 60)::bigint FROM components
+              WHERE revoked_at IS NULL AND last_seen_at < now() - interval '5 minutes'
+              ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "worker-load",
+        title: "Tunnels per worker",
+        sub: "Live tunnels right now",
+        class: "bar-a",
+        link: Link::None,
+        windowed: false,
+        sql: "SELECT worker_id, count(*) FROM tunnels WHERE lease_expires_at > now() GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "db-errors",
+        title: "Database statement errors",
+        sub: "By error code",
+        class: "bar-bad",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT error_code, count(*) FROM db_statements WHERE at >= $1 AND error_code IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "kube-errors",
+        title: "Kubernetes API errors",
+        sub: "Cluster and HTTP status, 400 and above",
+        class: "bar-bad",
+        link: Link::None,
+        windowed: true,
+        sql: "SELECT cluster || ' ' || status::text, count(*) FROM kube_requests WHERE at >= $1 AND status >= 400
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "web-errors",
+        title: "Web app server errors",
+        sub: "Resource, responses with status 500 and above",
+        class: "bar-bad",
+        link: Link::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM web_requests WHERE at >= $1 AND status >= 500
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+];
+
+/// The ranked lists the page asked for (the rest are not queried).
+async fn rankings(
+    db: &Db,
+    since: OffsetDateTime,
+    selection: &Selection,
+) -> Result<Vec<RankPanel>, sqlx::Error> {
+    let mut out = Vec::new();
+    for spec in RANKINGS.iter().filter(|s| selection.has(s.id)) {
+        let query = sqlx::query(spec.sql);
+        let rows = if spec.windowed {
+            query.bind(since)
+        } else {
+            query
+        }
+        .fetch_all(db)
+        .await?
+        .iter()
+        .map(|r| Ok((r.try_get::<String, _>(0)?, r.try_get::<i64, _>(1)?)))
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        let link = spec.link;
+        out.push(RankPanel {
+            id: spec.id,
+            title: spec.title,
+            sub: spec.sub,
+            rows: rank(rows, |name| match link {
+                Link::None => None,
+                Link::Resource => Some(format!("/console/resources/{}", path_segment(name))),
+                Link::User => Some(format!("/console/users/{}", path_segment(name))),
             }),
-            class: "bar-c",
-        },
-        RankPanel {
-            id: "busiest-resources",
-            title: "Busiest resources",
-            sub: "Sessions",
-            rows: rank(top_resources, |name| {
-                Some(format!("/console/resources/{}", path_segment(name)))
-            }),
-            class: "bar-a",
-        },
-        RankPanel {
-            id: "active-people",
-            title: "Most active people",
-            sub: "Sessions",
-            rows: rank(top_users, |name| {
-                Some(format!("/console/users/{}", path_segment(name)))
-            }),
-            class: "bar-b",
-        },
-        RankPanel {
-            id: "bot-repos",
-            title: "Bot sessions by repository",
-            sub: "CI jobs, by the repository or project that ran them",
-            rows: rank(bot_repos, |_| None),
-            class: "bar-bot",
-        },
-        RankPanel {
-            id: "session-length",
-            title: "Session length",
-            sub: "Finished sessions",
-            rows: rank(lengths, |_| None),
-            class: "bar-c",
-        },
-        RankPanel {
-            id: "denial-reasons",
-            title: "Why access was denied",
-            sub: "Denied attempts",
-            rows: rank(denials, |_| None),
-            class: "bar-bad",
-        },
-        RankPanel {
-            id: "admin-actions",
-            title: "Admin actions",
-            sub: "Locks, kills, revokes, tokens, policy",
-            rows: rank(actions, |_| None),
-            class: "bar-d",
-        },
-    ];
-    Ok(ranked)
+            class: spec.class,
+        });
+    }
+    Ok(out)
 }
 
 async fn build(
     state: &AppState,
     range: Range,
+    selection: &Selection,
 ) -> Result<(Vec<Tile>, Vec<Panel>, Vec<RankPanel>), sqlx::Error> {
     let db = &state.db;
     let (starts, labels) = buckets(range);
@@ -817,7 +956,7 @@ async fn build(
             legend: vec![("bar-a", "Sign-ins"), ("bar-bad", "Denied")],
         },
     ];
-    let ranked = rankings(db, since).await?;
+    let ranked = rankings(db, since, selection).await?;
     Ok((tiles, panels, ranked))
 }
 
