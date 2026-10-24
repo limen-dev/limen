@@ -169,7 +169,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics, and the [architecture diagram](docs/diagrams/README.md)
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
-- [Threat model](docs/threat-model.md)
+- [Threat model](docs/threat-model.md) and the [pentest plan](docs/pentest-plan.md)
 - [Policy reference](docs/policy.md)
 - [Runbooks](docs/runbooks/README.md)
 - A public documentation site and homepage are planned ([ADR-0021](docs/adr/0021-docs-site-and-homepage.md))
