@@ -99,10 +99,10 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml  tcp.yml  web.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
-                            dev-users.sh and gen-dev-users.py (generated user lists)
+                            dev-users.sh and gen-dev-users.py (generated user lists), test-policy-selection.sh
 ```
 
 Other top-level directories: [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-layout).

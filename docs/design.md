@@ -392,7 +392,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 
 What each phase built is in its guide and ADR; this section holds only what is unverified, deferred, or assumed.
 
-- **Unverified against real services.** Everything is tested against local stand-ins, and there are no AWS, Okta, or Datadog accounts yet. Each item below is tracked by a "Verify Phase N" issue (#76 to #85).
+- **Unverified against real services.** Everything is tested against local stand-ins, and there are no AWS, Okta, or Datadog accounts yet. Each item below is tracked by a "Verify" issue (#63, #64, #76 to #85).
   - Phase 6: RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login and behavior on a real Redshift.
   - Phase 7: ElastiCache IAM token acceptance, the re-login, TLS with the AWS bundle. Not built: cluster mode, ElastiCache Serverless, a worker-managed ElastiCache user bootstrap.
   - Phase 9: Atlas (SCRAM, X.509, `MONGODB-AWS`, public-CA TLS, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, `mongos`. The `MONGODB-AWS` SigV4 signature is checked against a fixture; SCRAM against the RFC vectors.
