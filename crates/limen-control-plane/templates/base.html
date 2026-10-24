@@ -49,7 +49,7 @@
     </div>
   </aside>
   <div class="main">
-    <main>
+    <main{% block refresh %}{% endblock %}>
 {% block content %}{% endblock %}
     </main>
     <div class="foot">Limen {{ chrome.version }} · policy v{{ chrome.policy_version }}</div>
