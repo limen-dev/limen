@@ -1,15 +1,14 @@
 //! Limen worker: runs inside target networks and terminates resource protocols.
 
 use clap::Parser;
-use limen_core::telemetry::{self, LogFormat};
+use limen_core::telemetry::LogArgs;
 use limen_worker::{Config, Worker};
 
 #[derive(Debug, Parser)]
 #[command(name = "limen-worker", version = limen_core::VERSION, about)]
 struct Args {
-    /// Emit logs as JSON lines instead of human-readable text.
-    #[arg(long, env = "LIMEN_LOG_JSON")]
-    log_json: bool,
+    #[command(flatten)]
+    log: LogArgs,
 
     #[command(flatten)]
     config: Config,
@@ -19,11 +18,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     limen_core::metrics::install();
-    telemetry::init(if args.log_json {
-        LogFormat::Json
-    } else {
-        LogFormat::Text
-    });
+    args.log.init();
     tracing::info!(version = limen_core::VERSION, "worker starting");
     let (tx, rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {

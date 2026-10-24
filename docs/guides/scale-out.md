@@ -59,6 +59,17 @@ If you cannot accept that loss window, run `durable`; if you must run `ephemeral
 
 The bundled Grafana dashboards read the audit data (Athena or Trino), not these metrics; scrape `/metrics` on each component's admin port with your own Prometheus or agent. A target-tracking rule for workers looks like `avg(limen_worker_sessions_active / limen_worker_sessions_max) = 0.6`.
 
+## Logging
+
+The control plane, proxy, worker and `limen-spool-adopt` take the same flags, each with an environment variable:
+
+| Flag | Variable | Default |
+|---|---|---|
+| `--log-level` | `LIMEN_LOG_LEVEL` | `info`; a `tracing` filter such as `info,h2=debug`. `RUST_LOG`, when set, wins |
+| `--log-format` | `LIMEN_LOG_FORMAT` | `text`; `json` writes one object per line for log shipping. `--log-json` / `LIMEN_LOG_JSON` still works as an alias |
+
+Levels: `error` needs an operator, `warn` is a handled but unexpected condition, `info` is lifecycle, `debug` is per-request detail, `trace` is wire-level. Credentials are wrapped in `limen_core::secret::Secret` and never logged. The `limen` CLI logs to stderr at `warn`.
+
 ## Sizing
 
 **Database connections.** Each control plane holds a pool of up to 16 connections to PostgreSQL (`--database-max-connections`, `LIMEN_DATABASE_MAX_CONNECTIONS`, 1 to 500). With *N* replicas the database sees up to 16 × *N*. Check that against your Aurora instance's `max_connections` (it depends on the instance class) and leave room for migrations and the console's queries. A handful of replicas is far below any production instance. If you run dozens, put RDS Proxy in front of the database.
