@@ -56,6 +56,26 @@ staticPasswords:
     username: guest
     userID: 5f0e8c2a-9a47-4a0b-8a51-6a0e0f8d2c11
     groups: [marketing]
+  - email: auditor@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: auditor
+    userID: 45369e6c-79fa-5fe4-98cf-54cb1a2d1fe4
+    groups: [auditors]
+  - email: viewer@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: viewer
+    userID: e81ee05c-9588-5afa-af43-354b4c6561d4
+    groups: [viewers]
+  - email: oncall@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: oncall
+    userID: 431be7e7-2cef-572e-8c87-1a089fe16455
+    groups: [sre-oncall]
+  - email: contractor@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: contractor
+    userID: ede36c5a-90d8-59b0-8b9c-c94295132b01
+    groups: [contractors]
   # END dev-users
   # Browser SSO fixture: the reserved username prefix must be refused as a bot.
   - email: bot:phase12@example.com

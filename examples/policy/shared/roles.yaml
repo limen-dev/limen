@@ -52,3 +52,53 @@ spec:
       kafka: { users: [consumer, admin], classes: [read, write, admin], topics: ["*"] }
     - resources: { kind: [kubernetes], labels: { env: [staging, prod] } }
       kube: { groups: ["limen:edit"] }
+---
+kind: role
+version: v1
+metadata:
+  name: auditor
+  description: Read-only SQL on every environment to check data. No shell access.
+spec:
+  cert_ttl: 10m
+  allow:
+    - resources: { kind: [postgres, mysql, redshift], labels: { "*": ["*"] } }
+      db: { roles: [limen_read] }
+---
+kind: role
+version: v1
+metadata:
+  name: viewer
+  description: Read-only SQL on staging. Nothing else.
+spec:
+  cert_ttl: 5m
+  allow:
+    - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
+      db: { roles: [limen_read] }
+---
+kind: role
+version: v1
+metadata:
+  name: sre-oncall
+  description: The on-call SRE. Production SSH and databases, with short certificates and sessions.
+spec:
+  cert_ttl: 15m
+  max_session_ttl: 2h
+  allow:
+    - resources: { kind: [ssh], labels: { "*": ["*"] } }
+      ssh: { logins: [ubuntu, ec2-user] }
+    - resources: { kind: [postgres, mysql, redshift], labels: { "*": ["*"] } }
+      db: { roles: [limen_read, limen_write] }
+  deny:
+    - resources: { kind: [ssh], labels: { tier: [bastion] } }
+---
+kind: role
+version: v1
+metadata:
+  name: contractor
+  description: A contractor. One staging host by name, with a very short certificate and session.
+spec:
+  cert_ttl: 5m
+  max_session_ttl: 2h
+  allow:
+    - resources: { kind: [ssh], labels: { env: [staging] }, names: [web-staging-1] }
+      ssh: { logins: [ubuntu] }
