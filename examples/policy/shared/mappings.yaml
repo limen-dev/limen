@@ -6,3 +6,7 @@ spec:
   - { idp_group: developers, roles: [dev-readonly] }
   - { idp_group: sre, roles: [sre] }
   - { idp_group: limen-admins, roles: ["limen:admin"] }
+  - { idp_group: auditors, roles: [auditor] }
+  - { idp_group: viewers, roles: [viewer] }
+  - { idp_group: sre-oncall, roles: [sre-oncall] }
+  - { idp_group: contractors, roles: [contractor] }

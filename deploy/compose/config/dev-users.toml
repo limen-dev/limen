@@ -27,3 +27,27 @@ id = "guest"
 email = "guest@example.com"
 user_id = "5f0e8c2a-9a47-4a0b-8a51-6a0e0f8d2c11"
 groups = ["marketing"]   # no mapping in examples/policy on purpose: login is denied
+
+[[user]]
+id = "auditor"
+email = "auditor@example.com"
+user_id = "45369e6c-79fa-5fe4-98cf-54cb1a2d1fe4"
+groups = ["auditors"]   # reads every database, no shell
+
+[[user]]
+id = "viewer"
+email = "viewer@example.com"
+user_id = "e81ee05c-9588-5afa-af43-354b4c6561d4"
+groups = ["viewers"]   # staging databases, read only
+
+[[user]]
+id = "oncall"
+email = "oncall@example.com"
+user_id = "431be7e7-2cef-572e-8c87-1a089fe16455"
+groups = ["sre-oncall"]   # SRE on call: production SSH and databases for a short window
+
+[[user]]
+id = "contractor"
+email = "contractor@example.com"
+user_id = "ede36c5a-90d8-59b0-8b9c-c94295132b01"
+groups = ["contractors"]   # one staging host, short-lived and narrow

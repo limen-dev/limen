@@ -33,6 +33,15 @@ WHERE = (
     "AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd')"
 )
 
+# The "Resource type" dashboard variable (multi-select, defaults to all). Panels
+# that group sessions by type filter with {K}; the variable's own query lists
+# the types seen in the last 30 days.
+KIND_FILTER = "data.kind IN (${kind:singlequote})"
+KIND_VARIABLE_SQL = (
+    "SELECT DISTINCT data.kind AS kind FROM {T} WHERE kind = 'session.start' AND data.kind IS NOT NULL "
+    "AND dt >= format_datetime(current_timestamp - INTERVAL '30' DAY, 'yyyy-MM-dd') ORDER BY 1"
+)
+
 # Events are delivered at least once; count distinct event_id, never rows.
 PANELS = [
     {
@@ -82,8 +91,29 @@ GROUP BY 1, 2 ORDER BY sessions DESC LIMIT 100""",
         "w": 8, "h": 8,
         "format": "table",
         "sql": """SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions
-FROM {T} WHERE {W} AND kind = 'session.start'
+FROM {T} WHERE {W} AND kind = 'session.start' AND {K}
 GROUP BY 1 ORDER BY 2 DESC""",
+    },
+    {
+        "title": "Connections per resource type",
+        "type": "timeseries",
+        "w": 16, "h": 8,
+        "format": "time_series",
+        "description": "Sessions started per hour, one line per resource type. Use the Resource type selector to pick which to show.",
+        "sql": """SELECT date_trunc('hour', from_iso8601_timestamp("time")) AS time, data.kind AS metric, count(DISTINCT session_id) AS value
+FROM {T} WHERE {W} AND kind = 'session.start' AND {K}
+GROUP BY 1, 2 ORDER BY 1""",
+    },
+    {
+        "title": "Resource types in use",
+        "type": "table",
+        "w": 24, "h": 7,
+        "format": "table",
+        "description": "Per resource type: sessions, distinct people or bots, distinct resources, and the latest connection.",
+        "sql": """SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions, count(DISTINCT "user") AS users,
+  count(DISTINCT data.resource) AS resources, max(from_iso8601_timestamp("time")) AS last_connection
+FROM {T} WHERE {W} AND kind = 'session.start' AND {K}
+GROUP BY 1 ORDER BY sessions DESC""",
     },
     {
         "title": "Who accessed what",
@@ -196,13 +226,30 @@ def target_query(target, sql, fmt):
     return {"datasource": ds, "refId": "A", "rawSQL": sql, "format": 1 if fmt == "table" else 0}
 
 
+def kind_variable(target):
+    query = target_query(target, KIND_VARIABLE_SQL.replace("{T}", target["table"]), "table")
+    del query["refId"]
+    return {
+        "name": "kind",
+        "label": "Resource type",
+        "type": "query",
+        "datasource": target["ds"],
+        "query": query,
+        "refresh": 2,
+        "multi": True,
+        "includeAll": True,
+        "current": {"selected": True, "text": ["All"], "value": ["$__all"]},
+        "sort": 1,
+    }
+
+
 def dashboard(name):
     target = TARGETS[name]
     panels, x, y, row_h = [], 0, 0, 0
     for i, p in enumerate(PANELS, start=1):
         if x + p["w"] > 24:
             x, y, row_h = 0, y + row_h, 0
-        sql = p["sql"].replace("{T}", target["table"]).replace("{W}", WHERE)
+        sql = p["sql"].replace("{T}", target["table"]).replace("{W}", WHERE).replace("{K}", KIND_FILTER)
         panel = {
             "id": i,
             "title": p["title"],
@@ -225,6 +272,7 @@ def dashboard(name):
         "timezone": "utc",
         "schemaVersion": 39,
         "refresh": "1m",
+        "templating": {"list": [kind_variable(target)]},
         "time": {"from": "now-24h", "to": "now"},
         "panels": panels,
         "editable": False,
@@ -264,7 +312,9 @@ def queries_for_tests():
         return (sql.replace("$__timeFilter(from_iso8601_timestamp(\"time\"))", "from_iso8601_timestamp(\"time\") > current_timestamp - INTERVAL '1' DAY")
                 .replace("$__timeFrom()", "(current_timestamp - INTERVAL '1' DAY)")
                 .replace("$__timeTo()", "current_timestamp"))
-    out = {p["title"]: expand(p["sql"].replace("{T}", t).replace("{W}", WHERE)) for p in PANELS}
+    kinds = KIND_FILTER.replace("${kind:singlequote}", "'postgres', 'redis', 'ssh'")
+    out = {p["title"]: expand(p["sql"].replace("{T}", t).replace("{W}", WHERE).replace("{K}", kinds)) for p in PANELS}
+    out["Resource type variable"] = KIND_VARIABLE_SQL.replace("{T}", t)
     out.update({a["title"]: a["sql"].replace("{T}", t) for a in ALERTS})
     return out
 
