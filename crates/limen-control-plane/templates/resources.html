@@ -8,23 +8,28 @@
   </div>
   <form method="get" action="/console/resources" class="search">
     <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
+    {% if !kind_value.is_empty() %}<input type="hidden" name="kind" value="{{ kind_value }}">{% endif %}
+    {% for l in label_values %}<input type="hidden" name="label" value="{{ l }}">{% endfor %}
     <input type="text" name="q" value="{{ query }}" placeholder="Search name or label" aria-label="Search">
   </form>
 </div>
 <div class="tabs kinds">
-  <a href="/console/resources"{% if all_selected %} aria-current="true"{% endif %}>All</a>
-  {% for k in kinds %}<a href="/console/resources?kind={{ k.name }}"{% if k.current %} aria-current="true"{% endif %}><span class="kind-dot {{ k.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ k.icon }}"/></svg></span>{{ k.name }}</a>{% endfor %}
+  <a href="{{ all_href }}"{% if all_selected %} aria-current="true"{% endif %}>All</a>
+  {% for k in kinds %}<a href="{{ k.href }}"{% if k.current %} aria-current="true"{% endif %}><span class="kind-dot {{ k.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ k.icon }}"/></svg></span>{{ k.name }}</a>{% endfor %}
 </div>
+{% if !active_labels.is_empty() %}
+<div class="chips active-filters">Labels: {% for l in active_labels %}<a class="chip" href="{{ l.href }}" title="Remove filter">{{ l.text }} ×</a>{% endfor %} <a href="{{ clear_href }}">Clear</a></div>
+{% endif %}
 {% if rows.is_empty() %}
 <div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg><div>No resources match.</div></div>
 {% else %}
 <div class="table-wrap"><table>
   <thead><tr><th>Resource</th><th>Labels</th>{% if chrome.is_admin %}<th>Roles with access</th><th class="num">Workers</th><th class="num">Sessions</th>{% else %}<th>Access as</th>{% endif %}</tr></thead>
   <tbody>
-  {% for r in rows %}
+  {% for (r, labels) in rows %}
     <tr>
       <td><div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }}{% if chrome.is_admin %} · <span class="mono">{{ r.target }}</span>{% endif %}</div></div></div></td>
-      <td><div class="chips">{% for l in r.labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
+      <td><div class="chips">{% for l in labels %}<a class="chip" href="{{ l.href }}">{{ l.text }}</a>{% endfor %}</div></td>
       {% if chrome.is_admin %}
       <td><div class="chips">{% for a in r.roles %}<span class="chip c{{ a.chip.c }}">{{ a.chip.text }}</span>{% endfor %}</div></td>
       <td class="num">{% if r.workers == 0 %}<span class="pill warn">none</span>{% else %}{{ r.workers }}{% endif %}</td>

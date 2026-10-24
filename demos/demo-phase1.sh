@@ -63,6 +63,20 @@ expected="$(find "$root/examples/policy" -type f \( -name '*.yaml' -o -name '*.y
 [ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = "$expected" ] || fail "admin should see all $expected resources of examples/policy"
 pass "sre sees every resource"
 
+filtered="$(limen ls --json --type ssh --label env=staging | python3 -c 'import json,sys; print(",".join(r["kind"] + ":" + r["labels"]["env"] for r in json.load(sys.stdin)))')"
+[ -n "$filtered" ] && ! grep -qv '^ssh:staging$' <<<"${filtered//,/$'\n'}" || fail "limen ls --type ssh --label env=staging returned: $filtered"
+pass "limen ls filters by type and label"
+dbs="$(limen db ls --json | python3 -c 'import json,sys; print(",".join(sorted({r["kind"] for r in json.load(sys.stdin)})))')"
+[ -n "$dbs" ] && ! grep -qv '^\(postgres\|mysql\|redshift\)$' <<<"${dbs//,/$'\n'}" || fail "limen db ls returned kinds: $dbs"
+pass "limen db ls lists only database resources"
+first="$(limen ls -q | head -1)"
+[ -n "$first" ] || fail "limen ls -q printed nothing"
+limen show "$first" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["name"] == sys.argv[1] and d["connect"].startswith("limen "), d' "$first" || fail "limen show $first"
+[ "$(limen ls "${first:0:3}" -q | grep -c .)" -ge 1 ] || fail "limen ls <query> found nothing"
+limen status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["logged_in"] and d["roles"], d' || fail "limen status --json"
+limen completions bash | grep -q _limen || fail "limen completions bash"
+pass "limen ls <query>, -q, show, status --json and completions work"
+
 step "A developer sees only what policy allows"
 "$here/scripts/dev-login.sh" "$DEVELOPER"
 limen ls

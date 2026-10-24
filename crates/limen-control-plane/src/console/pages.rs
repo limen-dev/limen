@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use askama::Template;
-use axum::extract::{Form, Path, Query, State};
+use axum::extract::{Form, Path, Query, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -18,10 +18,10 @@ use uuid::Uuid;
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
-    KubePage, KubeView, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage,
-    ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage,
-    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WebRequestView, WorkerMatch,
-    Workers, error_page, list_text, path_segment, time_text,
+    KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage,
+    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView,
+    SessionsPage, StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WebRequestView,
+    WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -270,10 +270,42 @@ pub struct ResourcesQuery {
     q: Option<String>,
 }
 
+/// Every `label=key=value` in the query string (repeatable; a value may contain commas).
+fn label_filters(raw: Option<&str>) -> Vec<String> {
+    let mut labels: Vec<String> = url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes())
+        .filter(|(k, v)| k == "label" && v.split_once('=').is_some_and(|(key, _)| !key.is_empty()))
+        .map(|(_, v)| v.into_owned())
+        .collect();
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+/// A `/console/resources` link for one filter combination, so every filter is shareable.
+fn resources_href(kind: Option<&str>, q: &str, labels: &[String]) -> String {
+    let mut ser = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(k) = kind {
+        ser.append_pair("kind", k);
+    }
+    if !q.is_empty() {
+        ser.append_pair("q", q);
+    }
+    for l in labels {
+        ser.append_pair("label", l);
+    }
+    let query = ser.finish();
+    if query.is_empty() {
+        "/console/resources".to_owned()
+    } else {
+        format!("/console/resources?{query}")
+    }
+}
+
 pub async fn resources(
     State(state): State<AppState>,
     auth: Auth,
     Query(q): Query<ResourcesQuery>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
     let loaded = state.policy.current();
     let (components, tunnels) = if auth.is_admin {
@@ -338,11 +370,14 @@ pub async fn resources(
             .map(str::to_lowercase)
             .filter(|s| !s.is_empty());
     let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
+    let label_filter = label_filters(raw.as_deref());
+    let query_text = q.q.clone().unwrap_or_default();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
     kinds.dedup();
     rows.retain(|r| {
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
+            && label_filter.iter().all(|l| r.labels.contains(l))
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
@@ -356,6 +391,7 @@ pub async fn resources(
                 .map(|k| {
                     let (icon, kclass) = views::kind_icon(&k);
                     KindTab {
+                        href: resources_href(Some(&k), &query_text, &label_filter),
                         current: kind_filter.as_deref() == Some(k.as_str()),
                         icon,
                         kclass,
@@ -364,8 +400,46 @@ pub async fn resources(
                 })
                 .collect(),
             all_selected: kind_filter.is_none(),
-            query: q.q.unwrap_or_default(),
-            rows,
+            all_href: resources_href(None, &query_text, &label_filter),
+            active_labels: label_filter
+                .iter()
+                .map(|l| LabelLink {
+                    text: l.clone(),
+                    href: resources_href(
+                        kind_filter.as_deref(),
+                        &query_text,
+                        &label_filter
+                            .iter()
+                            .filter(|o| *o != l)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    ),
+                })
+                .collect(),
+            clear_href: resources_href(kind_filter.as_deref(), &query_text, &[]),
+            kind_value: kind_filter.clone().unwrap_or_default(),
+            label_values: label_filter.clone(),
+            query: query_text.clone(),
+            rows: rows
+                .into_iter()
+                .map(|r| {
+                    let labels = r
+                        .labels
+                        .iter()
+                        .map(|l| {
+                            let mut next = label_filter.clone();
+                            if !next.contains(l) {
+                                next.push(l.clone());
+                            }
+                            LabelLink {
+                                text: l.clone(),
+                                href: resources_href(kind_filter.as_deref(), &query_text, &next),
+                            }
+                        })
+                        .collect();
+                    (r, labels)
+                })
+                .collect(),
         }
         .render(),
     )
@@ -1492,4 +1566,25 @@ pub async fn audit(
         }
         .render(),
     )
+}
+
+#[cfg(test)]
+mod label_filter_tests {
+    use super::*;
+
+    #[test]
+    fn collects_repeated_labels_and_keeps_commas() {
+        let got = label_filters(Some(
+            "kind=ssh&label=env%3Dprod&label=note%3Da%2Cb&label=bad&label=env%3Dprod",
+        ));
+        assert_eq!(got, ["env=prod", "note=a,b"]);
+        assert_eq!(label_filters(None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn href_round_trips() {
+        let href = resources_href(Some("ssh"), "web", &["note=a,b".into(), "env=prod".into()]);
+        let (_, query) = href.split_once('?').expect("query string");
+        assert_eq!(label_filters(Some(query)), ["env=prod", "note=a,b"]);
+    }
 }

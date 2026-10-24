@@ -333,6 +333,29 @@ wait "$forward_pid" 2>/dev/null || true
 forward_pid=""
 pass "fixed-target TCP relay round-tripped"
 
+step "Detached TCP forward: --detach, limen conns ls, limen conns stop"
+detached_out="$(LIMEN_HOME="$home_dev" "$LIMEN_BIN" tcp tcp-echo --detach 2>&1)" || fail "tcp --detach failed: $detached_out"
+dport="$(sed -nE 's/.*Connect with: nc 127\.0\.0\.1 ([0-9]+).*/\1/p' <<<"$detached_out" | head -1)"
+[ -n "$dport" ] || fail "no listener port in: $detached_out"
+python3 - "$dport" <<'PY'
+import socket
+import sys
+
+payload = b"phase12-detached-roundtrip"
+with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=10) as client:
+    client.settimeout(10)
+    client.sendall(payload)
+    client.shutdown(socket.SHUT_WR)
+    received = bytearray()
+    while chunk := client.recv(4096):
+        received.extend(chunk)
+assert received == payload, received
+PY
+[ "$(LIMEN_HOME="$home_dev" "$LIMEN_BIN" conns ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = 1 ] || fail "conns ls should list the detached forward"
+LIMEN_HOME="$home_dev" "$LIMEN_BIN" conns stop --all >/dev/null
+[ "$(LIMEN_HOME="$home_dev" "$LIMEN_BIN" conns ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = 0 ] || fail "conns stop --all should end the forward"
+pass "detached forward round-tripped, listed, and stopped"
+
 step "Verify denied human/bot sign-in and full audit projection"
 web_sign_in "$GUEST" "$state/web-guest.cookies" deny
 web_sign_in "bot:phase12@example.com" "$state/web-bot.cookies" deny
