@@ -8,11 +8,23 @@
     <p class="sub">What has been happening, from the console's own records (kept for 30 days). Times are UTC.</p>
   </div>
   <div class="tabs">
-    <a href="/console/dashboards?range=24h"{% if range == "24h" %} aria-current="true"{% endif %}>24 hours</a>
-    <a href="/console/dashboards?range=7d"{% if range == "7d" %} aria-current="true"{% endif %}>7 days</a>
-    <a href="/console/dashboards?range=30d"{% if range == "30d" %} aria-current="true"{% endif %}>30 days</a>
+    <a href="/console/dashboards?range=24h&amp;view={{ view }}"{% if range == "24h" %} aria-current="true"{% endif %}>24 hours</a>
+    <a href="/console/dashboards?range=7d&amp;view={{ view }}"{% if range == "7d" %} aria-current="true"{% endif %}>7 days</a>
+    <a href="/console/dashboards?range=30d&amp;view={{ view }}"{% if range == "30d" %} aria-current="true"{% endif %}>30 days</a>
   </div>
 </div>
+<div class="tabs">
+{% for v in views %}  <a href="/console/dashboards?range={{ range }}&amp;view={{ v.key }}"{% if view == v.key %} aria-current="true"{% endif %}>{{ v.label }}</a>
+{% endfor %}{% if custom %}  <a href="/console/dashboards?range={{ range }}" aria-current="true">Custom</a>{% endif %}
+</div>
+<details{% if custom %} open{% endif %}>
+  <summary>Choose panels</summary>
+  <form method="get" action="/console/dashboards" class="pick">
+    <input type="hidden" name="range" value="{{ range }}">
+    {% for c in choices %}<label><input type="checkbox" name="p" value="{{ c.id }}"{% if c.on %} checked{% endif %}> {{ c.title }}</label>
+    {% endfor %}<button type="submit">Show</button>
+  </form>
+</details>
 <section class="stats">
 {% for t in tiles %}
   <div class="card stat {{ t.tone }}"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div><b>{{ t.value }}</b><span>{{ t.label }}</span></div></div>

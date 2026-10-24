@@ -4,7 +4,7 @@
 //! dashboards for the full history are an optional extra (`deploy/grafana`).
 
 use askama::Template;
-use axum::extract::{Query, State};
+use axum::extract::{Query, RawQuery, State};
 use axum::response::Response;
 use serde::Deserialize;
 use sqlx::Row;
@@ -115,6 +115,7 @@ pub struct Series {
 }
 
 pub struct Panel {
+    pub id: &'static str,
     pub title: &'static str,
     pub sub: &'static str,
     pub chart: Chart,
@@ -229,10 +230,131 @@ fn rank(rows: Vec<(String, i64)>, link: impl Fn(&str) -> Option<String>) -> Vec<
 }
 
 pub struct RankPanel {
+    pub id: &'static str,
     pub title: &'static str,
     pub sub: &'static str,
     pub rows: Vec<Ranked>,
     pub class: &'static str,
+}
+
+// ---- views ---------------------------------------------------------------------
+
+/// The pickable panels, in page order: `(id, title)`.
+const CATALOG: [(&str, &str); 11] = [
+    ("sessions", "Sessions over time"),
+    ("signins", "Sign-ins and denials"),
+    ("busiest-resources", "Busiest resources"),
+    ("active-people", "Most active people"),
+    ("bot-repos", "Bot sessions by repository"),
+    ("session-length", "Session length"),
+    ("denial-reasons", "Why access was denied"),
+    ("admin-actions", "Admin actions"),
+    ("kinds", "Sessions by kind"),
+    ("endings", "How sessions ended"),
+    ("traffic", "Data transferred"),
+];
+
+/// Named selections of panels; `all` is every one.
+const VIEWS: [(&str, &str, &[&str]); 5] = [
+    (
+        "overview",
+        "Overview",
+        &[
+            "sessions",
+            "signins",
+            "busiest-resources",
+            "active-people",
+            "session-length",
+            "admin-actions",
+        ],
+    ),
+    (
+        "security",
+        "Security",
+        &[
+            "signins",
+            "denial-reasons",
+            "admin-actions",
+            "active-people",
+        ],
+    ),
+    (
+        "bots",
+        "Bots",
+        &["sessions", "bot-repos", "busiest-resources"],
+    ),
+    (
+        "usage",
+        "Usage",
+        &[
+            "sessions",
+            "kinds",
+            "busiest-resources",
+            "traffic",
+            "session-length",
+            "endings",
+        ],
+    ),
+    ("all", "Everything", &[]),
+];
+
+pub struct ViewTab {
+    pub key: &'static str,
+    pub label: &'static str,
+}
+
+pub struct Choice {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub on: bool,
+}
+
+/// What the query string asked for: a named view, or an explicit list of panels
+/// (`p=<id>` once per panel, from the "Choose panels" form).
+struct Selection {
+    view: &'static str,
+    custom: bool,
+    ids: Vec<&'static str>,
+}
+
+impl Selection {
+    fn parse(query: Option<&str>) -> Self {
+        let mut view = None;
+        let mut picked = Vec::new();
+        for (key, value) in query
+            .unwrap_or("")
+            .split('&')
+            .filter_map(|kv| kv.split_once('='))
+        {
+            match key {
+                "view" => view = VIEWS.iter().find(|v| v.0 == value),
+                "p" => picked.extend(CATALOG.iter().find(|c| c.0 == value).map(|c| c.0)),
+                _ => {}
+            }
+        }
+        if !picked.is_empty() {
+            return Self {
+                view: "custom",
+                custom: true,
+                ids: picked,
+            };
+        }
+        let (key, _, ids) = view.copied().unwrap_or(VIEWS[0]);
+        let ids = if ids.is_empty() {
+            CATALOG.iter().map(|c| c.0).collect()
+        } else {
+            ids.to_vec()
+        };
+        Self {
+            view: key,
+            custom: false,
+            ids,
+        }
+    }
+
+    fn has(&self, id: &str) -> bool {
+        self.ids.contains(&id)
+    }
 }
 
 // ---- data ----------------------------------------------------------------------
@@ -301,6 +423,10 @@ fn duration_text(ms: f64) -> String {
 pub struct DashboardsPage {
     pub chrome: Chrome,
     pub range: &'static str,
+    pub view: &'static str,
+    pub views: Vec<ViewTab>,
+    pub choices: Vec<Choice>,
+    pub custom: bool,
     pub tiles: Vec<Tile>,
     pub panels: Vec<Panel>,
     pub ranked: Vec<RankPanel>,
@@ -314,23 +440,46 @@ pub struct DashQuery {
 pub async fn dashboards(
     State(state): State<AppState>,
     auth: Auth,
+    RawQuery(raw): RawQuery,
     Query(q): Query<DashQuery>,
 ) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
     let range = Range::parse(q.range.as_deref());
+    let selection = Selection::parse(raw.as_deref());
     match build(&state, range).await {
-        Ok((tiles, panels, ranked)) => html(
-            DashboardsPage {
-                chrome: Chrome::new(&auth, "dashboards", state.policy.current().version),
-                range: range.key(),
-                tiles,
-                panels,
-                ranked,
-            }
-            .render(),
-        ),
+        Ok((tiles, mut panels, mut ranked)) => {
+            panels.retain(|p| selection.has(p.id));
+            ranked.retain(|p| selection.has(p.id));
+            html(
+                DashboardsPage {
+                    chrome: Chrome::new(&auth, "dashboards", state.policy.current().version),
+                    range: range.key(),
+                    view: selection.view,
+                    views: VIEWS
+                        .iter()
+                        .map(|v| ViewTab {
+                            key: v.0,
+                            label: v.1,
+                        })
+                        .collect(),
+                    choices: CATALOG
+                        .iter()
+                        .map(|c| Choice {
+                            id: c.0,
+                            title: c.1,
+                            on: selection.has(c.0),
+                        })
+                        .collect(),
+                    custom: selection.custom,
+                    tiles,
+                    panels,
+                    ranked,
+                }
+                .render(),
+            )
+        }
         Err(e) => {
             tracing::error!(error = %e, "building dashboards");
             error_page(
@@ -456,8 +605,55 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
     .map(|(k, n)| (k.split_once(' ').map_or(k.clone(), |(_, t)| t.to_owned()), n))
     .collect::<Vec<_>>();
 
+    let kinds = counts(
+        db,
+        "SELECT COALESCE(kind, 'unknown'), count(*) FROM sessions WHERE started_at >= $1
+         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+        since,
+    )
+    .await?;
+    let endings = counts(
+        db,
+        "SELECT end_reason, count(*) FROM sessions WHERE started_at >= $1 AND end_reason IS NOT NULL
+         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+        since,
+    )
+    .await?;
+    let traffic = counts(
+        db,
+        "SELECT resource, (sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) / 1024)::bigint FROM sessions
+         WHERE started_at >= $1 AND resource IS NOT NULL GROUP BY 1 HAVING sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) > 0
+         ORDER BY 2 DESC, 1 LIMIT 8",
+        since,
+    )
+    .await?;
+
     let ranked = vec![
         RankPanel {
+            id: "kinds",
+            title: "Sessions by kind",
+            sub: "Protocol or integration",
+            rows: rank(kinds, |_| None),
+            class: "bar-b",
+        },
+        RankPanel {
+            id: "endings",
+            title: "How sessions ended",
+            sub: "Finished sessions",
+            rows: rank(endings, |_| None),
+            class: "bar-d",
+        },
+        RankPanel {
+            id: "traffic",
+            title: "Data transferred",
+            sub: "KiB in both directions, by resource",
+            rows: rank(traffic, |name| {
+                Some(format!("/console/resources/{}", path_segment(name)))
+            }),
+            class: "bar-c",
+        },
+        RankPanel {
+            id: "busiest-resources",
             title: "Busiest resources",
             sub: "Sessions",
             rows: rank(top_resources, |name| {
@@ -466,6 +662,7 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
             class: "bar-a",
         },
         RankPanel {
+            id: "active-people",
             title: "Most active people",
             sub: "Sessions",
             rows: rank(top_users, |name| {
@@ -474,24 +671,28 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
             class: "bar-b",
         },
         RankPanel {
+            id: "bot-repos",
             title: "Bot sessions by repository",
             sub: "CI jobs, by the repository or project that ran them",
             rows: rank(bot_repos, |_| None),
             class: "bar-bot",
         },
         RankPanel {
+            id: "session-length",
             title: "Session length",
             sub: "Finished sessions",
             rows: rank(lengths, |_| None),
             class: "bar-c",
         },
         RankPanel {
+            id: "denial-reasons",
             title: "Why access was denied",
             sub: "Denied attempts",
             rows: rank(denials, |_| None),
             class: "bar-bad",
         },
         RankPanel {
+            id: "admin-actions",
             title: "Admin actions",
             sub: "Locks, kills, revokes, tokens, policy",
             rows: rank(actions, |_| None),
@@ -574,6 +775,7 @@ async fn build(
     ];
     let panels = vec![
         Panel {
+            id: "sessions",
             title: "Sessions",
             sub: "Started per period",
             chart: bar_chart(
@@ -594,6 +796,7 @@ async fn build(
             legend: vec![("bar-a", "People"), ("bar-bot", "Bots")],
         },
         Panel {
+            id: "signins",
             title: "Sign-ins and denials",
             sub: "Successful logins next to refused attempts",
             chart: bar_chart(
@@ -621,6 +824,32 @@ async fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_defaults_to_the_overview() {
+        let s = Selection::parse(None);
+        assert_eq!((s.view, s.custom), ("overview", false));
+        assert!(s.has("sessions") && !s.has("traffic"));
+    }
+
+    #[test]
+    fn selection_by_view_and_by_panel() {
+        assert_eq!(
+            Selection::parse(Some("view=all&range=7d")).ids.len(),
+            CATALOG.len()
+        );
+        assert_eq!(Selection::parse(Some("view=nope")).view, "overview");
+        let s = Selection::parse(Some("range=24h&p=traffic&p=bogus&p=kinds"));
+        assert!(s.custom);
+        assert_eq!(s.ids, vec!["traffic", "kinds"]);
+    }
+
+    #[test]
+    fn every_view_names_real_panels() {
+        for (_, _, ids) in VIEWS {
+            assert!(ids.iter().all(|i| CATALOG.iter().any(|c| c.0 == *i)));
+        }
+    }
 
     #[test]
     fn nice_ceilings() {
