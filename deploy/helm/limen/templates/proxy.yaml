@@ -1,40 +1,45 @@
-{{- with .Values.proxy }}{{- if .enabled }}
+{{- range $key, $over := .Values.proxies }}
+{{- $c := include "limen.merged" (dict "defaults" $.Values.proxyDefaults "over" $over) | fromYaml }}
+{{- $ref := dict "component" "proxy" "key" $key }}
+{{- $name := printf "proxy-%s" $key }}
+{{- $cpAddr := $c.controlPlaneAddr | default (printf "control-plane-%s:3080" ($c.controlPlane | default (include "limen.firstKey" $.Values.controlPlanes))) }}
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: proxy
-  labels: {{ include "limen.labels" "proxy" | nindent 4 }}
-  {{- with .service.annotations }}
+  name: {{ $name }}
+  labels: {{ include "limen.labels" $ref | nindent 4 }}
+  {{- with $c.service.annotations }}
   annotations: {{ toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .service.type }}
-  selector: {{ include "limen.selector" "proxy" | nindent 4 }}
+  type: {{ $c.service.type }}
+  selector: {{ include "limen.selector" $ref | nindent 4 }}
   ports:
-    - { name: public, port: {{ .service.port }}, targetPort: public }
+    - { name: public, port: {{ $c.service.port }}, targetPort: public }
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: proxy
-  labels: {{ include "limen.labels" "proxy" | nindent 4 }}
+  name: {{ $name }}
+  labels: {{ include "limen.labels" $ref | nindent 4 }}
 spec:
-  replicas: {{ .replicas }}
+  replicas: {{ $c.replicas }}
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxUnavailable: 1, maxSurge: 1 }
   selector:
-    matchLabels: {{ include "limen.selector" "proxy" | nindent 6 }}
+    matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
   template:
     metadata:
-      labels: {{ include "limen.labels" "proxy" | nindent 8 }}
+      labels: {{ include "limen.labels" $ref | nindent 8 }}
     spec:
       {{- include "limen.pullSecrets" $ | nindent 6 }}
-      terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds }}
-      {{- with .nodeSelector }}
+      terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds }}
+      {{- with $c.nodeSelector }}
       nodeSelector: {{ toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .tolerations }}
+      {{- with $c.tolerations }}
       tolerations: {{ toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -50,16 +55,16 @@ spec:
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - { name: LIMEN_PEER_ADDRESS, value: "$(POD_IP):3443" }
-            - { name: LIMEN_NAME, value: "{{ required "proxy.namePrefix is required" .namePrefix }}-$(POD_NAME)" }
-            - { name: LIMEN_CONTROL_PLANE_ADDR, value: "control-plane:3080" }
-            - { name: LIMEN_CONTROL_PLANE_NAME, value: control-plane }
+            - { name: LIMEN_NAME, value: "{{ required "proxies.<key>.namePrefix is required" $c.namePrefix }}-$(POD_NAME)" }
+            - { name: LIMEN_CONTROL_PLANE_ADDR, value: {{ $cpAddr | quote }} }
+            - { name: LIMEN_CONTROL_PLANE_NAME, value: {{ regexReplaceAll ":[0-9]+$" $cpAddr "" | quote }} }
             - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
-            - { name: LIMEN_DNS_NAMES, value: {{ required "proxy.dnsNames is required" .dnsNames | quote }} }
-            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: {{ .drainTimeoutSecs | quote }} }
+            - { name: LIMEN_DNS_NAMES, value: {{ required "proxies.<key>.dnsNames is required" $c.dnsNames | quote }} }
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: {{ $c.drainTimeoutSecs | quote }} }
             - name: LIMEN_JOIN_TOKEN
-              valueFrom: { secretKeyRef: { name: {{ $.Values.existingSecrets.proxyJoin | quote }}, key: token } }
+              valueFrom: { secretKeyRef: { name: {{ $c.joinSecret | default $.Values.existingSecrets.proxyJoin | quote }}, key: token } }
             - { name: LIMEN_DATA_DIR, value: /var/lib/limen/proxy }
-            {{- with .extraEnv }}
+            {{- with $c.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
@@ -71,7 +76,7 @@ spec:
           livenessProbe:
             httpGet: { path: /healthz, port: admin }
             periodSeconds: 10
-          resources: {{ toYaml .resources | nindent 12 }}
+          resources: {{ toYaml $c.resources | nindent 12 }}
       volumes:
         - name: ca
           configMap: { name: {{ $.Values.internalCA.configMap | quote }} }
@@ -82,9 +87,9 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: proxy
+  name: {{ $name }}
 spec:
-  minAvailable: {{ .pdb.minAvailable }}
+  minAvailable: {{ $c.pdb.minAvailable }}
   selector:
-    matchLabels: {{ include "limen.selector" "proxy" | nindent 6 }}
-{{- end }}{{- end }}
+    matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
+{{- end }}

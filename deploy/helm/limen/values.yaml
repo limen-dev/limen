@@ -1,5 +1,12 @@
 # Limen chart values. Everything marked REQUIRED has no default; `helm
 # install` fails with a message naming the missing value.
+#
+# Each of controlPlanes, proxies and workers is a map: add an entry to run one
+# more group. An entry overrides the matching *Defaults block, so it holds
+# only what differs. Keys become part of every resource name. Example:
+#   workers:
+#     prod-db: { proxy: public }
+#     staging: { proxy: public, replicas: 2 }
 
 image:
   registry: ""          # e.g. ghcr.io/your-org
@@ -7,7 +14,8 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
-# Secrets and ConfigMaps you create beforehand (see README.md).
+# Secrets and ConfigMaps you create beforehand (see README.md). A group can
+# point at its own with `joinSecret`, so each can have its own token.
 existingSecrets:
   database: limen-database          # key: url
   proxyJoin: limen-proxy-join       # key: token
@@ -15,8 +23,8 @@ existingSecrets:
 internalCA:
   configMap: limen-internal-ca      # key: internal-ca.pem
 
-controlPlane:
-  enabled: true
+controlPlanes: {}   # REQUIRED unless you run none of this component
+controlPlaneDefaults:
   replicas: 3
   drainTimeout: 20s
   # Must exceed drainTimeout by enough to finish the drain and the handoff.
@@ -30,6 +38,7 @@ controlPlane:
     userCaKey: ""
     sshUserCaKey: ""
     sshHostCaKey: ""
+  databaseSecret: ""                # default: existingSecrets.database
   spool:
     size: 10Gi
     storageClassName: ""
@@ -41,13 +50,16 @@ controlPlane:
   tolerations: []
   serviceAccount: { create: true, annotations: {} }   # IRSA role for KMS and S3
 
-proxy:
-  enabled: true
+proxies: {}   # REQUIRED unless you run none of this component
+proxyDefaults:
   replicas: 3
   drainTimeoutSecs: 20
   terminationGracePeriodSeconds: 40
   namePrefix: ""                    # REQUIRED: the join token must approve it
   dnsNames: ""                      # REQUIRED: the public DNS name(s) of the load balancer
+  controlPlane: ""                  # key of the control plane group to dial; default: the first
+  controlPlaneAddr: ""              # overrides controlPlane, e.g. "cp.other-cluster.example.com:3080"
+  joinSecret: ""                    # default: existingSecrets.proxyJoin
   service:
     type: LoadBalancer
     port: 443
@@ -62,16 +74,18 @@ proxy:
   nodeSelector: {}
   tolerations: []
 
-worker:
-  enabled: true
+workers: {}   # REQUIRED unless you run none of this component
+workerDefaults:
   replicas: 3
   maxSessions: 200
   drainTimeoutSecs: 300
   # Above drainTimeoutSecs plus about 20 s to upload recordings.
   terminationGracePeriodSeconds: 330
   namePrefix: ""                    # REQUIRED
-  proxyAddr: ""                     # REQUIRED: host:port, e.g. proxy.example.com:443
-  proxyName: ""                     # REQUIRED: the proxy's certificate name
+  proxy: ""                         # key of the proxy group to dial; default: the first
+  proxyAddr: ""                     # overrides proxy: host:port
+  proxyName: ""                     # overrides proxy: the proxy's certificate name
+  joinSecret: ""                    # default: existingSecrets.workerJoin
   resources:
     requests: { cpu: 250m, memory: 256Mi }
   extraEnv: []

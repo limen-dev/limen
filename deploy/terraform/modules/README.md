@@ -4,17 +4,35 @@
 |---|---|
 | `audit` | S3 audit store, KMS, Glue and Athena |
 | `datadog` | Datadog sink monitors |
-| `ecs` | One Limen component (`control-plane`, `proxy` or `worker`) as a Fargate service: log group, security group, task and execution roles |
-| `ec2` | One component as an Auto Scaling group of Amazon Linux 2023 instances running the container under systemd |
+| `ecs` | Limen services on Fargate, built on `terraform-aws-modules/ecs` (cluster and service submodules) |
+| `ec2` | Limen Auto Scaling groups of Amazon Linux 2023 instances running the container under systemd, built on `terraform-aws-modules/autoscaling` and `security-group` |
 
-`ecs` and `ec2` deploy **one component per call**, so each can sit in its own VPC and subnets with its own name: call the module once per component. Peers reach each other through security group rules; both modules output `security_group_id` for that. `examples/complete` puts the control plane and proxy on ECS in one VPC and the workers on EC2 in another.
+Layout of `ecs` and `ec2`: `versions.tf`, `variables.tf`, `locals.tf`, `main.tf`, `outputs.tf` (and `data.tf`, `user-data.sh.tftpl` in `ec2`). Provider and module versions are pinned.
 
-Both modules take secrets as Secrets Manager ARNs (`secrets = { LIMEN_JOIN_TOKEN = arn }`), read at start with the task or instance role, so values stay out of Terraform state and user data. Roles accept extra policies (`task_role_policy_arns`) for KMS and S3.
+## Running more than one of each
 
-Limits to know about:
+`ecs` takes a `services` map and `ec2` a `groups` map. **Every entry is one more service**, of any component (`control-plane`, `proxy`, `worker`), with its own VPC, subnets, size, image and settings:
 
-- Fargate stops a task at most 120 s after SIGTERM (`stop_timeout`), shorter than the worker's default 300 s drain. Use `ec2` for workers, or lower `LIMEN_DRAIN_TIMEOUT_SECS` below 120.
-- Fargate has no persistent volume here. A control plane there runs with the default spool, and an unshipped audit spool is lost if the task dies. Use `ec2` (root volume) when that matters.
-- Proxies on `ec2` need a TCP load balancer you create; pass its target group as `target_group_arn`.
+```hcl
+module "ecs" {
+  source = "../../modules/ecs"
+  name   = "limen-prod"
+  services = {
+    proxy-public  = { component = "proxy", image = "...", vpc_id = "vpc-core", subnet_ids = [...], desired_count = 3, target_group_arn = "..." }
+    proxy-partner = { component = "proxy", image = "...", vpc_id = "vpc-partner", subnet_ids = [...] }
+    worker-prod   = { component = "worker", image = "...", vpc_id = "vpc-prod", subnet_ids = [...], min_count = 3, max_count = 20 }
+  }
+}
+```
 
-**Unverified:** both modules and the example pass `terraform validate` and `tflint` only. They were never applied to AWS.
+Scale an existing service by changing `desired_count` (ECS; with `min_count`/`max_count` a CPU target-tracking policy is added) or `desired_capacity` (EC2; Terraform then ignores the live count so your scaling policies win). Peers reach each other through security group rules; both modules output each service's `security_group_id` and role name. `examples/complete` builds all three components from maps, with workers in separate VPCs; `terraform.tfvars.example` shows the shape.
+
+Secrets are ARNs (`secrets = { LIMEN_JOIN_TOKEN = arn }`), read at start with the task or instance role, so values stay out of state and user data. Attach KMS and S3 policies with `task_role_policy_arns` (ECS) or `role_policy_arns` (EC2).
+
+## Limits
+
+- Fargate stops a task at most 120 s after SIGTERM (`stop_timeout`), shorter than the worker's default 300 s drain; the module rejects a larger value. Use `ec2` for workers, or set `LIMEN_DRAIN_TIMEOUT_SECS` below 120.
+- Fargate tasks have no persistent volume, so an unshipped audit spool is lost if a control plane task dies. Control plane replicas also need stable ids (`LIMEN_ID`) that neither ECS nor an Auto Scaling group gives; the Kubernetes StatefulSet does. Test control planes on these runtimes before relying on them.
+- Proxies on `ec2` need a TCP load balancer you create; pass its target groups in `target_group_arns`.
+
+**Unverified:** the modules and the example pass `terraform validate` only. They were never planned or applied against AWS.

@@ -75,6 +75,18 @@ A dependency is adopted only if all of these hold:
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
 | RUSTSEC-2026-0387 (`crypto-bigint` timing variability) | `crypto-bigint` 0.5.5 (via `openidconnect` 4.0.1, `p256`/`p384` 0.13, `elliptic-curve` 0.13) | The advisory covers operations on secret integers. Limen only verifies IdP ES256/ES384 ID token signatures with public keys, so none are processed. The other path, `aws-sigv4`, is cleared: 1.6.4 uses `crypto-bigint` 0.7. The fix is on `openidconnect` master (4.1.0, `p256`/`p384` 0.14) but not on crates.io yet; upstream tracks it in [openidconnect-rs#244](https://github.com/ramosbugs/openidconnect-rs/issues/244). Remove the `deny.toml` ignore and this row when 4.1.0 ships and we bump. |
 
+## Terraform registry modules (2026-10-25)
+
+The `ecs` and `ec2` modules under `deploy/terraform/modules` build on community modules from `terraform-aws-modules`, pinned with a pessimistic constraint (`~>`). Versions and release dates from the Terraform registry on 2026-10-25.
+
+| Module | Version | Last release | Used for | Verdict |
+|---|---|---|---|---|
+| `terraform-aws-modules/ecs/aws` (`cluster`, `service`) | 7.6.1 | 2026-09-18 | Fargate cluster, services, task and execution roles, service security group, autoscaling | Adopt |
+| `terraform-aws-modules/autoscaling/aws` | 9.3.2 | 2026-09-18 | Launch template, Auto Scaling group, instance profile and role | Adopt |
+| `terraform-aws-modules/security-group/aws` | 6.0.0 | 2026-06-03 | Instance security groups | Adopt |
+
+Advisory check: not done against a Terraform advisory source (none is wired into CI); the modules are widely used and maintained. Re-check when bumping.
+
 ## Consequences
 - We own two small protocol codecs: MySQL (server side toward clients, client side toward targets) and RESP, plus the PostgreSQL frame layer. All are to be fuzzed with `cargo-fuzz`; that is still open for the Phase 6 codecs (design §14).
 - To add a dependency, a PR adds a row here.
