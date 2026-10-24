@@ -402,15 +402,8 @@ What each phase built is in its guide and ADR; this section holds only what is u
 - **Deferred to Phase 14:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
 - **Deferred and not yet scheduled in §13:**
   - Port forwarding through Limen (from Phase 2).
-  - Phase 6:
-    - Secrets Manager for the bootstrap admin (`admin_secret_arn`); the admin password is a file.
-    - `audit.log_parameters`: query parameters are never logged.
-    - Statement-level allow and deny (enforcement is the database's grants).
-    - MySQL cursors, compression, and `LOCAL INFILE`; PostgreSQL protocol versions other than 3.0.
-  - Phase 9:
-    - `mongodb+srv://` (DNS SRV and TXT) resolution and sharded clusters (`mongos`).
-    - Presenting the server as a replica set so drivers can use transactions and retryable writes (needs the CLI to tell the worker its listener address).
-    - A role bootstrap for MongoDB users (made by hand, see `docs/guides/mongodb.md`), SASLprep for non-ASCII passwords, and per-collection or per-operation policy.
+  - Phase 6: listed in the [databases guide](guides/databases.md#not-in-this-release).
+  - Phase 9: `mongodb+srv://` and sharded clusters, a MongoDB role bootstrap, replica-set presentation for transactions, SASLprep, per-collection policy; see the [MongoDB guide](guides/mongodb.md#operating-it).
   - Fuzzing the MySQL codec, the PostgreSQL frame splitter (promised in ADR-0012), and the BSON reader and wire framing with `cargo-fuzz`.
   - Grafana panels and typed columns for the `db.*` and `mongo.*` events. The audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*

@@ -234,7 +234,7 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 
 ## Web console (Phase 3.5)
 
-`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
+`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only their own resources and sessions). The certificate warning and the dev CA are covered in the [README quickstart](../../README.md#quickstart). `demo-phase35.sh` logs in with curl, locks and unlocks a user, ends a live session, and checks the recording playback.
 
 The console's OIDC client (`limen-console`) and its dev secret are in `config/dex/config.yaml` and `docker-compose.yml`.
 

@@ -39,26 +39,7 @@ The admin password goes to the worker as a file (Kubernetes secret, ECS secret, 
 
 ## 3. Describe the database in policy
 
-```yaml
-kind: resource
-version: v1
-metadata: { name: orders-prod, labels: { env: prod, team: payments } }
-spec:
-  postgres:
-    endpoint: "orders.cluster-xyz.eu-west-1.rds.amazonaws.com:5432"
-    region: eu-west-1
-    iam_auth: true                       # or false with password_dir
-    default_database: orders
-    tls_ca_file: /etc/limen/rds-global-bundle.pem
-    admin_user: limen_admin
-    admin_password_file: /run/limen/admin-password
-    bootstrap:
-      - role: limen_read
-        grants: [{ database: orders, access: read }]
-      - role: limen_write
-        grants: [{ database: orders, access: write }]
-  worker_selector: { pool: prod-vpc }
-```
+Write the resource as in the [databases guide](../guides/databases.md#resources). For RDS or Aurora with IAM set `iam_auth: true` and `region` (for example `orders.cluster-xyz.eu-west-1.rds.amazonaws.com:5432`, CA bundle `rds-global-bundle.pem`); with `iam_auth: false` set `password_dir`. Keep `admin_user`, `admin_password_file` and the `bootstrap` roles.
 
 Then a role that lets people use them (`db: { roles: [limen_read], databases: [orders] }`). Apply with `limen admin apply`. Role names must start with `limen_`.
 
