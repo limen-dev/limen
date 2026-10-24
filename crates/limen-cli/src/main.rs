@@ -207,6 +207,17 @@ enum Command {
     },
 }
 
+/// Options shared by every `ls` view.
+#[derive(Debug, clap::Args)]
+struct ListArgs {
+    /// Output JSON instead of a table.
+    #[arg(long)]
+    json: bool,
+    /// Only resources with this label (`key=value`). Repeat to require several.
+    #[arg(long, value_name = "KEY=VALUE", value_parser = commands::parse_label)]
+    label: Vec<(String, String)>,
+}
+
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
     /// An ~/.ssh/config block so `ssh <login>@<resource>.limen` works directly.
@@ -215,6 +226,8 @@ enum ConfigCommand {
 
 #[derive(Debug, Subcommand)]
 enum DbCommand {
+    /// List the postgres/mysql/redshift resources you can access.
+    Ls(ListArgs),
     /// Open a local listener for psql or mysql to connect to without a password.
     Connect {
         resource: String,
@@ -233,6 +246,8 @@ enum DbCommand {
 
 #[derive(Debug, Subcommand)]
 enum RedisCommand {
+    /// List the redis resources you can access.
+    Ls(ListArgs),
     /// Open a local listener that redis-cli (or any Redis or Valkey client) connects to without a password.
     Connect {
         resource: String,
@@ -253,6 +268,8 @@ enum RedisCommand {
 
 #[derive(Debug, Subcommand)]
 enum KubeCommand {
+    /// List the kubernetes resources you can access.
+    Ls(ListArgs),
     /// Write a kubeconfig for a cluster; kubectl then asks `limen kube credentials`.
     Login {
         cluster: String,
@@ -269,6 +286,8 @@ enum KubeCommand {
 
 #[derive(Debug, Subcommand)]
 enum MongoCommand {
+    /// List the mongodb resources you can access.
+    Ls(ListArgs),
     /// Open a local listener that mongosh (or any MongoDB driver) connects to without a password.
     Connect {
         resource: String,
@@ -292,6 +311,8 @@ enum MongoCommand {
 
 #[derive(Debug, Subcommand)]
 enum SearchCommand {
+    /// List the opensearch/elasticsearch resources you can access.
+    Ls(ListArgs),
     /// Open a local listener that curl and the Elasticsearch and `OpenSearch` clients use without a credential.
     Connect {
         resource: String,
@@ -312,6 +333,8 @@ enum SearchCommand {
 
 #[derive(Debug, Subcommand)]
 enum MqCommand {
+    /// List the rabbitmq resources you can access.
+    Ls(ListArgs),
     /// Open a local listener that AMQP 0-9-1 clients (pika, amqplib, Bunny, ...) connect to without a password.
     Connect {
         resource: String,
@@ -332,6 +355,8 @@ enum MqCommand {
 
 #[derive(Debug, Subcommand)]
 enum KafkaCommand {
+    /// List the kafka resources you can access.
+    Ls(ListArgs),
     /// Open local listeners that Kafka clients (kcat, the Java client, librdkafka, ...) bootstrap from without a password.
     Connect {
         resource: String,
@@ -352,6 +377,8 @@ enum KafkaCommand {
 
 #[derive(Debug, Subcommand)]
 enum WebCommand {
+    /// List the web resources you can access.
+    Ls(ListArgs),
     /// Open an internal web app in your browser after single sign-on.
     Open {
         app: String,
@@ -410,8 +437,45 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Logout => commands::logout(proxy).await,
         Command::Status => commands::status(proxy),
         Command::Ls { json, kind, label } => {
-            commands::ls(proxy, json, kind.as_deref(), &label).await
+            commands::ls(proxy, json, kind.as_deref().as_slice(), &label).await
         }
+        Command::Db {
+            command: DbCommand::Ls(args),
+        } => {
+            commands::ls(
+                proxy,
+                args.json,
+                &["postgres", "mysql", "redshift"],
+                &args.label,
+            )
+            .await
+        }
+        Command::Redis {
+            command: RedisCommand::Ls(args),
+        } => commands::ls(proxy, args.json, &["redis"], &args.label).await,
+        Command::Mongo {
+            command: MongoCommand::Ls(args),
+        } => commands::ls(proxy, args.json, &["mongodb"], &args.label).await,
+        Command::Search {
+            command: SearchCommand::Ls(args),
+        } => {
+            commands::ls(
+                proxy,
+                args.json,
+                &["opensearch", "elasticsearch"],
+                &args.label,
+            )
+            .await
+        }
+        Command::Mq {
+            command: MqCommand::Ls(args),
+        } => commands::ls(proxy, args.json, &["rabbitmq"], &args.label).await,
+        Command::Kafka {
+            command: KafkaCommand::Ls(args),
+        } => commands::ls(proxy, args.json, &["kafka"], &args.label).await,
+        Command::Web {
+            command: WebCommand::Ls(args),
+        } => commands::ls(proxy, args.json, &["web"], &args.label).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
@@ -465,6 +529,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 print,
             } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
             KubeCommand::Credentials => commands::kube::credentials(proxy),
+            KubeCommand::Ls(args) => {
+                commands::ls(proxy, args.json, &["kubernetes"], &args.label).await
+            }
         },
         Command::Mongo {
             command:
@@ -789,6 +856,27 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_per_protocol_ls() {
+        for group in [
+            "db", "redis", "kube", "mongo", "search", "mq", "kafka", "web",
+        ] {
+            let cli = Cli::try_parse_from(["limen", group, "ls", "--json", "--label", "env=prod"])
+                .unwrap_or_else(|e| panic!("{group} ls: {e}"));
+            assert!(matches!(
+                cli.command,
+                Command::Db { .. }
+                    | Command::Redis { .. }
+                    | Command::Kube { .. }
+                    | Command::Mongo { .. }
+                    | Command::Search { .. }
+                    | Command::Mq { .. }
+                    | Command::Kafka { .. }
+                    | Command::Web { .. }
+            ));
+        }
     }
 
     #[test]

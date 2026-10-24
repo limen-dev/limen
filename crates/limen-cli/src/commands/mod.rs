@@ -100,8 +100,8 @@ pub fn parse_label(s: &str) -> Result<(String, String), String> {
 }
 
 /// Whether a resource passes the `--type` and `--label` filters of `limen ls`.
-fn matches_filters(r: &Resource, kind: Option<&str>, labels: &[(String, String)]) -> bool {
-    kind.is_none_or(|k| r.kind == k)
+fn matches_filters(r: &Resource, kinds: &[&str], labels: &[(String, String)]) -> bool {
+    (kinds.is_empty() || kinds.contains(&r.kind.as_str()))
         && labels
             .iter()
             .all(|(k, v)| r.labels.get(k).is_some_and(|actual| actual == v))
@@ -110,7 +110,7 @@ fn matches_filters(r: &Resource, kind: Option<&str>, labels: &[(String, String)]
 pub async fn ls(
     proxy: Option<&str>,
     json: bool,
-    kind: Option<&str>,
+    kinds: &[&str],
     labels: &[(String, String)],
 ) -> anyhow::Result<()> {
     let (_, channel) = api::authenticated(proxy)?;
@@ -119,11 +119,11 @@ pub async fn ls(
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
-    let filtered = kind.is_some() || !labels.is_empty();
+    let filtered = !kinds.is_empty() || !labels.is_empty();
     let resources: Vec<_> = resp
         .resources
         .into_iter()
-        .filter(|r| matches_filters(r, kind, labels))
+        .filter(|r| matches_filters(r, kinds, labels))
         .collect();
     if json {
         let items: Vec<_> = resources
@@ -184,13 +184,13 @@ mod ls_filter_tests {
     #[test]
     fn filters_by_type_and_every_label() {
         let r = resource("postgres", &[("env", "staging"), ("team", "payments")]);
-        assert!(matches_filters(&r, None, &[]));
-        assert!(matches_filters(&r, Some("postgres"), &[]));
-        assert!(!matches_filters(&r, Some("ssh"), &[]));
+        assert!(matches_filters(&r, &[], &[]));
+        assert!(matches_filters(&r, &["postgres"], &[]));
+        assert!(!matches_filters(&r, &["ssh", "mysql"], &[]));
         let env = ("env".to_owned(), "staging".to_owned());
         let team = ("team".to_owned(), "other".to_owned());
-        assert!(matches_filters(&r, None, std::slice::from_ref(&env)));
-        assert!(!matches_filters(&r, None, &[env, team]));
+        assert!(matches_filters(&r, &[], std::slice::from_ref(&env)));
+        assert!(!matches_filters(&r, &[], &[env, team]));
     }
 
     #[test]
