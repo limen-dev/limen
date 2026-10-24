@@ -33,6 +33,7 @@ async fn deny(
     reason: &'static str,
 ) -> Status {
     metrics::counter!("limen_logins_total", "outcome" => "denied").increment(1);
+    tracing::warn!(user = user.as_deref(), client_addr = ?addr, reason, "login denied");
     let data =
         json!({ "action": "login", "reason": reason, "client_addr": addr.map(|a| a.to_string()) });
     if let Err(e) = audit

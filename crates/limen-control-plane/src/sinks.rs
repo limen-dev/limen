@@ -391,7 +391,7 @@ impl DatadogSink {
                 }
                 Outcome::Rejected(status) => {
                     let id = chunk[0].get("event_id").cloned().unwrap_or_default();
-                    tracing::error!(%status, event_id = %id, "Datadog rejected an audit event; skipping it in Datadog only (it's in S3)");
+                    tracing::warn!(%status, event_id = %id, "Datadog rejected an audit event; skipping it in Datadog only (it's in S3)");
                     metrics::counter!("limen_audit_datadog_rejected_total").increment(1);
                 }
             }

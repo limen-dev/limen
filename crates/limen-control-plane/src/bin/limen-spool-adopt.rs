@@ -8,14 +8,13 @@
 
 use clap::Parser;
 use limen_control_plane::adopt::{self, AdoptArgs};
-use limen_core::telemetry::{self, LogFormat};
+use limen_core::telemetry::LogArgs;
 
 #[derive(Debug, Parser)]
 #[command(name = "limen-spool-adopt", version = limen_core::VERSION, about)]
 struct Args {
-    /// Emit logs as JSON lines instead of human-readable text.
-    #[arg(long, env = "LIMEN_LOG_JSON")]
-    log_json: bool,
+    #[command(flatten)]
+    log: LogArgs,
 
     #[command(flatten)]
     adopt: AdoptArgs,
@@ -24,11 +23,7 @@ struct Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    telemetry::init(if args.log_json {
-        LogFormat::Json
-    } else {
-        LogFormat::Text
-    });
+    args.log.init();
     match adopt::run(args.adopt).await {
         Ok(done) => match done.peer {
             Some(peer) => eprintln!("OK: handed {} audit records to {peer}", done.sent),

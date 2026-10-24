@@ -104,6 +104,7 @@ async fn deny(
     reason: &'static str,
 ) -> Status {
     metrics::counter!("limen_logins_total", "outcome" => "denied", "actor" => "bot").increment(1);
+    tracing::warn!(method, client_addr = ?addr, reason, "bot login denied");
     let data = json!({
         "action": "bot_login",
         "actor_type": "bot",

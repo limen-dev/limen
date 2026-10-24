@@ -715,7 +715,7 @@ where
             let action = if written {
                 planned.ok
             } else {
-                tracing::error!(resource = %cx.config.resource, "audit unavailable; refusing a Kafka request");
+                tracing::error!(resource = %cx.config.resource, session = %cx.config.session_id, "audit unavailable; refusing a Kafka request");
                 metrics::counter!("limen_broker_audit_failures_total", "protocol" => "kafka")
                     .increment(1);
                 planned.audit_failed
