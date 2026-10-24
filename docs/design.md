@@ -340,9 +340,9 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 
 ## 12. Workspace layout
 
+Top-level directories are listed in [CONTRIBUTING.md](../CONTRIBUTING.md#repository-layout). The crates:
+
 ```
-Cargo.toml  Cargo.lock  rust-toolchain.toml  mise.toml  deny.toml  clippy.toml
-proto/limen/v1/          # control.proto, tunnel.proto (+ policy, audit ingest later)
 crates/
   limen-core/            # ids, labels, resource kinds, telemetry init, secret newtypes
   limen-proto/           # tonic/prost generated code
@@ -352,16 +352,14 @@ crates/
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
   limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
-  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
+  limen-kube/            # Kubernetes request classification and exec/port-forward stream decoding
   limen-testkit/         # fixtures, in-process cluster harness
+  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-control-plane/   # bin
   limen-proxy/           # bin
-  limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, search, kube
+  limen-worker/          # bin; protocol modules: ssh, db (pg, mysql), redis, mongo, search, amqp, kafka, kube
   limen-cli/             # bin `limen`
-deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
-deploy/grafana/{dashboards,alerting,provisioning}
-docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
 When a protocol module in the worker grows big enough, it moves to its own crate (`limen-proto-pg`, …) so it can be fuzzed in isolation.

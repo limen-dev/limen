@@ -99,10 +99,9 @@ deploy/compose/
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists)
-demos/                      one demo per phase (exit criteria) and the Redis scenarios test
-scripts/                    smoke-release.sh, ci-db-targets.sh
-deploy/                     cli/ (installer), compose/, docker/, grafana/, kubernetes/, terraform/
 ```
+
+Other top-level directories: [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-layout).
 
 Compose resolves relative paths against the first `-f` file's directory, so list `docker-compose.yml` first, or pass `--project-directory deploy/compose` when you start from a file in `stacks/`.
 
