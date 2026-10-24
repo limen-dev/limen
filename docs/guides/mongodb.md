@@ -14,7 +14,6 @@ mongosh "mongodb://127.0.0.1:51234/orders?directConnection=true"
 
 - Each connection to the listener is its own audited session. A driver opens a few (monitoring and a pool), so one `mongosh` opens a few sessions. The console shows them as one row ("4 connections"): they share a group id that `limen mongo connect` generates for its run, and the session page lists the commands of all of them. Each connection still has its own session id and audit events. The check `limen mongo connect` makes at startup carries no traffic and is not counted. Leave `limen mongo connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
 - `--role write` picks the role when policy allows several. `--database orders` opens another database (the resource's `default_database` otherwise). `--listen 127.0.0.1:27018` fixes the port (loopback only). `--socket ~/.limen/run/catalog.sock` uses a unix socket (mode 0600, in a directory only you can enter) instead of TCP.
-- Anyone who can reach the listener acts as you. That is why it binds loopback only and the socket is private. Don't forward the port.
 - **Connect without credentials.** A connection string with a user and password is refused (`Limen has already authenticated this session`); the worker's login stays.
 - A refusal reaches your client as a MongoDB error: `not authorized on billing` for a database policy doesn't grant, `Limen policy does not allow the dropDatabase command`, or `Limen: access denied ...` if you can't use the resource at all.
 
@@ -55,7 +54,7 @@ To keep values, set `full_commands: true` on the resource. Fields named like sec
 
 A refused command is a `mongo.command` event with `phase: refused` and a `reason` (`database_not_granted`, `command_denied`, `auth_command`, `unknown_cursor`). `session.start` and `session.end` carry `kind: mongodb`. Locking a user or killing a session ends the MongoDB session like any other.
 
-**In the console**, a session's page lists its commands (time, command, shape, outcome), up to 500, including refused ones and each command's result and error code. MongoDB sessions have no terminal recording; this list is the record, the same as for SQL and Redis sessions. The console keeps this text in the control plane's database for 30 days (table `db_statements`), visible only to admins and to the session's own user. The complete trail stays in S3 and Datadog with the hash chain.
+**In the console**, the session page lists its commands ([command lists](console.md)): time, command, shape, outcome, and each command's result and error code.
 
 ## Operating it
 

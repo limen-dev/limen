@@ -99,14 +99,13 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml  tcp.yml  web.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
-                            dev-users.sh and gen-dev-users.py (generated user lists)
-demos/                      one demo per phase (exit criteria) and the Redis scenarios test
-scripts/                    smoke-release.sh, ci-db-targets.sh
-deploy/                     cli/ (installer), compose/, docker/, grafana/, kubernetes/, terraform/
+                            dev-users.sh and gen-dev-users.py (generated user lists), test-policy-selection.sh
 ```
+
+Other top-level directories: [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-layout).
 
 Compose resolves relative paths against the first `-f` file's directory, so list `docker-compose.yml` first, or pass `--project-directory deploy/compose` when you start from a file in `stacks/`.
 
@@ -178,9 +177,9 @@ deploy/compose/setup.sh down                # removes the volumes too (add --sca
 
 The demos in `demos/` use the same helper (`scripts/lib.sh`). The Phase 5, 6 and 7 demos run their own copy (project, images and host ports set through `LIMEN_PROJECT`, `LIMEN_IMAGE_TAG` and `LIMEN_PORT_*`, see `docker-compose.yml`), so each can run beside this one.
 
-Every phase is checked against the running stack, not only by unit tests: Phase 2 covers SSH with recording, Phase 3 the audit pipeline and dashboards, Phase 3.5 the web console, Phase 4 bots (a CI job logging in with an identity token), Phase 5 scale-out (killing and restarting control planes during a live session without losing audit events), and Phase 6 databases (`psql` and `mysql` through `limen db connect`). The exit criteria for each phase are in [`docs/design.md`](../../docs/design.md#13-phases-and-exit-criteria).
+Each phase's demo checks its exit criteria ([design §13](../../docs/design.md#13-phases-and-exit-criteria)).
 
-## SSH (Phase 2)
+## Demos and SSH
 
 ```sh
 demos/demo-phase2.sh          # end to end with OpenSSH, including a control plane outage
@@ -273,7 +272,7 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 
 ## Web console (Phase 3.5)
 
-`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only his own resources and sessions). The proxy's certificate comes from the Limen internal CA, so your browser will warn about it. That's expected here: don't add the dev CA to your system trust store. Use `limen --ca-file` for the CLI, and `curl --cacert deploy/compose/.state/internal-ca.pem` for scripts. `demo-phase35.sh` does the Dex login with curl, locks and unlocks a user, ends a live session, and plays back the recording check.
+`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (sees only their own resources and sessions). The certificate warning and the dev CA are covered in the [README quickstart](../../README.md#quickstart). `demo-phase35.sh` logs in with curl, locks and unlocks a user, ends a live session, and checks the recording playback.
 
 The console's OIDC client (`limen-console`) and its dev secret are in `config/dex/config.yaml` and `docker-compose.yml`.
 
@@ -287,16 +286,13 @@ demos/demo-phase5.sh          # resets the scale stack, runs the exit test, stop
 demos/demo-phase5.sh --keep   # reuse the running scale stack and leave it up
 ```
 
-What is in it:
+What is in it (how scale-out behaves — identity, spool modes, connection age, worker load and drain, names, the shared CA — is in the [scale-out guide](../../docs/guides/scale-out.md)):
 
-- `control-plane-0`, `-1`, `-2` on one PostgreSQL. Each has its own `--id` (`LIMEN_ID`, also its S3 manifest writer), its own spool volume, and `--advertise-url https://control-plane-N:3080` (where peers hand off to). All three share the network alias `control-plane`, so DNS returns all three. Spool modes: `-1` is `durable`, `-0` and `-2` are `ephemeral`; override with `LIMEN_SCALE_SPOOL_MODE_0/1/2`. `stop_grace_period` (40 s) is longer than the drain timeout (20 s), so `docker compose stop` drains and hands off rather than being cut short.
-- Connection age: each control plane closes every API connection gracefully (HTTP/2 GOAWAY) after `LIMEN_MAX_CONNECTION_AGE_SECS` ±10 %, then gives in-flight calls `LIMEN_CONNECTION_AGE_GRACE_SECS` (30 s) before cutting it. The default is 300 s; this stack uses 60 s (`LIMEN_SCALE_MAX_CONNECTION_AGE_SECS` overrides it, 0 disables), so the proxies, which all start on `control-plane-1`, move onto the other replicas during the demo. Proxies resolve `control-plane` again on every reconnect and try the addresses in random order.
-- Worker load: each worker accepts at most `LIMEN_MAX_SESSIONS` sessions at once (default 200, 0 for no cap) and reports its load in every ping; proxies send each session to the less loaded of two eligible workers and answer `no capacity` (audited as `auth.denied`, `data.reason` `capacity`) when every eligible worker is full. Proxies learn the load from their pings (`LIMEN_PING_INTERVAL_SECS`, default 15) and share it with peers through the registry (`LIMEN_REPORT_INTERVAL_SECS`, default 15); a full worker that the figures missed refuses, and the proxy tries another (up to 3). This stack keeps the defaults; the cap is exercised by the end-to-end tests (`crates/limen-e2e/tests/scale.rs`).
-- Worker drain: on `docker compose stop worker-N` (SIGTERM) a worker takes no new sessions (a proxy that hasn't seen its `draining` ping yet is refused before anything is read and tries another worker), lets open sessions finish for `LIMEN_DRAIN_TIMEOUT_SECS`, then ends the rest (`session.end` with `data.reason` `worker_drain`), uploads their recordings, and exits; an idle worker exits at once. The default timeout is 600 s; this stack sets 20 s, and its `stop_grace_period` (40 s) covers that plus the 18 s the worker may need after it. Worker stops are exercised by the end-to-end tests (`crates/limen-e2e/tests/scale.rs`), not by `demo-phase5.sh`.
-- The CA: the CA certificates are in the database, and with the file backend the keys are on one volume (`cp-ca`) every replica mounts. Whichever replica starts first creates them; the others read the same files (creation is race-free). Separate key volumes per replica do not work: a replica whose key does not match the stored certificate refuses to start. With the KMS backend, every replica gets the same KMS key ids instead.
-- `proxy-0`, `-1`, `-2` reach the control plane through the `control-plane` alias, and share the alias `proxy`; `worker-0`, `-1`, `-2` dial `proxy` and so land on any of them (sessions reach a worker on another proxy by peering). They enroll with the same multi-use static dev tokens as the dev stack, which here also approve names: `limen.io/name=proxy-*` and `limen.io/name=worker-*` in `LIMEN_STATIC_JOIN_TOKENS`, and each proxy and worker asks for its own with `LIMEN_NAME` (`proxy-0`..`proxy-2`, `worker-0`..`worker-2`).
-- Names: optional, for people. They show beside the id in the console, `limen admin components`, the proxies' `/tunnels`, logs, and audit data (`worker_name` and `proxy_name` on `session.start`, `worker_name` on `session.end` and `session.recording`, `component_name` on `worker.enroll` and `component.revoke`), only for components that have one. The id stays the identity: certificates, policy, and revocation use it. A name is `a-z`, `0-9` and `-`, 1 to 63 characters, not starting or ending with `-`, and must be approved by the join token: exactly (`--name prod-a-worker-1`, given even if the component asks for none) or by a pattern with one `*`, which matches zero or more of those characters (`prod-a-*` accepts `prod-a-1`, not `prod-b-1` or `prod-a`). Static tokens are reusable, so they take patterns only. Anything else is refused (`permission_denied`, audited as `auth.denied`). Names are unique among enrolled, unrevoked proxies and workers together: a second component asking for a live name gets `already_exists` (audited as `auth.denied`, reason `name already in use`), and a single-use token is not used up by that. Revoking a component frees its name. The name is sent only at first enrollment and is fixed after that (also as the certificate label `limen.io/name`; policy can't select on it: a `worker_selector` on that key is refused, because a name is for people and whoever holds a pattern token picks its value, so select workers by the labels on their join token); a different `LIMEN_NAME` later is ignored with a warning. A component that loses its data directory and enrolls again under its old name is refused until the old one is revoked, so give autoscaled, ephemeral components unique names (for example with the instance id), or none.
-- SeaweedFS, PostgreSQL, and Dex (the same `config/dex/config.yaml`, rewritten at start for this stack's ports). The SSH target and the other targets come from their stacks (`setup.sh --scale`); there is no KMS here.
+- `control-plane-0`, `-1`, `-2` on one PostgreSQL, sharing the network alias `control-plane`. Spool modes: `-1` is `durable`, `-0` and `-2` are `ephemeral` (override with `LIMEN_SCALE_SPOOL_MODE_0/1/2`). `stop_grace_period` (40 s) is longer than the drain timeout (20 s), so `docker compose stop` drains and hands off.
+- `proxy-0`, `-1`, `-2` (alias `proxy`) and `worker-0`, `-1`, `-2`, which dial `proxy` and land on any of them. They enroll with the same multi-use static dev tokens as the dev stack, which here also approve the names `proxy-N` and `worker-N` (`LIMEN_STATIC_JOIN_TOKENS`).
+- Shorter timers than the defaults so the demo is quick: connection age 60 s (`LIMEN_SCALE_MAX_CONNECTION_AGE_SECS`, 0 disables) and worker drain 20 s. The per-worker session cap and worker drain are exercised by the end-to-end tests (`crates/limen-e2e/tests/scale.rs`), not by `demo-phase5.sh`.
+- The file-backed CA keys live on one volume (`cp-ca`) that every replica mounts. There is no KMS here.
+- SeaweedFS, PostgreSQL, and Dex (the same `config/dex/config.yaml`, rewritten for this stack's ports). The SSH and other targets come from their stacks (`setup.sh --scale`).
 
 Host ports (127.0.0.1): proxies `23443` / `23453` / `23463` (admin `23444` / `23454` / `23464`), control plane admin `23081` / `23082` / `23083`, Dex `25556`, S3 `28333`. To use the CLI against it:
 

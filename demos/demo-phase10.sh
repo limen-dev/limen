@@ -5,8 +5,8 @@
 # against policy (method class and index pattern) and audited, and bodies stay
 # out of the audit trail.
 #
-#   deploy/compose/demo-phase10.sh          # resets this demo's stack first (down -v)
-#   deploy/compose/demo-phase10.sh --keep   # reuse the running stack
+#   demos/demo-phase10.sh          # resets this demo's stack first (down -v)
+#   demos/demo-phase10.sh --keep   # reuse the running stack
 #
 # Runs as its own compose project (limen-search) on its own ports, so it can
 # sit next to the dev stack. Targets are real Elasticsearch 8.15 (security on)

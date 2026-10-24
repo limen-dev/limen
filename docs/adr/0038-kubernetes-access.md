@@ -52,7 +52,7 @@ A kube worker enrolls like any worker and is told its cluster: `--kube-cluster` 
 Helm and Terraform for EKS (Phase 14), the AWS IAM join (Phase 14), EKS access-entry integration, verb-level Limen policy, long-running-controller workloads (one session per request), merging into an existing kubeconfig, and multi-cluster fan-out.
 
 ## Verification
-- **Verified** on a real **kind** cluster (Kubernetes 1.37, kubectl 1.35) by `deploy/compose/demo-phase8.sh`: `get`, `auth whoami` (user, groups, and session extra as the cluster sees them), RBAC for `limen:view` and `limen:edit`, forged `--as` ignored, `exec` over WebSocket and SPDY with exit codes and stdin, `attach`, `port-forward` over both transports, recordings uploaded and played, lock ending an open exec.
+- **Verified** on a real **kind** cluster (Kubernetes 1.37, kubectl 1.35) by `demos/demo-phase8.sh`: `get`, `auth whoami` (user, groups, and session extra as the cluster sees them), RBAC for `limen:view` and `limen:edit`, forged `--as` ignored, `exec` over WebSocket and SPDY with exit codes and stdin, `attach`, `port-forward` over both transports, recordings uploaded and played, lock ending an open exec.
 - Automated: `limen-kube` unit tests (request classification, WebSocket and SPDY decoding, split and malformed input), policy tests, CLI tests, and `limen-e2e/tests/phase8.rs` against a stand-in API server.
 - **Unverified against real service:** Amazon EKS (endpoint access, private endpoints, the worker's token and CA there).
 

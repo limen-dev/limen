@@ -101,8 +101,6 @@ Where a managed AWS service exists, each target works with it and compatible sel
   </tr>
 </table>
 
-**Guides:** [using the console](docs/guides/console.md) · [using the CLI](docs/guides/cli.md)
-
 Behind both: short-lived certificates instead of keys and passwords, deny-by-default YAML policy, an audit trail that cannot silently lose events (S3 with a signed hash chain, Datadog, Grafana), and reverse tunnels so targets never need an open inbound port.
 
 ## Quickstart
@@ -137,25 +135,11 @@ open https://localhost:3443/console/              # macOS; elsewhere just paste 
 
 The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/milestones): one per phase, with the checklist in its epic issue and the exit criteria in its description. [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria) holds the technical definition of "done" ([ADR-0023](docs/adr/0023-roadmap-in-github.md)).
 
-| Phase | What | Status |
-|---|---|---|
-| 0 | Design, ADRs, threat model, skeleton, CI | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/1) |
-| 1 | Control plane, OIDC login, worker enrollment and reverse tunnels | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/2) |
-| 2 | SSH with session recording | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/3) |
-| 3 | Audit pipeline: S3 and Datadog, hash chain, Grafana dashboards | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/4) |
-| 3.5 | Web console | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/5) |
-| 4 | Machine identities (bots) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/6) |
-| 5 | Scale-out: many control planes, proxies, workers | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/7) |
-| 6 | PostgreSQL, MySQL, Aurora, Redshift | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/9) (IAM and Redshift unverified on AWS) |
-| 7 | Redis and Valkey | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/10) (ElastiCache IAM unverified) |
-| 8 | Kubernetes (EKS) | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/11) (verified on kind, not yet on EKS) |
-| 9 | MongoDB, Atlas, DocumentDB | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/12) (Atlas, DocumentDB, and IAM unverified) |
-| 10 | OpenSearch and Elasticsearch | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/13) (Amazon OpenSearch Service and Elastic Cloud unverified) |
-| 11 | RabbitMQ and Kafka | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/14) (Amazon MQ, MSK, and MSK IAM unverified) |
-| 12 | Internal web apps and TCP services | ✅ [milestone](https://github.com/jfcmartins/limen/milestone/15) |
-| 13 | Access requests and approvals, audit and recording search, resource discovery, policy tooling, access reviews | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/18) |
-| 14 | Hardening and production readiness | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/16) |
-| Docs | Documentation site and homepage | ⏳ [milestone](https://github.com/jfcmartins/limen/milestone/8) |
+Phases 0 to 12 are done: foundations, login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, databases, Redis, Kubernetes, MongoDB, search, messaging, and internal web apps with TCP. Which parts are still unverified against real services is shown in the tables above. Next:
+
+- **Phase 13:** access requests and approvals, audit and recording search, resource discovery, policy tooling ([milestone](https://github.com/jfcmartins/limen/milestone/18))
+- **Phase 14:** hardening and production readiness ([milestone](https://github.com/jfcmartins/limen/milestone/16))
+- **Docs:** documentation site and homepage ([milestone](https://github.com/jfcmartins/limen/milestone/8))
 
 ## Why "Limen"
 Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.
@@ -163,7 +147,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- [Using the console](docs/guides/console.md), [using the CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), and [bots for CI](docs/guides/bots.md)
+- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs

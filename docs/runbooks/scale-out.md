@@ -1,6 +1,6 @@
 # Scaling out, replacing, and upgrading copies
 
-How to add and remove control planes, proxies, and workers without losing audit events or ending sessions. Background: [Running Limen at scale](../scale-out.md).
+How to add and remove control planes, proxies, and workers without losing audit events or ending sessions. Background: [Running Limen at scale](../guides/scale-out.md).
 
 ## Before you start: grace periods
 

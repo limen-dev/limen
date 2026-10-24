@@ -35,7 +35,7 @@ Limen must run as several copies of each component and tolerate copies appearing
 
 ## Outcome (Phase 5)
 
-Built as decided, with these changes found while building and testing it. The operator view is [Running Limen at scale](../scale-out.md).
+Built as decided, with these changes found while building and testing it. The operator view is [Running Limen at scale](../guides/scale-out.md).
 
 - **Correction to "producers keep events until the control plane acks".** True, but the ack comes when the event is fsynced to the replica's *local* disk, not when it is shipped. An `ephemeral` replica killed without warning (SIGKILL, out-of-memory, host loss) therefore loses what it had acknowledged and not yet shipped, up to the sink flush interval (60 seconds for S3 by default). Asking a peer to hold a copy before acking was rejected: one more round trip on every ingest and a hard dependency on a peer. The loss is bounded, documented, and **visible**: the verifier reports each producer's missing sequence numbers. `durable` mode (a volume per replica, the default) loses nothing.
 - **A replica registry** (`control_plane_replicas`, heartbeat 5 s, live under 15 s) gives refusal of a duplicate `--id`, peer discovery for handoff, and the replica count. `--id` defaults to the hostname. An ownership token stops a stalled replica from refreshing or deleting the row of the replica that took its id.

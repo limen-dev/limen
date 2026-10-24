@@ -61,7 +61,7 @@ Slice 6e reuses 6a unchanged except for authentication (`GetClusterCredentials`,
 - Compose gains `postgres-target` and `mysql-target` (separate from the control plane's own database) seeded with a small schema and two `limen_*` roles.
 - Unit tests: frame parsing for both protocols; fuzz targets (`cargo-fuzz`) for the MySQL codec and the PostgreSQL frame splitter, as ADR-0012 already promises for owned codecs.
 - Integration tests: allowed and denied role and database; `SET ROLE` has no effect because of grants; cancel; `COPY`; multi-statement; prepared statements; audit-write failure refuses the statement; idempotent bootstrap; token signing against vectors.
-- `deploy/compose/demo-phase6.sh`: logs in, runs `psql` and `mysql` through `limen db connect`, shows the audited statements, shows a denied database, runs bootstrap twice.
+- `demos/demo-phase6.sh`: logs in, runs `psql` and `mysql` through `limen db connect`, shows the audited statements, shows a denied database, runs bootstrap twice.
 - Docs: `docs/guides/databases.md`, runbook `database-onboarding.md`, a threat-model update (new listener, statement text in audit, admin secret, `SET ROLE`), ADR-0012 rows for new dependencies.
 
 ### 9. Dependencies

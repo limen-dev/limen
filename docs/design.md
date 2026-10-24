@@ -340,9 +340,9 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 
 ## 12. Workspace layout
 
+Top-level directories are listed in [CONTRIBUTING.md](../CONTRIBUTING.md#repository-layout). The crates:
+
 ```
-Cargo.toml  Cargo.lock  rust-toolchain.toml  mise.toml  deny.toml  clippy.toml
-proto/limen/v1/          # control.proto, tunnel.proto (+ policy, audit ingest later)
 crates/
   limen-core/            # ids, labels, resource kinds, telemetry init, secret newtypes
   limen-proto/           # tonic/prost generated code
@@ -352,16 +352,14 @@ crates/
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
   limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
-  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
+  limen-kube/            # Kubernetes request classification and exec/port-forward stream decoding
   limen-testkit/         # fixtures, in-process cluster harness
+  limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
   limen-control-plane/   # bin
   limen-proxy/           # bin
-  limen-worker/          # bin; protocol modules: ssh, pg, mysql, redis, search, kube
+  limen-worker/          # bin; protocol modules: ssh, db (pg, mysql), redis, mongo, search, amqp, kafka, kube
   limen-cli/             # bin `limen`
-deploy/{docker,compose,kubernetes,terraform/{modules/{audit,datadog},examples/audit}}
-deploy/grafana/{dashboards,alerting,provisioning}
-docs/{design.md,threat-model.md,policy.md,components.md,guides/,adr/,runbooks/}
 ```
 
 When a protocol module in the worker grows big enough, it moves to its own crate (`limen-proto-pg`, …) so it can be fuzzed in isolation.
@@ -391,31 +389,22 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 14 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
-- **Phase 7 status (2026-10-17).**
-  - Implemented and tested: `limen redis connect` (loopback or unix-socket listener), the proxy's `limen-redis/1` sessions, the worker's RESP2/RESP3 codec and session handler (ordered replies with locally answered denials, pipelining, `MULTI`, Pub/Sub pass-through), per-command policy (default deny list, `allow_commands`, `deny_commands`, key patterns, databases), `redis.command` audit with values redacted and credentials never logged, audit that fails closed, ACL-password login, an IAM token signer, and re-login before the 12-hour limit. `demos/demo-phase7.sh` runs real Redis 7.4 and Valkey 8.0.
-  - *Unverified against real ElastiCache:* IAM token acceptance, the re-login, TLS with the AWS bundle. Cluster mode, ElastiCache Serverless, and a worker-managed ElastiCache user bootstrap are not built. The demo uses a small RESP client where `redis-cli` isn't installed.
-- **Phase 10 status (2026-10-18).**
-  - Implemented and tested: `limen search connect` (loopback or unix-socket listener), the proxy's `limen-search/1` sessions, the worker's HTTP front and engine client, the request classifier (method class, index scope from the path and from bodies, hidden indices, evasions), per-grant `classes` and `indices`, `search.request`/`search.response` audit that fails closed with bodies and query values off by default, the console's request list, basic, API-key, bearer, mTLS, and `SigV4` credentials, and a `SigV4` signer checked against an independent implementation. `demos/demo-phase10.sh` runs real Elasticsearch 8.15 (security on) and OpenSearch 2.17 (security plugin, TLS verified in full).
-  - *Unverified against real services:* Amazon OpenSearch Service (SigV4 acceptance, fine-grained access control), OpenSearch Serverless, Elastic Cloud API keys, TLS with the Amazon bundle.
-- **Phase 11 status (2026-10-18).**
-  - Implemented and tested: `limen mq connect` and `limen kafka connect`, the proxy's `limen-mq/1` and `limen-kafka/1` sessions, the worker's AMQP 0-9-1 relay and Kafka request-level proxy (per-operation policy, audit before forwarding, address rewrite across a real three-broker cluster, SASL `PLAIN`/`SCRAM`), and the console's operation list. `demos/demo-phase11.sh` runs real RabbitMQ 4 and Apache Kafka 3.9 with pika and librdkafka.
-  - *Unverified against real AWS:* Amazon MQ, MSK (the `AWS_MSK_IAM` payload, TLS with the AWS bundle), and MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
-- **Deferred and not yet scheduled in §13:** port forwarding through Limen (deferred from Phase 2).
-- **Deferred to Phase 14:** the IAM join method for components.
-- **Deferred from Phase 9, not yet scheduled in §13:**
-  - `mongodb+srv://` (DNS SRV and TXT) resolution; sharded clusters (`mongos`); presenting the server as a replica set so drivers can use transactions and retryable writes (needs the CLI to tell the worker its listener address)
-  - a role bootstrap for MongoDB users (the users are made by hand, as `docs/guides/mongodb.md` says), SASLprep for non-ASCII passwords, and per-collection or per-operation policy (policy is by database and command name)
-  - fuzzing the BSON reader and wire framing with `cargo-fuzz`, and Grafana panels and typed audit columns for the `mongo.*` events (the audit table ignores fields it doesn't list, as for `db.*`)
-- **Deferred from Phase 6, not yet scheduled in §13:**
-  - Secrets Manager for the bootstrap admin (`admin_secret_arn`); the admin password is a file
-  - `audit.log_parameters`: query parameters are never logged
-  - statement-level allow and deny (enforcement is the database's grants)
-  - MySQL cursors, compression, and `LOCAL INFILE`; PostgreSQL protocol versions other than 3.0
-  - fuzzing the MySQL codec and the PostgreSQL frame splitter with `cargo-fuzz`, promised in ADR-0012
-  - Grafana panels and typed columns for the `db.*` events: the audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so the events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL
-- **Unverified against real services (Phase 6):** RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; PostgreSQL `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login against a real Redshift server, and Redshift behavior in general.
-- **Unverified against real services (Phase 9):** Atlas (SCRAM, X.509, `MONGODB-AWS`, TLS with the public CA, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, and `mongos`. The SigV4 signature for `MONGODB-AWS` is checked against a fixture; SCRAM against the RFC vectors.
-- **No AWS, Okta, or Datadog accounts yet.** Everything is tested against local stand-ins. Anything that depends on a real-service behavior is marked *unverified against real service* until validated: RDS IAM auth, ElastiCache IAM, KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
+
+What each phase built is in its guide and ADR; this section holds only what is unverified, deferred, or assumed.
+
+- **Unverified against real services.** Everything is tested against local stand-ins, and there are no AWS, Okta, or Datadog accounts yet. Each item below is tracked by a "Verify" issue (#63, #64, #76 to #85).
+  - Phase 6: RDS and Aurora IAM tokens (SigV4 matches AWS's published examples; `rds_iam` is a stub role in tests, MySQL `AWSAuthenticationPlugin` is untested), the Redshift credential APIs (a local HTTP stand-in), MD5 login and behavior on a real Redshift.
+  - Phase 7: ElastiCache IAM token acceptance, the re-login, TLS with the AWS bundle. Not built: cluster mode, ElastiCache Serverless, a worker-managed ElastiCache user bootstrap.
+  - Phase 9: Atlas (SCRAM, X.509, `MONGODB-AWS`, public-CA TLS, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, `mongos`. The `MONGODB-AWS` SigV4 signature is checked against a fixture; SCRAM against the RFC vectors.
+  - Phase 10: Amazon OpenSearch Service (SigV4 acceptance, fine-grained access control), OpenSearch Serverless, Elastic Cloud API keys, TLS with the Amazon bundle.
+  - Phase 11: Amazon MQ, MSK (the `AWS_MSK_IAM` payload, the AWS bundle), MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
+  - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
+- **Deferred to Phase 14:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
+- **Deferred and not yet scheduled in §13:**
+  - Port forwarding through Limen (from Phase 2).
+  - Phase 6: listed in the [databases guide](guides/databases.md#not-in-this-release).
+  - Phase 9: `mongodb+srv://` and sharded clusters, a MongoDB role bootstrap, replica-set presentation for transactions, SASLprep, per-collection policy; see the [MongoDB guide](guides/mongodb.md#operating-it).
+  - Fuzzing the MySQL codec, the PostgreSQL frame splitter (promised in ADR-0012), and the BSON reader and wire framing with `cargo-fuzz`.
+  - Grafana panels and typed columns for the `db.*` and `mongo.*` events. The audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL.
 - KMS `Sign` is a network call per certificate (single-digit ms, with per-account quotas). The target scale is well within the quotas. *Verify the current KMS request quotas in Phase 1.*
 - Recording and auditing happen at the worker (ADR-0002). If the owner prefers recording at the proxy, ADR-0002 is the one to change.
-- The ACM exportable public certificate for the proxy listener has to be verified in Phase 14. The fallback is an operator-supplied cert.
