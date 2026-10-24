@@ -22,3 +22,5 @@ A few things worth knowing:
 - **Switch theme** with the sun/moon buttons at the bottom of the sidebar (it follows your system by default).
 - **Browser sign-ins last 8 hours** by default (never longer than the maximum certificate lifetime), or until you sign out or an admin locks you. This is separate from the CLI's short-lived certificate.
 - Setup for your own deployment (OIDC client, public URL): [`docs/runbooks/console.md`](../runbooks/console.md).
+
+**Command lists.** Database, Redis, MongoDB and search sessions have no terminal recording. Their session page lists what ran (up to 500 entries, including the ones policy refused). The console keeps that text in the control plane's database for 30 days (table `db_statements`), visible only to admins and the session's own user. The complete trail stays in S3 and Datadog.

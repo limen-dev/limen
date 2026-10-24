@@ -50,12 +50,20 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |
 | `limen mq connect <resource> [--user U] [--vhost V] [--listen ADDR] [--idle-timeout 1h]` | Open a loopback listener for an AMQP 0-9-1 client; prints an `amqp://` URL with no real password (see [the messaging guide](messaging.md)) |
 | `limen kafka connect <resource> [--user U] [--listen ADDR] [--brokers 8] [--idle-timeout 1h]` | Open a bootstrap listener and one per broker slot for a Kafka client; prints the bootstrap address |
-| `web open`, `tcp` | **Planned**, one per integration ([roadmap](https://github.com/jfcmartins/limen/milestones)). The commands and their options exist so scripts and docs can be written now; each one says which phase delivers it and does nothing else. The resources they will open are already listed by `limen ls` and in the console |
+| `limen web open [--no-browser] <resource>` | Open an internal web app behind Limen SSO in the browser, or print its URL (see [the web apps guide](web-apps.md)) |
+| `limen tcp <resource> [--listen ADDR]` | Open a loopback listener that forwards to one fixed TCP target; each connection is an audited session (see [the TCP guide](tcp.md)) |
 
 Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 </details>
 
-**Good to know**
+### Local listeners
+
+`limen db`, `redis`, `mongo`, `search`, `mq`, `kafka` (each with `connect`) and `limen tcp` open a listener on your machine for your usual client, which needs no password:
+- It binds loopback only (`--listen 127.0.0.1:PORT` fixes the port), or a private unix socket with `--socket PATH` where offered (mode 0600, in a directory only you can enter). Anyone who can reach it acts as you, so don't forward the port.
+- Each connection is its own audited session, so a client that pools connections opens several. Leave the command running while you work; Ctrl-C stops it, and where `--idle-timeout` is offered it stops by itself after an hour with no connection (`--idle-timeout 30m`, `0` for never).
+- A refusal reaches your client as that protocol's own error.
+
+### Good to know
 - **Credentials are short-lived on purpose.** They live in `~/.limen/` (override with `LIMEN_HOME`) and expire in minutes. When they do, the CLI tells you to run `limen login`.
 - **Plain `ssh` works too.** Run `limen config ssh >> ~/.ssh/config`, then `ssh <login>@<resource>.limen`.
 - **Scripting.** Output is plain text when piped; `limen ls --json` is stable for tools; `NO_COLOR=1` or `--color never` turns colour off everywhere.

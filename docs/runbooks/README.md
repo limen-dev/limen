@@ -1,6 +1,6 @@
 # Runbooks
 
-Runbooks are added as each component ships. Planned:
+Runbooks are added as each component ships. Rows without a link are planned:
 
 | Runbook | Phase |
 |---|---|

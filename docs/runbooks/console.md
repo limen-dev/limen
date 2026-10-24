@@ -19,12 +19,7 @@ Then give the control plane (all replicas):
 Without the public URL the console is off and `/console/*` answers 404.
 
 ## Day to day
-- **Users**: who has signed in, their roles, lock status. Lock or unlock with a reason.
-- **Sessions**: active and past. Open one to play its recording or end it.
-- **Workers**: enrollment state, tunnels, certificate expiry. Outstanding join tokens (unused and unexpired; values are never stored). Create single-use join tokens (shown once) and revoke a worker.
-- **Dashboards**: built-in charts from the console's own records (30 days). For longer history, or your own panels and alerts, the optional Grafana dashboards in `deploy/grafana` read the audit store directly.
-- **Audit trail**: the last 30 days, filterable. A convenience copy for answering "what just happened"; for investigations use the sinks (S3 or Datadog) and [verify the chain](audit-verify.md).
-- **Policy**: what's active, the YAML behind each document, and a dry-run check. Apply changes with `limen admin apply`.
+What each page does is in the [console guide](../guides/console.md). For operators: the Dashboards page shows 30 days from the console's own records (longer history, or your own panels and alerts, come from the optional Grafana dashboards in `deploy/grafana`); the Audit trail page is a convenience copy of the last 30 days, so for investigations use the sinks (S3 or Datadog) and [verify the chain](audit-verify.md).
 
 ## Troubleshooting
 | Symptom | Likely cause |

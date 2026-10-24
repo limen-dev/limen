@@ -20,9 +20,7 @@ es = Elasticsearch("http://127.0.0.1:51234")
 es.search(index="app-orders", query={"match_all": {}})
 ```
 
-- Each connection to the listener is its own audited session. Clients that pool connections (all of them) open several: that is several sessions, each with its own session ID in the trail. Leave `limen search connect` running while you work; press Ctrl-C, or wait for it to stop after an hour with no connection (`--idle-timeout 30m`, `0` for never).
-- `--role write` picks the engine role when policy allows several. `--listen 127.0.0.1:9200` fixes the port (loopback only). `--socket ~/.limen/run/search.sock` uses a unix socket (mode 0600, in a directory only you can enter): `curl --unix-socket ~/.limen/run/search.sock http://localhost/`.
-- Anyone who can reach the listener acts as you. That is why it binds loopback only and the socket is private. Don't forward the port.
+- Listener behavior (loopback only, one audited session per connection, idle timeout, `--listen`, `--socket`): [Using the CLI](cli.md#local-listeners). Clients that pool connections open several sessions, each with its own session ID. `--role write` picks the engine role when policy allows several. A unix socket works with `curl --unix-socket ~/.limen/run/search.sock http://localhost/`.
 - A refusal reaches your client as an Elasticsearch-shaped error: `403` or `400` with `{"error": {"type": "limen_security_exception", "reason": "Limen: ..."}}`, and an `x-limen-refused: true` header. The connection stays open after a refusal.
 - Headers your client sends are not forwarded, except a short list of harmless ones (`Accept`, `Content-Type`, `Content-Encoding`, `User-Agent`, the Elastic client metadata headers, `traceparent`). `Authorization`, API keys, `es-security-runas-user`, `opensearch_security_impersonate_as`, and `x-forwarded-*` are dropped. The worker adds its own credential and `X-Opaque-Id: limen:<session id>`.
 
@@ -90,7 +88,7 @@ spec:
 
 Document ids are in the path, so by default they are in the trail; `redact_ids` replaces them with `h:` and 16 hex characters of SHA-256 over the resource name and the id. It is a plain hash: it stops casual reading, not a guess at a likely id.
 
-**In the console**, a search session's page lists its requests (time, API, method and path, outcome), up to 500, including the ones policy refused. Search sessions have no terminal recording; this list is the record (owner decision: it needn't be video). It shows the method and path (ids hashed if the resource sets `redact_ids`) and, for each request, "ok", "error" (with the HTTP status and the engine's error type) or "refused" (with the reason). The console keeps this text in the control plane's database for 30 days (table `db_statements`, shared with SQL and Redis sessions), visible only to admins and to the session's own user. The complete trail stays in S3 and Datadog.
+**In the console**, the session page lists its requests ([command lists](console.md)): time, API, method and path (ids hashed if the resource sets `redact_ids`), and "ok", "error" (with the HTTP status and the engine's error type) or "refused" (with the reason).
 
 ## Operating it
 
