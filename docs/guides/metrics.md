@@ -19,7 +19,7 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_audit_spool_pending` | gauge | `consumer` | all |
 | `limen_audit_spool_bytes` | gauge | | all |
 | `limen_audit_shipped_total`, `limen_audit_ship_errors_total` | counter | `consumer` | all |
-| `limen_ca_sign_seconds` | histogram | `kind` (`x509`, `ssh`) | control plane |
+| `limen_ca_sign_seconds` | summary (quantiles) | `kind` (`x509`, `ssh`) | control plane |
 | `limen_ca_sign_errors_total` | counter | `kind` | control plane |
 | `limen_api_request_seconds` | histogram | `service` | control plane |
 | `limen_control_plane_replicas` | gauge | | control plane |

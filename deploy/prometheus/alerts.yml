@@ -64,7 +64,8 @@ groups:
           description: "Logins and new sessions fail while signing is down. With KMS, check the key, its policy and AWS availability."
 
       - alert: LimenCaSigningSlow
-        expr: histogram_quantile(0.99, sum by (le, kind) (rate(limen_ca_sign_seconds_bucket[10m]))) > 2
+        # Histograms are exported as summaries (no buckets), so read the quantile.
+        expr: max by (kind) (limen_ca_sign_seconds{quantile="0.99"}) > 2
         for: 10m
         labels: { severity: ticket }
         annotations:

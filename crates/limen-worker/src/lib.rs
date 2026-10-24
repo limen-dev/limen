@@ -944,6 +944,8 @@ pub async fn run(
         u32::try_from(worker.sessions.max()).unwrap_or(u32::MAX),
     ));
     metrics::gauge!("limen_worker_draining").set(0.0);
+    // Exist at 0 so "no tunnels" is alertable for a worker that never connects.
+    metrics::gauge!("limen_worker_tunnels_up").set(0.0);
     tracing::info!(id = %worker.id(), name = worker.name().as_deref(), tunnels = worker.config.tunnels, "worker running");
 
     let _ = shutdown.wait_for(|stop| *stop).await;
