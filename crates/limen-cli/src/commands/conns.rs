@@ -79,6 +79,17 @@ fn child_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<std::ff
     args.into_iter().filter(|a| !is_detach_flag(a)).collect()
 }
 
+/// The command's own output minus "Press Ctrl-C to stop.", which means nothing once it runs in the background.
+fn without_ctrl_c(text: &str) -> String {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.replace("Press Ctrl-C to stop.", "");
+            let line = line.trim_end();
+            (!line.trim().is_empty()).then(|| format!("{line}\n"))
+        })
+        .collect()
+}
+
 /// Start the current command in the background and print where it listens.
 #[cfg(unix)]
 pub async fn detach(proxy: Option<&str>) -> anyhow::Result<()> {
@@ -147,7 +158,10 @@ pub async fn detach(proxy: Option<&str>) -> anyhow::Result<()> {
         expires_at_unix: profile.meta.expires_at_unix,
     };
     write_state(&conn)?;
-    print!("{}", std::fs::read_to_string(&log_path).unwrap_or_default());
+    print!(
+        "{}",
+        without_ctrl_c(&std::fs::read_to_string(&log_path).unwrap_or_default())
+    );
     ui::success(&format!("Running in the background as {}.", ui::bold(&id)));
     ui::hint(&format!(
         "`limen conns ls` lists connections, `limen conns stop {id}` ends this one. It also ends when your login expires or on `limen logout`."
@@ -311,6 +325,15 @@ pub fn stop_command(proxy: Option<&str>, ids: &[String], all: bool) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drops_the_ctrl_c_hint() {
+        let out = "Listening.\nNo password is needed. Press Ctrl-C to stop.\nPress Ctrl-C to stop.\nEach one is audited. Press Ctrl-C to stop.\n";
+        assert_eq!(
+            without_ctrl_c(out),
+            "Listening.\nNo password is needed.\nEach one is audited.\n"
+        );
+    }
 
     #[test]
     fn ids_cannot_escape_the_directory() {
