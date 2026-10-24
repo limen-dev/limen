@@ -149,7 +149,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 ## Documentation
 - Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
-- [Design](docs/design.md): architecture, data paths, failure semantics
+- [Design](docs/design.md): architecture, data paths, failure semantics, and the [architecture diagram](docs/diagrams/README.md)
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
 - [Threat model](docs/threat-model.md)
 - [Policy reference](docs/policy.md)
