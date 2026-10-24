@@ -15,6 +15,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use super::query;
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
@@ -529,10 +530,19 @@ pub async fn resource_detail(
 
 // ---- sessions --------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct SessionsQuery {
     filter: Option<String>,
     user: Option<String>,
+    resource: Option<String>,
+    kind: Option<String>,
+    actor: Option<String>,
+    login: Option<String>,
+    addr: Option<String>,
+    end: Option<String>,
+    repo: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
     offset: Option<i64>,
     done: Option<String>,
 }
@@ -545,17 +555,67 @@ pub async fn sessions(
     let active_only = q.filter.as_deref() == Some("active");
     // Non-admins only ever see their own, whatever the query says.
     let user_filter = if auth.is_admin {
-        q.user.clone().filter(|u| !u.is_empty())
+        q.user.clone().filter(|u| !u.trim().is_empty())
     } else {
         Some(auth.username.clone())
+    };
+    let mut problems = Vec::new();
+    let actor = actor_param(q.actor.as_ref());
+    if q.actor.as_deref().is_some_and(|a| !a.is_empty()) && actor.is_none() {
+        problems.push("Ignored the actor filter: use user or bot.".to_owned());
+    }
+    let (from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
+    problems.extend(ignored);
+    let actor_text = actor.clone().unwrap_or_default();
+    let when = |t: Option<time::OffsetDateTime>, raw: &Option<String>| {
+        t.map(|_| raw.clone().unwrap_or_default().trim().to_owned())
+            .unwrap_or_default()
+    };
+    let (from_text, to_text) = (when(from, &q.from), when(to, &q.to));
+    let shown_user = if auth.is_admin {
+        user_filter.clone().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let active_text = if active_only {
+        "active".to_owned()
+    } else {
+        String::new()
+    };
+    let applied = present(&[
+        ("filter", Some(&active_text)),
+        ("user", Some(&shown_user)),
+        ("resource", q.resource.as_ref()),
+        ("kind", q.kind.as_ref()),
+        ("actor", Some(&actor_text)),
+        ("login", q.login.as_ref()),
+        ("addr", q.addr.as_ref()),
+        ("end", q.end.as_ref()),
+        ("repo", q.repo.as_ref()),
+        ("from", Some(&from_text)),
+        ("to", Some(&to_text)),
+    ]);
+    let value = |key: &str| {
+        applied
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
     };
     let offset = q.offset.unwrap_or(0).max(0);
     let filter = SessionFilter {
         username: user_filter.clone(),
+        resource: value("resource"),
+        actor,
+        kind: value("kind"),
+        login: value("login"),
+        client_addr: value("addr"),
+        end_reason: value("end"),
+        repo: value("repo"),
+        from,
+        to,
         active_only,
         limit: PAGE_SIZE,
         offset,
-        ..SessionFilter::default()
     };
     let mut rows = match store::list_sessions(&state.db, &filter).await {
         Ok(rows) => rows,
@@ -564,17 +624,10 @@ pub async fn sessions(
     let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
     rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
     let link = |offset: i64| {
-        let mut url = format!("/console/sessions?offset={offset}");
-        if active_only {
-            url.push_str("&filter=active");
-        }
-        if auth.is_admin
-            && let Some(u) = &user_filter
-        {
-            url.push_str("&user=");
-            url.push_str(&path_segment(u));
-        }
-        url
+        let offset = offset.to_string();
+        let mut pairs: Vec<(&str, &str)> = applied.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        pairs.push(("offset", offset.as_str()));
+        query::href("/console/sessions", &pairs)
     };
     html(
         SessionsPage {
@@ -583,6 +636,20 @@ pub async fn sessions(
             sessions: rows.iter().map(SessionView::from).collect(),
             active_only,
             user_filter: auth.is_admin.then(|| user_filter.clone()).flatten(),
+            filter: views::SessionFilterView {
+                user: shown_user.clone(),
+                resource: value("resource").unwrap_or_default(),
+                kind: value("kind").unwrap_or_default(),
+                actor: actor_text.clone(),
+                login: value("login").unwrap_or_default(),
+                addr: value("addr").unwrap_or_default(),
+                end: value("end").unwrap_or_default(),
+                repo: value("repo").unwrap_or_default(),
+                from: from_text.clone(),
+                to: to_text.clone(),
+            },
+            chips: chips("/console/sessions", &applied),
+            problems,
             newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
             older: has_more.then(|| link(offset + PAGE_SIZE)),
         }
@@ -972,7 +1039,17 @@ pub async fn user_detail(
             }
         }
     };
-    let events = match store::list_events(&state.db, Some(&name), None, 15, 0).await {
+    let events = match store::list_events(
+        &state.db,
+        &store::EventFilter {
+            username: Some(name.clone()),
+            ..store::EventFilter::default()
+        },
+        15,
+        0,
+    )
+    .await
+    {
         Ok(rows) => rows.iter().take(15).map(event_view).collect(),
         Err(e) => return db_error("reading a user's activity", &e),
     };
@@ -1509,11 +1586,72 @@ pub async fn kube_requests(
     )
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct AuditQuery {
     user: Option<String>,
     kind: Option<String>,
+    actor: Option<String>,
+    q: Option<String>,
+    session: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
     offset: Option<i64>,
+}
+
+/// The non-empty values of the filters a query asked for, in a fixed order.
+fn present<'a>(fields: &[(&'a str, Option<&String>)]) -> Vec<(&'a str, String)> {
+    fields
+        .iter()
+        .filter_map(|(k, v)| {
+            v.map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty())
+                .map(|v| (*k, v))
+        })
+        .collect()
+}
+
+fn filter_name(key: &str) -> &'static str {
+    match key {
+        "kind" => "Kind",
+        "user" => "User",
+        "actor" => "Actor",
+        "q" => "Text",
+        "session" => "Session",
+        "from" => "From",
+        "to" => "To",
+        "resource" => "Resource",
+        "login" => "Account",
+        "addr" => "Address",
+        "end" => "Ended",
+        "repo" => "Repository",
+        "filter" => "Show",
+        _ => "Filter",
+    }
+}
+
+/// A removable chip for each applied filter; `base` is the page's path.
+fn chips(base: &str, applied: &[(&str, String)]) -> Vec<views::FilterChip> {
+    applied
+        .iter()
+        .filter(|(key, _)| *key != "filter")
+        .map(|(key, value)| {
+            let rest: Vec<(&str, &str)> = applied
+                .iter()
+                .filter(|(k, _)| k != key)
+                .map(|(k, v)| (*k, v.as_str()))
+                .collect();
+            views::FilterChip {
+                label: format!("{}: {value}", filter_name(key)),
+                remove: query::href(base, &rest),
+            }
+        })
+        .collect()
+}
+
+/// `user` or `bot`, or nothing.
+fn actor_param(raw: Option<&String>) -> Option<String> {
+    raw.map(|a| a.trim().to_ascii_lowercase())
+        .filter(|a| a == "user" || a == "bot")
 }
 
 pub async fn audit(
@@ -1524,18 +1662,58 @@ pub async fn audit(
     if let Err(r) = auth.admin() {
         return r;
     }
-    let user = q.user.clone().filter(|u| !u.is_empty());
-    let kind = q.kind.clone().filter(|k| !k.is_empty());
+    let mut problems = Vec::new();
+    let actor = actor_param(q.actor.as_ref());
+    if q.actor.as_deref().is_some_and(|a| !a.is_empty()) && actor.is_none() {
+        problems.push("Ignored the actor filter: use user or bot.".to_owned());
+    }
+    let session = q
+        .session
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| {
+            let id = Uuid::parse_str(s).ok();
+            if id.is_none() {
+                problems.push(format!("Ignored “{s}” for Session: not a session id."));
+            }
+            id
+        });
+    let (from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
+    problems.extend(ignored);
+    let actor_text = actor.clone().unwrap_or_default();
+    let session_text = session.map(|id| id.to_string()).unwrap_or_default();
+    let when = |t: Option<time::OffsetDateTime>, raw: &Option<String>| {
+        t.map(|_| raw.clone().unwrap_or_default().trim().to_owned())
+            .unwrap_or_default()
+    };
+    let (from_text, to_text) = (when(from, &q.from), when(to, &q.to));
+    let applied = present(&[
+        ("kind", q.kind.as_ref()),
+        ("user", q.user.as_ref()),
+        ("actor", Some(&actor_text)),
+        ("q", q.q.as_ref()),
+        ("session", Some(&session_text)),
+        ("from", Some(&from_text)),
+        ("to", Some(&to_text)),
+    ]);
+    let value = |key: &str| {
+        applied
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
+    };
+    let filter = store::EventFilter {
+        username: value("user"),
+        kind: value("kind"),
+        actor,
+        text: value("q"),
+        session_id: session,
+        from,
+        to,
+    };
     let offset = q.offset.unwrap_or(0).max(0);
-    let mut rows = match store::list_events(
-        &state.db,
-        user.as_deref(),
-        kind.as_deref(),
-        PAGE_SIZE,
-        offset,
-    )
-    .await
-    {
+    let mut rows = match store::list_events(&state.db, &filter, PAGE_SIZE, offset).await {
         Ok(rows) => rows,
         Err(e) => return db_error("listing audit events", &e),
     };
@@ -1543,26 +1721,29 @@ pub async fn audit(
     let has_more = i64::try_from(rows.len()).is_ok_and(|n| n > PAGE_SIZE);
     rows.truncate(usize::try_from(PAGE_SIZE).unwrap_or(50));
     let link = |offset: i64| {
-        let mut url = format!("/console/audit?offset={offset}");
-        if let Some(u) = &user {
-            url.push_str("&user=");
-            url.push_str(&path_segment(u));
-        }
-        if let Some(k) = &kind {
-            url.push_str("&kind=");
-            url.push_str(&path_segment(k));
-        }
-        url
+        let offset = offset.to_string();
+        let mut pairs: Vec<(&str, &str)> = applied.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        pairs.push(("offset", offset.as_str()));
+        query::href("/console/audit", &pairs)
     };
     html(
         AuditPage {
             chrome: chrome(&state, &auth, "audit"),
             events: rows.iter().map(event_view).collect(),
             kinds,
+            filter: views::AuditFilterView {
+                kind: value("kind").unwrap_or_default(),
+                user: value("user").unwrap_or_default(),
+                actor: actor_text.clone(),
+                text: value("q").unwrap_or_default(),
+                session: session_text.clone(),
+                from: from_text.clone(),
+                to: to_text.clone(),
+            },
+            chips: chips("/console/audit", &applied),
+            problems,
             newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
             older: has_more.then(|| link(offset + PAGE_SIZE)),
-            kind_filter: kind.clone(),
-            user_filter: user.clone(),
         }
         .render(),
     )

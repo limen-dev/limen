@@ -11,13 +11,31 @@
 <nav class="tabs" aria-label="Audit views"><a href="/console/audit" aria-current="true">All events</a><a href="/console/audit/kubernetes">Kubernetes</a></nav>
 <form method="get" action="/console/audit" class="filters">
   <label><span>Event</span>
-    <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if kind_filter.as_deref() == Some(k.as_str()) %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+    <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
   </label>
   <label><span>User</span>
-    <input type="text" name="user" value="{% if let Some(u) = user_filter %}{{ u }}{% endif %}" placeholder="anyone" maxlength="200">
+    <input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200">
+  </label>
+  <label><span>Actor</span>
+    <select name="actor"><option value="">People and bots</option><option value="user"{% if filter.actor == "user" %} selected{% endif %}>People</option><option value="bot"{% if filter.actor == "bot" %} selected{% endif %}>Bots</option></select>
+  </label>
+  <label><span>Text in details</span>
+    <input type="text" name="q" value="{{ filter.text }}" placeholder="reason, resource, …" maxlength="200">
+  </label>
+  <label><span>Session</span>
+    <input type="text" name="session" value="{{ filter.session }}" placeholder="session id" maxlength="40">
+  </label>
+  <label><span>From (UTC)</span>
+    <input type="datetime-local" name="from" value="{{ filter.from }}">
+  </label>
+  <label><span>To (UTC)</span>
+    <input type="datetime-local" name="to" value="{{ filter.to }}">
   </label>
   <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
+  {% if !chips.is_empty() %}<a href="/console/audit">Clear</a>{% endif %}
 </form>
+{% for p in problems %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ p }}</div>{% endfor %}
+{% if !chips.is_empty() %}<div class="chips applied">{% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Remove this filter">{{ c.label }} ×</a>{% endfor %}</div>{% endif %}
 {% include "events_table.html" %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}

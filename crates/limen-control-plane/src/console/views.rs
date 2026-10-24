@@ -514,8 +514,26 @@ pub struct SessionsPage {
     pub sessions: Vec<SessionView>,
     pub active_only: bool,
     pub user_filter: Option<String>,
+    pub filter: SessionFilterView,
+    pub chips: Vec<FilterChip>,
+    pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
+}
+
+/// The values to put back in the sessions filter form.
+#[derive(Default)]
+pub struct SessionFilterView {
+    pub user: String,
+    pub resource: String,
+    pub kind: String,
+    pub actor: String,
+    pub login: String,
+    pub addr: String,
+    pub end: String,
+    pub repo: String,
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Template)]
@@ -747,10 +765,29 @@ pub struct AuditPage {
     pub chrome: Chrome,
     pub events: Vec<EventView>,
     pub kinds: Vec<String>,
-    pub kind_filter: Option<String>,
-    pub user_filter: Option<String>,
+    pub filter: AuditFilterView,
+    pub chips: Vec<FilterChip>,
+    pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
+}
+
+/// The values to put back in the audit filter form.
+#[derive(Default)]
+pub struct AuditFilterView {
+    pub kind: String,
+    pub user: String,
+    pub actor: String,
+    pub text: String,
+    pub session: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// An applied filter, with the link that removes just that one.
+pub struct FilterChip {
+    pub label: String,
+    pub remove: String,
 }
 
 /// One Kubernetes API request, in kubectl's terms.

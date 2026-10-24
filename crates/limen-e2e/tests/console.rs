@@ -932,6 +932,70 @@ async fn console_end_to_end() {
         "the bot's session shows up under its repository"
     );
 
+    // ---- drill-down: dashboard links and the filters behind them ------------------------------
+    assert!(
+        dash.body.contains("/console/audit?kind=auth.denied")
+            && dash.body.contains("/console/audit?kind=auth.login")
+            && dash.body.contains("/console/sessions?actor=bot"),
+        "tiles lead to the records behind them"
+    );
+    let usage = admin_user.get("/console/dashboards?view=usage").await;
+    assert!(
+        usage.body.contains("/console/sessions?kind=ssh") && usage.body.contains("from=20"),
+        "ranked rows lead to the sessions behind them, for the same period"
+    );
+    let bot_sessions = admin_user.get("/console/sessions?actor=bot").await;
+    assert!(bot_sessions.body.contains("bot:deploy-e2e") && !bot_sessions.body.contains(DEVELOPER));
+    let people = admin_user.get("/console/sessions?actor=user").await;
+    assert!(people.body.contains(DEVELOPER) && !people.body.contains("bot:deploy-e2e"));
+    let one = admin_user
+        .get("/console/sessions?kind=ssh&resource=web-1&end=nonsense")
+        .await;
+    assert_eq!(one.status, 200);
+    assert!(!one.body.contains(DEVELOPER), "no session ended that way");
+    let future = admin_user.get("/console/sessions?from=2999-01-01").await;
+    assert!(!future.body.contains("web-1"));
+    let bad = admin_user
+        .get("/console/sessions?from=yesterday&actor=robot")
+        .await;
+    assert!(bad.body.contains("Ignored") && bad.body.contains("web-1"));
+    let chip = admin_user.get("/console/sessions?kind=ssh").await;
+    assert!(chip.body.contains("Remove this filter") && chip.body.contains("Kind: ssh"));
+
+    let prefix = admin_user.get("/console/audit?kind=user.*").await;
+    assert!(prefix.body.contains(">user.lock</span>"));
+    assert!(!prefix.body.contains(">join_token.create</span>"));
+    let text = admin_user.get("/console/audit?q=TARGET_USER").await;
+    assert!(
+        text.body.contains(">user.lock</span>"),
+        "text search ignores case"
+    );
+    let bot_events = admin_user.get("/console/audit?actor=bot").await;
+    assert!(bot_events.body.contains("bot:deploy-e2e"));
+    assert!(
+        !bot_events
+            .body
+            .contains(&format!("/console/users/{DEVELOPER_ENC}\""))
+    );
+    let window = admin_user
+        .get("/console/audit?kind=user.lock&from=2000-01-01&to=2999-01-01")
+        .await;
+    assert!(
+        window.body.contains(">user.lock</span>") && window.body.contains("Remove this filter")
+    );
+    let past = admin_user.get("/console/audit?to=2000-01-01").await;
+    assert!(past.body.contains("No events match"));
+    let junk = admin_user
+        .get("/console/audit?session=nope&from=soon&actor=x")
+        .await;
+    assert_eq!(junk.status, 200);
+    assert_eq!(junk.body.matches("Ignored").count(), 3, "{}", junk.body);
+    let trail = admin_user
+        .get(&format!("/console/audit?session={id}"))
+        .await;
+    assert_eq!(trail.status, 200);
+    assert!(!trail.body.contains("Ignored"));
+
     // ---- policy browsing and dry run -------------------------------------------------------
     let policy_page = admin_user.get("/console/policy").await;
     assert_eq!(policy_page.status, 200);

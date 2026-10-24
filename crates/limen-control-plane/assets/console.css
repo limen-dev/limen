@@ -327,3 +327,9 @@ td.empty { text-align: center; }
 
 .pick { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 14px; align-items: center; }
 .pick label { display: inline-flex; gap: 6px; align-items: center; }
+.chips.applied { margin: 0 0 12px; }
+.chips.applied a.chip { text-decoration: none; }
+.filters a { align-self: center; }
+a.stat.drill { color: inherit; text-decoration: none; }
+a.stat.drill:hover { border-color: var(--text-3); }
+.chart a.bar-link:hover rect { opacity: .8; }

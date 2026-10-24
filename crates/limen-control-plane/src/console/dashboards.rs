@@ -10,6 +10,7 @@ use serde::Deserialize;
 use sqlx::Row;
 use time::{Duration, OffsetDateTime, PrimitiveDateTime};
 
+use super::query::{href, when_text};
 use super::views::{Chrome, error_page, path_segment};
 use super::{Auth, html};
 use crate::db::Db;
@@ -86,6 +87,7 @@ pub struct Bar {
     pub h: i32,
     pub class: &'static str,
     pub tip: String,
+    pub href: Option<String>,
 }
 
 pub struct Tick {
@@ -112,6 +114,8 @@ pub struct Series {
     pub name: &'static str,
     pub class: &'static str,
     pub values: Vec<i64>,
+    /// Where each period's bar leads (the records behind it); empty for none.
+    pub hrefs: Vec<String>,
 }
 
 pub struct Panel {
@@ -171,6 +175,7 @@ pub fn bar_chart(labels: &[String], series: &[Series]) -> Chart {
                 h: height,
                 class: one.class,
                 tip: format!("{label}: {value} {}", one.name),
+                href: one.hrefs.get(index).filter(|h| !h.is_empty()).cloned(),
             });
         }
     }
@@ -421,6 +426,7 @@ fn slot(starts: &[PrimitiveDateTime], t: PrimitiveDateTime) -> Option<usize> {
 }
 
 pub struct Tile {
+    pub href: Option<String>,
     pub value: String,
     pub label: &'static str,
     pub icon: &'static str,
@@ -575,11 +581,22 @@ struct TimeSeries {
     denied: Vec<i64>,
 }
 
+/// Where a ranked row leads: the records behind its number.
 #[derive(Clone, Copy)]
-enum Link {
+enum Drill {
     None,
     Resource,
     User,
+    /// The audit trail, narrowed to `kind` (empty: the row's label is the kind)
+    /// and, if `by` is not empty, to the row's label in that filter.
+    Audit {
+        kind: &'static str,
+        by: &'static str,
+    },
+    /// The sessions list with the row's label in this filter.
+    Sessions(&'static str),
+    /// One page for every row.
+    Page(&'static str),
 }
 
 /// One ranked list: the SQL returns `(label, count)`. `windowed` queries take the
@@ -589,7 +606,7 @@ struct Spec {
     title: &'static str,
     sub: &'static str,
     class: &'static str,
-    link: Link,
+    drill: Drill,
     windowed: bool,
     sql: &'static str,
 }
@@ -600,7 +617,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Busiest resources",
         sub: "Sessions",
         class: "bar-a",
-        link: Link::Resource,
+        drill: Drill::Resource,
         windowed: true,
         sql: "SELECT resource, count(*) FROM sessions WHERE started_at >= $1 AND resource IS NOT NULL
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -610,7 +627,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Most active people",
         sub: "Sessions",
         class: "bar-b",
-        link: Link::User,
+        drill: Drill::User,
         windowed: true,
         sql: "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -620,7 +637,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Bot sessions by repository",
         sub: "CI jobs, by the repository or project that ran them",
         class: "bar-bot",
-        link: Link::None,
+        drill: Drill::Sessions("repo"),
         windowed: true,
         sql: "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
               WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -630,7 +647,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Session length",
         sub: "Finished sessions",
         class: "bar-c",
-        link: Link::None,
+        drill: Drill::None,
         windowed: true,
         sql: "SELECT CASE WHEN duration_ms < 60000 THEN 'under 1 min' WHEN duration_ms < 300000 THEN '1 to 5 min'
                           WHEN duration_ms < 1800000 THEN '5 to 30 min' WHEN duration_ms < 7200000 THEN '30 min to 2 h'
@@ -643,7 +660,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Why access was denied",
         sub: "Denied attempts",
         class: "bar-bad",
-        link: Link::None,
+        drill: Drill::Audit { kind: "auth.denied", by: "q" },
         windowed: true,
         sql: "SELECT summary, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
@@ -653,7 +670,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Admin actions",
         sub: "Locks, kills, revokes, tokens, policy",
         class: "bar-d",
-        link: Link::None,
+        drill: Drill::Audit { kind: "", by: "kind" },
         windowed: true,
         sql: "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
               ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change')
@@ -664,7 +681,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Sessions by kind",
         sub: "Protocol or integration",
         class: "bar-b",
-        link: Link::None,
+        drill: Drill::Sessions("kind"),
         windowed: true,
         sql: "SELECT COALESCE(kind, 'unknown'), count(*) FROM sessions WHERE started_at >= $1
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -674,7 +691,7 @@ const RANKINGS: [Spec; 20] = [
         title: "How sessions ended",
         sub: "Finished sessions",
         class: "bar-d",
-        link: Link::None,
+        drill: Drill::Sessions("end"),
         windowed: true,
         sql: "SELECT end_reason, count(*) FROM sessions WHERE started_at >= $1 AND end_reason IS NOT NULL
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -684,7 +701,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Data transferred",
         sub: "KiB in both directions, by resource",
         class: "bar-c",
-        link: Link::Resource,
+        drill: Drill::Resource,
         windowed: true,
         sql: "SELECT resource, (sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) / 1024)::bigint FROM sessions
               WHERE started_at >= $1 AND resource IS NOT NULL
@@ -695,7 +712,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Most refused people",
         sub: "Denied attempts: repeated refusals can be guessing or a stale role",
         class: "bar-bad",
-        link: Link::User,
+        drill: Drill::Audit { kind: "auth.denied", by: "user" },
         windowed: true,
         sql: "SELECT username, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1 AND username IS NOT NULL
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -705,7 +722,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Out-of-hours access",
         sub: "People's sessions started outside 07:00 to 19:00 UTC",
         class: "bar-d",
-        link: Link::User,
+        drill: Drill::User,
         windowed: true,
         sql: "SELECT username, count(*) FROM sessions
               WHERE started_at >= $1 AND actor_type = 'user' AND username IS NOT NULL
@@ -717,7 +734,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Longest sessions",
         sub: "Minutes, person and resource",
         class: "bar-c",
-        link: Link::None,
+        drill: Drill::None,
         windowed: true,
         sql: "SELECT COALESCE(username, '?') || ' on ' || COALESCE(resource, '?'), (duration_ms / 60000)::bigint FROM sessions
               WHERE started_at >= $1 AND duration_ms IS NOT NULL ORDER BY duration_ms DESC LIMIT 8",
@@ -727,7 +744,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Accounts used",
         sub: "Sessions by the account they logged in as on the target",
         class: "bar-a",
-        link: Link::None,
+        drill: Drill::Sessions("login"),
         windowed: true,
         sql: "SELECT COALESCE(login, 'n/a'), count(*) FROM sessions WHERE started_at >= $1
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -737,7 +754,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Where sessions came from",
         sub: "Client address",
         class: "bar-b",
-        link: Link::None,
+        drill: Drill::Sessions("addr"),
         windowed: true,
         sql: "SELECT client_addr, count(*) FROM sessions WHERE started_at >= $1 AND client_addr IS NOT NULL
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -747,7 +764,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Finished without a recording",
         sub: "Sessions by resource. Not every kind is recorded",
         class: "bar-bad",
-        link: Link::Resource,
+        drill: Drill::Resource,
         windowed: true,
         sql: "SELECT resource, count(*) FROM sessions
               WHERE started_at >= $1 AND ended_at IS NOT NULL AND recording_uri IS NULL AND resource IS NOT NULL
@@ -758,7 +775,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Components gone quiet",
         sub: "Minutes since last seen, over 5 (proxies and workers, not revoked)",
         class: "bar-bad",
-        link: Link::None,
+        drill: Drill::Page("/console/workers"),
         windowed: false,
         sql: "SELECT id || ' (' || kind || ')', (EXTRACT(epoch FROM now() - last_seen_at) / 60)::bigint FROM components
               WHERE revoked_at IS NULL AND last_seen_at < now() - interval '5 minutes'
@@ -769,7 +786,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Tunnels per worker",
         sub: "Live tunnels right now",
         class: "bar-a",
-        link: Link::None,
+        drill: Drill::Page("/console/workers"),
         windowed: false,
         sql: "SELECT worker_id, count(*) FROM tunnels WHERE lease_expires_at > now() GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
     },
@@ -778,7 +795,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Database statement errors",
         sub: "By error code",
         class: "bar-bad",
-        link: Link::None,
+        drill: Drill::Page("/console/audit?kind=db.query.end"),
         windowed: true,
         sql: "SELECT error_code, count(*) FROM db_statements WHERE at >= $1 AND error_code IS NOT NULL
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -788,7 +805,7 @@ const RANKINGS: [Spec; 20] = [
         title: "Kubernetes API errors",
         sub: "Cluster and HTTP status, 400 and above",
         class: "bar-bad",
-        link: Link::None,
+        drill: Drill::Page("/console/audit/kubernetes"),
         windowed: true,
         sql: "SELECT cluster || ' ' || status::text, count(*) FROM kube_requests WHERE at >= $1 AND status >= 400
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
@@ -798,17 +815,19 @@ const RANKINGS: [Spec; 20] = [
         title: "Web app server errors",
         sub: "Resource, responses with status 500 and above",
         class: "bar-bad",
-        link: Link::Resource,
+        drill: Drill::Resource,
         windowed: true,
         sql: "SELECT resource, count(*) FROM web_requests WHERE at >= $1 AND status >= 500
               GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
     },
 ];
 
-/// The ranked lists the page asked for (the rest are not queried).
+/// The ranked lists the page asked for (the rest are not queried). `from` is the
+/// start of the period, carried into the links so they show the same window.
 async fn rankings(
     db: &Db,
     since: OffsetDateTime,
+    from: &str,
     selection: &Selection,
 ) -> Result<Vec<RankPanel>, sqlx::Error> {
     let mut out = Vec::new();
@@ -824,15 +843,27 @@ async fn rankings(
         .iter()
         .map(|r| Ok((r.try_get::<String, _>(0)?, r.try_get::<i64, _>(1)?)))
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
-        let link = spec.link;
+        let (drill, windowed) = (spec.drill, spec.windowed);
+        let window = if windowed { from } else { "" };
         out.push(RankPanel {
             id: spec.id,
             title: spec.title,
             sub: spec.sub,
-            rows: rank(rows, |name| match link {
-                Link::None => None,
-                Link::Resource => Some(format!("/console/resources/{}", path_segment(name))),
-                Link::User => Some(format!("/console/users/{}", path_segment(name))),
+            rows: rank(rows, |label| match drill {
+                Drill::None => None,
+                Drill::Resource => Some(format!("/console/resources/{}", path_segment(label))),
+                Drill::User => Some(format!("/console/users/{}", path_segment(label))),
+                Drill::Audit { kind: "", by } => {
+                    Some(href("/console/audit", &[(by, label), ("from", window)]))
+                }
+                Drill::Audit { kind, by } => Some(href(
+                    "/console/audit",
+                    &[("kind", kind), (by, label), ("from", window)],
+                )),
+                Drill::Sessions(key) => {
+                    Some(href("/console/sessions", &[(key, label), ("from", window)]))
+                }
+                Drill::Page(path) => Some(path.to_owned()),
             }),
             class: spec.class,
         });
@@ -849,6 +880,23 @@ async fn build(
     let (starts, labels) = buckets(range);
     let since = starts.first().copied().unwrap_or_else(utc_now).assume_utc();
     let unit = range.unit();
+    // The period as the audit trail and sessions filters read it, for the links.
+    let from_text = starts.first().map(|s| when_text(*s)).unwrap_or_default();
+    let bucket_links = |page: &str, pairs: &[(&str, &str)]| -> Vec<String> {
+        starts
+            .iter()
+            .map(|start| {
+                let (from, to) = (when_text(*start), when_text(*start + range.step()));
+                let mut all = pairs.to_vec();
+                all.extend([("from", from.as_str()), ("to", to.as_str())]);
+                href(page, &all)
+            })
+            .collect()
+    };
+    let session_links = bucket_links("/console/sessions", &[("actor", "user")]);
+    let bot_links = bucket_links("/console/sessions", &[("actor", "bot")]);
+    let login_links = bucket_links("/console/audit", &[("kind", "auth.login")]);
+    let denied_links = bucket_links("/console/audit", &[("kind", "auth.denied")]);
 
     let TimeSeries {
         sessions,
@@ -876,36 +924,51 @@ async fn build(
     let total_denied: i64 = denied.iter().sum();
     let tiles = vec![
         Tile {
+            href: Some(href("/console/sessions", &[("from", &from_text)])),
             value: total_sessions.to_string(),
             label: "Sessions",
             icon: "terminal",
             tone: "c-green",
         },
         Tile {
+            href: Some("/console/users".to_owned()),
             value: people.to_string(),
             label: "People",
             icon: "users",
             tone: "c-blue",
         },
         Tile {
+            href: Some(href(
+                "/console/sessions",
+                &[("actor", "bot"), ("from", &from_text)],
+            )),
             value: total_bot_sessions.to_string(),
             label: "Bot sessions",
             icon: "bot",
             tone: "c-violet",
         },
         Tile {
+            href: Some(href(
+                "/console/audit",
+                &[("kind", "auth.login"), ("from", &from_text)],
+            )),
             value: logins.iter().sum::<i64>().to_string(),
             label: "Sign-ins",
             icon: "key-round",
             tone: "c-teal",
         },
         Tile {
+            href: Some(href(
+                "/console/audit",
+                &[("kind", "auth.denied"), ("from", &from_text)],
+            )),
             value: total_denied.to_string(),
             label: "Denied",
             icon: "ban",
             tone: if total_denied > 0 { "bad" } else { "c-amber" },
         },
         Tile {
+            href: None,
             value: average.map_or_else(|| "—".into(), duration_text),
             label: "Average session",
             icon: "clock",
@@ -924,11 +987,13 @@ async fn build(
                         name: "people's sessions",
                         class: "bar-a",
                         values: sessions,
+                        hrefs: session_links,
                     },
                     Series {
                         name: "bot sessions",
                         class: "bar-bot",
                         values: bot_sessions,
+                        hrefs: bot_links,
                     },
                 ],
             ),
@@ -945,18 +1010,20 @@ async fn build(
                         name: "sign-ins",
                         class: "bar-a",
                         values: logins,
+                        hrefs: login_links,
                     },
                     Series {
                         name: "denied",
                         class: "bar-bad",
                         values: denied,
+                        hrefs: denied_links,
                     },
                 ],
             ),
             legend: vec![("bar-a", "Sign-ins"), ("bar-bad", "Denied")],
         },
     ];
-    let ranked = rankings(db, since, selection).await?;
+    let ranked = rankings(db, since, &from_text, selection).await?;
     Ok((tiles, panels, ranked))
 }
 
@@ -1012,6 +1079,7 @@ mod tests {
                 name: "sessions",
                 class: "bar-a",
                 values,
+                hrefs: Vec::new(),
             }],
         );
         assert!(!c.empty);
@@ -1038,6 +1106,7 @@ mod tests {
                 name: "x",
                 class: "bar-a",
                 values: vec![0],
+                hrefs: Vec::new(),
             }],
         );
         assert!(c.empty);
