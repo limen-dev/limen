@@ -76,6 +76,10 @@ limen admin components                 # the proxy, the worker, and its tunnels
 | `admin@example.com` | `limen-admins`, `sre` | `limen:admin`, `sre` |
 | `developer@example.com` | `developers` | `dev-readonly` |
 | `guest@example.com` | `marketing` | none, so login is denied |
+| `auditor@example.com` | `auditors` | `auditor` |
+| `viewer@example.com` | `viewers` | `viewer` |
+| `oncall@example.com` | `sre-oncall` | `sre-oncall` |
+| `contractor@example.com` | `contractors` | `contractor` |
 <!-- END dev-users -->
 
 ### Logging in without a browser
@@ -126,6 +130,40 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `web` | `stacks/web.yml` plus the single/scale worker opt-in overlay | `web-target`, an HTTP fixture for browser SSO, request policy, and auditing |
 
 **Container names.** Limen itself is not an environment (one Limen is deployed to reach all of them), so its containers have plain names: `limen-control-plane`, `limen-proxy`, `limen-worker`, `limen-postgres`, `limen-dex`, `limen-s3`, `limen-kms`. The stand-in targets and tools carry the environment they represent, `-dev` here: `postgres-orders-dev`, `mysql-orders-dev`, `redis-cache-dev`, `valkey-cache-dev`, `ssh-web-dev`, `kubernetes-dev` (the k3s cluster), `datadog-fake-dev`, `trino-dev`, `grafana-dev`, `ci-issuer-fake-dev`. A second copy beside the dev stack (the scaled stack, or a demo) uses its own environment name for both, for example `limen-proxy-scale`, `postgres-orders-dbdemo`.
+
+### Containers
+
+What `docker ps` (or the OrbStack Containers tab) shows, by stack. Images marked `.env` take their version from [`.env`](.env); `limen-*` images are built from this repository (`deploy/docker/Dockerfile`). Names carry `-dev` here (see above). Containers marked *once* exit when their work is done.
+
+| Container | Image | Stack | What it is for |
+|---|---|---|---|
+| `limen-postgres` | `POSTGRES_IMAGE` | limen | Control plane state: policy, workers, sessions, join tokens |
+| `limen-dex` | `DEX_IMAGE` | limen | The dev identity provider (OIDC) with the dev users |
+| `limen-s3` | `SEAWEEDFS_IMAGE` | limen | S3-compatible store for audit batches and session recordings |
+| `limen-kms` | `KMS_IMAGE` | limen | Local stand-in for AWS KMS: signs the certificates the CA issues |
+| `limen-control-plane` | `limen-control-plane` | limen | Login, policy, the internal CA, the audit pipeline and the web console |
+| `limen-proxy` | `limen-proxy` | limen | The mTLS front door that clients and workers' tunnels connect to |
+| `limen-worker` | `limen-worker` | limen | Reaches the targets for the proxy, and records and audits sessions |
+| `limen-control-plane-{0,1,2}`, `limen-proxy-{0,1,2}`, `limen-worker-{0,1,2}` | as above | scale | The scaled Limen, three of each, instead of the single containers |
+| `ssh-web-dev` | `limen-sshd-target` | `ssh` | An OpenSSH server to reach with `limen ssh` |
+| `postgres-orders-dev`, `mysql-orders-dev` | `POSTGRES_IMAGE`, `MYSQL_IMAGE` | `db` | PostgreSQL and MySQL targets with TLS and a seeded `orders` database |
+| `db-tls`, `db-secrets-init` | `ALPINE_IMAGE` | `db` | *Once*: create the TLS certificates and the worker's database logins |
+| `db-bootstrap` | `limen-worker` | `db` | *Once* (profile `tools`): creates the database roles the policy names |
+| `redis-cache-dev`, `valkey-cache-dev` | `REDIS_IMAGE`, `VALKEY_IMAGE` | `redis` | Redis and Valkey targets with ACL users |
+| `mongo-catalog-dev` | `MONGO_IMAGE` | `mongo` | A MongoDB target with TLS, SCRAM and X.509 |
+| `mongo-tls`, `mongo-creds` | `ALPINE_IMAGE` | `mongo` | *Once*: create the certificates and the worker's MongoDB logins |
+| `elasticsearch-search-dev`, `opensearch-search-dev` | `ELASTICSEARCH_IMAGE`, `OPENSEARCH_IMAGE` | `search` | Search targets with security on |
+| `search-ca-dir` | `ALPINE_IMAGE` | `search` | *Once*: gives OpenSearch a writable directory for its demo certificates |
+| `rabbitmq-messaging-dev` | `RABBITMQ_IMAGE` | `messaging` | A RabbitMQ target with users and vhosts |
+| `kafka-{1,2,3}-messaging-dev` | `KAFKA_IMAGE` | `messaging` | A three-broker Kafka cluster (KRaft, SASL) |
+| `kubernetes-dev` | `K3S_IMAGE` | `kube` | A k3s cluster standing in for EKS |
+| `limen-kube-worker` | `limen-worker` | `kube` | A worker in its own pool that serves the cluster |
+| `tcp-target-dev` | `PYTHON_IMAGE` | `tcp` | A TCP echo fixture for `limen tcp` |
+| `web-target-dev` | `PYTHON_IMAGE` | `web` | An HTTP fixture for browser SSO and request policy |
+| `trino-dev`, `trino-init-dev` | `TRINO_IMAGE` | `observability` | Queries the audit batches in S3 as SQL (what Athena does in AWS); `trino-init-dev` keeps the table in step with the new batches |
+| `grafana-dev` | `GRAFANA_IMAGE` | `observability` | The audit dashboards at http://localhost:3000 |
+| `datadog-fake-dev` | `limen-fake-datadog` | `observability` | Receives the audit events the Datadog sink sends, so the sink can be tested |
+| `ci-issuer-fake-dev` | `limen-fake-ci-issuer` | `bots` | Issues CI identity tokens for the bot login demo |
 
 `setup.sh` picks the files and profiles, writes the settings a stack needs on a Limen service to `.state/stack.env` (the core reads it if present), then pins the CA, signs in as the admin, applies shared policy plus only the selected stacks' policies, bootstraps the database roles, and seeds Redis. Consequently, `limen ls` shows resources for the enabled stacks rather than every example:
 

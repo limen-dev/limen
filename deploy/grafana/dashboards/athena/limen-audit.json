@@ -182,12 +182,88 @@
             "uid": "limen-athena"
           },
           "format": 1,
-          "rawSQL": "SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions\nFROM events WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start'\nGROUP BY 1 ORDER BY 2 DESC",
+          "rawSQL": "SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions\nFROM events WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start' AND data.kind IN (${kind:singlequote})\nGROUP BY 1 ORDER BY 2 DESC",
           "refId": "A"
         }
       ],
       "title": "Access by resource type",
       "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "limen-athena"
+      },
+      "description": "Sessions started per hour, one line per resource type. Use the Resource type selector to pick which to show.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 16
+      },
+      "id": 6,
+      "options": {},
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "limen-athena"
+          },
+          "format": 0,
+          "rawSQL": "SELECT date_trunc('hour', from_iso8601_timestamp(\"time\")) AS time, data.kind AS metric, count(DISTINCT session_id) AS value\nFROM events WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start' AND data.kind IN (${kind:singlequote})\nGROUP BY 1, 2 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Connections per resource type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "limen-athena"
+      },
+      "description": "Per resource type: sessions, distinct people or bots, distinct resources, and the latest connection.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 7,
+      "options": {},
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "limen-athena"
+          },
+          "format": 1,
+          "rawSQL": "SELECT data.kind AS kind, count(DISTINCT session_id) AS sessions, count(DISTINCT \"user\") AS users,\n  count(DISTINCT data.resource) AS resources, max(from_iso8601_timestamp(\"time\")) AS last_connection\nFROM events WHERE $__timeFilter(from_iso8601_timestamp(\"time\")) AND dt BETWEEN format_datetime($__timeFrom(), 'yyyy-MM-dd') AND format_datetime($__timeTo(), 'yyyy-MM-dd') AND kind = 'session.start' AND data.kind IN (${kind:singlequote})\nGROUP BY 1 ORDER BY sessions DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Resource types in use",
+      "type": "table"
     },
     {
       "datasource": {
@@ -202,9 +278,9 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 31
       },
-      "id": 6,
+      "id": 8,
       "options": {},
       "targets": [
         {
@@ -239,9 +315,9 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 40
       },
-      "id": 7,
+      "id": 9,
       "options": {},
       "targets": [
         {
@@ -276,9 +352,9 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 40
       },
-      "id": 8,
+      "id": 10,
       "options": {},
       "targets": [
         {
@@ -314,9 +390,9 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 49
       },
-      "id": 9,
+      "id": 11,
       "options": {},
       "targets": [
         {
@@ -352,9 +428,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 51
+        "y": 58
       },
-      "id": 10,
+      "id": 12,
       "options": {},
       "targets": [
         {
@@ -390,9 +466,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 51
+        "y": 58
       },
-      "id": 11,
+      "id": 13,
       "options": {},
       "targets": [
         {
@@ -427,9 +503,9 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 66
       },
-      "id": 12,
+      "id": 14,
       "options": {},
       "targets": [
         {
@@ -458,6 +534,46 @@
     "limen",
     "audit"
   ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "grafana-athena-datasource",
+          "uid": "limen-athena"
+        },
+        "includeAll": true,
+        "label": "Resource type",
+        "multi": true,
+        "name": "kind",
+        "query": {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "limen-athena"
+          },
+          "format": 1,
+          "rawSQL": "SELECT DISTINCT data.kind AS kind FROM events WHERE kind = 'session.start' AND data.kind IS NOT NULL AND dt >= format_datetime(current_timestamp - INTERVAL '30' DAY, 'yyyy-MM-dd') ORDER BY 1"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": {
     "from": "now-24h",
     "to": "now"
