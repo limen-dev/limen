@@ -125,18 +125,25 @@ enum Command {
     /// Delete local credentials.
     Logout,
     /// Show the current identity, roles, and when the credentials expire.
-    Status,
-    /// List resources you are allowed to access.
-    Ls {
-        /// Output JSON instead of a table.
+    Status {
+        /// Output JSON instead of text.
         #[arg(long)]
         json: bool,
+    },
+    /// List resources you are allowed to access.
+    Ls {
+        #[command(flatten)]
+        args: ListArgs,
         /// Only resources of this type, such as `postgres` or `ssh`.
         #[arg(long = "type", value_name = "KIND")]
         kind: Option<String>,
-        /// Only resources with this label (`key=value`). Repeat to require several.
-        #[arg(long, value_name = "KEY=VALUE", value_parser = commands::parse_label)]
-        label: Vec<(String, String)>,
+    },
+    /// Show one resource: type, labels, how you may access it, and the command to connect.
+    Show {
+        resource: String,
+        /// Output JSON instead of text.
+        #[arg(long)]
+        json: bool,
     },
     /// Open an SSH session: `limen ssh [login@]resource [command...]`.
     Ssh {
@@ -210,12 +217,28 @@ enum Command {
 /// Options shared by every `ls` view.
 #[derive(Debug, clap::Args)]
 struct ListArgs {
+    /// Only resources whose name or a label contains this text (case-insensitive).
+    query: Option<String>,
     /// Output JSON instead of a table.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "quiet")]
     json: bool,
+    /// Print only the resource names, one per line, for scripts and shell loops.
+    #[arg(short, long)]
+    quiet: bool,
     /// Only resources with this label (`key=value`). Repeat to require several.
     #[arg(long, value_name = "KEY=VALUE", value_parser = commands::parse_label)]
     label: Vec<(String, String)>,
+}
+
+impl From<ListArgs> for commands::ListFilter {
+    fn from(a: ListArgs) -> Self {
+        Self {
+            query: a.query,
+            json: a.json,
+            quiet: a.quiet,
+            labels: a.label,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -435,47 +458,32 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ..
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
         Command::Logout => commands::logout(proxy).await,
-        Command::Status => commands::status(proxy),
-        Command::Ls { json, kind, label } => {
-            commands::ls(proxy, json, kind.as_deref().as_slice(), &label).await
+        Command::Status { json } => commands::status(proxy, json),
+        Command::Ls { args, kind } => {
+            commands::ls(proxy, &args.into(), kind.as_deref().as_slice()).await
         }
+        Command::Show { resource, json } => commands::show(proxy, &resource, json).await,
         Command::Db {
             command: DbCommand::Ls(args),
-        } => {
-            commands::ls(
-                proxy,
-                args.json,
-                &["postgres", "mysql", "redshift"],
-                &args.label,
-            )
-            .await
-        }
+        } => commands::ls(proxy, &args.into(), &["postgres", "mysql", "redshift"]).await,
         Command::Redis {
             command: RedisCommand::Ls(args),
-        } => commands::ls(proxy, args.json, &["redis"], &args.label).await,
+        } => commands::ls(proxy, &args.into(), &["redis"]).await,
         Command::Mongo {
             command: MongoCommand::Ls(args),
-        } => commands::ls(proxy, args.json, &["mongodb"], &args.label).await,
+        } => commands::ls(proxy, &args.into(), &["mongodb"]).await,
         Command::Search {
             command: SearchCommand::Ls(args),
-        } => {
-            commands::ls(
-                proxy,
-                args.json,
-                &["opensearch", "elasticsearch"],
-                &args.label,
-            )
-            .await
-        }
+        } => commands::ls(proxy, &args.into(), &["opensearch", "elasticsearch"]).await,
         Command::Mq {
             command: MqCommand::Ls(args),
-        } => commands::ls(proxy, args.json, &["rabbitmq"], &args.label).await,
+        } => commands::ls(proxy, &args.into(), &["rabbitmq"]).await,
         Command::Kafka {
             command: KafkaCommand::Ls(args),
-        } => commands::ls(proxy, args.json, &["kafka"], &args.label).await,
+        } => commands::ls(proxy, &args.into(), &["kafka"]).await,
         Command::Web {
             command: WebCommand::Ls(args),
-        } => commands::ls(proxy, args.json, &["web"], &args.label).await,
+        } => commands::ls(proxy, &args.into(), &["web"]).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
@@ -529,9 +537,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 print,
             } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
             KubeCommand::Credentials => commands::kube::credentials(proxy),
-            KubeCommand::Ls(args) => {
-                commands::ls(proxy, args.json, &["kubernetes"], &args.label).await
-            }
+            KubeCommand::Ls(args) => commands::ls(proxy, &args.into(), &["kubernetes"]).await,
         },
         Command::Mongo {
             command:
@@ -863,8 +869,9 @@ mod tests {
         for group in [
             "db", "redis", "kube", "mongo", "search", "mq", "kafka", "web",
         ] {
-            let cli = Cli::try_parse_from(["limen", group, "ls", "--json", "--label", "env=prod"])
-                .unwrap_or_else(|e| panic!("{group} ls: {e}"));
+            let cli =
+                Cli::try_parse_from(["limen", group, "ls", "stag", "-q", "--label", "env=prod"])
+                    .unwrap_or_else(|e| panic!("{group} ls: {e}"));
             assert!(matches!(
                 cli.command,
                 Command::Db { .. }

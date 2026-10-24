@@ -65,14 +65,38 @@ async fn end_login(proxy: &str, profile: &Profile) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn status(proxy: Option<&str>) -> anyhow::Result<()> {
+pub fn status(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
     let proxy = api::resolve_proxy(proxy)?;
     let Some(profile) = Profile::load(&proxy)? else {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({ "proxy": proxy, "logged_in": false })
+            );
+            return Ok(());
+        }
         ui::info(&format!("Not logged in to {proxy}."));
         ui::hint("Run `limen login` to sign in.");
         return Ok(());
     };
     let remaining = profile.expires_at() - time::OffsetDateTime::now_utc();
+    if json {
+        let expires = profile
+            .expires_at()
+            .format(&time::format_description::well_known::Rfc3339)?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "proxy": profile.meta.proxy,
+                "logged_in": remaining.is_positive(),
+                "user": profile.meta.username,
+                "roles": profile.meta.roles,
+                "expires_at": expires,
+                "seconds_left": remaining.whole_seconds().max(0),
+            }))?
+        );
+        return Ok(());
+    }
     let roles: Vec<String> = profile.meta.roles.iter().map(|r| ui::role(r)).collect();
     anstream::println!(
         "{}",
@@ -99,33 +123,71 @@ pub fn parse_label(s: &str) -> Result<(String, String), String> {
     }
 }
 
-/// Whether a resource passes the `--type` and `--label` filters of `limen ls`.
-fn matches_filters(r: &Resource, kinds: &[&str], labels: &[(String, String)]) -> bool {
-    (kinds.is_empty() || kinds.contains(&r.kind.as_str()))
-        && labels
-            .iter()
-            .all(|(k, v)| r.labels.get(k).is_some_and(|actual| actual == v))
+/// What `limen ls` and the per-protocol `ls` views narrow the list by.
+#[derive(Debug, Default)]
+pub struct ListFilter {
+    pub query: Option<String>,
+    pub json: bool,
+    pub quiet: bool,
+    pub labels: Vec<(String, String)>,
 }
 
-pub async fn ls(
-    proxy: Option<&str>,
-    json: bool,
-    kinds: &[&str],
-    labels: &[(String, String)],
-) -> anyhow::Result<()> {
+/// Whether a resource passes the type, label and text filters of `limen ls`.
+fn matches_filters(r: &Resource, kinds: &[&str], f: &ListFilter) -> bool {
+    let text = |needle: &str| {
+        let needle = needle.to_lowercase();
+        r.name.to_lowercase().contains(&needle)
+            || r.labels
+                .iter()
+                .any(|(k, v)| format!("{k}={v}").to_lowercase().contains(&needle))
+    };
+    (kinds.is_empty() || kinds.contains(&r.kind.as_str()))
+        && f.labels
+            .iter()
+            .all(|(k, v)| r.labels.get(k).is_some_and(|actual| actual == v))
+        && f.query.as_deref().is_none_or(text)
+}
+
+/// The command that opens a resource of this kind, for hints.
+fn connect_command(kind: &str, name: &str) -> String {
+    match kind {
+        "postgres" | "mysql" | "redshift" => format!("limen db connect {name}"),
+        "redis" => format!("limen redis connect {name}"),
+        "kubernetes" => format!("limen kube login {name}"),
+        "mongodb" => format!("limen mongo connect {name}"),
+        "opensearch" | "elasticsearch" => format!("limen search connect {name}"),
+        "rabbitmq" => format!("limen mq connect {name}"),
+        "kafka" => format!("limen kafka connect {name}"),
+        "web" => format!("limen web open {name}"),
+        "tcp" => format!("limen tcp {name}"),
+        _ => format!("limen ssh {name}"),
+    }
+}
+
+async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
     let (_, channel) = api::authenticated(proxy)?;
-    let resp = ResourcesClient::new(channel)
+    Ok(ResourcesClient::new(channel)
         .list_resources(ListResourcesRequest {})
         .await
         .map_err(|s| api::status_error(&s))?
-        .into_inner();
-    let filtered = !kinds.is_empty() || !labels.is_empty();
-    let resources: Vec<_> = resp
-        .resources
+        .into_inner()
+        .resources)
+}
+
+fn sorted_labels(r: &Resource) -> Vec<String> {
+    let mut labels: Vec<_> = r.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    labels.sort();
+    labels
+}
+
+pub async fn ls(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::Result<()> {
+    let filtered = !kinds.is_empty() || !f.labels.is_empty() || f.query.is_some();
+    let resources: Vec<_> = fetch_resources(proxy)
+        .await?
         .into_iter()
-        .filter(|r| matches_filters(r, kinds, labels))
+        .filter(|r| matches_filters(r, kinds, f))
         .collect();
-    if json {
+    if f.json {
         let items: Vec<_> = resources
             .iter()
             .map(|r| serde_json::json!({ "name": r.name, "kind": r.kind, "labels": r.labels, "principals": r.principals }))
@@ -133,10 +195,16 @@ pub async fn ls(
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
     }
+    if f.quiet {
+        for r in &resources {
+            println!("{}", r.name);
+        }
+        return Ok(());
+    }
     if resources.is_empty() {
         if filtered {
             ui::info("No resources match those filters.");
-            ui::hint("Run `limen ls` without --type or --label to see everything you can reach.");
+            ui::hint("Run `limen ls` without filters to see everything you can reach.");
         } else {
             ui::info("No resources are available to you.");
             ui::hint("Your roles don't grant access to anything yet. Ask an admin.");
@@ -146,22 +214,74 @@ pub async fn ls(
     let rows: Vec<[String; 4]> = resources
         .iter()
         .map(|r| {
-            let mut labels: Vec<_> = r.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
-            labels.sort();
             [
                 ui::bold(&r.name),
                 ui::kind_label(&r.kind),
                 r.principals.join(", "),
-                ui::dim(&labels.join(" ")),
+                ui::dim(&sorted_labels(r).join(" ")),
             ]
         })
         .collect();
     ui::print_table(["name", "kind", "access as", "labels"], &rows);
     let n = resources.len();
-    ui::hint(&format!(
-        "{n} resource{} · connect with `limen ssh <name>`",
-        if n == 1 { "" } else { "s" }
-    ));
+    let hint = if n == 1 {
+        format!(
+            "1 resource · connect with `{}`",
+            connect_command(&resources[0].kind, &resources[0].name)
+        )
+    } else {
+        format!("{n} resources · `limen show <name>` tells you how to connect to one")
+    };
+    ui::hint(&hint);
+    Ok(())
+}
+
+/// `limen show <resource>`: everything the control plane tells this user about one resource.
+pub async fn show(proxy: Option<&str>, name: &str, json: bool) -> anyhow::Result<()> {
+    let resources = fetch_resources(proxy).await?;
+    let Some(r) = resources.iter().find(|r| r.name == name) else {
+        let near: Vec<_> = resources
+            .iter()
+            .filter(|r| r.name.contains(name))
+            .map(|r| r.name.as_str())
+            .collect();
+        let tip = if near.is_empty() {
+            String::new()
+        } else {
+            format!(" Did you mean: {}?", near.join(", "))
+        };
+        anyhow::bail!("no resource named `{name}` is available to you.{tip}");
+    };
+    let connect = connect_command(&r.kind, &r.name);
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": r.name,
+                "kind": r.kind,
+                "labels": r.labels,
+                "principals": r.principals,
+                "default_database": r.default_database,
+                "web_url": r.web_url,
+                "connect": connect,
+            }))?
+        );
+        return Ok(());
+    }
+    let mut rows = vec![
+        ("Name", ui::bold(&r.name)),
+        ("Kind", ui::kind_label(&r.kind)),
+        ("Access as", r.principals.join(", ")),
+        ("Labels", sorted_labels(r).join(" ")),
+    ];
+    if !r.default_database.is_empty() {
+        rows.push(("Default database", r.default_database.clone()));
+    }
+    if !r.web_url.is_empty() {
+        rows.push(("Address", r.web_url.clone()));
+    }
+    rows.push(("Connect", format!("`{connect}`")));
+    anstream::println!("{}", ui::key_values(&rows));
     Ok(())
 }
 
@@ -184,13 +304,32 @@ mod ls_filter_tests {
     #[test]
     fn filters_by_type_and_every_label() {
         let r = resource("postgres", &[("env", "staging"), ("team", "payments")]);
-        assert!(matches_filters(&r, &[], &[]));
-        assert!(matches_filters(&r, &["postgres"], &[]));
-        assert!(!matches_filters(&r, &["ssh", "mysql"], &[]));
+        let none = ListFilter::default();
+        assert!(matches_filters(&r, &[], &none));
+        assert!(matches_filters(&r, &["postgres"], &none));
+        assert!(!matches_filters(&r, &["ssh", "mysql"], &none));
+        let q = |t: &str| ListFilter {
+            query: Some(t.into()),
+            ..ListFilter::default()
+        };
+        assert!(matches_filters(&r, &[], &q("PAYM")));
+        assert!(matches_filters(&r, &[], &q("env=stag")));
+        assert!(!matches_filters(&r, &[], &q("nope")));
         let env = ("env".to_owned(), "staging".to_owned());
         let team = ("team".to_owned(), "other".to_owned());
-        assert!(matches_filters(&r, &[], std::slice::from_ref(&env)));
-        assert!(!matches_filters(&r, &[], &[env, team]));
+        let with = |labels| ListFilter {
+            labels,
+            ..ListFilter::default()
+        };
+        assert!(matches_filters(&r, &[], &with(vec![env.clone()])));
+        assert!(!matches_filters(&r, &[], &with(vec![env, team])));
+    }
+
+    #[test]
+    fn connect_commands_follow_the_kind() {
+        assert_eq!(connect_command("mysql", "a"), "limen db connect a");
+        assert_eq!(connect_command("rabbitmq", "a"), "limen mq connect a");
+        assert_eq!(connect_command("ssh", "a"), "limen ssh a");
     }
 
     #[test]

@@ -90,7 +90,7 @@ pub fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::Result
         ui::bold(proxy),
         ui::accent(&resp.username)
     ));
-    commands::status(Some(proxy))
+    commands::status(Some(proxy), false)
 }
 
 /// Pin the CA the user named, once, for this proxy.
