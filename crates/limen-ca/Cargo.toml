@@ -15,6 +15,7 @@ kms = ["dep:aws-sdk-kms", "dep:sha2"]
 [dependencies]
 limen-core.workspace = true
 futures.workspace = true
+metrics.workspace = true
 rcgen.workspace = true
 rustls-pki-types.workspace = true
 rand.workspace = true

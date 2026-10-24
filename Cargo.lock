@@ -2836,6 +2836,7 @@ dependencies = [
  "futures",
  "limen-core",
  "limen-testkit",
+ "metrics",
  "rand 0.10.3",
  "rcgen",
  "rustls-pki-types",

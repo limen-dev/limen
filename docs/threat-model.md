@@ -234,6 +234,7 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 | Rate limiting | `governor`: per IP before auth, per user after, stricter for login and enrollment |
 | Supply chain | `cargo-deny` (advisories, licenses, sources, bans), `cargo-audit`, pinned toolchain and tools (mise), GitHub Actions pinned to commit SHAs, minimal `permissions:` in workflows, distroless images, SBOM in release (Phase 14) |
 | Memory safety | `unsafe_code = "forbid"` workspace-wide. Hand-written protocol codecs (MySQL, RESP) are fuzzed |
+| I/D: the `/metrics` endpoint on each component's admin port (issue #59) | Plain HTTP, no authentication, like `/healthz`: expose the admin port only to the monitoring network, never publicly. Metrics carry counts, latencies and a few fixed labels (`kind`, `consumer`, `reason`, `outcome`, `status`); never user names, resource names, statements or tokens. Adding a label with a free-form value needs review. See `docs/guides/metrics.md` |
 | Clock skew | Certs are back-dated 1 minute. TTL checks allow ±2 minutes |
 
 ## 6. Accepted residual risks (v1)
@@ -256,4 +257,5 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 | 2026-10-17 | 6 | SQL databases: verified TLS to targets, secret files and the bootstrap admin, statement text in audit, role and database guards, shared-role cancel and kill (residual), SigV4 and Redshift credential calls (unverified), injection into bootstrap SQL, frame limits |
 | 2026-10-17 | 8 (final review) | Kubernetes: built-in user names, audit of requests that fail upstream, upstream 401 as a service error, token refresh during rotation |
 | Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |
+| 2026-10-24 | 14 | Observability: `/metrics` on the admin port is unauthenticated and label-restricted; CA signing metrics |
 | 2026-10-17 | 8 | Kubernetes: the `/k8s/` entry point and upgrade proxy, identity-header stripping at two hops, recordability of streams, the worker's impersonation token, ALPN-less HTTP/1.1 |

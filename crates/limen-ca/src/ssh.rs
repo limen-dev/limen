@@ -136,7 +136,8 @@ impl SshCa {
         let runtime = tokio::runtime::Handle::current();
         let signer = Arc::clone(&self.signer);
         let public = self.public.key_data().clone();
-        tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let outcome = tokio::task::spawn_blocking(move || {
             builder.sign(&BlockingSshSigner {
                 inner: &*signer,
                 public,
@@ -144,8 +145,10 @@ impl SshCa {
             })
         })
         .await
-        .map_err(|e| CaError::Internal(e.to_string()))?
-        .map_err(ssh_err)
+        .map_err(|e| CaError::Internal(e.to_string()))
+        .and_then(|r| r.map_err(ssh_err));
+        crate::record_sign("ssh", started, outcome.is_ok());
+        outcome
     }
 }
 
@@ -344,6 +347,28 @@ mod tests {
         assert!(
             cert.validate([&other.public_key().fingerprint(HashAlg::Sha256)])
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn signing_is_timed() {
+        let _ = limen_core::metrics::install();
+        let key = user_key();
+        ca(CaPurpose::UserSsh)
+            .issue_user_cert(SshUserCertRequest {
+                public_key: key.public_key().clone(),
+                principal: "ubuntu".into(),
+                key_id: "session-metrics".into(),
+                ttl: Duration::from_mins(1),
+                permit_pty: true,
+                permit_port_forwarding: false,
+            })
+            .await
+            .expect("issue");
+        let text = limen_core::metrics::render();
+        assert!(
+            text.contains("limen_ca_sign_seconds") && text.contains("kind=\"ssh\""),
+            "{text}"
         );
     }
 
