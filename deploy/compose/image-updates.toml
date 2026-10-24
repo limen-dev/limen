@@ -1,0 +1,17 @@
+# Policy for scripts/bump-images.py. Keys are variables in deploy/compose/.env.
+#
+# A tag is followed within its own stream: the same shape (prefix, number of numeric
+# parts, suffix such as -alpine). A newer tag with the same first number is bumped; a
+# newer first number (a major) is only reported. Digest-pinned and moving tags
+# (no number in the tag) are reported, never edited.
+
+# Variables the script must not touch, with the reason.
+[hold]
+MYSQL_IMAGE = "8.4 is the LTS line; 9.x is an innovation release"
+ELASTICSEARCH_IMAGE = "stand-in for the versions Elastic Cloud and the docs promise; move on purpose"
+OPENSEARCH_IMAGE = "stand-in for the versions Amazon OpenSearch Service offers; move on purpose"
+SSHD_BASE_IMAGE = "tracks the Alpine release the sshd target was tested on"
+K3S_IMAGE = "must stay within kubectl's version skew (kubectl in mise.toml)"
+PYTHON_IMAGE = "tracks python in mise.toml"
+ALPINE_IMAGE = "Alpine minor releases are majors for our purposes; move on purpose"
+MONGO_IMAGE = "8.0 is the supported line; 8.1+ are rapid releases"

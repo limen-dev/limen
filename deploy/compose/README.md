@@ -91,6 +91,8 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 Every container image the stack, the demos and the image builds use is listed in one file, [`.env`](.env) (Compose loads it by itself from this directory, and the demos and `scripts/ci-db-targets.sh` source it). Tool versions are in `mise.toml`. To change a version, edit `.env`, then run `scripts/check-versions.sh`. It fails when something drifts: a compose file that pins an image itself, a script that names one, a Dockerfile that has a default for a base image instead of taking it as a build arg, a build of it that does not pass the arg, or one of the few places that cannot read `.env` (the CI service containers, the Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
 
+Newer tags are looked for by `scripts/bump-images.py` (report only; `--apply` edits `.env` and the places that must agree, then runs the check). The weekly `image-bumps` workflow runs it and opens one draft PR. It bumps within a stream (same first number and suffix, e.g. `1.99.0-trixie` to `1.99.1-trixie`), only reports newer majors, and leaves digest-pinned and moving tags to a human. Variables to leave alone, with the reason, are in [`image-updates.toml`](image-updates.toml).
+
 ## Layout
 
 ```

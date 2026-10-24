@@ -1,0 +1,49 @@
+name: image bumps
+
+# Weekly: look for newer tags of the images in deploy/compose/.env and open a draft PR
+# (scripts/bump-images.py, #94). Needs "Allow GitHub Actions to create and approve pull
+# requests" in the repository settings. A PR opened with GITHUB_TOKEN does not start
+# other workflows; CI starts when someone marks it ready for review, like any draft.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: image-bumps
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: chore/image-bumps
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - name: Bump
+        run: scripts/bump-images.py --apply --summary "$RUNNER_TEMP/body.md"
+      - name: Open or update the draft PR
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then echo "Nothing to bump."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add deploy/compose/.env .github/workflows/ci-rust.yml rust-toolchain.toml mise.toml
+          git commit -m "chore(deploy): bump container images"
+          git push --force origin "$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')" ]; then
+            gh pr create --draft --head "$BRANCH" --title "chore(deploy): bump container images" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr edit "$BRANCH" --body-file "$RUNNER_TEMP/body.md"
+          fi
