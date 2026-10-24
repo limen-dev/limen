@@ -90,7 +90,7 @@ jobs:
           # so a change to the workflows is checked by the full suite.
           rust_re='^(crates/|proto/|deploy/docker/|deploy/compose/\.env$|scripts/check-versions\.sh$|\.github/|Cargo\.(toml|lock)$|(rust-toolchain|clippy|rustfmt|deny)\.toml$|mise\.toml$)'
           # Infrastructure code, plus crates (dashboards are generated from metric names).
-          infra_re='^(crates/|deploy/terraform/|deploy/grafana/|deploy/compose/config/dev-users\.toml$|deploy/compose/scripts/gen-dev-users\.py$|\.github/)'
+          infra_re='^(crates/|deploy/terraform/|deploy/helm/|deploy/grafana/|deploy/compose/config/dev-users\.toml$|deploy/compose/scripts/gen-dev-users\.py$|\.github/)'
           workflows_re='^\.github/'
           # No base commit (new branch, manual run) means we can't tell, so run everything.
           if [ "$RUN_ALL" = true ] || ! base="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)"; then
@@ -409,15 +409,19 @@ jobs:
           git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          install_args: terraform
+          install_args: terraform helm
       - name: terraform fmt
         run: terraform fmt -check -recursive deploy/terraform
       - name: terraform validate
         run: |
-          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/examples/audit; do
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/modules/ecs deploy/terraform/modules/ec2 deploy/terraform/examples/audit deploy/terraform/examples/complete; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
+      - name: helm lint and template
+        run: |
+          helm lint deploy/helm/limen -f deploy/helm/limen/ci-values.yaml
+          helm template limen deploy/helm/limen -f deploy/helm/limen/ci-values.yaml > /dev/null
       - name: Generated dashboards are up to date
         run: |
           python3 deploy/grafana/generate.py
