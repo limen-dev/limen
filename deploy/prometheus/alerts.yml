@@ -1,0 +1,78 @@
+# Prometheus alerting rules for Limen (issue #62). Load with `rule_files:`.
+# The Datadog equivalents are in deploy/terraform/modules/datadog.
+#
+# Assumes each component is scraped under a job named limen-control-plane,
+# limen-proxy or limen-worker (change the `job` matchers if yours differ).
+# Unverified against a live Alertmanager: checked with `promtool check rules`.
+groups:
+  - name: limen
+    rules:
+      - alert: LimenAuditSpoolGrowing
+        expr: max by (instance, consumer) (limen_audit_spool_pending) > 1000
+        for: 15m
+        labels: { severity: page }
+        annotations:
+          summary: "Audit events are piling up in the {{ $labels.consumer }} spool on {{ $labels.instance }}"
+          description: "A sink is failing. If the spool fills, the component refuses new sessions (fail closed)."
+          runbook: docs/runbooks/audit-spool-full.md
+
+      - alert: LimenAuditShipFailing
+        expr: sum by (consumer) (increase(limen_audit_ship_errors_total[10m])) > 10
+        labels: { severity: page }
+        annotations:
+          summary: "Shipping audit events to {{ $labels.consumer }} keeps failing"
+          description: "Events are safe in the spool until it fills."
+          runbook: docs/runbooks/audit-spool-full.md
+
+      - alert: LimenDenialSpike
+        expr: sum(increase(limen_logins_total{outcome="denied"}[10m])) > 20
+        labels: { severity: ticket }
+        annotations:
+          summary: "More than 20 denied logins in 10 minutes"
+          description: "Check the failed and denied attempts panel in Grafana. Tune the threshold to your user count."
+
+      - alert: LimenWorkerDisconnected
+        expr: max by (instance) (limen_worker_tunnels_up) < 1
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Worker {{ $labels.instance }} has no tunnel to any proxy"
+          description: "The targets behind this worker are unreachable."
+
+      - alert: LimenNoWorkerTunnels
+        expr: sum(limen_proxy_tunnels) < 1
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "No proxy holds a worker tunnel"
+          description: "No target is reachable."
+
+      - alert: LimenPolicyStale
+        expr: max by (instance, job) (limen_policy_snapshot_age_seconds) > 240
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.instance }} cannot refresh its signed policy"
+          description: "Database, Redis and Kubernetes access stops after the 5-minute grace period; SSH already fails closed."
+
+      - alert: LimenCaSigningErrors
+        expr: sum by (kind) (increase(limen_ca_sign_errors_total[10m])) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "The CA failed to sign {{ $labels.kind }} certificates"
+          description: "Logins and new sessions fail while signing is down. With KMS, check the key, its policy and AWS availability."
+
+      - alert: LimenCaSigningSlow
+        expr: histogram_quantile(0.99, sum by (le, kind) (rate(limen_ca_sign_seconds_bucket[10m]))) > 2
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p99 {{ $labels.kind }} signing latency is over 2 seconds"
+
+      - alert: LimenComponentDown
+        expr: up{job=~"limen-.*"} == 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} is not answering /metrics"
