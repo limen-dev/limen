@@ -95,6 +95,9 @@ with status, byte counts, and duration. Denials—including unauthenticated
 requests that start a sign-in—produce `auth.denied`. Audit excludes query
 values, request/response bodies, cookies, and credentials. WebSocket upgrades
 produce request and response events and a stream-end event with byte counts.
+The handshake's `Origin` must name the app itself (a sibling app on the same
+site is refused with `websocket_origin_denied`), and an upgraded stream is
+closed when the app session expires (`reason: session_expired`).
 The control plane projects request metadata, never payloads or query strings,
 into the existing session detail page. If audit cannot be written, Limen does
 not forward the request or issue a successful handoff.

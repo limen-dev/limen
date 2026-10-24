@@ -12,6 +12,13 @@ pub async fn connect(
     listen: Option<&str>,
 ) -> anyhow::Result<()> {
     let address = listen.unwrap_or("127.0.0.1:0");
+    // Refuse before binding so a non-loopback address is never briefly exposed.
+    for candidate in tokio::net::lookup_host(address)
+        .await
+        .with_context(|| format!("resolving {address}"))?
+    {
+        ensure_loopback(candidate)?;
+    }
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .with_context(|| format!("listening on {address}"))?;

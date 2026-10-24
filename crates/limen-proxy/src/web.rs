@@ -199,6 +199,25 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         .await;
     }
 
+    // Cookies are host-only but SameSite=Lax is per site, so a page on a sibling
+    // app could otherwise open a WebSocket here with the user's session.
+    if websocket
+        && !websocket_origin_allowed(req.headers(), &route.target.host, web_public_port(proxy))
+    {
+        return audit_denied(
+            proxy,
+            None,
+            None,
+            "websocket_origin_denied",
+            StatusCode::FORBIDDEN,
+            "origin not allowed",
+            Some(&route.resource),
+            Some(req.method().as_str()),
+            Some(uri.path()),
+        )
+        .await;
+    }
+
     let claims = match read_app_session(proxy, &req, &route) {
         Ok(Some((claims, identity))) => (claims, identity),
         Ok(None) => return login_redirect(proxy, &route, &uri, req.method()).await,
@@ -500,8 +519,18 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         let host = route.target.host;
         let bytes_in = Arc::new(AtomicU64::new(0));
         let bytes_out = Arc::new(AtomicU64::new(0));
+        // An upgraded stream is no longer re-authorized per request, so it must
+        // not outlive the app session that opened it.
+        let lifetime = std::time::Duration::from_secs(
+            u64::try_from(
+                claims
+                    .expires_at_unix
+                    .saturating_sub(OffsetDateTime::now_utc().unix_timestamp()),
+            )
+            .unwrap_or(0),
+        );
         tokio::spawn(async move {
-            let result = async {
+            let result = tokio::time::timeout(lifetime, async {
                 let client = client_upgrade.await.map_err(|e| Box::new(e) as BoxError)?;
                 let upstream = upstream_upgrade
                     .await
@@ -511,13 +540,14 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
                 tokio::io::copy_bidirectional(&mut client, &mut upstream)
                     .await
                     .map_err(|e| Box::new(e) as BoxError)
-            }
+            })
             .await;
             let bytes_in = bytes_in.load(Ordering::Relaxed);
             let bytes_out = bytes_out.load(Ordering::Relaxed);
             let (bytes_in, bytes_out, reason) = match result {
-                Ok(_) => (bytes_in, bytes_out, "closed"),
-                Err(e) => {
+                Err(_) => (bytes_in, bytes_out, "session_expired"),
+                Ok(Ok(_)) => (bytes_in, bytes_out, "closed"),
+                Ok(Err(e)) => {
                     tracing::debug!(error = %e, session = %session_id, "websocket stream ended with an error");
                     (bytes_in, bytes_out, "stream_error")
                 }
@@ -697,6 +727,31 @@ fn is_websocket_request(req: &Request<Incoming>) -> bool {
             .filter_map(|v| v.to_str().ok())
             .flat_map(|value| value.split(','))
             .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+}
+
+/// Browsers always send `Origin` on a WebSocket handshake; require it to name
+/// this app. A missing header means a non-browser client, which cannot ride a
+/// browser's cookie jar.
+fn websocket_origin_allowed(headers: &HeaderMap, host: &str, public_port: u16) -> bool {
+    let mut values = headers.get_all(header::ORIGIN).iter();
+    let Some(origin) = values.next() else {
+        return true;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    let Some(origin) = origin.to_str().ok().and_then(|o| Url::parse(o).ok()) else {
+        return false;
+    };
+    origin.scheme() == "https"
+        && origin
+            .host_str()
+            .is_some_and(|h| h.eq_ignore_ascii_case(host))
+        && origin
+            .port()
+            .is_none_or(|port| port == 443 || port == public_port)
+        && origin.path() == "/"
+        && origin.username().is_empty()
 }
 
 fn valid_browser_nonce(nonce: &str) -> bool {
@@ -1570,6 +1625,24 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[test]
+    fn websocket_origin_must_name_the_app() {
+        let check = |origin: Option<&'static str>| {
+            let mut headers = HeaderMap::new();
+            if let Some(origin) = origin {
+                headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
+            }
+            websocket_origin_allowed(&headers, "app.apps.test", 38443)
+        };
+        assert!(check(None));
+        assert!(check(Some("https://app.apps.test")));
+        assert!(check(Some("https://APP.apps.test:38443")));
+        assert!(!check(Some("https://other.apps.test")));
+        assert!(!check(Some("http://app.apps.test")));
+        assert!(!check(Some("https://app.apps.test:9999")));
+        assert!(!check(Some("null")));
     }
 
     #[test]
