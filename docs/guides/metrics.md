@@ -29,7 +29,7 @@ Protocol-specific counters (`limen_mongo_*`, `limen_search_*`, `limen_broker_*`,
 
 ## Traces
 
-Set `--otlp-endpoint` (`LIMEN_OTLP_ENDPOINT`, for example `http://localhost:4318`) on a component to export traces over OTLP/HTTP to a Datadog Agent or any OpenTelemetry collector. `--trace-environment` (`LIMEN_ENVIRONMENT`, shared with the control plane's `--environment`) tags them. Off by default. Spans exported today: `api.request` (control plane), and `session` on the proxy and on the worker, which share a `session` attribute. Only ids and outcomes are attached, never user names, statements or tokens (ADR-0040). Traces are per component for now; linking them into one trace is a follow-up. Tested against a stand-in collector only: **unverified** against a real Agent or collector.
+Set `--otlp-endpoint` (`LIMEN_OTLP_ENDPOINT`, for example `http://localhost:4318`) on a component to export traces over OTLP/HTTP to a Datadog Agent or any OpenTelemetry collector. `--trace-environment` (`LIMEN_ENVIRONMENT`, shared with the control plane's `--environment`) tags them. Off by default. Spans exported today: `api.request` (control plane), and `session` on the proxy and on the worker, which share a `session` attribute. Only ids and outcomes are attached, never user names, statements or tokens (ADR-0040). Traces are per component for now; linking them into one trace is a follow-up. Verified against Jaeger 1.76 (a real OTLP collector); **unverified** against a Datadog Agent. To check yours: `LIMEN_TEST_OTLP_ENDPOINT=http://localhost:4318 cargo test -p limen-core --test otlp_collector`, then look for service `limen-collector-test`.
 
 ## Alerts
 

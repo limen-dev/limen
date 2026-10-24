@@ -25,4 +25,4 @@ Linking the proxy's and worker's spans into one trace needs a W3C `traceparent` 
 
 ## Consequences
 - Outbound data flow added: spans to the configured collector (threat model, cross-cutting).
-- Unverified against a real collector or Datadog Agent: tested against a stand-in socket that records the POST.
+- Tested against a stand-in socket that records the POST, and against Jaeger 1.76 (`LIMEN_TEST_OTLP_ENDPOINT`, `otlp_collector` test). Unverified against a Datadog Agent.
