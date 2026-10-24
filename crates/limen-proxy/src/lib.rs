@@ -8,6 +8,7 @@ mod peer;
 pub mod relay;
 mod sessions;
 pub mod tunnels;
+mod web;
 
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
@@ -205,6 +206,7 @@ fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerCon
             alpn::SEARCH,
             alpn::MQ,
             alpn::KAFKA,
+            alpn::TCP,
             alpn::H2,
             alpn::HTTP1,
         ],
@@ -380,6 +382,9 @@ async fn handle_connection(
         }
         Some(p) if p == alpn::KAFKA => {
             sessions::handle(proxy, tls, peer, sessions::Protocol::Kafka).await;
+        }
+        Some(p) if p == alpn::TCP => {
+            sessions::handle(proxy, tls, peer, sessions::Protocol::Tcp).await;
         }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
         Some(p) if p == alpn::H2 => {

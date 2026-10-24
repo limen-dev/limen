@@ -1,6 +1,6 @@
 # Limen threat model
 
-Status: **Living document**. Last reviewed 2026-10-14 (Phase 2). Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
+Status: **Living document**. Last reviewed for Phase 12. Method: STRIDE per trust boundary, plus abuse cases. Review this document in every phase that adds an entry point, a credential type, or a data store. A PR that adds any of those must update it.
 
 ## 1. Assets
 
@@ -17,6 +17,8 @@ Status: **Living document**. Last reviewed 2026-10-14 (Phase 2). Method: STRIDE 
 | A9 | Policy (roles, mappings, resources) | Changing it grants access |
 | A10 | Join tokens | Enrolling a rogue worker |
 | A11 | Aurora state | Policy history, token hashes, tunnel registry |
+| A12 | Web app handoffs, signed browser sessions, and identity assertions | Replaying a handoff or forging identity to an upstream app |
+| A13 | Web request audit projection | Request metadata supports investigations; accidental payload or query capture would expose user data |
 
 ## 2. Adversaries
 - **External attacker** on the internet who can reach the public NLB.
@@ -39,6 +41,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
                                       │
                                      TB6 ── [Datadog, Grafana]
 [CLI] ──TB0── [IdP]
+[Browser] ──TB10── [Proxy] ──TB2── [Worker] ──TB10── [Web app]
 ```
 
 ## 4. STRIDE by boundary
@@ -62,6 +65,15 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | E: malformed `SessionRequest` | Strict schema, size limits, `deny_unknown_fields`. Fuzzed in Phase 14 |
 | S/E: a client sends its own identity to the Kubernetes route (`Authorization`, `Impersonate-*`, `X-Remote-*`, `X-Limen-*`) to act as someone else (ADR-0038) | `/k8s/<cluster>/` takes the user from the mTLS certificate only, verified against the user CA. The proxy and then the worker both strip those headers; the worker sets the impersonation from the signed grant. Paths with dot segments, empty segments, or encoded slashes and dots are refused, so audit and API server read a path alike. Tested end to end (stand-in) and on kind (`kubectl --as=system:admin` is ignored) |
 | E: the `/k8s/` route is a new HTTP entry point that upgrades connections (exec, attach, port-forward) | It answers only for a verified user certificate and a cluster policy grants. Only `exec`, `attach`, and `portforward` on pods may upgrade, anything else that asks is a 403. Connections with no ALPN are served as HTTP/1.1 and reach only `/console/` and `/k8s/`. Locks, kills, grant expiry, and worker revocation end an open stream, and cut a streaming response (`watch`, `logs -f`), within a second (proxy and worker both check; tested) |
+### TB10: Browser ↔ proxy ↔ worker ↔ internal web app (ADR-0022)
+| Threat | Mitigation |
+|---|---|
+| S/E: a browser replays a handoff or app session at another app | OIDC state and handoffs are one-use, short-lived, and bound to resource and exact host; the signed app session also carries and verifies the user certificate, login, resource, host, and expiry. The `__Host-` cookie is Secure, HttpOnly, SameSite=Lax, host-only, and removed before forwarding |
+| E: a browser app session outlives authorization | Every request checks the current proxy policy snapshot, deny rules, user lock/restrictions, and session expiry. Bots are refused browser sessions; session lifetime is capped by the user certificate |
+| S/E: a client spoofs an upstream identity or routing header | The proxy rejects host/SNI/authority mismatch, routes only to an exact policy host and fixed worker target, strips inbound Limen/forwarding headers, and adds signed identity headers only when the resource explicitly enables them. Apps must verify ES256 JWT issuer, audience, key ID, and expiry |
+| E: a sibling internal app or a long-lived WebSocket rides a user's session | App cookies are host-only and `SameSite=Lax`, but sibling hosts are same-site, so a WebSocket handshake must carry an `Origin` that names the app (else `auth.denied`, `websocket_origin_denied`). An upgraded stream is no longer re-authorized per request, so it is closed at app-session expiry (`session_expired`). Plain cross-app `fetch`/form requests are the app's own CSRF concern (residual risk) |
+| I: web queries, cookies, bodies, or credentials enter audit | `web.request`, `web.response`, and WebSocket-end events contain bounded path and request/outcome metadata only; query, payload, cookie, authorization values, and upstream error text are excluded. Unauthenticated requests and denials emit `auth.denied`; audit failure blocks forwarding and successful handoff |
+| E: an upstream target is impersonated or a worker is used as an open proxy | The worker connects only to the resource's fixed `address`; HTTPS certificate verification is required unless an explicit development-only target opt-in is enabled at both policy and worker. No `CONNECT`, client-selected destination, or unsupported upgrade is forwarded |
 
 ### TB2/TB2′: Proxy ↔ worker (tunnel) and worker/proxy ↔ control plane
 | Threat | Mitigation |
@@ -133,7 +145,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 |---|---|
 | E: CA key theft (A1) | Keys live in KMS. `kms:Sign` is granted only to the control plane task role, with a key-policy condition on the signing algorithm. CloudTrail on `Sign`. Separate keys per purpose |
 | T: policy tampering in Aurora (A9) | Policy versions are immutable rows. Snapshots are signed. `policy.change` is audited. The DB user has no `DELETE` on the policy tables |
-| I: Aurora data exposure | Encryption at rest (KMS), TLS, IAM auth for the control plane DB user (Phase 14), no secrets stored (join tokens are hashed) |
+| I: Aurora data exposure | Encryption at rest (KMS), TLS, IAM auth for the control plane DB user (Phase 14). Web state and handoff bearer tokens are hashes; login rows retain a PKCE verifier and nonce until expiry, and handoff rows retain a signed short-lived session. `web_requests` stores only user, resource, host, method, bounded path, status, byte counts, and duration—never query, headers, cookies, or bodies. Protect the database as credential-bearing control-plane state |
 
 ### TB7: Browser ↔ proxy ↔ web console (ADR-0017)
 | Threat | Mitigation |
@@ -209,6 +221,11 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 
 ## 5. Cross-cutting
 
+| Threat | Mitigation |
+|---|---|
+| E: a TCP client turns Limen into an open proxy or reaches an unapproved target | `limen tcp` sends only the resource name. The proxy authorizes `TcpAccess`; the worker connects only to the `address` in that resource's signed policy snapshot. No destination is accepted from the client. Restrict worker egress at the network layer. |
+| I: raw TCP payloads are captured in audit | The relay never parses or logs stream bytes. Proxy session start/end events record actor, resource, duration, byte counts, and reason; no payload or recording is produced. |
+
 | Concern | Control |
 |---|---|
 | Secrets in logs | `Secret<T>` (no `Serialize`, redacted `Debug`). Log scanner test. Tokens never in URLs |
@@ -237,4 +254,5 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 | 2026-10-15 | CI | Self-hosted runners run pull request code on the owner's machines (TB9). Private repository only |
 | 2026-10-17 | 6 | SQL databases: verified TLS to targets, secret files and the bootstrap admin, statement text in audit, role and database guards, shared-role cancel and kill (residual), SigV4 and Redshift credential calls (unverified), injection into bootstrap SQL, frame limits |
 | 2026-10-17 | 8 (final review) | Kubernetes: built-in user names, audit of requests that fail upstream, upstream 401 as a service error, token refresh during rotation |
+| Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |
 | 2026-10-17 | 8 | Kubernetes: the `/k8s/` entry point and upgrade proxy, identity-header stripping at two hops, recordability of streams, the worker's impersonation token, ALPN-less HTTP/1.1 |

@@ -20,6 +20,8 @@ use crate::TransportError;
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub remote_addr: Option<SocketAddr>,
+    /// TLS SNI, when the client sent one. HTTP app routing binds this to Host.
+    pub server_name: Option<String>,
     /// The client certificate chain rustls verified, leaf first. Empty when
     /// the client presented none.
     pub client_certs: Vec<CertificateDer<'static>>,
@@ -45,6 +47,7 @@ impl PeerInfo {
             .unwrap_or_default();
         Self {
             remote_addr,
+            server_name: stream.get_ref().1.server_name().map(str::to_owned),
             client_certs,
         }
     }

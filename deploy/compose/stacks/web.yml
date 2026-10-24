@@ -1,0 +1,14 @@
+# A local HTTP target for the Phase 12 browser SSO demo.
+services:
+  web-target:
+    container_name: web-target-${LIMEN_ENV:-dev}
+    profiles: ["web"]
+    image: ${PYTHON_IMAGE}
+    command: ["python", "-u", "/opt/limen/web_fixture.py"]
+    volumes:
+      - ./config/targets/web/web_fixture.py:/opt/limen/web_fixture.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=1)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

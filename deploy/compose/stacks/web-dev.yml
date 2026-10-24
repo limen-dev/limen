@@ -1,0 +1,5 @@
+# Development worker opt-in for the local HTTP-only web fixture.
+services:
+  worker:
+    environment:
+      LIMEN_ALLOW_INSECURE_WEB_TARGETS: "true"

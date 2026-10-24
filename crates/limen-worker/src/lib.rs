@@ -40,6 +40,7 @@ use tokio::sync::{Notify, watch};
 use tonic::{Request, Response, Status, Streaming};
 
 #[derive(Debug, Clone, Args)]
+#[allow(clippy::struct_excessive_bools)] // Independent opt-in flags for worker features.
 pub struct Config {
     /// Proxy address, `host:port`. The worker only ever connects out.
     #[arg(long, env = "LIMEN_PROXY_ADDR")]
@@ -185,6 +186,11 @@ pub struct Config {
     /// For the local compose profile only (ADR-0033).
     #[arg(long, env = "LIMEN_ALLOW_INSECURE_DB_TARGETS")]
     pub allow_insecure_db_targets: bool,
+
+    /// Let resources set `web.insecure_dev` and use plain HTTP upstreams.
+    /// For local compose only (ADR-0022).
+    #[arg(long, env = "LIMEN_ALLOW_INSECURE_WEB_TARGETS")]
+    pub allow_insecure_web_targets: bool,
 
     #[command(flatten)]
     pub kube: kube::KubeConfig,
@@ -452,6 +458,10 @@ impl Worker {
 
     pub(crate) fn allow_insecure_db_targets(&self) -> bool {
         self.config.allow_insecure_db_targets
+    }
+
+    pub(crate) fn allow_insecure_web_targets(&self) -> bool {
+        self.config.allow_insecure_web_targets
     }
 
     pub(crate) fn credentials(&self) -> Arc<ComponentCredentials> {
@@ -784,6 +794,7 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
                     tracing::info!(tunnel = index, proxy = %worker.config.proxy_addr, "tunnel connected");
                     let peer = PeerInfo {
                         remote_addr: None,
+                        server_name: None,
                         client_certs: Vec::new(),
                     };
                     // On shutdown, close gracefully (GOAWAY) so the closing

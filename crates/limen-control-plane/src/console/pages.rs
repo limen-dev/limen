@@ -20,8 +20,8 @@ use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
     KubePage, KubeView, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage,
     ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage,
-    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WorkerMatch, Workers,
-    error_page, list_text, path_segment, time_text,
+    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WebRequestView, WorkerMatch,
+    Workers, error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -593,6 +593,21 @@ pub async fn session_detail(
             } else {
                 (Vec::new(), 0, 0)
             };
+            let (web_requests, web_request_total, web_request_problems) = if s.is_web {
+                let rows = store::web_requests(&state.db, row.session_id, STATEMENT_LIMIT)
+                    .await
+                    .unwrap_or_default();
+                let (total, problems) = store::web_session_counts(&state.db, row.session_id)
+                    .await
+                    .unwrap_or_default();
+                (
+                    rows.iter().map(WebRequestView::from).collect(),
+                    total,
+                    problems,
+                )
+            } else {
+                (Vec::new(), 0, 0)
+            };
             html(
                 SessionPage {
                     chrome: chrome(&state, &auth, "sessions"),
@@ -601,6 +616,9 @@ pub async fn session_detail(
                     requests,
                     request_total,
                     request_problems,
+                    web_requests,
+                    web_request_total,
+                    web_request_problems,
                     statement_total,
                     statement_errors,
                 }

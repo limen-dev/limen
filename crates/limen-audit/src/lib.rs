@@ -81,6 +81,15 @@ pub enum EventKind {
     KafkaSummary,
     #[serde(rename = "kube.request")]
     KubeRequest,
+    /// A web app request, durably recorded before forwarding.
+    #[serde(rename = "web.request")]
+    WebRequest,
+    /// The final status and byte counts for a web request.
+    #[serde(rename = "web.response")]
+    WebResponse,
+    /// End of a WebSocket stream, including duration and byte counts.
+    #[serde(rename = "web.websocket")]
+    WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
     /// A proxy or worker enrolled. `data.kind` says which.

@@ -1,0 +1,11 @@
+# Development worker opt-in for the local HTTP-only web fixture in scale mode.
+services:
+  worker-0:
+    environment:
+      LIMEN_ALLOW_INSECURE_WEB_TARGETS: "true"
+  worker-1:
+    environment:
+      LIMEN_ALLOW_INSECURE_WEB_TARGETS: "true"
+  worker-2:
+    environment:
+      LIMEN_ALLOW_INSECURE_WEB_TARGETS: "true"

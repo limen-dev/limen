@@ -538,6 +538,20 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    // Unauthenticated `/console/web/login` inserts a row per call, so abandoned
+    // sign-ins and unredeemed handoffs must not accumulate.
+    deleted += sqlx::query("DELETE FROM web_app_logins WHERE expires_at < now()")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM web_app_handoffs WHERE expires_at < now()")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM web_requests WHERE at < now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM session_kills WHERE killed_at < now() - interval '2 days'")
         .execute(&mut *tx)
         .await?

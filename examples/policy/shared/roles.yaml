@@ -39,7 +39,7 @@ spec:
   allow:
     - resources: { kind: [ssh], labels: { "*": ["*"] } }
       ssh: { logins: [ubuntu, ec2-user], port_forwarding: true }
-    - resources: { kind: [postgres, mysql, redis], labels: { "*": ["*"] } }
+    - resources: { kind: [postgres, mysql, redshift, redis], labels: { "*": ["*"] } }
       db: { roles: [limen_read, limen_write] }
       redis: { users: [write] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }

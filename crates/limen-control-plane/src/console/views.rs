@@ -222,6 +222,8 @@ pub struct SessionView {
     pub is_mongo: bool,
     /// An `OpenSearch` or Elasticsearch session: no recording, but audited requests.
     pub is_search: bool,
+    /// A browser web request: no recording, but an audited request/response.
+    pub is_web: bool,
     /// A `RabbitMQ` or Kafka session: no recording, but audited operations.
     pub is_broker: bool,
     /// Any of those: the page lists what was sent instead of a recording.
@@ -282,6 +284,7 @@ impl From<&SessionRow> for SessionView {
             is_kubectl: s.kind.as_deref() == Some("kubectl"),
             is_mongo: s.kind.as_deref() == Some("mongodb"),
             is_search: matches!(s.kind.as_deref(), Some("opensearch" | "elasticsearch")),
+            is_web: s.kind.as_deref() == Some("web"),
             is_broker: matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")),
             has_statements: matches!(
                 s.kind.as_deref(),
@@ -312,6 +315,8 @@ impl From<&SessionRow> for SessionView {
                 "Search sessions have no terminal recording. Every request is in the audit trail as search.request and search.response events that carry this session id (in S3 and Datadog)."
             } else if matches!(s.kind.as_deref(), Some("rabbitmq" | "kafka")) {
                 "RabbitMQ and Kafka sessions have no terminal recording. Every operation is in the audit trail as mq.operation or kafka.request events that carry this session id (in S3 and Datadog). Message content is never recorded."
+            } else if s.kind.as_deref() == Some("web") {
+                "Web requests have no recording. The audited request and response metadata are shown below; query strings, headers, and bodies are never kept."
             } else {
                 "This session wasn't recorded."
             },
@@ -524,8 +529,54 @@ pub struct SessionPage {
     pub requests: Vec<KubeView>,
     pub request_total: i64,
     pub request_problems: i64,
+    /// Browser web requests, oldest first.
+    pub web_requests: Vec<WebRequestView>,
+    pub web_request_total: i64,
+    pub web_request_problems: i64,
     pub statement_total: i64,
     pub statement_errors: i64,
+}
+
+pub struct WebRequestView {
+    pub time: String,
+    pub method: String,
+    pub path: String,
+    pub status: String,
+    pub status_class: &'static str,
+    pub traffic: String,
+    pub latency: String,
+    pub outcome: String,
+}
+
+impl From<&super::store::WebRequestRow> for WebRequestView {
+    fn from(request: &super::store::WebRequestRow) -> Self {
+        let status = request
+            .status
+            .map_or_else(|| "in flight".into(), |status| status.to_string());
+        let status_class = match request.status {
+            Some(200..=399) => "ok",
+            Some(400..) => "bad",
+            _ => "warn",
+        };
+        let traffic = match (request.bytes_in, request.bytes_out) {
+            (Some(bytes_in), Some(bytes_out)) => {
+                format!("{} in, {} out", bytes_text(bytes_in), bytes_text(bytes_out))
+            }
+            _ => "—".into(),
+        };
+        Self {
+            time: time_text(Some(request.at)),
+            method: request.method.clone(),
+            path: request.path.clone(),
+            status,
+            status_class,
+            traffic,
+            latency: request
+                .duration_ms
+                .map_or_else(|| "—".into(), |ms| format!("{ms} ms")),
+            outcome: request.outcome.clone().unwrap_or_default(),
+        }
+    }
 }
 
 /// One statement of a database session, ready to show.

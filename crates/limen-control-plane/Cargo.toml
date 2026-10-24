@@ -46,6 +46,7 @@ futures.workspace = true
 governor.workspace = true
 http.workspace = true
 openidconnect.workspace = true
+prost.workspace = true
 rand.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true

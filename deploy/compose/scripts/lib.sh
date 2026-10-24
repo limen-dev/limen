@@ -13,8 +13,27 @@
 # Limen: docker-compose.yml (one of each component) or, with --scale,
 # stacks/scale.yml (3 control planes, 3 proxies, 3 workers).
 # Stacks (each a compose file and a profile of the same name):
-STACK_NAMES=(ssh db redis mongo search messaging observability bots kube)
+STACK_NAMES=(ssh db redis mongo search messaging observability bots kube tcp web)
 compose=() STACK_FLAGS=() # set by stack_setup
+POLICY_FILES=()
+
+# Select shared policy and the examples for each enabled resource stack.
+stack_policy_files() {
+  local root="$1" s kind selected=" "
+  shift
+  POLICY_FILES=("$root/examples/policy/shared")
+  for s in "$@"; do
+    case "$s" in
+      db) kind=database ;;
+      ssh|redis|mongo|search|messaging|bots|kube|tcp|web) kind="$s" ;;
+      observability) continue ;;
+      *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
+    esac
+    case "$selected" in *" $kind "*) continue ;; esac
+    selected+="$kind "
+    POLICY_FILES+=("$root/examples/policy/stacks/$kind")
+  done
+}
 
 # ---- terminal output -----------------------------------------------------------
 # Colours and symbols; plain text when stdout is not a terminal or NO_COLOR is set.
@@ -91,6 +110,12 @@ stack_setup() {
             KUBE_CLUSTER="kubernetes-$LIMEN_ENV"
             export LIMEN_KUBE_DIR="$STACK_STATE/kube"
             export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
+      tcp) files+=(-f "$here/stacks/tcp.yml") ;;
+      web)
+        files+=(-f "$here/stacks/web.yml")
+        if $scale; then files+=(-f "$here/stacks/web-scale.yml")
+        else files+=(-f "$here/stacks/web-dev.yml"); fi
+        ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
     profiles+=(--profile "$s")
@@ -117,6 +142,8 @@ stack_describe() {
     observability) echo "fake Datadog intake, plus Trino and Grafana over the audit log" ;;
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
     kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
+    tcp) echo "a raw TCP echo target (limen tcp)" ;;
+    web) echo "an HTTP app target for browser SSO and request auditing" ;;
   esac
 }
 
@@ -343,13 +370,13 @@ YAML
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
 stack_endpoints() {
   ui_init
-  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_bots=false has_kube=false
+  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_bots=false has_kube=false has_tcp=false has_web=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
-    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; esac
+    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; esac
   done
   local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
-  if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube; then
+  if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube || $has_tcp || $has_web; then
     ui_section "Resources"
     $has_ssh && printf "$row" "SSH" "limen ssh web-staging-1"
     $has_db && printf "$row" "PostgreSQL" "limen db connect orders-staging" "MySQL" "limen db connect orders-mysql-staging"
@@ -358,6 +385,8 @@ stack_endpoints() {
     $has_search && printf "$row" "Elasticsearch" "limen search connect search-staging" "OpenSearch" "limen search connect search-opensearch"
     $has_messaging && printf "$row" "RabbitMQ" "limen mq connect events-rabbit-staging" "Kafka" "limen kafka connect events-kafka-staging"
     $has_kube && printf "$row" "Kubernetes" "limen kube login eks-staging --kubeconfig $kc && kubectl --kubeconfig $kc get pods -A"
+    $has_tcp && printf "$row" "TCP" "limen tcp tcp-echo"
+    $has_web && printf "$row" "Web app" "limen web open web-demo"
   fi
   if $has_obs || $has_bots; then
     ui_section "Other"
@@ -367,6 +396,7 @@ stack_endpoints() {
   ui_section "Connect"
   printf "$row" "CLI" "limen --proxy $STACK_PROXY login --ca-file $ca" "" "limen ls"
   printf "$row" "Console" "https://$STACK_PROXY/console/" "Sign in" "admin@example.com / password"
+  $has_web && ui_note "For web-demo, resolve app.apps.test to 127.0.0.1; its certificate uses the local dev CA."
   ui_note "Browsers warn about the dev CA; that is expected. Stop it with: deploy/compose/setup.sh${scale[*]:+ --scale} down"
   return 0
 }

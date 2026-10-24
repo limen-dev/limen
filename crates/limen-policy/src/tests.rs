@@ -1,8 +1,35 @@
 use super::*;
 
-const ROLES: &str = include_str!("../../../examples/policy/roles.yaml");
-const MAPPINGS: &str = include_str!("../../../examples/policy/mappings.yaml");
-const RESOURCES: &str = include_str!("../../../examples/policy/resources.yaml");
+const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
+const MAPPINGS: &str = include_str!("../../../examples/policy/shared/mappings.yaml");
+const TCP_PHASE12: &str = include_str!("../../../examples/policy/stacks/tcp/phase12.yaml");
+const WEB_PHASE12: &str = include_str!("../../../examples/policy/stacks/web/phase12.yaml");
+const PLANNED: &str = concat!(
+    include_str!("../../../examples/policy/shared/planned-access.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/database/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/kube/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/messaging/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/web/planned.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/tcp/planned.yaml"),
+);
+const RESOURCES: &str = concat!(
+    include_str!("../../../examples/policy/stacks/ssh/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/database/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/redis/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/mongo/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/messaging/resources.yaml"),
+    "\n---\n",
+    include_str!("../../../examples/policy/stacks/search/resources.yaml"),
+);
 
 fn example() -> Policy {
     Policy::parse_yaml([
@@ -11,6 +38,19 @@ fn example() -> Policy {
         ("resources.yaml", RESOURCES),
     ])
     .expect("example policy is valid")
+}
+
+#[test]
+fn phase12_stack_policies_are_valid() {
+    Policy::parse_yaml([
+        ("roles.yaml", ROLES),
+        ("mappings.yaml", MAPPINGS),
+        ("planned.yaml", PLANNED),
+        ("resources.yaml", RESOURCES),
+        ("tcp-phase12.yaml", TCP_PHASE12),
+        ("web-phase12.yaml", WEB_PHASE12),
+    ])
+    .expect("Phase 12 stack policies are valid");
 }
 
 fn roles(r: &[&str]) -> Vec<String> {
@@ -309,24 +349,22 @@ fn worker_selector_matching() {
     assert!(!p.worker_may_serve("no-such-resource", &dev));
 }
 
-mod planned_integrations {
+mod integration_examples {
     use super::*;
 
-    const PLANNED: &str = include_str!("../../../examples/policy/planned.yaml");
-
-    fn with_planned() -> Policy {
+    fn with_examples() -> Policy {
         Policy::parse_yaml([
             ("roles.yaml", ROLES),
             ("mappings.yaml", MAPPINGS),
             ("resources.yaml", RESOURCES),
             ("planned.yaml", PLANNED),
         ])
-        .expect("example policy with the planned integrations is valid")
+        .expect("example policy is valid")
     }
 
     #[test]
-    fn every_planned_kind_has_an_example_resource() {
-        let policy = with_planned();
+    fn every_resource_kind_has_an_example_resource() {
+        let policy = with_examples();
         let admin = roles(&["sre", "sre-planned"]);
         let kinds: std::collections::HashSet<_> =
             policy.accessible(&admin).iter().map(|r| r.kind).collect();
@@ -337,7 +375,7 @@ mod planned_integrations {
 
     #[test]
     fn developers_get_staging_only_and_read_only_principals() {
-        let policy = with_planned();
+        let policy = with_examples();
         let dev = roles(&["dev-readonly", "dev-planned"]);
         let seen = policy.accessible(&dev);
         let names: Vec<_> = seen.iter().map(|r| r.name.as_str()).collect();
@@ -356,7 +394,7 @@ mod planned_integrations {
 
     #[test]
     fn principals_must_fit_the_kind() {
-        let policy = with_planned();
+        let policy = with_examples();
         // The brokers are served now, so their grants are in `sre`.
         let sre = roles(&["sre", "sre-planned"]);
         let eval = |resource: &str, principal: Principal| {
@@ -422,9 +460,56 @@ mod planned_integrations {
 
     #[test]
     fn web_grants_take_no_fields() {
-        let role = "kind: role\nversion: v1\nmetadata: { name: r }\nspec:\n  allow:\n    - resources: { kind: [web], labels: { \"*\": [\"*\"] } }\n      web: { paths: [\"/\"] }\n";
-        assert!(Policy::parse_yaml([("r.yaml", role)]).is_err());
+        let role = "kind: role\nversion: v1\nmetadata: { name: r }\nspec:\n  allow:\n    - resources: { kind: [web], labels: { \"*\": [\"*\"] } }\n      web: { path_prefixes: [\"/admin\"], methods: [GET, POST] }\n";
+        assert!(Policy::parse_yaml([("r.yaml", role)]).is_ok());
     }
+}
+
+#[test]
+fn web_policy_restrictions_are_per_request_and_deny_wins() {
+    let role = r#"
+kind: role
+version: v1
+metadata: { name: reader }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: { methods: [GET], path_prefixes: ["/admin"] }
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: { path_prefixes: ["/admin/secret"] }
+---
+kind: resource
+version: v1
+metadata: { name: app }
+spec:
+  web: { address: "app:443", host: "app.apps.example.com", tls_ca_file: "/etc/ssl/ca.pem" }
+"#;
+    let policy = Policy::parse_yaml([("web.yaml", role)]).expect("valid web policy");
+    let roles = vec!["reader".to_owned()];
+    assert!(policy.web_request_allowed(&roles, "app", "GET", "/admin"));
+    assert!(policy.web_request_allowed(&roles, "app", "GET", "/admin/users"));
+    assert!(!policy.web_request_allowed(&roles, "app", "POST", "/admin/users"));
+    assert!(!policy.web_request_allowed(&roles, "app", "GET", "/administrator"));
+    assert!(!policy.web_request_allowed(&roles, "app", "GET", "/admin/secret"));
+}
+
+#[test]
+fn web_hosts_are_unique_across_resources() {
+    let resources = r#"
+kind: resource
+version: v1
+metadata: { name: first }
+spec:
+  web: { address: "first:8080", host: "app.example.com", insecure_dev: true }
+---
+kind: resource
+version: v1
+metadata: { name: second }
+spec:
+  web: { address: "second:8080", host: "app.example.com", insecure_dev: true }
+"#;
+    assert!(Policy::parse_yaml([("web.yaml", resources)]).is_err());
 }
 
 #[test]
@@ -433,10 +518,7 @@ fn every_example_resource_has_a_target_to_show() {
         ("roles.yaml", ROLES),
         ("mappings.yaml", MAPPINGS),
         ("resources.yaml", RESOURCES),
-        (
-            "planned.yaml",
-            include_str!("../../../examples/policy/planned.yaml"),
-        ),
+        ("planned.yaml", PLANNED),
     ])
     .expect("valid");
     for (name, resource) in &policy.resources {
@@ -451,7 +533,7 @@ mod bots {
     use super::*;
     use crate::bot::JoinMethod;
 
-    const BOTS: &str = include_str!("../../../examples/policy/bots.yaml");
+    const BOTS: &str = include_str!("../../../examples/policy/stacks/bots/policy.yaml");
 
     fn with_bots() -> Policy {
         Policy::parse_yaml([

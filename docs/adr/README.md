@@ -26,7 +26,7 @@ Each ADR's status line gives its approval date.
 | [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Accepted |
 | [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Accepted |
 | [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
-| [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Proposed |
+| [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Accepted |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
 | [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Accepted |
 | [0025](0025-access-requests.md) | Access requests and just-in-time approval (with break-glass) | Proposed |
@@ -44,4 +44,4 @@ Each ADR's status line gives its approval date.
 | [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
 | [0037](0037-messaging-access.md) | RabbitMQ, Amazon MQ, Kafka, and MSK access (Phase 11): AMQP and Kafka codecs in the worker, multi-broker slot rewrite, bodies never logged | Proposed |
 
-ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and stay `Proposed` until their phase starts.
+ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.
