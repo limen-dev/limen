@@ -114,7 +114,7 @@ You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`
 deploy/compose/setup.sh
 
 # 2. Install the CLI (once; re-run after pulling to upgrade)
-deploy/cli/install.sh
+scripts/install-cli.sh
 
 # 3. Sign in (a browser opens on Dex; the dev admin is admin@example.com, password "password")
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem

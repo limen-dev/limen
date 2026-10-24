@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the limen CLI from this checkout and install it on your PATH.
 #
-#   deploy/cli/install.sh                 # installs to ~/.local/bin/limen
-#   PREFIX=/usr/local deploy/cli/install.sh
+#   scripts/install-cli.sh                 # installs to ~/.local/bin/limen
+#   PREFIX=/usr/local scripts/install-cli.sh
 #
 # Re-run it after pulling to upgrade. Needs a Rust toolchain (rustup reads the
 # version pinned in rust-toolchain.toml). Release tarballs (ADR-0024) will
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 prefix="${PREFIX:-$HOME/.local}"
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo not found. Install Rust with rustup: https://rustup.rs" >&2
