@@ -5,7 +5,7 @@
 //!
 //! Needs `LIMEN_TEST_DATABASE_URL` (control plane state). The search server
 //! is a small in-process stand-in (the real engines are exercised by
-//! `deploy/compose/demo-phase10.sh`).
+//! `demos/demo-phase10.sh`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

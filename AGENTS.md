@@ -4,7 +4,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 
 ## Rules
 - **Work in a git worktree.** `git worktree add .claude/worktrees/<topic> -b <branch>`; make all edits, builds, and commits there. Never edit the main checkout or switch its branch.
-- **Phase by phase.** Status is in `docs/design.md` §13 (✅ = done). Several phases are already implemented, so check there before any change. Only work on a phase the owner has approved; don't build ahead, even partially (planned integrations are data-only stubs). Each phase ships tests, docs, and a demo (`deploy/compose/demo-*.sh`).
+- **Phase by phase.** Status is in `docs/design.md` §13 (✅ = done). Several phases are already implemented, so check there before any change. Only work on a phase the owner has approved; don't build ahead, even partially (planned integrations are data-only stubs). Each phase ships tests, docs, and a demo (`demos/demo-*.sh`).
 - **Verify before claiming.** Run it before saying it works. Anything tested only against a local stand-in is labelled `unverified`.
 - **Secrets stay out of logs.** Use `limen_core::secret::Secret`. mTLS everywhere; no long-lived user credentials. Audit fails closed.
 - **Image versions.** Container images are pinned only in `deploy/compose/.env`; edit it and run `scripts/check-versions.sh` (CI runs it). Tool versions are in `mise.toml`.
@@ -39,7 +39,7 @@ Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbSt
 ## Layout
 - Binaries: `crates/limen-{control-plane,proxy,worker,cli}`.
 - Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component}`; tests in `limen-testkit` and `limen-e2e`.
-- Dev stack: `deploy/compose/` (`setup.sh` starts it; `stacks/`, `config/`, `scripts/`, `demos/`; see its README).
+- Dev stack: `deploy/compose/` (`setup.sh` starts it; `stacks/`, `config/`, `scripts/`; see its README). Demos: `demos/`).
 - Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`). Terraform: `deploy/terraform`.
 - Generated dashboards: `python3 deploy/grafana/generate.py`.
 - Dev users: only in `deploy/compose/config/dev-users.toml`; regenerate with `python3 deploy/compose/scripts/gen-dev-users.py`. Tests use `limen_testkit::users`.
