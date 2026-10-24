@@ -29,6 +29,7 @@ A dependency is adopted only if all of these hold:
 | OIDC | openidconnect | 4.0.1 | 2025-07 (repo active 2025-11) | Adopt. Stable and widely used. Watch maintenance; a fallback is `openidconnect` minus discovery plus `jsonwebtoken` |
 | SQL state | sqlx | 0.9.0 | 2026-05 | Adopt |
 | CLI | clap | 4.6.7 | 2026-09 | Adopt |
+| CLI completions | clap_complete 4.6.11 | | 2026-10 | Adopt. Same maintainers and release train as clap; generates `limen completions <shell>`. No advisories; MIT/Apache-2.0 |
 | Telemetry | tracing 0.1.44, tracing-subscriber 0.3.23, opentelemetry(-otlp) 0.33.1, tracing-opentelemetry 0.34 | | 2025-12 → 2026-10 | Adopt |
 | Metrics | metrics 0.24.6 + metrics-exporter-prometheus 0.18.3, cadence 1.8.0 | | 2026-04/05 | Adopt |
 | SSH | russh 0.64.1 | | 2026-10-05 | Adopt, at ≥ 0.60.3 (RUSTSEC-2026-0154 fixed). Fuzz our usage |

@@ -42,6 +42,7 @@ Each ADR's status line gives its approval date.
 | [0035](0035-mongodb-access.md) | MongoDB, Atlas, and DocumentDB access (Phase 9): BSON/OP_MSG relay in the worker, SCRAM/X.509/IAM, redacted command shapes | Accepted |
 | [0036](0036-search-access.md) | OpenSearch and Elasticsearch access (Phase 10): HTTP front in the worker, policy by method class and index pattern | Accepted |
 | [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
+| [0039](0039-detached-connections.md) | Detached connections (`--detach`) and `limen conns` | Accepted |
 | [0037](0037-messaging-access.md) | RabbitMQ, Amazon MQ, Kafka, and MSK access (Phase 11): AMQP and Kafka codecs in the worker, multi-broker slot rewrite, bodies never logged | Proposed |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

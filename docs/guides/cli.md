@@ -13,6 +13,11 @@ limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
 limen redis connect cache-staging          # a local listener for redis-cli, no password
 limen mongo connect catalog-staging        # a local listener for mongosh, no password
 limen search connect search-staging        # a local listener for curl and Elasticsearch/OpenSearch clients, no credential
+limen show orders-staging    # type, labels, who you may act as, and the command to connect
+limen connect orders-staging # open any resource by name; picks db/redis/ssh/... from its type
+limen redis connect cache-staging --detach   # run in the background; limen conns ls / stop
+limen status --json          # identity and expiry for scripts (local only, no admin needed)
+limen completions zsh        # shell completions (bash, zsh, fish, elvish, powershell)
 limen logout                 # end this login and delete local credentials
 ```
 
@@ -34,9 +39,15 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen login [--device] [--no-browser] [--ca-file PEM]` | Sign in through the identity provider and get short-lived credentials. `--ca-file` pins the proxy's CA for later commands |
 | `limen login --bot <github_actions\|gitlab\|oidc> [--bot-name N] [--token-env VAR] [--token-file FILE] [--audience A]` | Log in as a **bot** with a CI platform's identity token (for CI jobs; see [the bots guide](bots.md)) |
 | `limen logout` | End this login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and delete the local credentials. Your other logins are not affected. If the proxy can't be reached the credentials are still deleted, and the certificate stays valid until it expires |
-| `limen status` | Show your identity, roles, and the time left on your credentials |
+| `limen status [--json]` | Show your identity, roles, and the time left on your credentials. `--json` is for scripts; it reads local credentials only, so it needs no admin role |
 | `limen ls [--json] [--type KIND] [--label KEY=VALUE]…` | List the resources you can access, optionally only one type and only those carrying every given label |
 | `limen <group> ls [--json] [--label KEY=VALUE]…` | The same list limited to one family: `db` (postgres, mysql, redshift), `redis`, `kube`, `mongo`, `search` (opensearch, elasticsearch), `mq` (rabbitmq), `kafka`, `web`. For SSH use `limen ls --type ssh`; for TCP, `--type tcp` |
+| `limen ls [QUERY] [-q] [--watch[=SECS]]` | `QUERY` matches names and labels (case-insensitive); `-q` prints names only; `--watch` redraws every SECS seconds (default 2) |
+| `limen show <resource> [--json]` | One resource: type, labels, principals, default database or address, and the command that connects |
+| `limen connect <resource> [options…]` | Opens a resource by name using the right command for its type; options after the name go to that command |
+| `limen <connect command> … --detach` (`-d`) | Run the listener in the background and return once it prints its address. It ends when your login expires, on `limen logout`, on `limen conns stop`, or after the idle timeout ([ADR-0039](../adr/0039-detached-connections.md)). macOS and Linux |
+| `limen conns ls [--json]`, `limen conns stop <id>…\|--all` | List and end detached connections |
+| `limen completions <shell>` | Print a shell completion script |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
 | `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `mongosh` or any MongoDB driver; each connection is an audited session (see [the MongoDB guide](mongodb.md)) |

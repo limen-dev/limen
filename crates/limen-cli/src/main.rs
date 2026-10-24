@@ -57,6 +57,10 @@ struct Cli {
     #[arg(long, global = true, env = "LIMEN_PROXY")]
     proxy: Option<String>,
 
+    /// Run a `connect` command in the background and return once it is listening.
+    #[arg(short = 'd', long, global = true)]
+    detach: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -138,6 +142,20 @@ enum Command {
         #[arg(long = "type", value_name = "KIND")]
         kind: Option<String>,
     },
+    /// Open any resource by name: picks `ssh`, `db connect`, `redis connect`, ... from its type.
+    Connect {
+        resource: String,
+        /// Options passed to the command it picks, e.g. `--listen 127.0.0.1:6380` or `--role readonly`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// List and stop connections started with `--detach`.
+    Conns {
+        #[command(subcommand)]
+        command: ConnsCommand,
+    },
+    /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
+    Completions { shell: clap_complete::Shell },
     /// Show one resource: type, labels, how you may access it, and the command to connect.
     Show {
         resource: String,
@@ -220,8 +238,11 @@ struct ListArgs {
     /// Only resources whose name or a label contains this text (case-insensitive).
     query: Option<String>,
     /// Output JSON instead of a table.
-    #[arg(long, conflicts_with = "quiet")]
+    #[arg(long, conflicts_with_all = ["quiet", "watch"])]
     json: bool,
+    /// Redraw the list every SECS seconds (default 2) until interrupted.
+    #[arg(long, value_name = "SECS", num_args = 0..=1, default_missing_value = "2")]
+    watch: Option<u64>,
     /// Print only the resource names, one per line, for scripts and shell loops.
     #[arg(short, long)]
     quiet: bool,
@@ -236,9 +257,28 @@ impl From<ListArgs> for commands::ListFilter {
             query: a.query,
             json: a.json,
             quiet: a.quiet,
+            watch: a.watch,
             labels: a.label,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum ConnsCommand {
+    /// List detached connections.
+    Ls {
+        /// Output JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// End detached connections.
+    Stop {
+        /// Connection ids from `limen conns ls`.
+        ids: Vec<String>,
+        /// End all of them.
+        #[arg(long, conflicts_with = "ids")]
+        all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -411,6 +451,22 @@ enum WebCommand {
     },
 }
 
+/// The argument list for the command that opens `resource`, chosen by its type.
+async fn connect_argv(
+    proxy: Option<&str>,
+    resource: &str,
+    extra: &[String],
+) -> anyhow::Result<Vec<String>> {
+    let kind = commands::kind_of(proxy, resource).await?;
+    let mut argv = vec!["limen".to_owned()];
+    if let Some(p) = proxy {
+        argv.extend(["--proxy".to_owned(), p.to_owned()]);
+    }
+    argv.extend(commands::connect_words(&kind, resource));
+    argv.extend(extra.iter().cloned());
+    Ok(argv)
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -421,15 +477,50 @@ async fn main() {
     });
     // Logs go to stderr and default to warnings, so command output stays clean.
     telemetry::init_with_default(LogFormat::Text, "warn");
-    if let Err(e) = run(cli).await {
+    let result = run(cli).await;
+    if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
+        commands::conns::forget(&id);
+    }
+    if let Err(e) = result {
         ui::error(&e);
         std::process::exit(1);
     }
 }
 
+/// Commands that open a local listener, the only ones `--detach` applies to.
+fn opens_listener(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Db {
+            command: DbCommand::Connect { .. }
+        } | Command::Redis {
+            command: RedisCommand::Connect { .. }
+        } | Command::Mongo {
+            command: MongoCommand::Connect { .. }
+        } | Command::Search {
+            command: SearchCommand::Connect { .. }
+        } | Command::Mq {
+            command: MqCommand::Connect { .. }
+        } | Command::Kafka {
+            command: KafkaCommand::Connect { .. }
+        } | Command::Tcp { .. }
+            | Command::Connect { .. }
+    )
+}
+
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.proxy.as_deref();
+    if cli.detach {
+        anyhow::ensure!(
+            opens_listener(&cli.command),
+            "--detach applies to commands that open a local listener, such as `limen redis connect`"
+        );
+        return commands::conns::detach(proxy).await;
+    }
+    if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
+        tokio::spawn(commands::conns::watch_expiry(id, cli.proxy.clone()));
+    }
     match cli.command {
         Command::Login {
             bot: Some(method),
@@ -461,6 +552,23 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Status { json } => commands::status(proxy, json),
         Command::Ls { args, kind } => {
             commands::ls(proxy, &args.into(), kind.as_deref().as_slice()).await
+        }
+        Command::Connect { resource, args } => {
+            let argv = connect_argv(proxy, &resource, &args).await?;
+            Box::pin(run(Cli::try_parse_from(argv)?)).await
+        }
+        Command::Conns { command } => match command {
+            ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
+            ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
+        },
+        Command::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut <Cli as clap::CommandFactory>::command(),
+                "limen",
+                &mut std::io::stdout(),
+            );
+            Ok(())
         }
         Command::Show { resource, json } => commands::show(proxy, &resource, json).await,
         Command::Db {

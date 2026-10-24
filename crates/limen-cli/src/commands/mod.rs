@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod bot;
+pub mod conns;
 pub mod db;
 pub mod kafka;
 pub mod kube;
@@ -19,6 +20,7 @@ use limen_proto::v1::{ListResourcesRequest, Resource};
 
 use crate::profile::Profile;
 use crate::{api, ui};
+use anyhow::Context as _;
 
 /// End the login at the proxy, then delete the local credentials. The proxy
 /// and workers refuse the certificate from then on, wherever a copy of it is.
@@ -37,6 +39,10 @@ pub async fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
         end_login(&proxy, &profile).await
     };
     Profile::delete(&proxy)?;
+    let stopped = conns::stop_all(&proxy);
+    if stopped > 0 {
+        ui::info(&format!("Closed {stopped} detached connection(s)."));
+    }
     match ended {
         Ok(()) => ui::success(&format!(
             "Logged out of {}. The login is ended and local credentials are deleted.",
@@ -129,6 +135,7 @@ pub struct ListFilter {
     pub query: Option<String>,
     pub json: bool,
     pub quiet: bool,
+    pub watch: Option<u64>,
     pub labels: Vec<(String, String)>,
 }
 
@@ -148,20 +155,41 @@ fn matches_filters(r: &Resource, kinds: &[&str], f: &ListFilter) -> bool {
         && f.query.as_deref().is_none_or(text)
 }
 
+/// The words of the command that opens a resource of this kind, after `limen`.
+pub fn connect_words(kind: &str, name: &str) -> Vec<String> {
+    let (group, verb): (&str, &str) = match kind {
+        "postgres" | "mysql" | "redshift" => ("db", "connect"),
+        "redis" => ("redis", "connect"),
+        "kubernetes" => ("kube", "login"),
+        "mongodb" => ("mongo", "connect"),
+        "opensearch" | "elasticsearch" => ("search", "connect"),
+        "rabbitmq" => ("mq", "connect"),
+        "kafka" => ("kafka", "connect"),
+        "web" => ("web", "open"),
+        "tcp" => ("tcp", ""),
+        _ => ("ssh", ""),
+    };
+    let mut words = vec![group.to_owned()];
+    if !verb.is_empty() {
+        words.push(verb.to_owned());
+    }
+    words.push(name.to_owned());
+    words
+}
+
 /// The command that opens a resource of this kind, for hints.
 fn connect_command(kind: &str, name: &str) -> String {
-    match kind {
-        "postgres" | "mysql" | "redshift" => format!("limen db connect {name}"),
-        "redis" => format!("limen redis connect {name}"),
-        "kubernetes" => format!("limen kube login {name}"),
-        "mongodb" => format!("limen mongo connect {name}"),
-        "opensearch" | "elasticsearch" => format!("limen search connect {name}"),
-        "rabbitmq" => format!("limen mq connect {name}"),
-        "kafka" => format!("limen kafka connect {name}"),
-        "web" => format!("limen web open {name}"),
-        "tcp" => format!("limen tcp {name}"),
-        _ => format!("limen ssh {name}"),
-    }
+    format!("limen {}", connect_words(kind, name).join(" "))
+}
+
+/// The type of a resource the caller can access.
+pub async fn kind_of(proxy: Option<&str>, name: &str) -> anyhow::Result<String> {
+    fetch_resources(proxy)
+        .await?
+        .into_iter()
+        .find(|r| r.name == name)
+        .map(|r| r.kind)
+        .with_context(|| format!("no resource named `{name}` is available to you; see `limen ls`"))
 }
 
 async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
@@ -181,6 +209,20 @@ fn sorted_labels(r: &Resource) -> Vec<String> {
 }
 
 pub async fn ls(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::Result<()> {
+    let Some(secs) = f.watch else {
+        return ls_once(proxy, f, kinds).await;
+    };
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    loop {
+        if tty {
+            print!("\x1b[2J\x1b[H");
+        }
+        ls_once(proxy, f, kinds).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(secs.max(1))).await;
+    }
+}
+
+async fn ls_once(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::Result<()> {
     let filtered = !kinds.is_empty() || !f.labels.is_empty() || f.query.is_some();
     let resources: Vec<_> = fetch_resources(proxy)
         .await?
