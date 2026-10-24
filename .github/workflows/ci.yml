@@ -138,7 +138,7 @@ jobs:
           git clean -ffdx
           git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Image versions live in deploy/compose/.env; the places that cannot read it must agree.
       - name: Image versions agree
         run: scripts/check-versions.sh
@@ -238,7 +238,7 @@ jobs:
       - name: Start the database targets
         run: scripts/ci-db-targets.sh start
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Test (and fail if any integration test skipped)
         run: |
           set -o pipefail
@@ -277,7 +277,7 @@ jobs:
           git clean -ffdx
           git log -1 --oneline
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --workspace --all-features --locked
 
   supply-chain:
