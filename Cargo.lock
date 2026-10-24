@@ -2820,13 +2820,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "limen-auth"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "limen-ca"
 version = "0.1.0"
 dependencies = [
