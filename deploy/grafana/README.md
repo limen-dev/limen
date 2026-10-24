@@ -15,9 +15,12 @@ The generated files are committed. After changing `generate.py`, run `python3 de
 
 ## Panels
 
+The **Resource type** selector at the top picks which types the per-type panels show (all by default).
+
 - Logins and denials over time
 - Active sessions
-- Access by resource type
+- Access by resource type, and connections per resource type over time
+- Resource types in use (sessions, people, resources, last connection)
 - Who accessed what (user, resource, login, last access)
 - Failed and denied attempts, with the reason
 - Top users
