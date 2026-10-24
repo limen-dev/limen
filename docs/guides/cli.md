@@ -6,6 +6,7 @@ The `limen` command is for signing in and connecting. For browsing and admin act
 limen login                  # sign in (opens a browser). On a machine without one: limen login --device
 limen status                 # who am I, which roles, when does it expire?
 limen ls                     # what can I reach?   add --json for scripts
+limen ls --type postgres --label env=staging   # filter by type and label (repeat --label to require several)
 limen ssh web-staging-1      # connect; the login is picked from policy when there's only one
 limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
 limen redis connect cache-staging          # a local listener for redis-cli, no password
@@ -33,7 +34,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen login --bot <github_actions\|gitlab\|oidc> [--bot-name N] [--token-env VAR] [--token-file FILE] [--audience A]` | Log in as a **bot** with a CI platform's identity token (for CI jobs; see [the bots guide](bots.md)) |
 | `limen logout` | End this login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and delete the local credentials. Your other logins are not affected. If the proxy can't be reached the credentials are still deleted, and the certificate stays valid until it expires |
 | `limen status` | Show your identity, roles, and the time left on your credentials |
-| `limen ls [--json]` | List the resources you can access |
+| `limen ls [--json] [--type KIND] [--label KEY=VALUE]…` | List the resources you can access, optionally only one type and only those carrying every given label |
 | `limen ssh [login@]resource [command…]` | Open an SSH session through Limen (recorded and audited) |
 | `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `mongosh` or any MongoDB driver; each connection is an audited session (see [the MongoDB guide](mongodb.md)) |

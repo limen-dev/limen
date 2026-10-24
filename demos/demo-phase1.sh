@@ -63,6 +63,10 @@ expected="$(find "$root/examples/policy" -type f \( -name '*.yaml' -o -name '*.y
 [ "$(limen ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" = "$expected" ] || fail "admin should see all $expected resources of examples/policy"
 pass "sre sees every resource"
 
+filtered="$(limen ls --json --type ssh --label env=staging | python3 -c 'import json,sys; print(",".join(r["kind"] + ":" + r["labels"]["env"] for r in json.load(sys.stdin)))')"
+[ -n "$filtered" ] && ! grep -qv '^ssh:staging$' <<<"${filtered//,/$'\n'}" || fail "limen ls --type ssh --label env=staging returned: $filtered"
+pass "limen ls filters by type and label"
+
 step "A developer sees only what policy allows"
 "$here/scripts/dev-login.sh" "$DEVELOPER"
 limen ls

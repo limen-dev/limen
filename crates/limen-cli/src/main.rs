@@ -131,6 +131,12 @@ enum Command {
         /// Output JSON instead of a table.
         #[arg(long)]
         json: bool,
+        /// Only resources of this type, such as `postgres` or `ssh`.
+        #[arg(long = "type", value_name = "KIND")]
+        kind: Option<String>,
+        /// Only resources with this label (`key=value`). Repeat to require several.
+        #[arg(long, value_name = "KEY=VALUE", value_parser = commands::parse_label)]
+        label: Vec<(String, String)>,
     },
     /// Open an SSH session: `limen ssh [login@]resource [command...]`.
     Ssh {
@@ -403,7 +409,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
         Command::Logout => commands::logout(proxy).await,
         Command::Status => commands::status(proxy),
-        Command::Ls { json } => commands::ls(proxy, json).await,
+        Command::Ls { json, kind, label } => {
+            commands::ls(proxy, json, kind.as_deref(), &label).await
+        }
         Command::Admin { command } => commands::admin::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,

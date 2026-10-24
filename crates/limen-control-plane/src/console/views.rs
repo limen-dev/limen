@@ -845,10 +845,17 @@ pub struct WorkerMatch {
 }
 
 pub struct KindTab {
+    pub href: String,
     pub name: String,
     pub icon: &'static str,
     pub kclass: &'static str,
     pub current: bool,
+}
+
+/// A `key=value` label that links to the resources page filtered by it.
+pub struct LabelLink {
+    pub text: String,
+    pub href: String,
 }
 
 pub struct ResourceRow {
@@ -872,8 +879,13 @@ pub struct ResourcesPage {
     pub chrome: Chrome,
     pub kinds: Vec<KindTab>,
     pub all_selected: bool,
+    pub all_href: String,
+    pub active_labels: Vec<LabelLink>,
+    pub clear_href: String,
+    pub kind_value: String,
+    pub label_value: String,
     pub query: String,
-    pub rows: Vec<ResourceRow>,
+    pub rows: Vec<(ResourceRow, Vec<LabelLink>)>,
 }
 
 #[derive(Template)]

@@ -14,8 +14,8 @@ pub mod ssh;
 pub mod tcp;
 pub mod web;
 
-use limen_proto::v1::ListResourcesRequest;
 use limen_proto::v1::resources_client::ResourcesClient;
+use limen_proto::v1::{ListResourcesRequest, Resource};
 
 use crate::profile::Profile;
 use crate::{api, ui};
@@ -91,29 +91,59 @@ pub fn status(proxy: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
+/// Parse a `key=value` label filter.
+pub fn parse_label(s: &str) -> Result<(String, String), String> {
+    match s.split_once('=') {
+        Some((k, v)) if !k.is_empty() => Ok((k.to_owned(), v.to_owned())),
+        _ => Err("expected KEY=VALUE".to_owned()),
+    }
+}
+
+/// Whether a resource passes the `--type` and `--label` filters of `limen ls`.
+fn matches_filters(r: &Resource, kind: Option<&str>, labels: &[(String, String)]) -> bool {
+    kind.is_none_or(|k| r.kind == k)
+        && labels
+            .iter()
+            .all(|(k, v)| r.labels.get(k).is_some_and(|actual| actual == v))
+}
+
+pub async fn ls(
+    proxy: Option<&str>,
+    json: bool,
+    kind: Option<&str>,
+    labels: &[(String, String)],
+) -> anyhow::Result<()> {
     let (_, channel) = api::authenticated(proxy)?;
     let resp = ResourcesClient::new(channel)
         .list_resources(ListResourcesRequest {})
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
+    let filtered = kind.is_some() || !labels.is_empty();
+    let resources: Vec<_> = resp
+        .resources
+        .into_iter()
+        .filter(|r| matches_filters(r, kind, labels))
+        .collect();
     if json {
-        let items: Vec<_> = resp
-            .resources
+        let items: Vec<_> = resources
             .iter()
             .map(|r| serde_json::json!({ "name": r.name, "kind": r.kind, "labels": r.labels, "principals": r.principals }))
             .collect();
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
     }
-    if resp.resources.is_empty() {
-        ui::info("No resources are available to you.");
-        ui::hint("Your roles don't grant access to anything yet. Ask an admin.");
+    if resources.is_empty() {
+        if filtered {
+            ui::info("No resources match those filters.");
+            ui::hint("Run `limen ls` without --type or --label to see everything you can reach.");
+        } else {
+            ui::info("No resources are available to you.");
+            ui::hint("Your roles don't grant access to anything yet. Ask an admin.");
+        }
         return Ok(());
     }
-    let rows: Vec<[String; 4]> = resp
-        .resources
+    let rows: Vec<[String; 4]> = resources
         .iter()
         .map(|r| {
             let mut labels: Vec<_> = r.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -127,10 +157,47 @@ pub async fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
         })
         .collect();
     ui::print_table(["name", "kind", "access as", "labels"], &rows);
-    let n = resp.resources.len();
+    let n = resources.len();
     ui::hint(&format!(
         "{n} resource{} · connect with `limen ssh <name>`",
         if n == 1 { "" } else { "s" }
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod ls_filter_tests {
+    use super::*;
+
+    fn resource(kind: &str, labels: &[(&str, &str)]) -> Resource {
+        Resource {
+            name: "r".into(),
+            kind: kind.into(),
+            labels: labels
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn filters_by_type_and_every_label() {
+        let r = resource("postgres", &[("env", "staging"), ("team", "payments")]);
+        assert!(matches_filters(&r, None, &[]));
+        assert!(matches_filters(&r, Some("postgres"), &[]));
+        assert!(!matches_filters(&r, Some("ssh"), &[]));
+        let env = ("env".to_owned(), "staging".to_owned());
+        let team = ("team".to_owned(), "other".to_owned());
+        assert!(matches_filters(&r, None, std::slice::from_ref(&env)));
+        assert!(!matches_filters(&r, None, &[env, team]));
+    }
+
+    #[test]
+    fn parses_label_flags() {
+        assert_eq!(parse_label("env=prod"), Ok(("env".into(), "prod".into())));
+        assert_eq!(parse_label("a=b=c"), Ok(("a".into(), "b=c".into())));
+        assert!(parse_label("env").is_err());
+        assert!(parse_label("=x").is_err());
+    }
 }

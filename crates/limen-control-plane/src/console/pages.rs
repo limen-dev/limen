@@ -18,10 +18,10 @@ use uuid::Uuid;
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, Home, KindTab,
-    KubePage, KubeView, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage, ResourcePage,
-    ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView, SessionsPage,
-    StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WebRequestView, WorkerMatch,
-    Workers, error_page, list_text, path_segment, time_text,
+    KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage,
+    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView,
+    SessionsPage, StatementView, Stats, TokenPage, UserPage, UserView, UsersPage, WebRequestView,
+    WorkerMatch, Workers, error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -268,6 +268,28 @@ fn matching_workers(
 pub struct ResourcesQuery {
     kind: Option<String>,
     q: Option<String>,
+    /// Comma-separated `key=value` pairs; a resource must carry all of them.
+    label: Option<String>,
+}
+
+/// A `/console/resources` link for one filter combination, so every filter is shareable.
+fn resources_href(kind: Option<&str>, q: &str, labels: &[String]) -> String {
+    let mut ser = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(k) = kind {
+        ser.append_pair("kind", k);
+    }
+    if !q.is_empty() {
+        ser.append_pair("q", q);
+    }
+    if !labels.is_empty() {
+        ser.append_pair("label", &labels.join(","));
+    }
+    let query = ser.finish();
+    if query.is_empty() {
+        "/console/resources".to_owned()
+    } else {
+        format!("/console/resources?{query}")
+    }
 }
 
 pub async fn resources(
@@ -338,11 +360,24 @@ pub async fn resources(
             .map(str::to_lowercase)
             .filter(|s| !s.is_empty());
     let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
+    let mut label_filter: Vec<String> = q
+        .label
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|l| l.contains('='))
+        .map(str::to_owned)
+        .collect();
+    label_filter.sort();
+    label_filter.dedup();
+    let query_text = q.q.clone().unwrap_or_default();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
     kinds.dedup();
     rows.retain(|r| {
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
+            && label_filter.iter().all(|l| r.labels.contains(l))
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
@@ -356,6 +391,7 @@ pub async fn resources(
                 .map(|k| {
                     let (icon, kclass) = views::kind_icon(&k);
                     KindTab {
+                        href: resources_href(Some(&k), &query_text, &label_filter),
                         current: kind_filter.as_deref() == Some(k.as_str()),
                         icon,
                         kclass,
@@ -364,8 +400,46 @@ pub async fn resources(
                 })
                 .collect(),
             all_selected: kind_filter.is_none(),
-            query: q.q.unwrap_or_default(),
-            rows,
+            all_href: resources_href(None, &query_text, &label_filter),
+            active_labels: label_filter
+                .iter()
+                .map(|l| LabelLink {
+                    text: l.clone(),
+                    href: resources_href(
+                        kind_filter.as_deref(),
+                        &query_text,
+                        &label_filter
+                            .iter()
+                            .filter(|o| *o != l)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    ),
+                })
+                .collect(),
+            clear_href: resources_href(kind_filter.as_deref(), &query_text, &[]),
+            kind_value: kind_filter.clone().unwrap_or_default(),
+            label_value: label_filter.join(","),
+            query: query_text.clone(),
+            rows: rows
+                .into_iter()
+                .map(|r| {
+                    let labels = r
+                        .labels
+                        .iter()
+                        .map(|l| {
+                            let mut next = label_filter.clone();
+                            if !next.contains(l) {
+                                next.push(l.clone());
+                            }
+                            LabelLink {
+                                text: l.clone(),
+                                href: resources_href(kind_filter.as_deref(), &query_text, &next),
+                            }
+                        })
+                        .collect();
+                    (r, labels)
+                })
+                .collect(),
         }
         .render(),
     )
