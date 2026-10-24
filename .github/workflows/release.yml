@@ -54,7 +54,7 @@ jobs:
         with:
           ref: ${{ needs.please.outputs.pr_branch }}
           persist-credentials: true
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - name: Refresh the lock file
         run: cargo update --workspace
       - name: Commit it, if it changed
@@ -114,7 +114,7 @@ jobs:
           set -euo pipefail
           version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           [ "v${version}" = "${TAG}" ] || { echo "tag ${TAG} but Cargo.toml says ${version}" >&2; exit 1; }
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - name: Add target
         run: rustup target add "${{ matrix.target }}"
       - name: Build release binaries

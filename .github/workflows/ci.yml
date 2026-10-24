@@ -137,7 +137,7 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Image versions live in deploy/compose/.env; the places that cannot read it must agree.
       - name: Image versions agree
@@ -237,7 +237,7 @@ jobs:
       # LIMEN_TEST_MONGO_CA_FILE, and LIMEN_TEST_MONGO_CLIENT_PEM to the steps below.
       - name: Start the database targets
         run: scripts/ci-db-targets.sh start
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test (and fail if any integration test skipped)
         run: |
@@ -276,7 +276,7 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --workspace --all-features --locked
 
@@ -306,7 +306,7 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: cargo deny --locked check
       - run: cargo audit
 
@@ -378,7 +378,7 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: actionlint
 
   terraform-and-dashboards:
@@ -407,7 +407,7 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: terraform
       - name: terraform fmt
