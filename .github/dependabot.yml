@@ -16,4 +16,5 @@ updates:
     commit-message:
       prefix: "chore(ci)"
   # Container images are pinned in deploy/compose/.env and checked by
-  # scripts/check-versions.sh, so Dependabot does not manage docker (see #94).
+  # scripts/check-versions.sh, so Dependabot does not manage docker. The bump-images workflow
+  # (scripts/bump-images.py) does that instead (see #94).

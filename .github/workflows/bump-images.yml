@@ -1,0 +1,62 @@
+name: bump-images
+
+# Weekly: look for newer patch-level tags of the images in deploy/compose/.env and open one draft pull
+# request with the bumps (scripts/bump-images.py, #94). Newer minor or major streams and digest-pinned
+# images are only listed in the pull request body. The compose demos run when a person marks the pull
+# request ready for review, like any other pull request.
+# Needs "Allow GitHub Actions to create and approve pull requests" in the repository settings.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-images
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ${{ vars.CI_RUNNERS == 'github-hosted' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out main
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          git fetch --no-tags --depth=1 origin main
+          git checkout -q -f FETCH_HEAD
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - name: Bump and open a draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$(mktemp)"
+          mise exec -- python3 scripts/bump-images.py --apply | tee "$report"
+          if git diff --quiet; then echo "nothing to bump"; exit 0; fi
+          branch="chore/bump-images-$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$branch"
+          git add deploy/compose/.env .github/workflows/ci.yml rust-toolchain.toml mise.toml
+          git commit -q -m "chore(deploy): bump container images"
+          git push -q origin "$branch"
+          {
+            echo "Patch-level image bumps from \`scripts/bump-images.py\`; \`scripts/check-versions.sh\` passes."
+            echo "Unverified until the compose demos run: mark ready for review to start CI."
+            echo
+            echo '```'
+            grep -E '^(bump|newer|pinned|warn)' "$report"
+            echo '```'
+          } > body.md
+          gh pr create --draft --base main --head "$branch" --title "chore(deploy): bump container images" --body-file body.md

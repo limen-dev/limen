@@ -91,6 +91,8 @@ limen admin components                 # the proxy, the worker, and its tunnels
 
 Every container image the stack, the demos and the image builds use is listed in one file, [`.env`](.env) (Compose loads it by itself from this directory, and the demos and `scripts/ci-db-targets.sh` source it). Tool versions are in `mise.toml`. To change a version, edit `.env`, then run `scripts/check-versions.sh`. It fails when something drifts: a compose file that pins an image itself, a script that names one, a Dockerfile that has a default for a base image instead of taking it as a build arg, a build of it that does not pass the arg, or one of the few places that cannot read `.env` (the CI service containers, the Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
 
+Newer images are found by `scripts/bump-images.py` (report only; `--apply` edits `.env` and the places that must agree, then runs the check). It applies patch-level bumps only (`v2.46.0` to `v2.46.1`); a newer minor or major stream, a tag with fewer than three numbers (`mysql:8.4`, `postgres:18-alpine`) and a digest-pinned image (the KMS stand-in) are listed, never changed. `docker.elastic.co` does not allow anonymous tag listing, so Elasticsearch is not checked. The `bump-images` workflow runs it weekly and opens one draft pull request; mark it ready for review to run the demos in CI.
+
 ## Layout
 
 ```
