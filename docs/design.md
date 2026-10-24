@@ -346,8 +346,7 @@ Top-level directories are listed in [CONTRIBUTING.md](../CONTRIBUTING.md#reposit
 crates/
   limen-core/            # ids, labels, resource kinds, telemetry init, secret newtypes
   limen-proto/           # tonic/prost generated code
-  limen-policy/          # YAML model, validation, evaluator, signed snapshots
-  limen-auth/            # OIDC (PKCE, device), group→role mapping, IdP trait
+  limen-policy/          # YAML model (roles, group→role mappings, resources), validation, evaluator, signed snapshots
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
@@ -356,7 +355,7 @@ crates/
   limen-kube/            # Kubernetes request classification and exec/port-forward stream decoding
   limen-testkit/         # fixtures, in-process cluster harness
   limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
-  limen-control-plane/   # bin
+  limen-control-plane/   # bin; includes the OIDC login (the CLI has the client side)
   limen-proxy/           # bin
   limen-worker/          # bin; protocol modules: ssh, db (pg, mysql), redis, mongo, search, amqp, kafka, kube
   limen-cli/             # bin `limen`

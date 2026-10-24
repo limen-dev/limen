@@ -38,7 +38,7 @@ Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbSt
 
 ## Layout
 - Binaries: `crates/limen-{control-plane,proxy,worker,cli}`.
-- Libraries: `limen-{core,auth,ca,policy,session,audit,tunnel,proto,component,kube}`; tests in `limen-testkit` and `limen-e2e`.
+- Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component,kube}`; tests in `limen-testkit` and `limen-e2e`.
 - Dev stack: `deploy/compose/` (`setup.sh` starts it; `stacks/`, `config/`, `scripts/`; see its README). Demos: `demos/`.
 - Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`). Terraform: `deploy/terraform`.
 - Generated dashboards: `python3 deploy/grafana/generate.py`.

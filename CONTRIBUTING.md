@@ -56,3 +56,4 @@ All terminal output goes through `crates/limen-cli/src/ui.rs` (colour, glyphs, t
 - A new entry point, credential type, or data store needs an update to the [threat model](docs/threat-model.md).
 - A change to the audit event envelope must bump `limen_audit::SCHEMA_VERSION`.
 - No `unsafe` (forbidden workspace-wide). Never put secrets in logs: wrap them in the secret newtype.
+- The logo files in `assets/` are copied into `crates/limen-control-plane/assets/` (compiled into the console) and `deploy/compose/config/dex/theme/` (mounted into Dex), because each needs them next to its own files. Change all copies together.
