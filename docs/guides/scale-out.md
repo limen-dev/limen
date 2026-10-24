@@ -70,6 +70,8 @@ The control plane, proxy, worker and `limen-spool-adopt` take the same flags, ea
 
 Levels: `error` needs an operator, `warn` is a handled but unexpected condition, `info` is lifecycle, `debug` is per-request detail, `trace` is wire-level. Credentials are wrapped in `limen_core::secret::Secret` and never logged. The `limen` CLI logs to stderr at `warn`.
 
+Conventions the code follows: a failed or unavailable audit write that makes us refuse something is `error` (audit fails closed); a refused login or session is `warn` (login) or `info` (session policy denial), always with the user and reason; a failure in an optional sink (Datadog) is `warn`. Messages are lowercase, say what was refused or lost, and carry `session`, `resource` or `user` fields where known.
+
 ## Sizing
 
 **Database connections.** Each control plane holds a pool of up to 16 connections to PostgreSQL (`--database-max-connections`, `LIMEN_DATABASE_MAX_CONNECTIONS`, 1 to 500). With *N* replicas the database sees up to 16 × *N*. Check that against your Aurora instance's `max_connections` (it depends on the instance class) and leave room for migrations and the console's queries. A handful of replicas is far below any production instance. If you run dozens, put RDS Proxy in front of the database.

@@ -1060,7 +1060,7 @@ async fn apply(
             }
             if audit_failed {
                 // Fail closed: what can't be audited doesn't run.
-                tracing::error!(resource = %config.resource, "audit unavailable; refusing an AMQP operation");
+                tracing::error!(resource = %config.resource, session = %config.session_id, "audit unavailable; refusing an AMQP operation");
                 metrics::counter!("limen_broker_audit_failures_total", "protocol" => "amqp")
                     .increment(1);
                 let (class, method) = frames
@@ -1097,7 +1097,7 @@ async fn apply(
             metrics::counter!("limen_broker_refused_total", "protocol" => "amqp").increment(1);
             if audit_failed {
                 // A denial that can't be audited is still a denial.
-                tracing::error!(resource = %config.resource, "failed to audit a denied AMQP operation");
+                tracing::error!(resource = %config.resource, session = %config.session_id, "failed to audit a denied AMQP operation");
             }
             shared
                 .refuse_channel(channel, code, &text, class, method)

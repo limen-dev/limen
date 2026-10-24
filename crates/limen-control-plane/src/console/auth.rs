@@ -82,6 +82,7 @@ async fn deny(
     message: &'static str,
 ) -> Response {
     metrics::counter!("limen_logins_total", "outcome" => "denied").increment(1);
+    tracing::warn!(user = user.as_deref(), client_addr = ?addr, reason, "console login denied");
     if let Err(e) = state
         .audit
         .emit(

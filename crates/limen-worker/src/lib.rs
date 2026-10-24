@@ -775,7 +775,7 @@ async fn tunnel_loop(worker: Worker, index: usize, mut shutdown: watch::Receiver
         let config = match (creds.internal_ca(), creds.tls_identity()) {
             (Ok(ca), Ok(identity)) => client_config(&[ca], Some(identity), &[alpn::TUNNEL]),
             (Err(e), _) | (_, Err(e)) => {
-                tracing::error!(error = %e, "invalid credentials");
+                tracing::error!(error = %e, "the worker's CA or identity is unusable; not opening tunnels");
                 return;
             }
         };
