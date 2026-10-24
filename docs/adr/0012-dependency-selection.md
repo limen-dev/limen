@@ -65,6 +65,7 @@ A dependency is adopted only if all of these hold:
 | Advisory | Crate (path) | Why it's accepted |
 |---|---|---|
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
+| RUSTSEC-2026-0387 (constant-time timing variability) | `crypto-bigint` 0.5.5 (via `aws-sigv4`) | Limen reaches `aws-sigv4` through the AWS SDK for HMAC request signing; its elliptic-curve (SigV4a) path is not used on secrets. Fixed in crypto-bigint >=0.7.6, but `aws-sigv4` pins 0.5. Accepted 2026-10-24; re-evaluate when the AWS SDK updates it. |
 
 ## Consequences
 - We own two small protocol codecs: MySQL (server side toward clients, client side toward targets) and RESP, plus the PostgreSQL frame layer. All are to be fuzzed with `cargo-fuzz`; that is still open for the Phase 6 codecs (design §14).

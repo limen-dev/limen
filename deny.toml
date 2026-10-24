@@ -15,6 +15,11 @@ ignore = [
     # Limen only verifies IdP RS256 signatures with public keys and never holds
     # an RSA private key. No fixed version exists. See ADR-0012.
     { id = "RUSTSEC-2023-0071", reason = "public-key verification only; no RSA private keys" },
+    # crypto-bigint 0.5 (via aws-sigv4): timing variability in constant-time
+    # operations. Limen uses aws-sigv4 for HMAC request signing only, never its
+    # elliptic-curve (SigV4a) path. Fixed in >=0.7.6; drop this when aws-sigv4
+    # moves off 0.5. See ADR-0012.
+    { id = "RUSTSEC-2026-0387", reason = "aws-sigv4 HMAC signing only; no EC operations on secrets" },
 ]
 
 [licenses]
