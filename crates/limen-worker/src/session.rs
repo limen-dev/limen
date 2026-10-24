@@ -6,6 +6,7 @@
 //! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
+use tracing::Instrument as _;
 
 use limen_policy::{AccessRequest, Principal};
 use limen_proto::v1::ssh_certificates_client::SshCertificatesClient;
@@ -99,6 +100,8 @@ pub(crate) async fn open(
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
     let kube_worker = worker.clone();
+    // Exported as a trace span (ADR-0040): the session id only.
+    let span = limen_core::trace_span!("session", session = %session_id);
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -277,7 +280,8 @@ pub(crate) async fn open(
                 })),
             }))
             .await;
-    });
+    }
+    .instrument(span));
     Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
 }
 

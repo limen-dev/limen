@@ -754,6 +754,8 @@ async fn open_on(
     }
 }
 
+// Exported as a trace span (ADR-0040): ids and kind only, never the user or resource.
+#[tracing::instrument(name = "session", target = "limen::trace", skip_all, fields(session = %session_id, kind = resolved.kind.as_str()))]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn relay<IO>(
     proxy: &Proxy,

@@ -15,7 +15,12 @@ sha2.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
 tracing-subscriber.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -18,7 +18,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     limen_core::metrics::install();
-    args.log.init();
+    let _telemetry = args.log.init("limen-control-plane");
     tracing::info!(version = limen_core::VERSION, id = %args.config.id, "control plane starting");
 
     let (tx, rx) = tokio::sync::watch::channel(false);

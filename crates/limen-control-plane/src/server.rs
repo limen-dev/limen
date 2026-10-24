@@ -124,7 +124,10 @@ async fn record_latency(
 ) -> axum::response::Response {
     let service = service_label(request.uri().path());
     let started = std::time::Instant::now();
-    let response = next.run(request).await;
+    // The service is a fixed label (never a path), so it is safe to export.
+    let span = limen_core::trace_span!("api.request", service, status = tracing::field::Empty);
+    let response = tracing::Instrument::instrument(next.run(request), span.clone()).await;
+    span.record("status", response.status().as_u16());
     metrics::histogram!("limen_api_request_seconds", "service" => service)
         .record(started.elapsed().as_secs_f64());
     response
