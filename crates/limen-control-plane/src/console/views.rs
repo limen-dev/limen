@@ -806,6 +806,9 @@ pub struct UserPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub u: UserView,
+    /// What the user's roles reach under the active policy.
+    pub access: Vec<ResourceView>,
+    pub policy_version: i64,
     pub sessions: Vec<SessionView>,
     pub events: Vec<EventView>,
 }

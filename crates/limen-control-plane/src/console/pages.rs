@@ -97,6 +97,27 @@ fn category_tabs(
     tabs
 }
 
+/// What `roles` reach under `policy`, and as which accounts.
+fn access_for(policy: &limen_policy::Policy, roles: &[String]) -> Vec<ResourceView> {
+    policy
+        .accessible(roles)
+        .into_iter()
+        .map(|r| ResourceView {
+            connect: views::connect_for(r.kind.as_str(), &r.name),
+            name: r.name,
+            kind: r.kind.as_str().to_owned(),
+            icon: views::kind_icon(r.kind.as_str()).0,
+            kclass: views::kind_icon(r.kind.as_str()).1,
+            labels: r
+                .labels
+                .into_iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect(),
+            principals: r.principals,
+        })
+        .collect()
+}
+
 fn actor(auth: &Auth) -> Actor<'_> {
     Actor {
         username: &auth.username,
@@ -195,24 +216,7 @@ pub async fn home(
     Query(q): Query<DoneQuery>,
 ) -> Response {
     let loaded = state.policy.current();
-    let resources = loaded
-        .policy
-        .accessible(&auth.roles)
-        .into_iter()
-        .map(|r| ResourceView {
-            connect: views::connect_for(r.kind.as_str(), &r.name),
-            name: r.name,
-            kind: r.kind.as_str().to_owned(),
-            icon: views::kind_icon(r.kind.as_str()).0,
-            kclass: views::kind_icon(r.kind.as_str()).1,
-            labels: r
-                .labels
-                .into_iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect(),
-            principals: r.principals,
-        })
-        .collect();
+    let resources = access_for(&loaded.policy, &auth.roles);
     let filter = SessionFilter {
         username: (!auth.is_admin).then(|| auth.username.clone()),
         limit: 10,
@@ -1191,10 +1195,14 @@ pub async fn user_detail(
             .collect(),
         Err(e) => return db_error("listing a user's sessions", &e),
     };
+    let loaded = state.policy.current();
+    let role_names: Vec<String> = view.role_list.iter().map(|r| r.text.clone()).collect();
     html(
         UserPage {
             chrome: chrome(&state, &auth, "users"),
             notice: notice(q.done.as_deref()),
+            access: access_for(&loaded.policy, &role_names),
+            policy_version: loaded.version,
             u: view,
             sessions,
             events,

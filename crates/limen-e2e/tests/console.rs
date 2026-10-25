@@ -701,6 +701,15 @@ async fn console_end_to_end() {
             .body
             .contains("https://github.com/acme/infra/actions/runs/424242")
     );
+    // A user's page lists what their roles reach.
+    let detail = admin_user
+        .get(&format!("/console/users/{DEVELOPER_ENC}"))
+        .await;
+    assert_eq!(detail.status, 200);
+    assert!(
+        detail.body.contains("What they can reach"),
+        "user access section"
+    );
     // Search narrows the list pages.
     let hit = admin_user.get("/console/bots?q=github+acme").await;
     assert!(hit.body.contains("bot:deploy-e2e"), "bot search finds it");
