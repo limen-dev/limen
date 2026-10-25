@@ -701,6 +701,28 @@ async fn console_end_to_end() {
             .body
             .contains("https://github.com/acme/infra/actions/runs/424242")
     );
+    // Search narrows the list pages.
+    let hit = admin_user.get("/console/bots?q=github+acme").await;
+    assert!(hit.body.contains("bot:deploy-e2e"), "bot search finds it");
+    let miss = admin_user.get("/console/bots?q=no-such-bot-zzz").await;
+    assert!(
+        !miss.body.contains("bot:deploy-e2e") && miss.body.contains("No bot matches"),
+        "bot search misses cleanly"
+    );
+    let miss = admin_user.get("/console/users?q=no-such-user-zzz").await;
+    assert!(miss.body.contains("No user matches"), "user search misses");
+    let miss = admin_user
+        .get("/console/workers?q=no-such-worker-zzz")
+        .await;
+    assert!(
+        miss.body.contains("No component matches"),
+        "worker search misses"
+    );
+    let miss = admin_user.get("/console/policy?q=no-such-doc-zzz").await;
+    assert!(
+        miss.body.contains("No policy document matches"),
+        "policy search misses"
+    );
     let people_page = admin_user.get("/console/users").await;
     assert!(
         !people_page.body.contains("bot%3Adeploy-e2e")

@@ -145,6 +145,23 @@ fn notice(code: Option<&str>) -> Option<&'static str> {
 #[derive(Deserialize)]
 pub struct DoneQuery {
     done: Option<String>,
+    /// The search box of the list pages.
+    q: Option<String>,
+}
+
+/// The trimmed search text, empty if none.
+fn search_text(q: Option<&String>) -> String {
+    q.map(|s| s.trim().chars().take(200).collect())
+        .unwrap_or_default()
+}
+
+/// Every word of `needle` appears (case-insensitively) in one of `fields`.
+fn search_matches(needle: &str, fields: &[&str]) -> bool {
+    let hay = fields.join(" ").to_lowercase();
+    needle
+        .to_lowercase()
+        .split_whitespace()
+        .all(|word| hay.contains(word))
 }
 
 /// `GET /console/logout`: a page with the sign-out button. Signing out is a
@@ -966,16 +983,28 @@ pub async fn users(
             .collect(),
         Err(e) => return db_error("listing bots", &e),
     };
+    let query = search_text(q.q.as_ref());
+    let wanted = |u: &UserView| {
+        let chips: Vec<&str> = u
+            .role_list
+            .iter()
+            .chain(&u.group_list)
+            .map(|c| c.text.as_str())
+            .collect();
+        search_matches(&query, &[u.name.as_str(), &chips.join(" ")])
+    };
     let orphan_locks = locks
         .iter()
         .filter(|l| !known.contains(&l.username))
         .map(|l| lock_only_view(&l.username, l))
+        .filter(&wanted)
         .collect();
     html(
         UsersPage {
             chrome: chrome(&state, &auth, "users"),
             notice: notice(q.done.as_deref()),
-            users: users.iter().map(UserView::from).collect(),
+            users: users.iter().map(UserView::from).filter(&wanted).collect(),
+            query,
             orphan_locks,
         }
         .render(),
@@ -1025,7 +1054,7 @@ pub async fn bots(
         .collect();
     let locks = db::active_locks(&state.db).await.unwrap_or_default();
     let policy = state.policy.current();
-    let bots = policy
+    let bots: Vec<BotView> = policy
         .policy
         .bots()
         .map(|b| {
@@ -1071,10 +1100,34 @@ pub async fn bots(
             }
         })
         .collect();
+    let query = search_text(q.q.as_ref());
+    let bots: Vec<BotView> = bots
+        .into_iter()
+        .filter(|b| {
+            let role_names: Vec<&str> = b.roles.iter().map(|c| c.text.as_str()).collect();
+            let claims: Vec<&str> = b
+                .rules
+                .iter()
+                .flat_map(|f| [f.key.as_str(), f.value.as_str()])
+                .collect();
+            search_matches(
+                &query,
+                &[
+                    &b.name,
+                    &b.description,
+                    &b.issuer,
+                    b.method,
+                    &role_names.join(" "),
+                    &claims.join(" "),
+                ],
+            )
+        })
+        .collect();
     html(
         BotsPage {
             chrome: chrome(&state, &auth, "bots"),
             notice: notice(q.done.as_deref()),
+            query,
             bots,
         }
         .render(),
@@ -1233,7 +1286,7 @@ pub async fn workers(
         Ok(pair) => pair,
         Err(e) => return db_error("listing components", &e),
     };
-    let components = components
+    let components: Vec<ComponentView> = components
         .into_iter()
         .map(|c| {
             let labels: BTreeMap<String, String> =
@@ -1290,10 +1343,26 @@ pub async fn workers(
             .collect(),
         Err(e) => return db_error("listing join tokens", &e),
     };
+    let query = search_text(q.q.as_ref());
+    let components: Vec<ComponentView> = components
+        .into_iter()
+        .filter(|c| {
+            search_matches(
+                &query,
+                &[
+                    &c.id,
+                    c.name.as_deref().unwrap_or_default(),
+                    &c.kind,
+                    &c.label_list.join(" "),
+                ],
+            )
+        })
+        .collect();
     html(
         Workers {
             chrome: chrome(&state, &auth, "workers"),
             notice: notice(q.done.as_deref()),
+            query,
             components,
             pending,
         }
@@ -1466,8 +1535,23 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
     .collect()
 }
 
-fn policy_page(state: &AppState, auth: &Auth, pasted: String, result: Option<DryRun>) -> Response {
+fn policy_page(
+    state: &AppState,
+    auth: &Auth,
+    pasted: String,
+    result: Option<DryRun>,
+    query: String,
+) -> Response {
     let loaded = state.policy.current();
+    let groups: Vec<views::PolicyGroup> = policy_groups(state)
+        .into_iter()
+        .map(|mut g| {
+            g.docs
+                .retain(|d| search_matches(&query, &[&d.name, &d.summary, &d.yaml]));
+            g
+        })
+        .filter(|g| !g.docs.is_empty())
+        .collect();
     html(
         PolicyPage {
             chrome: chrome(state, auth, "policy"),
@@ -1479,7 +1563,8 @@ fn policy_page(state: &AppState, auth: &Auth, pasted: String, result: Option<Dry
                 loaded.author.clone()
             },
             created: time_text(loaded.created_at),
-            groups: policy_groups(state),
+            groups,
+            query,
             pasted,
             result,
         }
@@ -1487,11 +1572,21 @@ fn policy_page(state: &AppState, auth: &Auth, pasted: String, result: Option<Dry
     )
 }
 
-pub async fn policy(State(state): State<AppState>, auth: Auth) -> Response {
+pub async fn policy(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<DoneQuery>,
+) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
-    policy_page(&state, &auth, String::new(), None)
+    policy_page(
+        &state,
+        &auth,
+        String::new(),
+        None,
+        search_text(q.q.as_ref()),
+    )
 }
 
 #[derive(Deserialize)]
@@ -1543,7 +1638,7 @@ pub async fn dry_run(
             removed: vec![],
         },
     };
-    policy_page(&state, &auth, form.yaml, Some(result))
+    policy_page(&state, &auth, form.yaml, Some(result), String::new())
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {

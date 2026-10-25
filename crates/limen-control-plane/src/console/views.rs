@@ -786,6 +786,7 @@ pub struct BotView {
 pub struct BotsPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
+    pub query: String,
     pub bots: Vec<BotView>,
 }
 
@@ -795,6 +796,7 @@ pub struct UsersPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub users: Vec<UserView>,
+    pub query: String,
     pub orphan_locks: Vec<UserView>,
 }
 
@@ -861,6 +863,7 @@ pub struct PendingTokenView {
 pub struct Workers {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
+    pub query: String,
     pub components: Vec<ComponentView>,
     pub pending: Vec<PendingTokenView>,
 }
@@ -1006,6 +1009,7 @@ pub struct PolicyPage {
     pub author: String,
     pub created: String,
     pub groups: Vec<PolicyGroup>,
+    pub query: String,
     pub pasted: String,
     pub result: Option<DryRun>,
 }

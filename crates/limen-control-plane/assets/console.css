@@ -445,3 +445,20 @@ table.workers td.when .cell-sub { margin: 0; }
 table.workers .w-120 { width: 128px; }
 table.workers td.actions form.inline { gap: 6px; }
 table.workers td.actions form.inline input[type=text] { width: 150px; }
+
+/* Filter bars with many options (resource kinds, audit categories): separate chips, so a wrap reads as intended. */
+.tabs.kinds, .tabs.cats { display: flex; flex-wrap: wrap; gap: 8px; background: none; border: 0; padding: 0; border-radius: 0; }
+.tabs.kinds a, .tabs.cats a { display: inline-flex; align-items: center; gap: 7px; padding: 5px 13px 5px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); line-height: 1.4; transition: border-color .15s, color .15s, background .15s; }
+.tabs.kinds a:first-child, .tabs.cats a:first-child { padding-left: 13px; }
+.tabs.cats a:first-child { padding-left: 8px; }
+.tabs.kinds a:hover, .tabs.cats a:hover { border-color: var(--accent); color: var(--text); }
+.tabs.kinds a[aria-current="true"], .tabs.cats a[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); box-shadow: none; }
+.tabs.kinds, .tabs.cats { gap: 6px; }
+.tabs.kinds a, .tabs.cats a { gap: 6px; padding: 4px 11px 4px 6px; font-size: 13px; }
+.tabs.kinds a:first-child { padding-left: 11px; }
+.tabs.cats a:first-child { padding-left: 6px; }
+
+/* Search box in a page header: same look as the filter forms, with the "/" hint inside. */
+.page-head .search .kbd-hint { bottom: auto; top: 50%; transform: translateY(-50%); }
+.page-head .search input:focus ~ .kbd-hint, .page-head .search input:not(:placeholder-shown) ~ .kbd-hint { display: none; }
+.page-head .search input[type=search] { padding-left: 36px; padding-right: 34px; width: 280px; }

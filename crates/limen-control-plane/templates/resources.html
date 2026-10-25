@@ -11,7 +11,7 @@
     <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
     {% if !kind_value.is_empty() %}<input type="hidden" name="kind" value="{{ kind_value }}">{% endif %}
     {% for l in label_values %}<input type="hidden" name="label" value="{{ l }}">{% endfor %}
-    <input type="text" name="q" value="{{ query }}" placeholder="Search name or label" aria-label="Search">
+    <input type="search" name="q" value="{{ query }}" placeholder="Search name or label" aria-label="Search" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
   </form>
 </div>
 <div class="tabs kinds">
