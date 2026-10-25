@@ -15,6 +15,7 @@ pub mod jobs;
 pub mod oidc;
 pub mod pipeline;
 pub mod replicas;
+pub mod search;
 pub mod server;
 pub mod services;
 pub mod sinks;

@@ -122,6 +122,9 @@ pub struct Limits {
     /// Browser sign-ins (two requests each: start and callback). Separate, so
     /// the console and the CLI don't share one budget.
     pub console_login: DefaultKeyedRateLimiter<IpAddr>,
+    /// Searches of the audit trail, per person (ADR-0026): search is also a
+    /// way to read a lot at once.
+    pub search: DefaultKeyedRateLimiter<String>,
 }
 
 impl Default for Limits {
@@ -144,6 +147,8 @@ impl Limits {
         Self {
             unauthenticated: RateLimiter::keyed(quota),
             console_login: RateLimiter::keyed(console),
+            // Thirty a minute, bursts of ten, whatever the sign-in limits are.
+            search: RateLimiter::keyed(Quota::per_minute(nz(30)).allow_burst(nz(10))),
         }
     }
 }
@@ -163,8 +168,15 @@ impl Limits {
             .map_err(|_| Status::resource_exhausted("too many sign-in attempts; slow down"))
     }
 
+    pub fn check_search(&self, username: &str) -> Result<(), Status> {
+        self.search
+            .check_key(&username.to_owned())
+            .map_err(|_| Status::resource_exhausted("too many searches; slow down"))
+    }
+
     /// Drop state for idle keys. Call periodically.
     pub fn shrink(&self) {
+        self.search.retain_recent();
         self.unauthenticated.retain_recent();
         self.console_login.retain_recent();
     }

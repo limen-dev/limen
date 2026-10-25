@@ -206,6 +206,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Search the audit trail (limen:admin or limen:auditor).
+    Audit {
+        #[command(subcommand)]
+        command: commands::audit::AuditCommand,
+    },
     /// Ask a policy questions: test it, who can reach what, what changes.
     Policy {
         #[command(subcommand)]
@@ -727,6 +732,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             .await
         }
         Command::Policy { command } => commands::policy::run(proxy, command).await,
+        Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,

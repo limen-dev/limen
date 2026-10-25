@@ -605,6 +605,8 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         if e.kind == EventKind::KubeRequest {
             project_kube_request(&mut tx, e).await?;
         }
+        // A copy of what was done, to search (ADR-0026).
+        crate::search::index::index_event(&mut tx, e, &kind_name(e.kind)).await?;
         let Some(session_id) = e.session_id else {
             continue;
         };

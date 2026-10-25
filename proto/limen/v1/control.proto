@@ -69,6 +69,12 @@ service Admin {
   rpc RevokeComponent(RevokeComponentRequest) returns (RevokeComponentResponse);
 }
 
+// Searching recent audit events and recording text (ADR-0026). Needs the
+// limen:admin or limen:auditor role. Every search is audited and rate limited.
+service AuditSearch {
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
 service Enrollment {
   // Exchanges a join token and a CSR for a component certificate. Unauthenticated.
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
@@ -555,4 +561,36 @@ message ExplainResponse {
   repeated string lines = 1;
   // Whether the answer is the full trace (admin) or the user-safe one.
   bool full_trace = 2;
+}
+
+message SearchRequest {
+  // Words, "quoted phrases", and user: resource: kind: session: after: before:
+  // outcome: filters.
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message SearchHit {
+  int64 at_unix = 1;
+  string kind = 2;
+  string user = 3;
+  string session_id = 4;
+  string resource = 5;
+  // "ok" or "denied".
+  string outcome = 6;
+  // The match with context. The part between is what matched.
+  string before = 7;
+  string matched = 8;
+  string after = 9;
+  // Seconds into the session's recording where this moment plays. -1 if the
+  // session has no recording.
+  int64 recording_offset_secs = 10;
+}
+
+message SearchResponse {
+  repeated SearchHit hits = 1;
+  // More matched than were returned: narrow the search.
+  bool truncated = 2;
+  // The same search in the full-history store, if one is configured.
+  string history_url = 3;
 }

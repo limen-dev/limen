@@ -321,6 +321,23 @@ pub struct Config {
     #[arg(long, env = "LIMEN_BREAK_GLASS_WEBHOOK_URL", value_parser = parse_secret)]
     pub break_glass_webhook_url: Option<Secret<String>>,
 
+    /// How long the console and `limen audit search` keep events and
+    /// recording text searchable (ADR-0026). Older history stays in the sinks.
+    #[arg(long, env = "LIMEN_SEARCH_RETENTION", value_parser = parse_duration, default_value = "30d")]
+    pub search_retention: Duration,
+
+    /// Also index the text of session recordings so an auditor can search
+    /// what was on screen (ADR-0026). Off by default: terminals echo whatever
+    /// is displayed, secrets included. Common secret shapes are masked, which
+    /// is best effort and not a guarantee.
+    #[arg(long, env = "LIMEN_SEARCH_RECORDINGS")]
+    pub search_recordings: bool,
+
+    /// A link to the same search in the full-history store, shown next to
+    /// results. Placeholders: {query} {user} {resource} {kind} {after} {before}.
+    #[arg(long, env = "LIMEN_SEARCH_HISTORY_URL")]
+    pub search_history_url: Option<String>,
+
     /// Put the requester, role, resource, and reason in notices. Off by
     /// default so resource names don't leave Limen.
     #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]

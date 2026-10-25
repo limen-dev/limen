@@ -14,6 +14,7 @@ use limen_proto::v1::access_server::AccessServer;
 use limen_proto::v1::admin_server::AdminServer;
 use limen_proto::v1::audit_handoff_server::AuditHandoffServer;
 use limen_proto::v1::audit_ingest_server::AuditIngestServer;
+use limen_proto::v1::audit_search_server::AuditSearchServer;
 use limen_proto::v1::auth_server::AuthServer;
 use limen_proto::v1::enrollment_server::EnrollmentServer;
 use limen_proto::v1::policy_sync_server::PolicySyncServer;
@@ -32,6 +33,7 @@ use tonic::server::NamedService;
 
 use crate::services::access::AccessService;
 use crate::services::admin::AdminService;
+use crate::services::audit_search::AuditSearchService;
 use crate::services::auth::AuthService;
 use crate::services::enrollment::EnrollmentService;
 use crate::services::handoff::HandoffService;
@@ -93,8 +95,9 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 }
 
 /// The gRPC services the API serves (the names clients put in the path).
-fn grpc_services() -> [&'static str; 10] {
+fn grpc_services() -> [&'static str; 11] {
     [
+        AuditSearchServer::<AuditSearchService>::NAME,
         AccessServer::<AccessService>::NAME,
         AuthServer::<AuthService>::NAME,
         ResourcesServer::<ResourcesService>::NAME,
@@ -158,6 +161,10 @@ pub async fn serve_api(
     )
     .add_service(
         AccessServer::new(AccessService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AuditSearchServer::new(AuditSearchService(state.clone()))
             .max_decoding_message_size(MAX_MESSAGE_BYTES),
     )
     .add_service(

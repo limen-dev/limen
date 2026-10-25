@@ -1,5 +1,6 @@
 pub mod access;
 pub mod admin;
+pub mod audit_search;
 pub mod auth;
 pub mod bot_login;
 pub mod enrollment;

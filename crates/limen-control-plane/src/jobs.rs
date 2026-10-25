@@ -29,6 +29,15 @@ pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         state.limits.shrink();
+        // Events and recording text age out of the search window (ADR-0026).
+        let days = i32::try_from(state.config.search_retention.as_secs() / 86_400)
+            .unwrap_or(i32::MAX)
+            .max(1);
+        match crate::search::index::trim(&state.db, days).await {
+            Ok(n) if n > 0 => tracing::info!(deleted = n, "trimmed the search index"),
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "trimming the search index failed"),
+        }
         match crate::db::cleanup(&state.db).await {
             Ok(Some(n)) if n > 0 => tracing::info!(deleted = n, "cleaned up expired rows"),
             Ok(_) => {}

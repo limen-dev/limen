@@ -50,6 +50,7 @@ openidconnect.workspace = true
 prost.workspace = true
 rand.workspace = true
 rcgen.workspace = true
+regex-lite.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
