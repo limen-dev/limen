@@ -111,6 +111,8 @@ pub struct PageQuery {
     err: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    /// Which items a review page lists: waiting, kept, or removed.
+    show: Option<String>,
 }
 
 /// Where a failed form goes back to, with the reason kept short and escaped by the template.
@@ -688,6 +690,8 @@ pub struct ReviewPage {
     pub items: Vec<ItemView>,
     pub to_decide: usize,
     pub decided_n: usize,
+    /// The filter in force: `waiting`, `kept`, `removed`, or empty for all.
+    pub show: String,
     pub mine_only: bool,
 }
 
@@ -719,6 +723,20 @@ pub async fn review_page(
             .collect(),
         Err(s) => return action_error(&s),
     };
+    // The cards above the list filter it.
+    let show = match q.show.as_deref() {
+        Some(k @ ("waiting" | "kept" | "removed")) => k.to_owned(),
+        _ => String::new(),
+    };
+    let items: Vec<ItemView> = items
+        .into_iter()
+        .filter(|i| match show.as_str() {
+            "waiting" => i.pending,
+            "kept" => i.decision == "certify",
+            "removed" => i.decision == "flag",
+            _ => true,
+        })
+        .collect();
     html(
         ReviewPage {
             chrome: chrome(&state, &auth, "reviews"),
@@ -728,6 +746,7 @@ pub async fn review_page(
             to_decide: items.iter().filter(|i| i.pending).count(),
             decided_n: items.iter().filter(|i| !i.pending).count(),
             items,
+            show,
             mine_only: !auth.reads_record(),
         }
         .render(),

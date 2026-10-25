@@ -13,15 +13,16 @@
 {% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
 
 <section class="stats">
-  <div class="card stat"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#clock"/></svg></span><div><b>{{ review.waiting }}</b><span>Waiting for a decision</span></div></div>
-  <div class="card stat"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg></span><div><b>{{ review.kept }}</b><span>Kept</span></div></div>
-  <div class="card stat{% if review.flagged > 0 %} bad{% endif %}"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></span><div><b>{{ review.flagged }}</b><span>Removed</span></div></div>
+  <a class="card stat drill{% if show == "waiting" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=waiting" title="Show only what is waiting"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#clock"/></svg></span><div><b>{{ review.waiting }}</b><span>Waiting for a decision</span></div></a>
+  <a class="card stat drill{% if show == "kept" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=kept" title="Show only what was kept"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg></span><div><b>{{ review.kept }}</b><span>Kept</span></div></a>
+  <a class="card stat drill{% if review.flagged > 0 %} bad{% endif %}{% if show == "removed" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=removed" title="Show only what was removed"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></span><div><b>{{ review.flagged }}</b><span>Removed</span></div></a>
 </section>
+{% if !show.is_empty() %}<p class="hint">Showing only what is {{ show }}. <a href="/console/reviews/{{ review.id }}">Show everything</a></p>{% endif %}
 <div class="progress wide" title="{{ review.progress }}"><span style="width:{{ review.percent }}%"></span></div>
 
 {% if mine_only %}<p class="hint">Showing the items assigned to you.</p>{% endif %}
 {% if items.is_empty() %}
-<div class="card empty"><div>Nothing here for you.</div></div>
+<div class="card empty"><div>{% if show.is_empty() %}Nothing here for you.{% else %}Nothing is {{ show }}.{% endif %}</div></div>
 {% else %}
 {% if to_decide > 0 %}
 <h2>To decide</h2>
