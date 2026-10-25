@@ -33,7 +33,7 @@
 </details>
 <section class="stats">
 {% for t in tiles %}
-  {% if let Some(h) = t.href %}<a class="card stat drill {{ t.tone }}" href="{{ h }}" title="Show the records behind this number">{% else %}<div class="card stat {{ t.tone }}">{% endif %}<span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div><b>{{ t.value }}</b><span>{{ t.label }}</span></div>{% if t.href.is_some() %}</a>{% else %}</div>{% endif %}
+  {% if let Some(h) = t.href %}<a class="card stat drill {{ t.tone }}" href="{{ h }}" title="Show the records behind this number">{% else %}<div class="card stat {{ t.tone }}">{% endif %}<span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ t.icon }}"/></svg></span><div><b>{{ t.number() }}{% if !t.unit().is_empty() %}<small>{{ t.unit() }}</small>{% endif %}</b><span>{{ t.label }}</span></div>{% if t.href.is_some() %}</a>{% else %}</div>{% endif %}
 {% endfor %}
 </section>
 <section class="panels">

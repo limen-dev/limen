@@ -422,3 +422,8 @@ input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3);
 .dp-foot { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .dp-foot .link { color: var(--accent-text); font-size: 13px; padding: 2px 4px; }
 .dp-foot .link:hover { background: none; text-decoration: underline; }
+
+/* Tiles: the unit sits beside the number in a smaller size so wide values keep their padding. */
+.stat b small { font-size: 13px; font-weight: 550; color: var(--text-3); margin-left: 4px; letter-spacing: 0; }
+.stat > div { min-width: 0; }
+.stat span:not(.stat-icon) { white-space: nowrap; }

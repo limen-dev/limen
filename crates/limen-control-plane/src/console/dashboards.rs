@@ -447,6 +447,24 @@ pub struct Tile {
     pub tone: &'static str,
 }
 
+impl Tile {
+    /// The number and its unit ("35.8", "min"), so the template can set the unit smaller.
+    pub fn number(&self) -> &str {
+        self.split().0
+    }
+
+    pub fn unit(&self) -> &str {
+        self.split().1
+    }
+
+    fn split(&self) -> (&str, &str) {
+        match self.value.rsplit_once(' ') {
+            Some((n, u)) if matches!(u, "ms" | "s" | "min" | "h") => (n, u),
+            _ => (self.value.as_str(), ""),
+        }
+    }
+}
+
 fn duration_text(ms: f64) -> String {
     if ms < 1000.0 {
         format!("{ms:.0} ms")
@@ -994,7 +1012,7 @@ async fn build(
         Tile {
             href: None,
             value: average.map_or_else(|| "—".into(), duration_text),
-            label: "Average session",
+            label: "Avg session",
             icon: "clock",
             tone: "c-amber",
         },
