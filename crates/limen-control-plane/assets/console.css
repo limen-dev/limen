@@ -324,3 +324,141 @@ td.empty { text-align: center; }
 .bot-head h2 { margin: 0; font-size: 16px; }
 .bot-head .sub { margin: 2px 0 0; }
 .bot-head .avatar .i { width: 20px; height: 20px; }
+
+.chips.applied { margin: 0 0 12px; }
+.chips.applied a.chip { text-decoration: none; }
+.filters a { align-self: center; }
+a.stat.drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chart a.bar-link:hover rect { opacity: .8; }
+
+/* Filters: quick ranges, a primary row, and the rest under "More filters". */
+.presets { margin: 0 0 12px; }
+.applied { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 13px; font-weight: 500; text-decoration: none; }
+.fchip:hover { text-decoration: none; filter: brightness(.95); }
+.fchip .i { width: 13px; height: 13px; opacity: .7; }
+.applied .clear { font-size: 13px; margin-left: 4px; }
+.empty-hint { text-align: center; color: var(--text-3); margin: 14px 0; }
+
+/* Dashboards: toolbar and the panel chooser. */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; margin-bottom: 14px; }
+.toolbar .tabs { margin-bottom: 0; }
+.toolbar .tb-label { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
+.chooser { padding: 14px 16px; display: grid; gap: 14px; }
+.chooser fieldset { border: 0; margin: 0; padding: 0; }
+.chooser legend { font-weight: 600; font-size: 12.5px; color: var(--text-2); padding: 0; margin-bottom: 6px; }
+.chooser .opts { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.chooser label { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: 13px; }
+.chooser label:has(input:checked) { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.chooser .actions { display: flex; gap: 8px; align-items: center; }
+
+/* ---- Form controls: one look for every text, search, date and select box. ---- */
+input[type=search], input[type=datetime-local], input[type=date] {
+  font: inherit; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface); color: var(--text); width: 100%;
+}
+input[type=search]::-webkit-search-cancel-button { cursor: pointer; }
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 32px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a2b3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+input[type=datetime-local]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .7; }
+input[type=datetime-local]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3); }
+
+/* ---- Filter bar: a card with aligned, equal-height controls. ---- */
+.filters {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 12px; margin: 0 0 14px;
+  padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.filters label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-3); }
+.filters input, .filters select { height: 36px; padding-top: 0; padding-bottom: 0; font-size: 14px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); width: 170px; }
+.filters input[type=datetime-local] { width: 205px; }
+.filters .grow { flex: 1 1 280px; }
+.filters .grow input { width: 100%; }
+.filters input.search {
+  padding-left: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a2b3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 12px center;
+}
+.filters button { height: 36px; padding-top: 0; padding-bottom: 0; }
+.filters > a { align-self: center; font-size: 13px; }
+.more { flex-basis: 100%; background: none; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; margin: 2px 0 0; padding-top: 4px; }
+.more > summary { padding: 6px 0; color: var(--text-2); font-size: 13px; font-weight: 550; }
+.more-fields { display: flex; flex-wrap: wrap; gap: 14px 12px; padding: 6px 0 2px; }
+.presets { margin: 0 0 12px; }
+
+/* The panel chooser uses the same look. */
+.chooser button { height: 34px; padding-top: 0; padding-bottom: 0; }
+
+/* Review fixes: labelled period row, a "/" hint in the search box, tidier tiles and charts. */
+.range-row { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.range-row .tabs { margin-bottom: 0; }
+.range-row .tb-label { color: var(--text-3); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+.filters .grow { position: relative; }
+.kbd-hint { position: absolute; right: 10px; bottom: 8px; padding: 0 6px; height: 20px; line-height: 18px; border: 1px solid var(--border-strong); border-radius: 5px; font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--sunken); pointer-events: none; }
+.filters .grow input:focus ~ .kbd-hint { display: none; }
+.stat b { white-space: nowrap; }
+.chart { max-height: 280px; }
+
+/* Date picker: themed calendar (the native one cannot be styled). */
+.dp { position: relative; display: block; }
+.filters .dp input { width: 170px; padding-right: 36px; }
+.dp-btn { position: absolute; right: 4px; top: 4px; height: 28px; width: 28px; padding: 0; justify-content: center; background: none; border: 0; color: var(--text-3); border-radius: 6px; }
+.dp-btn:hover { background: var(--sunken); color: var(--text); border: 0; }
+.dp-btn .i { width: 16px; height: 16px; }
+.dp-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 272px; padding: 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .22); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+.dp-nav { width: 28px; height: 28px; padding: 0; justify-content: center; background: none; border: 1px solid transparent; color: var(--text-2); font-size: 18px; line-height: 1; border-radius: 7px; }
+.dp-nav:hover { background: var(--sunken); border-color: var(--border); }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.dp-dow { font-size: 11px; color: var(--text-3); padding: 4px 0; font-weight: 600; }
+.dp-day { height: 32px; padding: 0; justify-content: center; background: none; border: 1px solid transparent; color: var(--text); font-weight: 450; border-radius: 8px; font-size: 13px; }
+.dp-day:hover { background: var(--sunken); border-color: var(--border); }
+.dp-day.today { border-color: var(--accent); }
+.dp-day.sel, .dp-day.sel:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.dp-foot { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.dp-foot .link { color: var(--accent-text); font-size: 13px; padding: 2px 4px; }
+.dp-foot .link:hover { background: none; text-decoration: underline; }
+
+/* Tiles: the unit sits beside the number in a smaller size so wide values keep their padding. */
+.stat b small { font-size: 13px; font-weight: 550; color: var(--text-3); margin-left: 4px; letter-spacing: 0; }
+.stat > div { min-width: 0; }
+.stat span:not(.stat-icon) { white-space: nowrap; }
+
+/* Audit categories: one tab per service, with the same icons as the resources page. */
+.tabs.cats { flex-wrap: wrap; max-width: 100%; }
+.tabs.cats a { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 8px; }
+.kind-dot.k-auth { --kc: #10b981; } .kind-dot.k-admin { --kc: #f59e0b; } .kind-dot.k-other { --kc: #64748b; } .kind-dot.k-ssh { --kc: #10b981; }
+.kind-dot.k-auth, .kind-dot.k-admin, .kind-dot.k-other { color: var(--kc); background: color-mix(in srgb, var(--kc) 16%, transparent); }
+.kind-cell.tight { gap: 8px; }
+.kind-cell.tight .kind-dot { width: 22px; height: 22px; border-radius: 6px; }
+.kind-cell.tight .kind-dot .i { width: 14px; height: 14px; }
+.kind-cell.tight .pill { flex: none; }
+
+/* Workers: dates on two lines and a compact revoke form, so the table fits the page. */
+table.workers th, table.workers td { padding-left: 12px; padding-right: 12px; }
+table.workers td.when { font-variant-numeric: tabular-nums; }
+table.workers td.when .cell-sub { margin: 0; }
+table.workers .w-120 { width: 128px; }
+table.workers td.actions form.inline { gap: 6px; }
+table.workers td.actions form.inline input[type=text] { width: 150px; }
+
+/* Filter bars with many options (resource kinds, audit categories): separate chips, so a wrap reads as intended. */
+.tabs.kinds, .tabs.cats { display: flex; flex-wrap: wrap; gap: 8px; background: none; border: 0; padding: 0; border-radius: 0; }
+.tabs.kinds a, .tabs.cats a { display: inline-flex; align-items: center; gap: 7px; padding: 5px 13px 5px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); line-height: 1.4; transition: border-color .15s, color .15s, background .15s; }
+.tabs.kinds a:first-child, .tabs.cats a:first-child { padding-left: 13px; }
+.tabs.cats a:first-child { padding-left: 8px; }
+.tabs.kinds a:hover, .tabs.cats a:hover { border-color: var(--accent); color: var(--text); }
+.tabs.kinds a[aria-current="true"], .tabs.cats a[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); box-shadow: none; }
+.tabs.kinds, .tabs.cats { gap: 6px; }
+.tabs.kinds a, .tabs.cats a { gap: 6px; padding: 4px 11px 4px 6px; font-size: 13px; }
+.tabs.kinds a:first-child { padding-left: 11px; }
+.tabs.cats a:first-child { padding-left: 6px; }
+
+/* Search box in a page header: same look as the filter forms, with the "/" hint inside. */
+.page-head .search .kbd-hint { bottom: auto; top: 50%; transform: translateY(-50%); }
+.page-head .search input:focus ~ .kbd-hint, .page-head .search input:not(:placeholder-shown) ~ .kbd-hint { display: none; }
+.page-head .search input[type=search] { padding-left: 36px; padding-right: 34px; width: 280px; }
