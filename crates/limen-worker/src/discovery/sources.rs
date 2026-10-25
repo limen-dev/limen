@@ -207,6 +207,13 @@ async fn scan_ec2(
             break;
         }
     }
+    // Stopping at the cap would report a partial list as the whole, and what
+    // is missing from it would go stale and be refused. Fail the scope instead.
+    if token.is_some() {
+        return Err(format!(
+            "more than {MAX_PAGES} pages; this scope was not scanned completely"
+        ));
+    }
     // Host keys: the worker refuses hosts it can't verify, and DescribeInstances
     // doesn't say. The instance's console output does, on images that print it.
     for (f, id) in found.iter_mut().take(MAX_CONSOLE_FETCHES) {
@@ -361,6 +368,13 @@ async fn paged(
         if marker.is_none() {
             break;
         }
+    }
+    // Stopping at the cap would report a partial list as the whole, and what
+    // is missing from it would go stale and be refused. Fail the scope instead.
+    if marker.is_some() {
+        return Err(format!(
+            "more than {MAX_PAGES} pages; this scope was not scanned completely"
+        ));
     }
     Ok(pages)
 }
@@ -526,6 +540,13 @@ async fn scan_eks(
         if token.is_none() {
             break;
         }
+    }
+    // Stopping at the cap would report a partial list as the whole, and what
+    // is missing from it would go stale and be refused. Fail the scope instead.
+    if token.is_some() {
+        return Err(format!(
+            "more than {MAX_PAGES} pages; this scope was not scanned completely"
+        ));
     }
     let mut out = Vec::new();
     for name in names {

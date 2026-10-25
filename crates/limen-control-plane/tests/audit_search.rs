@@ -411,8 +411,9 @@ async fn old_events_age_out_of_the_search_window() {
     .execute(&r.h.state.db)
     .await
     .expect("age");
-    let deleted = search::index::trim(&r.h.state.db, 30).await.expect("trim");
-    assert_eq!(deleted, 1);
+    // The server's own trim job may get there first, so count what is left,
+    // not what this call deleted.
+    search::index::trim(&r.h.state.db, 30).await.expect("trim");
     assert_eq!(r.texts("drop table").await.len(), 0);
     assert_eq!(r.texts("select").await.len(), 1, "recent events stay");
 }

@@ -22,6 +22,12 @@ impl AuditSearch for AuditSearchService {
         // Admins and auditors only. Anyone else reads as not allowed, and the
         // attempt isn't a search, so it isn't audited as one.
         let user = caller.reader()?;
+        if crate::db::is_locked(&self.0.db, &user.username)
+            .await
+            .map_err(|_| Status::internal("checking locks"))?
+        {
+            return Err(Status::permission_denied("user locked"));
+        }
         let req = request.into_inner();
         let results = search::search(
             &self.0,

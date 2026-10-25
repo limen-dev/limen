@@ -504,6 +504,14 @@ fn must_stop(ctx: &Ctx) -> Option<&'static str> {
         return Some("max_session_ttl reached");
     }
     ctx.worker.policy.latest().and_then(|snapshot| {
+        if !admitted.request_ids.is_empty()
+            && snapshot.restrictions.grant_ended(
+                &admitted.request_ids,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+        {
+            return Some("the access grant ended");
+        }
         snapshot
             .restrictions
             .blocks(&admitted.username, &admitted.login_id, &admitted.session_id)

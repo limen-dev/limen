@@ -212,9 +212,17 @@ impl Admin for AdminService {
     ) -> Result<Response<DiscoveredInfo>, Status> {
         let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
         let r = request.into_inner();
-        crate::discovery::review(&self.0, &admin.username, "api", &r.key, r.accept, &r.note)
-            .await
-            .map(Response::new)
+        crate::discovery::review(
+            &self.0,
+            &admin.username,
+            "api",
+            &r.key,
+            r.accept,
+            &r.note,
+            None,
+        )
+        .await
+        .map(Response::new)
     }
 
     async fn get_policy_documents(

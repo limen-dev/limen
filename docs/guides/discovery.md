@@ -67,3 +67,7 @@ Seen, then not seen in `stale_after_cycles` **complete** scans marks it **stale*
 ## Operating
 
 `limen admin discovery status [--state pending|accepted|stale|changed]`, `accept`, `reject`. Events: `resource.discovered`, `resource.relabel`, `resource.review`, `resource.stale`. Metrics: `limen_discovery_scans_total`, `limen_discovered_resources{state}`, `limen_discovered_resources_new_total`. Worker flags: `--discovery`, and `--discovery-endpoint-url` for a stand-in in development.
+
+## Accepting is bound to what you saw
+
+The console sends a digest of the name, kind, labels and target on screen with **Accept**. If a scan changed the proposal in between (for example a tag was edited), the accept is refused with "it changed since you looked" and you check it again. A scope with more than 50 pages of results is reported as failed, not as complete, so nothing in it is marked stale by mistake.

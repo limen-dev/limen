@@ -57,3 +57,9 @@ Limits worth knowing: a pack covers at most 400 days and 50,000 rows per section
 | Activity is logged and logs are protected (SOC 2 CC7.2, ISO 27001 A.8.15) | `sessions` with recording hashes; the signed, hash-chained audit trail verified by `limen-audit-verify` |
 
 This is a map from Limen's records to the questions auditors ask, not a statement that using Limen satisfies a control. Your auditor decides that; the wording should be reviewed before it is shown to one.
+
+## Limits worth knowing
+
+- **Built-in roles can be certified, not removed here.** `limen:admin` and `limen:auditor` come from the certificate, which a review cannot withhold. Removing one is an IdP group change; the review records that you looked.
+- **A removal ends what the role reaches today**, in full, not the list stored when the review started: every open session of that person on any resource the role selects now.
+- **Locked people lose review powers** along with everything else, even while their certificate is still valid.

@@ -28,6 +28,7 @@
       <form method="post" action="/console/discovered/review" class="inline">
         <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
         <input type="hidden" name="key" value="{{ i.key }}">
+        <input type="hidden" name="shown" value="{{ i.shown }}">
         <input type="text" name="note" placeholder="Note" maxlength="500">
         <button type="submit" name="decision" value="accept"{% if !i.blockers.is_empty() %} disabled{% endif %}>{% if i.change_pending %}Accept the change{% else %}Accept{% endif %}</button>
         <button type="submit" name="decision" value="reject" class="secondary">Reject</button>

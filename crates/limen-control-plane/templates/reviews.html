@@ -11,17 +11,16 @@
 {% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
 
 {% if chrome.is_admin %}
-<div class="card">
-<form method="post" action="/console/reviews/start" class="stack wide">
-  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-  <div class="row">
-    <input type="text" name="name" placeholder="Name (optional)" maxlength="200" class="w-360">
-    <label><span>Days to answer</span> <input type="number" name="due_days" value="14" min="1" max="90" class="w-80"></label>
-    <label><span>Days a flag withholds</span> <input type="number" name="override_days" value="30" min="1" max="365" class="w-80"></label>
-    <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Start a review</button>
-  </div>
-</form>
-</div>
+<details class="start">
+  <summary class="button"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Start a review</summary>
+  <form method="post" action="/console/reviews/start" class="card fields">
+    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+    <label class="grow"><span>Name</span><input type="text" name="name" placeholder="Optional, e.g. Q4 access review" maxlength="200"></label>
+    <label><span>Days to answer</span><input type="number" name="due_days" value="14" min="1" max="90" class="w-80"></label>
+    <label><span>Days a removal holds</span><input type="number" name="override_days" value="30" min="1" max="365" class="w-80"></label>
+    <button type="submit">Start</button>
+  </form>
+</details>
 {% endif %}
 
 <h2>{% if reader %}Reviews{% else %}Reviews with items for you{% endif %}</h2>
@@ -29,14 +28,13 @@
 <div class="card empty"><div>No reviews{% if !reader %} are waiting for you{% endif %}.</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Review</th><th>Progress</th><th>Flagged</th><th>Certified without a comment</th><th>Due</th><th>Status</th></tr></thead>
+  <thead><tr><th>Review</th><th>Progress</th><th>Outcome</th><th>Due</th><th>Status</th></tr></thead>
   <tbody>
   {% for r in reviews %}
   <tr>
     <td><a class="cell-main" href="/console/reviews/{{ r.id }}">{{ r.name }}</a><div class="cell-sub">started by {{ r.started_by }}</div></td>
-    <td><div class="bar" title="{{ r.progress }}"><span style="width:{{ r.percent }}%"></span></div> {{ r.progress }}</td>
-    <td class="num">{{ r.flagged }}</td>
-    <td class="num">{{ r.silent }}</td>
+    <td><div class="review-progress"><div class="progress" title="{{ r.progress }}"><span style="width:{{ r.percent }}%"></span></div><small>{{ r.progress }}</small></div></td>
+    <td>{% if r.flagged > 0 %}<span class="pill bad">{{ r.flagged }} removed</span> {% endif %}{% if r.kept > 0 %}<span class="pill ok">{{ r.kept }} kept</span> {% endif %}{% if r.silent > 0 %}<span class="pill warn" title="Certified without saying why">{{ r.silent }} no comment</span>{% endif %}{% if r.flagged == 0 && r.kept == 0 %}<span class="muted">nothing yet</span>{% endif %}</td>
     <td class="nowrap">{{ r.due }}</td>
     <td>{% if r.overdue %}<span class="pill bad">overdue</span>{% else if r.status == "complete" %}<span class="pill ok">complete</span>{% else %}<span class="pill warn">{{ r.status }}</span>{% endif %}</td>
   </tr>
@@ -57,7 +55,7 @@
   <tr>
     <td>{{ d.user }}</td>
     <td><span class="chip c{{ d.role.c }}">{{ d.role.text }}</span></td>
-    <td>{{ d.reason }}</td>
+    <td class="why">{{ d.reason }}</td>
     <td class="nowrap">{{ d.until }}</td>
     {% if chrome.is_admin %}
     <td><form method="post" action="/console/reviews/overrides/{{ d.id }}/lift" class="inline">

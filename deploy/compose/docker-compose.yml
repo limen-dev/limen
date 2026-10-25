@@ -23,6 +23,8 @@ x-limen-image: &limen-build
   args:
     RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
     DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
+    # A checkout that builds beside others names its own cargo cache (see the Dockerfile).
+    LIMEN_BUILD_CACHE: ${LIMEN_BUILD_CACHE:-limen-target}
 
 x-dev-tokens:
   # Multi-use tokens so `docker compose up` works unattended. Dev only.

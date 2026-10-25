@@ -488,6 +488,9 @@ pub async fn decide(
     certify: bool,
     comment: &str,
 ) -> Result<ReviewItemInfo, Status> {
+    if limen_core::identity::actor_type(who.username) == "bot" {
+        return Err(Status::permission_denied("bots cannot decide reviews"));
+    }
     let item_id =
         Uuid::parse_str(item_id.trim()).map_err(|_| Status::invalid_argument("not an item id"))?;
     let comment = comment.trim();
@@ -537,6 +540,13 @@ pub async fn decide(
         // The same answer whether it exists or belongs to someone else.
         return Err(Status::permission_denied("this item isn't yours to decide"));
     }
+    // Admin and auditor power is read from the certificate, not from the
+    // resource check a deny override feeds, so a flag could not take it away.
+    if !certify && limen_core::identity::is_builtin_role(&item.role) {
+        return Err(Status::failed_precondition(
+            "this role is built in: remove it by changing the person's IdP group, and certify or comment here",
+        ));
+    }
     sqlx::query(
         "UPDATE review_items SET decision = $2, comment = $3, decided_by = $4, decided_at = now() WHERE id = $1",
     )
@@ -576,12 +586,20 @@ pub async fn decide(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("storing the override", e))?;
-        let names: Vec<String> = item.reaches.iter().map(|r| r.name.clone()).collect();
+        // What the role reaches today, in full: the list stored at the start
+        // of the review is capped and can be out of date.
+        let names: Vec<String> = state
+            .policy
+            .current()
+            .policy
+            .accessible(std::slice::from_ref(&item.role))
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
         let ended = sqlx::query(
             "INSERT INTO session_kills (session_id, reason, killed_by)
              SELECT session_id::text, 'access removed in a review', $3 FROM sessions
              WHERE username = $1 AND resource = ANY($2) AND ended_at IS NULL
-               AND started_at > now() - interval '24 hours'
              ON CONFLICT DO NOTHING",
         )
         .bind(&item.subject)

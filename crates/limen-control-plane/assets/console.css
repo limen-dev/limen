@@ -480,3 +480,29 @@ table.workers td.actions form.inline input[type=text] { width: 150px; }
 .page-head .search .kbd-hint { bottom: auto; top: 50%; transform: translateY(-50%); }
 .page-head .search input:focus ~ .kbd-hint, .page-head .search input:not(:placeholder-shown) ~ .kbd-hint { display: none; }
 .page-head .search input[type=search] { padding-left: 36px; padding-right: 34px; width: 280px; }
+
+/* Access reviews */
+.progress { height: 8px; border-radius: 4px; background: var(--sunken); border: 1px solid var(--border); overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--accent); }
+.progress.wide { margin: 4px 0 18px; }
+.review-progress { display: grid; gap: 6px; min-width: 190px; }
+.review-progress small { color: var(--text-3); font-size: 12.5px; }
+.queue { display: grid; gap: 12px; margin: 12px 0 28px; }
+.decision { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; padding: 16px 18px; align-items: start; }
+.decision .who { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 600; font-size: 15px; }
+.decision .what { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--text-2); }
+.decision .reaches { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.decision .meta { margin-top: 10px; color: var(--text-3); font-size: 12.5px; }
+.decision form { display: grid; gap: 10px; margin: 0; }
+.decision form input[type=text] { width: 100%; }
+.decision .buttons { display: flex; gap: 8px; }
+.decision .buttons button { flex: 1; justify-content: center; }
+@media (max-width: 760px) { .decision { grid-template-columns: 1fr; } }
+details.start { margin-bottom: 22px; }
+details.start > summary { display: inline-flex; cursor: pointer; list-style: none; }
+details.start > summary::-webkit-details-marker { display: none; }
+details.start[open] > summary { margin-bottom: 12px; }
+.fields { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; padding: 18px 20px; }
+.fields label { display: grid; gap: 6px; font-weight: 550; font-size: 13px; }
+.fields label.grow { flex: 1; min-width: 220px; }
+td.why { max-width: 360px; overflow-wrap: anywhere; }

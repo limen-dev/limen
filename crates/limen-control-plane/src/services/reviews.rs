@@ -27,6 +27,17 @@ fn who(u: &limen_ca::verify::UserIdentity) -> Who<'_> {
     }
 }
 
+/// A locked person loses the use of a certificate that is still valid.
+async fn not_locked(state: &AppState, username: &str) -> Result<(), Status> {
+    if crate::db::is_locked(&state.db, username)
+        .await
+        .map_err(|_| Status::internal("checking locks"))?
+    {
+        return Err(Status::permission_denied("user locked"));
+    }
+    Ok(())
+}
+
 #[tonic::async_trait]
 impl Reviews for ReviewsService {
     async fn start_review(
@@ -35,6 +46,7 @@ impl Reviews for ReviewsService {
     ) -> Result<Response<ReviewInfo>, Status> {
         let caller = caller::resolve(&request, &self.0.cas)?;
         let user = caller.admin()?;
+        not_locked(&self.0, &user.username).await?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
         reviews::start(&self.0, &who(user), &r.name, r.due_days, r.override_days)
@@ -72,6 +84,7 @@ impl Reviews for ReviewsService {
     ) -> Result<Response<ReviewItemInfo>, Status> {
         let caller = caller::resolve(&request, &self.0.cas)?;
         let user = caller.user()?;
+        not_locked(&self.0, &user.username).await?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
         reviews::decide(&self.0, &who(user), &r.item_id, r.certify, &r.comment)
@@ -97,6 +110,7 @@ impl Reviews for ReviewsService {
     ) -> Result<Response<LiftDenyResponse>, Status> {
         let caller = caller::resolve(&request, &self.0.cas)?;
         let user = caller.admin()?;
+        not_locked(&self.0, &user.username).await?;
         let r = request.into_inner();
         Ok(Response::new(LiftDenyResponse {
             lifted: reviews::lift_deny(&self.0, &who(user), &r.id, &r.reason).await?,
@@ -109,6 +123,7 @@ impl Reviews for ReviewsService {
     ) -> Result<Response<ExportEvidenceResponse>, Status> {
         let caller = caller::resolve(&request, &self.0.cas)?;
         let user = caller.reader()?;
+        not_locked(&self.0, &user.username).await?;
         let r = request.into_inner();
         let (pack, manifest_sha256) =
             crate::evidence::export(&self.0, &user.username, r.from_unix, r.to_unix).await?;

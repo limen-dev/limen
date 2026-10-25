@@ -97,6 +97,24 @@ fn accepted_view(p: &Proposal) -> Value {
     json!({ "name": p.name, "labels": p.labels, "spec": p.spec })
 }
 
+/// What an admin is shown about a proposal, as one short value. The console
+/// sends it back with Accept, so an accept covers what was on screen and not
+/// whatever the next scan wrote since.
+#[must_use]
+pub fn shown_digest<'a>(
+    name: &str,
+    kind: &str,
+    labels: impl IntoIterator<Item = (&'a String, &'a String)>,
+    target: &str,
+) -> String {
+    let mut labels: Vec<_> = labels
+        .into_iter()
+        .filter(|(k, _)| !k.starts_with("limen.io/"))
+        .collect();
+    labels.sort();
+    digest(&json!([name, kind, labels, target]))
+}
+
 fn digest(v: &Value) -> String {
     use std::fmt::Write as _;
     Sha256::digest(v.to_string().as_bytes())
@@ -600,6 +618,7 @@ pub async fn review(
     key: &str,
     accept: bool,
     note: &str,
+    shown: Option<&str>,
 ) -> Result<DiscoveredInfo, Status> {
     let note = note.trim();
     if note.len() > 500 || note.chars().any(char::is_control) {
@@ -635,6 +654,20 @@ pub async fn review(
         .find(|d| d.metadata.name == row.document)
         .cloned();
 
+    if let Some(shown) = shown
+        && accept
+        && shown
+            != shown_digest(
+                &proposal.name,
+                proposal.kind.as_str(),
+                &proposal.labels,
+                &proposal.target,
+            )
+    {
+        return Err(Status::aborted(
+            "it changed since you looked at it: open the list again and check it",
+        ));
+    }
     if accept {
         if !proposal.blockers.is_empty() {
             return Err(Status::failed_precondition(format!(

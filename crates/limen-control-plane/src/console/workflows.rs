@@ -288,7 +288,7 @@ pub async fn access_page(
         AccessPage {
             chrome: chrome(&state, &auth, "access"),
             notice: done_text(q.done.as_deref()),
-            error: q.err.clone(),
+            error: q.err.as_deref().map(shown_error),
             tab,
             reader: auth.reads_record(),
             prefill: q
@@ -345,7 +345,7 @@ pub async fn access_detail(
             AccessDetailPage {
                 chrome: chrome(&state, &auth, "access"),
                 notice: done_text(q.done.as_deref()),
-                error: q.err.clone(),
+                error: q.err.as_deref().map(shown_error),
                 r: request_view(&info, &auth),
             }
             .render(),
@@ -520,6 +520,8 @@ pub struct ReviewView {
     pub progress: String,
     pub percent: u32,
     pub flagged: u32,
+    pub kept: u32,
+    pub waiting: u32,
     pub silent: u32,
     pub due: String,
     pub started_by: String,
@@ -534,6 +536,8 @@ fn review_view(r: &ReviewInfo) -> ReviewView {
         progress: format!("{} of {} decided", r.decided, r.items),
         percent: (r.decided * 100).checked_div(r.items).unwrap_or(100),
         flagged: r.flagged,
+        kept: r.decided.saturating_sub(r.flagged),
+        waiting: r.items.saturating_sub(r.decided),
         silent: r.certified_silently,
         due: relative(r.due_at_unix),
         started_by: r.started_by.clone(),
@@ -593,7 +597,7 @@ pub async fn reviews_page(
         ReviewsPage {
             chrome: chrome(&state, &auth, "reviews"),
             notice: done_text(q.done.as_deref()),
-            error: q.err.clone(),
+            error: q.err.as_deref().map(shown_error),
             reviews: list,
             reader: auth.reads_record(),
             denies,
@@ -610,6 +614,10 @@ pub async fn reviews_page(
     )
 }
 
+/// Resources listed on an item before "and N more".
+const REACHES_SHOWN: usize = 6;
+
+#[allow(clippy::struct_excessive_bools)] // flags a template reads, not a state machine
 pub struct ItemView {
     pub id: String,
     pub subject: String,
@@ -617,6 +625,10 @@ pub struct ItemView {
     pub role: Chip,
     pub via: String,
     pub reaches: Vec<String>,
+    /// How many more it reaches than are listed.
+    pub reaches_more: usize,
+    /// The viewer's own access: someone else has to review it.
+    pub own: bool,
     pub usage: String,
     pub unused: bool,
     pub reviewer: String,
@@ -624,6 +636,8 @@ pub struct ItemView {
     pub comment: String,
     pub decided_by: String,
     pub can_decide: bool,
+    /// Nobody has decided it yet.
+    pub pending: bool,
 }
 
 fn item_view(i: &ReviewItemInfo) -> ItemView {
@@ -636,8 +650,11 @@ fn item_view(i: &ReviewItemInfo) -> ItemView {
         reaches: i
             .reaches
             .iter()
+            .take(REACHES_SHOWN)
             .map(|r| format!("{} ({})", r.name, r.principals.join(", ")))
             .collect(),
+        reaches_more: i.reaches.len().saturating_sub(REACHES_SHOWN),
+        own: false,
         usage: if i.sessions_90d == 0 {
             "not used in 90 days".into()
         } else {
@@ -657,6 +674,7 @@ fn item_view(i: &ReviewItemInfo) -> ItemView {
         comment: i.comment.clone(),
         decided_by: i.decided_by.clone(),
         can_decide: i.can_decide,
+        pending: i.decision.is_empty(),
     }
 }
 
@@ -668,6 +686,8 @@ pub struct ReviewPage {
     pub error: Option<String>,
     pub review: ReviewView,
     pub items: Vec<ItemView>,
+    pub to_decide: usize,
+    pub decided_n: usize,
     pub mine_only: bool,
 }
 
@@ -689,16 +709,24 @@ pub async fn review_page(
             "There is no such review.",
         );
     };
-    let items = match reviews::items(&state, &who, &id, false, false).await {
-        Ok(v) => v.iter().map(item_view).collect(),
+    let items: Vec<ItemView> = match reviews::items(&state, &who, &id, false, false).await {
+        Ok(v) => v
+            .iter()
+            .map(|i| ItemView {
+                own: i.subject.eq_ignore_ascii_case(&auth.username),
+                ..item_view(i)
+            })
+            .collect(),
         Err(s) => return action_error(&s),
     };
     html(
         ReviewPage {
             chrome: chrome(&state, &auth, "reviews"),
             notice: done_text(q.done.as_deref()),
-            error: q.err.clone(),
+            error: q.err.as_deref().map(shown_error),
             review: review_view(info),
+            to_decide: items.iter().filter(|i| i.pending).count(),
+            decided_n: items.iter().filter(|i| !i.pending).count(),
             items,
             mine_only: !auth.reads_record(),
         }
@@ -854,6 +882,12 @@ pub async fn evidence(
 
 // ---- discovered resources ---------------------------------------------------------------
 
+/// The text of a failure passed back in a link. Anyone can put anything in a
+/// link, so it is escaped by the template and kept short.
+fn shown_error(e: &str) -> String {
+    e.chars().take(300).collect()
+}
+
 pub struct DiscoveredView {
     pub key: String,
     pub name: String,
@@ -870,6 +904,8 @@ pub struct DiscoveredView {
     pub seen: String,
     pub change_pending: bool,
     pub reviewable: bool,
+    /// Digest of what is shown, sent back with the decision.
+    pub shown: String,
 }
 
 #[derive(Template)]
@@ -933,6 +969,7 @@ pub async fn discovered_page(
                 seen: relative(i.last_seen_unix),
                 change_pending: i.change_pending,
                 reviewable: i.state != "accepted" || i.change_pending,
+                shown: crate::discovery::shown_digest(&i.name, &i.kind, &i.labels, &i.target),
             }
         })
         .collect();
@@ -940,7 +977,7 @@ pub async fn discovered_page(
         DiscoveredPage {
             chrome: chrome(&state, &auth, "resources"),
             notice: done_text(q.done.as_deref()),
-            error: q.err.clone(),
+            error: q.err.as_deref().map(shown_error),
             items: views,
             pending,
         }
@@ -955,6 +992,9 @@ pub struct DiscoveredForm {
     decision: String,
     #[serde(default)]
     note: String,
+    /// What the admin was shown; empty fails an accept.
+    #[serde(default)]
+    shown: String,
 }
 
 pub async fn discovered_review(
@@ -974,7 +1014,16 @@ pub async fn discovered_review(
         return r;
     }
     let accept = f.decision == "accept";
-    match crate::discovery::review(&state, &auth.username, "console", &f.key, accept, &f.note).await
+    match crate::discovery::review(
+        &state,
+        &auth.username,
+        "console",
+        &f.key,
+        accept,
+        &f.note,
+        Some(&f.shown),
+    )
+    .await
     {
         Ok(_) => Redirect::to(&format!(
             "/console/discovered?done={}",
