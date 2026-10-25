@@ -8,10 +8,10 @@
     <p class="sub">The last 30 days, newest first. This is a summary: the complete, signed events are in your audit sinks.</p>
   </div>
 </div>
-<nav class="tabs" aria-label="Audit views"><a href="/console/audit" aria-current="true">All events</a><a href="/console/audit/kubernetes">Kubernetes</a></nav>
-<form method="get" action="/console/audit" class="search wide-search">
+{% include "audit_tabs.html" %}
+<form method="get" action="/console/audit" class="search wide-search" role="search">
   <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
-  <input type="text" name="q" value="{{ q }}" placeholder="Find a statement or command: DROP TABLE user:alice@example.com resource:orders-prod after:7d" aria-label="Search the audit trail" maxlength="512">
+  <input type="text" name="find" value="{{ q }}" placeholder="Find a statement or command: DROP TABLE user:alice@example.com resource:orders-prod after:7d" aria-label="Search the audit trail" maxlength="512">
 </form>
 <p class="hint">Search covers recent events, command and statement text, and (if your operator turned it on) what was on screen in recordings. Every search is recorded here too.</p>
 {% if let Some(s) = search %}
@@ -32,16 +32,33 @@
 {% endif %}
 {% if let Some(u) = s.history_url %}<p class="hint"><a href="{{ u }}" rel="noopener noreferrer">Run the same search over the full history</a></p>{% endif %}
 {% else %}
-<form method="get" action="/console/audit" class="filters">
-  <label><span>Event</span>
-    <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if kind_filter.as_deref() == Some(k.as_str()) %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+{% include "filter_presets.html" %}
+<form method="get" action="/console/audit" class="filters" data-autosubmit>
+  <label class="grow"><span>Search the details</span>
+    <input type="search" class="search" name="q" value="{{ filter.text }}" placeholder="Search reason, resource, account…" maxlength="200" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
+  </label>
+  <label><span>Kind</span>
+    <select name="kind"><option value="">All events</option><optgroup label="Groups">{% for c in groups %}<option value="{{ c.kinds }}"{% if filter.kind == c.kinds %} selected{% endif %}>{{ c.label }}</option>{% endfor %}</optgroup><optgroup label="Single kinds">{% for k in kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</optgroup></select>
   </label>
   <label><span>User</span>
-    <input type="text" name="user" value="{% if let Some(u) = user_filter %}{{ u }}{% endif %}" placeholder="anyone" maxlength="200">
+    <input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200" list="dl-users" autocomplete="off">
   </label>
-  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
+  <label><span>Actor</span>
+    <select name="actor"><option value="">People and bots</option><option value="user"{% if filter.actor == "user" %} selected{% endif %}>People</option><option value="bot"{% if filter.actor == "bot" %} selected{% endif %}>Bots</option></select>
+  </label>
+  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Search</button>
+  <details class="more"{% if more_open || !filter.session.is_empty() %} open{% endif %}>
+    <summary>More filters</summary>
+    <div class="more-fields">
+      <label><span>Session id</span><input type="text" name="session" value="{{ filter.session }}" placeholder="paste a session id" maxlength="40" autocomplete="off"></label>
+      {% include "filter_range.html" %}
+    </div>
+  </details>
+  <datalist id="dl-users">{% for u in suggest.users %}<option value="{{ u }}">{% endfor %}</datalist>
 </form>
+{% include "filter_feedback.html" %}
 {% include "events_table.html" %}
+{% if events.is_empty() && !chips.is_empty() %}<p class="empty-hint">Nothing matches these filters. Remove one above, widen the period, or <a href="{{ clear }}">clear all</a>.</p>{% endif %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
   {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}

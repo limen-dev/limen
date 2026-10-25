@@ -259,6 +259,17 @@ fn session_from_row(r: &sqlx::postgres::PgRow) -> Result<SessionRow, sqlx::Error
 pub struct SessionFilter {
     pub username: Option<String>,
     pub resource: Option<String>,
+    /// `user` or `bot`.
+    pub actor: Option<String>,
+    pub kind: Option<String>,
+    pub login: Option<String>,
+    pub client_addr: Option<String>,
+    pub end_reason: Option<String>,
+    /// The repository or project a bot's CI job ran for.
+    pub repo: Option<String>,
+    pub from: Option<OffsetDateTime>,
+    /// Exclusive.
+    pub to: Option<OffsetDateTime>,
     pub active_only: bool,
     pub limit: i64,
     pub offset: i64,
@@ -272,6 +283,14 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
         "
          WHERE ($2::text IS NULL OR username = $2)
            AND ($6::text IS NULL OR resource = $6)
+           AND ($7::text IS NULL OR actor_type = $7)
+           AND ($8::text IS NULL OR kind = $8)
+           AND ($9::text IS NULL OR login = $9)
+           AND ($10::text IS NULL OR client_addr = $10)
+           AND ($11::text IS NULL OR end_reason = $11)
+           AND ($12::text IS NULL OR COALESCE(ci->>'repository', ci->>'project_path', username) = $12)
+           AND ($13::timestamptz IS NULL OR started_at >= $13)
+           AND ($14::timestamptz IS NULL OR started_at < $14)
            AND (NOT $3 OR ",
         run_active!(),
         ")
@@ -290,6 +309,14 @@ pub async fn list_sessions(db: &Db, f: &SessionFilter) -> Result<Vec<SessionRow>
     .bind(f.limit + 1)
     .bind(f.offset)
     .bind(&f.resource)
+    .bind(&f.actor)
+    .bind(&f.kind)
+    .bind(&f.login)
+    .bind(&f.client_addr)
+    .bind(&f.end_reason)
+    .bind(&f.repo)
+    .bind(f.from)
+    .bind(f.to)
     .fetch_all(db)
     .await?
     .iter()
@@ -1595,21 +1622,48 @@ pub struct EventRow {
     pub summary: String,
 }
 
+/// What the audit trail can be narrowed by. Everything is optional and combines with AND.
+#[derive(Debug, Clone, Default)]
+pub struct EventFilter {
+    pub username: Option<String>,
+    /// Exact kinds or prefixes ending in `.*` (`auth.*`), separated by commas.
+    pub kind: Option<String>,
+    /// `user` or `bot`: the kind of identity behind the event.
+    pub actor: Option<String>,
+    /// Case-insensitive text in the summary.
+    pub text: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub from: Option<OffsetDateTime>,
+    /// Exclusive.
+    pub to: Option<OffsetDateTime>,
+}
+
 /// Newest first. `limit` rows starting at `offset`.
 pub async fn list_events(
     db: &Db,
-    username: Option<&str>,
-    kind: Option<&str>,
+    f: &EventFilter,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<EventRow>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT at, kind, username, session_id, summary FROM audit_events
-         WHERE ($1::text IS NULL OR username = $1) AND ($2::text IS NULL OR kind = $2)
-         ORDER BY at DESC, event_id DESC LIMIT $3 OFFSET $4",
+        "SELECT at, kind, username, session_id, summary FROM audit_events e
+         WHERE ($1::text IS NULL OR username = $1)
+           AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM unnest(string_to_array($2, ',')) p
+                             WHERE kind = p OR (p LIKE '%.*' AND starts_with(kind, left(p, -1)))))
+           AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.username = e.username AND u.actor_type = $3))
+           AND ($4::text IS NULL OR position(lower($4) in lower(summary)) > 0)
+           AND ($5::uuid IS NULL OR session_id = $5)
+           AND ($6::timestamptz IS NULL OR at >= $6)
+           AND ($7::timestamptz IS NULL OR at < $7)
+         ORDER BY at DESC, event_id DESC LIMIT $8 OFFSET $9",
     )
-    .bind(username)
-    .bind(kind)
+    .bind(&f.username)
+    .bind(&f.kind)
+    .bind(&f.actor)
+    .bind(&f.text)
+    .bind(f.session_id)
+    .bind(f.from)
+    .bind(f.to)
     .bind(limit + 1)
     .bind(offset)
     .fetch_all(db)
@@ -1625,6 +1679,43 @@ pub async fn list_events(
             })
         })
         .collect()
+}
+
+/// Names to complete while typing in a filter box. With `only` set (a person looking at
+/// their own sessions) the lists come from their sessions alone and name no other user.
+pub async fn suggestions(db: &Db, only: Option<&str>) -> super::views::Suggestions {
+    async fn column(db: &Db, sql: &'static str, only: Option<&str>) -> Vec<String> {
+        sqlx::query_scalar(sql)
+            .bind(only)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default()
+    }
+    super::views::Suggestions {
+        users: if only.is_some() {
+            Vec::new()
+        } else {
+            column(db, "SELECT username FROM users WHERE $1::text IS NULL ORDER BY 1 LIMIT 300", only).await
+        },
+        resources: column(
+            db,
+            "SELECT DISTINCT resource FROM sessions WHERE resource IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 300",
+            only,
+        )
+        .await,
+        kinds: column(
+            db,
+            "SELECT DISTINCT kind FROM sessions WHERE kind IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 100",
+            only,
+        )
+        .await,
+        ends: column(
+            db,
+            "SELECT DISTINCT end_reason FROM sessions WHERE end_reason IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 100",
+            only,
+        )
+        .await,
+    }
 }
 
 /// The kinds seen in the trail, for the filter.

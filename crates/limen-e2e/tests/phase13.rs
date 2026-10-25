@@ -1085,7 +1085,7 @@ async fn the_console_pages_for_the_workflows() {
 
     let mut hit = None;
     for _ in 0..60 {
-        let page = auditor.get("/console/audit?q=for-the-watcher").await;
+        let page = auditor.get("/console/audit?find=for-the-watcher").await;
         assert_eq!(page.status, 200);
         if page.body.contains("<mark>for-the-watcher</mark>") {
             hit = Some(page);

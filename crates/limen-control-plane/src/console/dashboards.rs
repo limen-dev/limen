@@ -4,12 +4,13 @@
 //! dashboards for the full history are an optional extra (`deploy/grafana`).
 
 use askama::Template;
-use axum::extract::{Query, State};
+use axum::extract::{Query, RawQuery, State};
 use axum::response::Response;
 use serde::Deserialize;
 use sqlx::Row;
 use time::{Duration, OffsetDateTime, PrimitiveDateTime};
 
+use super::query::{href, when_text};
 use super::views::{Chrome, error_page, path_segment};
 use super::{Auth, html};
 use crate::db::Db;
@@ -86,6 +87,7 @@ pub struct Bar {
     pub h: i32,
     pub class: &'static str,
     pub tip: String,
+    pub href: Option<String>,
 }
 
 pub struct Tick {
@@ -112,9 +114,12 @@ pub struct Series {
     pub name: &'static str,
     pub class: &'static str,
     pub values: Vec<i64>,
+    /// Where each period's bar leads (the records behind it); empty for none.
+    pub hrefs: Vec<String>,
 }
 
 pub struct Panel {
+    pub id: &'static str,
     pub title: &'static str,
     pub sub: &'static str,
     pub chart: Chart,
@@ -170,6 +175,7 @@ pub fn bar_chart(labels: &[String], series: &[Series]) -> Chart {
                 h: height,
                 class: one.class,
                 tip: format!("{label}: {value} {}", one.name),
+                href: one.hrefs.get(index).filter(|h| !h.is_empty()).cloned(),
             });
         }
     }
@@ -229,10 +235,187 @@ fn rank(rows: Vec<(String, i64)>, link: impl Fn(&str) -> Option<String>) -> Vec<
 }
 
 pub struct RankPanel {
+    pub id: &'static str,
     pub title: &'static str,
     pub sub: &'static str,
     pub rows: Vec<Ranked>,
     pub class: &'static str,
+}
+
+// ---- views ---------------------------------------------------------------------
+
+/// The pickable panels, in page order: `(id, title, group)`.
+const CATALOG: [(&str, &str, &str); 27] = [
+    ("sessions", "Sessions over time", "Activity"),
+    ("signins", "Sign-ins and denials", "Security"),
+    ("busiest-resources", "Busiest resources", "Activity"),
+    ("active-people", "Most active people", "Activity"),
+    ("bot-repos", "Bot sessions by repository", "Activity"),
+    ("session-length", "Session length", "Activity"),
+    ("denial-reasons", "Why access was denied", "Security"),
+    ("admin-actions", "Admin actions", "Security"),
+    ("access-requests", "Access requests", "Security"),
+    ("time-to-approve", "Time to approve", "Security"),
+    ("grants-by-role", "Grants by role", "Security"),
+    ("review-items", "Access review items", "Security"),
+    ("discovered", "Discovered resources", "Security"),
+    ("kinds", "Sessions by kind", "Activity"),
+    ("endings", "How sessions ended", "Reliability"),
+    ("traffic", "Data transferred", "Activity"),
+    ("denied-people", "Most refused people", "Security"),
+    ("off-hours", "Out-of-hours access", "Security"),
+    ("long-sessions", "Longest sessions", "Security"),
+    ("logins", "Accounts used", "Security"),
+    ("sources", "Where sessions came from", "Security"),
+    ("unrecorded", "Finished without a recording", "Security"),
+    ("quiet-components", "Components gone quiet", "Reliability"),
+    ("worker-load", "Tunnels per worker", "Reliability"),
+    ("db-errors", "Database statement errors", "Reliability"),
+    ("kube-errors", "Kubernetes API errors", "Reliability"),
+    ("web-errors", "Web app server errors", "Reliability"),
+];
+
+/// Named selections of panels; `all` is every one.
+const VIEWS: [(&str, &str, &[&str]); 6] = [
+    (
+        "overview",
+        "Overview",
+        &[
+            "sessions",
+            "signins",
+            "busiest-resources",
+            "active-people",
+            "bot-repos",
+            "session-length",
+            "admin-actions",
+        ],
+    ),
+    (
+        "security",
+        "Security",
+        &[
+            "signins",
+            "denial-reasons",
+            "denied-people",
+            "off-hours",
+            "long-sessions",
+            "logins",
+            "sources",
+            "unrecorded",
+            "access-requests",
+            "time-to-approve",
+            "grants-by-role",
+            "review-items",
+            "discovered",
+            "admin-actions",
+        ],
+    ),
+    (
+        "sre",
+        "Reliability",
+        &[
+            "sessions",
+            "endings",
+            "session-length",
+            "quiet-components",
+            "worker-load",
+            "db-errors",
+            "kube-errors",
+            "web-errors",
+            "traffic",
+        ],
+    ),
+    (
+        "bots",
+        "Bots",
+        &["sessions", "bot-repos", "busiest-resources"],
+    ),
+    (
+        "usage",
+        "Usage",
+        &[
+            "sessions",
+            "kinds",
+            "busiest-resources",
+            "traffic",
+            "session-length",
+            "endings",
+        ],
+    ),
+    ("all", "Everything", &[]),
+];
+
+pub struct ViewTab {
+    pub key: &'static str,
+    pub label: &'static str,
+}
+
+pub struct Choice {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub on: bool,
+}
+
+pub struct ChoiceGroup {
+    pub title: &'static str,
+    pub choices: Vec<Choice>,
+}
+
+/// What the query string asked for: a named view, or an explicit list of panels
+/// (`p=<id>` once per panel, from the "Choose panels" form).
+struct Selection {
+    view: &'static str,
+    custom: bool,
+    ids: Vec<&'static str>,
+}
+
+impl Selection {
+    fn parse(query: Option<&str>) -> Self {
+        let mut view = None;
+        let mut picked = Vec::new();
+        for (key, value) in query
+            .unwrap_or("")
+            .split('&')
+            .filter_map(|kv| kv.split_once('='))
+        {
+            match key {
+                "view" => view = VIEWS.iter().find(|v| v.0 == value),
+                "p" => picked.extend(CATALOG.iter().find(|c| c.0 == value).map(|c| c.0)),
+                _ => {}
+            }
+        }
+        if !picked.is_empty() {
+            return Self {
+                view: "custom",
+                custom: true,
+                ids: picked,
+            };
+        }
+        let (key, _, ids) = view.copied().unwrap_or(VIEWS[0]);
+        let ids = if ids.is_empty() {
+            CATALOG.iter().map(|c| c.0).collect()
+        } else {
+            ids.to_vec()
+        };
+        Self {
+            view: key,
+            custom: false,
+            ids,
+        }
+    }
+
+    /// `&view=<name>`, or `&p=<id>` for each panel of a custom selection.
+    fn query(&self) -> String {
+        if self.custom {
+            format!("&p={}", self.ids.join("&p="))
+        } else {
+            format!("&view={}", self.view)
+        }
+    }
+
+    fn has(&self, id: &str) -> bool {
+        self.ids.contains(&id)
+    }
 }
 
 // ---- data ----------------------------------------------------------------------
@@ -266,22 +449,30 @@ fn slot(starts: &[PrimitiveDateTime], t: PrimitiveDateTime) -> Option<usize> {
     starts.iter().position(|s| *s == t)
 }
 
-async fn counts(
-    db: &Db,
-    sql: &'static str,
-    since: OffsetDateTime,
-) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    let rows = sqlx::query(sql).bind(since).fetch_all(db).await?;
-    rows.iter()
-        .map(|r| Ok((r.try_get::<String, _>(0)?, r.try_get::<i64, _>(1)?)))
-        .collect()
-}
-
 pub struct Tile {
+    pub href: Option<String>,
     pub value: String,
     pub label: &'static str,
     pub icon: &'static str,
     pub tone: &'static str,
+}
+
+impl Tile {
+    /// The number and its unit ("35.8", "min"), so the template can set the unit smaller.
+    pub fn number(&self) -> &str {
+        self.split().0
+    }
+
+    pub fn unit(&self) -> &str {
+        self.split().1
+    }
+
+    fn split(&self) -> (&str, &str) {
+        match self.value.rsplit_once(' ') {
+            Some((n, u)) if matches!(u, "ms" | "s" | "min" | "h") => (n, u),
+            _ => (self.value.as_str(), ""),
+        }
+    }
 }
 
 fn duration_text(ms: f64) -> String {
@@ -301,6 +492,12 @@ fn duration_text(ms: f64) -> String {
 pub struct DashboardsPage {
     pub chrome: Chrome,
     pub range: &'static str,
+    pub view: &'static str,
+    pub views: Vec<ViewTab>,
+    pub groups: Vec<ChoiceGroup>,
+    pub custom: bool,
+    /// The selection as query parameters, to keep it when the range changes.
+    pub keep: String,
     pub tiles: Vec<Tile>,
     pub panels: Vec<Panel>,
     pub ranked: Vec<RankPanel>,
@@ -314,23 +511,54 @@ pub struct DashQuery {
 pub async fn dashboards(
     State(state): State<AppState>,
     auth: Auth,
+    RawQuery(raw): RawQuery,
     Query(q): Query<DashQuery>,
 ) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
     let range = Range::parse(q.range.as_deref());
-    match build(&state, range).await {
-        Ok((tiles, panels, ranked)) => html(
-            DashboardsPage {
-                chrome: Chrome::new(&auth, "dashboards", state.policy.current().version),
-                range: range.key(),
-                tiles,
-                panels,
-                ranked,
-            }
-            .render(),
-        ),
+    let selection = Selection::parse(raw.as_deref());
+    match build(&state, range, &selection).await {
+        Ok((tiles, mut panels, mut ranked)) => {
+            panels.retain(|p| selection.has(p.id));
+            ranked.retain(|p| selection.has(p.id));
+            html(
+                DashboardsPage {
+                    chrome: Chrome::new(&auth, "dashboards", state.policy.current().version),
+                    range: range.key(),
+                    view: selection.view,
+                    views: VIEWS
+                        .iter()
+                        .map(|v| ViewTab {
+                            key: v.0,
+                            label: v.1,
+                        })
+                        .collect(),
+                    groups: ["Activity", "Security", "Reliability"]
+                        .into_iter()
+                        .map(|title| ChoiceGroup {
+                            title,
+                            choices: CATALOG
+                                .iter()
+                                .filter(|c| c.2 == title)
+                                .map(|c| Choice {
+                                    id: c.0,
+                                    title: c.1,
+                                    on: selection.has(c.0),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                    custom: selection.custom,
+                    keep: selection.query(),
+                    tiles,
+                    panels,
+                    ranked,
+                }
+                .render(),
+            )
+        }
         Err(e) => {
             tracing::error!(error = %e, "building dashboards");
             error_page(
@@ -405,186 +633,378 @@ struct TimeSeries {
     denied: Vec<i64>,
 }
 
-/// The ranked lists: busiest resources and people, session length, denials, admin actions.
-#[allow(clippy::too_many_lines)]
-async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx::Error> {
-    let top_resources = counts(
-        db,
-        "SELECT resource, count(*) FROM sessions WHERE started_at >= $1 AND resource IS NOT NULL
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let top_users = counts(
-        db,
-        "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let bot_repos = counts(
-        db,
-        "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
-         WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let denials = counts(
-        db,
-        "SELECT summary, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1
-         GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
-        since,
-    )
-    .await?;
-    let actions = counts(
-        db,
-        "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
-         ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change',
-          'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export')
-         GROUP BY 1 ORDER BY 2 DESC, 1",
-        since,
-    )
-    .await?;
-    // Access workflows (ADR-0025, ADR-0029, ADR-0027).
-    let requests = counts(
-        db,
-        "SELECT status || CASE WHEN break_glass THEN ' (break-glass)' ELSE '' END, count(*) FROM access_requests
-         WHERE created_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
-        since,
-    )
-    .await?;
-    let grants_by_role = counts(
-        db,
-        "SELECT role, count(*) FROM access_grants WHERE granted_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
-        since,
-    )
-    .await?;
-    let time_to_approve = counts(
-        db,
-        "SELECT CASE WHEN d < interval '5 minutes' THEN '0 under 5 min' WHEN d < interval '30 minutes' THEN '1 5 to 30 min'
-                     WHEN d < interval '4 hours' THEN '2 30 min to 4 h' ELSE '3 over 4 h' END AS b, count(*)
-         FROM (SELECT decided_at - created_at AS d FROM access_requests
-               WHERE created_at >= $1 AND status IN ('approved', 'revoked') AND NOT break_glass AND decided_at IS NOT NULL) t
-         GROUP BY 1 ORDER BY 1",
-        since,
-    )
-    .await?
-    .into_iter()
-    .map(|(k, n)| (k.split_once(' ').map_or(k.clone(), |(_, t)| t.to_owned()), n))
-    .collect::<Vec<_>>();
-    let review_items = counts(
-        db,
-        "SELECT CASE WHEN i.decision IS NULL THEN CASE WHEN r.due_at < now() THEN 'overdue' ELSE 'waiting' END
-                     WHEN i.decision = 'flag' THEN 'flagged'
-                     WHEN i.comment = '' THEN 'certified without a comment' ELSE 'certified with a comment' END, count(*)
-         FROM review_items i JOIN access_reviews r ON r.id = i.review_id
-         WHERE r.started_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
-        since,
-    )
-    .await?;
-    let discovered = counts(
-        db,
-        "SELECT CASE WHEN change_pending THEN 'accepted, change pending' ELSE state END, count(*)
-         FROM discovered_resources WHERE $1::timestamptz IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1",
-        since,
-    )
-    .await?;
-    let lengths = counts(
-        db,
-        "SELECT CASE WHEN duration_ms < 60000 THEN '0 under 1 min' WHEN duration_ms < 300000 THEN '1 1 to 5 min'
-                     WHEN duration_ms < 1800000 THEN '2 5 to 30 min' WHEN duration_ms < 7200000 THEN '3 30 min to 2 h'
-                     ELSE '4 over 2 h' END AS b, count(*)
-         FROM sessions WHERE started_at >= $1 AND duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1",
-        since,
-    )
-    .await?
-    .into_iter()
-    .map(|(k, n)| (k.split_once(' ').map_or(k.clone(), |(_, t)| t.to_owned()), n))
-    .collect::<Vec<_>>();
+/// Where a ranked row leads: the records behind its number.
+#[derive(Clone, Copy)]
+enum Drill {
+    None,
+    Resource,
+    User,
+    /// The audit trail, narrowed to `kind` (empty: the row's label is the kind)
+    /// and, if `by` is not empty, to the row's label in that filter.
+    Audit {
+        kind: &'static str,
+        by: &'static str,
+    },
+    /// The sessions list with the row's label in this filter.
+    Sessions(&'static str),
+    /// One page for every row.
+    Page(&'static str),
+}
 
-    let ranked = vec![
-        RankPanel {
-            title: "Busiest resources",
-            sub: "Sessions",
-            rows: rank(top_resources, |name| {
-                Some(format!("/console/resources/{}", path_segment(name)))
+/// One ranked list: the SQL returns `(label, count)`. `windowed` queries take the
+/// start of the period as `$1`; the others describe the fleet right now.
+struct Spec {
+    id: &'static str,
+    title: &'static str,
+    sub: &'static str,
+    class: &'static str,
+    drill: Drill,
+    windowed: bool,
+    sql: &'static str,
+}
+
+const RANKINGS: [Spec; 25] = [
+    Spec {
+        id: "busiest-resources",
+        title: "Busiest resources",
+        sub: "Sessions",
+        class: "bar-a",
+        drill: Drill::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM sessions WHERE started_at >= $1 AND resource IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "active-people",
+        title: "Most active people",
+        sub: "Sessions",
+        class: "bar-b",
+        drill: Drill::User,
+        windowed: true,
+        sql: "SELECT username, count(*) FROM sessions WHERE started_at >= $1 AND username IS NOT NULL AND actor_type = 'user'
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "bot-repos",
+        title: "Bot sessions by repository",
+        sub: "CI jobs, by the repository or project that ran them",
+        class: "bar-bot",
+        drill: Drill::Sessions("repo"),
+        windowed: true,
+        sql: "SELECT COALESCE(ci->>'repository', ci->>'project_path', username), count(*) FROM sessions
+              WHERE started_at >= $1 AND actor_type = 'bot' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "session-length",
+        title: "Session length",
+        sub: "Finished sessions",
+        class: "bar-c",
+        drill: Drill::None,
+        windowed: true,
+        sql: "SELECT CASE WHEN duration_ms < 60000 THEN 'under 1 min' WHEN duration_ms < 300000 THEN '1 to 5 min'
+                          WHEN duration_ms < 1800000 THEN '5 to 30 min' WHEN duration_ms < 7200000 THEN '30 min to 2 h'
+                          ELSE 'over 2 h' END AS b, count(*)
+              FROM sessions WHERE started_at >= $1 AND duration_ms IS NOT NULL
+              GROUP BY 1 ORDER BY min(duration_ms)",
+    },
+    Spec {
+        id: "denial-reasons",
+        title: "Why access was denied",
+        sub: "Denied attempts",
+        class: "bar-bad",
+        drill: Drill::Audit { kind: "auth.denied", by: "q" },
+        windowed: true,
+        sql: "SELECT summary, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6",
+    },
+    Spec {
+        id: "admin-actions",
+        title: "Admin actions",
+        sub: "Locks, kills, revokes, tokens, policy",
+        class: "bar-d",
+        drill: Drill::Audit { kind: "", by: "kind" },
+        windowed: true,
+        sql: "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
+              ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change',
+               'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export')
+              GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "access-requests",
+        title: "Access requests",
+        sub: "By outcome",
+        class: "bar-a",
+        drill: Drill::Page("/console/access"),
+        windowed: true,
+        sql: "SELECT status || CASE WHEN break_glass THEN ' (break-glass)' ELSE '' END, count(*) FROM access_requests
+              WHERE created_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "time-to-approve",
+        title: "Time to approve",
+        sub: "Approved requests, from asking to the decision",
+        class: "bar-c",
+        drill: Drill::None,
+        windowed: true,
+        sql: "SELECT CASE WHEN d < interval '5 minutes' THEN 'under 5 min' WHEN d < interval '30 minutes' THEN '5 to 30 min'
+                          WHEN d < interval '4 hours' THEN '30 min to 4 h' ELSE 'over 4 h' END AS b, count(*)
+              FROM (SELECT decided_at - created_at AS d FROM access_requests
+                    WHERE created_at >= $1 AND status IN ('approved', 'revoked') AND NOT break_glass AND decided_at IS NOT NULL) t
+              GROUP BY 1 ORDER BY min(d)",
+    },
+    Spec {
+        id: "grants-by-role",
+        title: "Grants by role",
+        sub: "Access given by request",
+        class: "bar-b",
+        drill: Drill::Page("/console/access"),
+        windowed: true,
+        sql: "SELECT role, count(*) FROM access_grants WHERE granted_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "review-items",
+        title: "Access review items",
+        sub: "Where the reviews stand",
+        class: "bar-d",
+        drill: Drill::Page("/console/reviews"),
+        windowed: true,
+        sql: "SELECT CASE WHEN i.decision IS NULL THEN CASE WHEN r.due_at < now() THEN 'overdue' ELSE 'waiting' END
+                          WHEN i.decision = 'flag' THEN 'flagged'
+                          WHEN i.comment = '' THEN 'certified without a comment' ELSE 'certified with a comment' END, count(*)
+              FROM review_items i JOIN access_reviews r ON r.id = i.review_id
+              WHERE r.started_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "discovered",
+        title: "Discovered resources",
+        sub: "By state, now",
+        class: "bar-bot",
+        drill: Drill::Page("/console/discovered"),
+        windowed: false,
+        sql: "SELECT CASE WHEN change_pending THEN 'accepted, change pending' ELSE state END, count(*)
+              FROM discovered_resources GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "kinds",
+        title: "Sessions by kind",
+        sub: "Protocol or integration",
+        class: "bar-b",
+        drill: Drill::Sessions("kind"),
+        windowed: true,
+        sql: "SELECT COALESCE(kind, 'unknown'), count(*) FROM sessions WHERE started_at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "endings",
+        title: "How sessions ended",
+        sub: "Finished sessions",
+        class: "bar-d",
+        drill: Drill::Sessions("end"),
+        windowed: true,
+        sql: "SELECT end_reason, count(*) FROM sessions WHERE started_at >= $1 AND end_reason IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "traffic",
+        title: "Data transferred",
+        sub: "KiB in both directions, by resource",
+        class: "bar-c",
+        drill: Drill::Resource,
+        windowed: true,
+        sql: "SELECT resource, (sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) / 1024)::bigint FROM sessions
+              WHERE started_at >= $1 AND resource IS NOT NULL
+              GROUP BY 1 HAVING sum(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)) > 0 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "denied-people",
+        title: "Most refused people",
+        sub: "Denied attempts: repeated refusals can be guessing or a stale role",
+        class: "bar-bad",
+        drill: Drill::Audit { kind: "auth.denied", by: "user" },
+        windowed: true,
+        sql: "SELECT username, count(*) FROM audit_events WHERE kind = 'auth.denied' AND at >= $1 AND username IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "off-hours",
+        title: "Out-of-hours access",
+        sub: "People's sessions started outside 07:00 to 19:00 UTC",
+        class: "bar-d",
+        drill: Drill::User,
+        windowed: true,
+        sql: "SELECT username, count(*) FROM sessions
+              WHERE started_at >= $1 AND actor_type = 'user' AND username IS NOT NULL
+                AND (EXTRACT(hour FROM started_at AT TIME ZONE 'UTC') < 7 OR EXTRACT(hour FROM started_at AT TIME ZONE 'UTC') >= 19)
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "long-sessions",
+        title: "Longest sessions",
+        sub: "Minutes, person and resource",
+        class: "bar-c",
+        drill: Drill::None,
+        windowed: true,
+        sql: "SELECT COALESCE(username, '?') || ' on ' || COALESCE(resource, '?'), (duration_ms / 60000)::bigint FROM sessions
+              WHERE started_at >= $1 AND duration_ms IS NOT NULL ORDER BY duration_ms DESC LIMIT 8",
+    },
+    Spec {
+        id: "logins",
+        title: "Accounts used",
+        sub: "Sessions by the account they logged in as on the target",
+        class: "bar-a",
+        drill: Drill::Sessions("login"),
+        windowed: true,
+        sql: "SELECT COALESCE(login, 'n/a'), count(*) FROM sessions WHERE started_at >= $1
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "sources",
+        title: "Where sessions came from",
+        sub: "Client address",
+        class: "bar-b",
+        drill: Drill::Sessions("addr"),
+        windowed: true,
+        sql: "SELECT client_addr, count(*) FROM sessions WHERE started_at >= $1 AND client_addr IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "unrecorded",
+        title: "Finished without a recording",
+        sub: "Sessions by resource. Not every kind is recorded",
+        class: "bar-bad",
+        drill: Drill::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM sessions
+              WHERE started_at >= $1 AND ended_at IS NOT NULL AND recording_uri IS NULL AND resource IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "quiet-components",
+        title: "Components gone quiet",
+        sub: "Minutes since last seen, over 5 (proxies and workers, not revoked)",
+        class: "bar-bad",
+        drill: Drill::Page("/console/workers"),
+        windowed: false,
+        sql: "SELECT id || ' (' || kind || ')', (EXTRACT(epoch FROM now() - last_seen_at) / 60)::bigint FROM components
+              WHERE revoked_at IS NULL AND last_seen_at < now() - interval '5 minutes'
+              ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "worker-load",
+        title: "Tunnels per worker",
+        sub: "Live tunnels right now",
+        class: "bar-a",
+        drill: Drill::Page("/console/workers"),
+        windowed: false,
+        sql: "SELECT worker_id, count(*) FROM tunnels WHERE lease_expires_at > now() GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "db-errors",
+        title: "Database statement errors",
+        sub: "By error code",
+        class: "bar-bad",
+        drill: Drill::Page("/console/audit?kind=db.query.end"),
+        windowed: true,
+        sql: "SELECT error_code, count(*) FROM db_statements WHERE at >= $1 AND error_code IS NOT NULL
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "kube-errors",
+        title: "Kubernetes API errors",
+        sub: "Cluster and HTTP status, 400 and above",
+        class: "bar-bad",
+        drill: Drill::Page("/console/audit/kubernetes"),
+        windowed: true,
+        sql: "SELECT cluster || ' ' || status::text, count(*) FROM kube_requests WHERE at >= $1 AND status >= 400
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "web-errors",
+        title: "Web app server errors",
+        sub: "Resource, responses with status 500 and above",
+        class: "bar-bad",
+        drill: Drill::Resource,
+        windowed: true,
+        sql: "SELECT resource, count(*) FROM web_requests WHERE at >= $1 AND status >= 500
+              GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+];
+
+/// The ranked lists the page asked for (the rest are not queried). `from` is the
+/// start of the period, carried into the links so they show the same window.
+async fn rankings(
+    db: &Db,
+    since: OffsetDateTime,
+    from: &str,
+    selection: &Selection,
+) -> Result<Vec<RankPanel>, sqlx::Error> {
+    let mut out = Vec::new();
+    for spec in RANKINGS.iter().filter(|s| selection.has(s.id)) {
+        let query = sqlx::query(spec.sql);
+        let rows = if spec.windowed {
+            query.bind(since)
+        } else {
+            query
+        }
+        .fetch_all(db)
+        .await?
+        .iter()
+        .map(|r| Ok((r.try_get::<String, _>(0)?, r.try_get::<i64, _>(1)?)))
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        let (drill, windowed) = (spec.drill, spec.windowed);
+        let window = if windowed { from } else { "" };
+        out.push(RankPanel {
+            id: spec.id,
+            title: spec.title,
+            sub: spec.sub,
+            rows: rank(rows, |label| match drill {
+                Drill::None => None,
+                Drill::Resource => Some(format!("/console/resources/{}", path_segment(label))),
+                Drill::User => Some(format!("/console/users/{}", path_segment(label))),
+                Drill::Audit { kind: "", by } => {
+                    Some(href("/console/audit", &[(by, label), ("from", window)]))
+                }
+                Drill::Audit { kind, by } => Some(href(
+                    "/console/audit",
+                    &[("kind", kind), (by, label), ("from", window)],
+                )),
+                Drill::Sessions(key) => {
+                    Some(href("/console/sessions", &[(key, label), ("from", window)]))
+                }
+                Drill::Page(path) => Some(path.to_owned()),
             }),
-            class: "bar-a",
-        },
-        RankPanel {
-            title: "Most active people",
-            sub: "Sessions",
-            rows: rank(top_users, |name| {
-                Some(format!("/console/users/{}", path_segment(name)))
-            }),
-            class: "bar-b",
-        },
-        RankPanel {
-            title: "Bot sessions by repository",
-            sub: "CI jobs, by the repository or project that ran them",
-            rows: rank(bot_repos, |_| None),
-            class: "bar-bot",
-        },
-        RankPanel {
-            title: "Session length",
-            sub: "Finished sessions",
-            rows: rank(lengths, |_| None),
-            class: "bar-c",
-        },
-        RankPanel {
-            title: "Why access was denied",
-            sub: "Denied attempts",
-            rows: rank(denials, |_| None),
-            class: "bar-bad",
-        },
-        RankPanel {
-            title: "Access requests",
-            sub: "By outcome",
-            rows: rank(requests, |_| None),
-            class: "bar-a",
-        },
-        RankPanel {
-            title: "Time to approve",
-            sub: "Approved requests, from asking to the decision",
-            rows: rank(time_to_approve, |_| None),
-            class: "bar-c",
-        },
-        RankPanel {
-            title: "Grants by role",
-            sub: "Access given by request",
-            rows: rank(grants_by_role, |_| None),
-            class: "bar-b",
-        },
-        RankPanel {
-            title: "Access review items",
-            sub: "Where the reviews stand",
-            rows: rank(review_items, |_| None),
-            class: "bar-d",
-        },
-        RankPanel {
-            title: "Discovered resources",
-            sub: "By state, now",
-            rows: rank(discovered, |_| None),
-            class: "bar-bot",
-        },
-        RankPanel {
-            title: "Admin actions",
-            sub: "Locks, kills, revokes, tokens, policy",
-            rows: rank(actions, |_| None),
-            class: "bar-d",
-        },
-    ];
-    Ok(ranked)
+            class: spec.class,
+        });
+    }
+    Ok(out)
 }
 
 async fn build(
     state: &AppState,
     range: Range,
+    selection: &Selection,
 ) -> Result<(Vec<Tile>, Vec<Panel>, Vec<RankPanel>), sqlx::Error> {
     let db = &state.db;
     let (starts, labels) = buckets(range);
     let since = starts.first().copied().unwrap_or_else(utc_now).assume_utc();
     let unit = range.unit();
+    // The period as the audit trail and sessions filters read it, for the links.
+    let from_text = starts.first().map(|s| when_text(*s)).unwrap_or_default();
+    let bucket_links = |page: &str, pairs: &[(&str, &str)]| -> Vec<String> {
+        starts
+            .iter()
+            .map(|start| {
+                let (from, to) = (when_text(*start), when_text(*start + range.step()));
+                let mut all = pairs.to_vec();
+                all.extend([("from", from.as_str()), ("to", to.as_str())]);
+                href(page, &all)
+            })
+            .collect()
+    };
+    let session_links = bucket_links("/console/sessions", &[("actor", "user")]);
+    let bot_links = bucket_links("/console/sessions", &[("actor", "bot")]);
+    let login_links = bucket_links("/console/audit", &[("kind", "auth.login")]);
+    let denied_links = bucket_links("/console/audit", &[("kind", "auth.denied")]);
 
     let TimeSeries {
         sessions,
@@ -612,44 +1032,60 @@ async fn build(
     let total_denied: i64 = denied.iter().sum();
     let tiles = vec![
         Tile {
+            href: Some(href("/console/sessions", &[("from", &from_text)])),
             value: total_sessions.to_string(),
             label: "Sessions",
             icon: "terminal",
             tone: "c-green",
         },
         Tile {
+            href: Some("/console/users".to_owned()),
             value: people.to_string(),
             label: "People",
             icon: "users",
             tone: "c-blue",
         },
         Tile {
+            href: Some(href(
+                "/console/sessions",
+                &[("actor", "bot"), ("from", &from_text)],
+            )),
             value: total_bot_sessions.to_string(),
             label: "Bot sessions",
             icon: "bot",
             tone: "c-violet",
         },
         Tile {
+            href: Some(href(
+                "/console/audit",
+                &[("kind", "auth.login"), ("from", &from_text)],
+            )),
             value: logins.iter().sum::<i64>().to_string(),
             label: "Sign-ins",
             icon: "key-round",
             tone: "c-teal",
         },
         Tile {
+            href: Some(href(
+                "/console/audit",
+                &[("kind", "auth.denied"), ("from", &from_text)],
+            )),
             value: total_denied.to_string(),
             label: "Denied",
             icon: "ban",
             tone: if total_denied > 0 { "bad" } else { "c-amber" },
         },
         Tile {
+            href: None,
             value: average.map_or_else(|| "—".into(), duration_text),
-            label: "Average session",
+            label: "Avg session",
             icon: "clock",
             tone: "c-amber",
         },
     ];
     let panels = vec![
         Panel {
+            id: "sessions",
             title: "Sessions",
             sub: "Started per period",
             chart: bar_chart(
@@ -659,17 +1095,20 @@ async fn build(
                         name: "people's sessions",
                         class: "bar-a",
                         values: sessions,
+                        hrefs: session_links,
                     },
                     Series {
                         name: "bot sessions",
                         class: "bar-bot",
                         values: bot_sessions,
+                        hrefs: bot_links,
                     },
                 ],
             ),
             legend: vec![("bar-a", "People"), ("bar-bot", "Bots")],
         },
         Panel {
+            id: "signins",
             title: "Sign-ins and denials",
             sub: "Successful logins next to refused attempts",
             chart: bar_chart(
@@ -679,24 +1118,59 @@ async fn build(
                         name: "sign-ins",
                         class: "bar-a",
                         values: logins,
+                        hrefs: login_links,
                     },
                     Series {
                         name: "denied",
                         class: "bar-bad",
                         values: denied,
+                        hrefs: denied_links,
                     },
                 ],
             ),
             legend: vec![("bar-a", "Sign-ins"), ("bar-bad", "Denied")],
         },
     ];
-    let ranked = rankings(db, since).await?;
+    let ranked = rankings(db, since, &from_text, selection).await?;
     Ok((tiles, panels, ranked))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_defaults_to_the_overview() {
+        let s = Selection::parse(None);
+        assert_eq!((s.view, s.custom), ("overview", false));
+        assert!(s.has("sessions") && !s.has("traffic"));
+    }
+
+    #[test]
+    fn selection_by_view_and_by_panel() {
+        assert_eq!(
+            Selection::parse(Some("view=all&range=7d")).ids.len(),
+            CATALOG.len()
+        );
+        assert_eq!(Selection::parse(Some("view=nope")).view, "overview");
+        let s = Selection::parse(Some("range=24h&p=traffic&p=bogus&p=kinds"));
+        assert!(s.custom);
+        assert_eq!(s.ids, vec!["traffic", "kinds"]);
+    }
+
+    #[test]
+    fn the_selection_survives_a_range_change() {
+        assert_eq!(Selection::parse(Some("view=sre")).query(), "&view=sre");
+        let custom = Selection::parse(Some("p=kinds&p=traffic"));
+        assert_eq!(Selection::parse(Some(&custom.query()[1..])).ids, custom.ids);
+    }
+
+    #[test]
+    fn every_view_names_real_panels() {
+        for (_, _, ids) in VIEWS {
+            assert!(ids.iter().all(|i| CATALOG.iter().any(|c| c.0 == *i)));
+        }
+    }
 
     #[test]
     fn nice_ceilings() {
@@ -720,6 +1194,7 @@ mod tests {
                 name: "sessions",
                 class: "bar-a",
                 values,
+                hrefs: Vec::new(),
             }],
         );
         assert!(!c.empty);
@@ -746,6 +1221,7 @@ mod tests {
                 name: "x",
                 class: "bar-a",
                 values: vec![0],
+                hrefs: Vec::new(),
             }],
         );
         assert!(c.empty);

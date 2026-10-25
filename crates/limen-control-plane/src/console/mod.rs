@@ -20,6 +20,7 @@ mod auth;
 mod dashboards;
 pub mod oidc_flow;
 mod pages;
+mod query;
 pub mod store;
 mod views;
 pub(crate) mod web_auth;
