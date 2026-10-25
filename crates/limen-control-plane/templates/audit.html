@@ -12,7 +12,7 @@
 {% include "filter_presets.html" %}
 <form method="get" action="/console/audit" class="filters" data-autosubmit>
   <label class="grow"><span>Search the details</span>
-    <input type="search" class="search" name="q" value="{{ filter.text }}" placeholder="reason, resource, account…  (press / to focus)" maxlength="200" data-focus-search>
+    <input type="search" class="search" name="q" value="{{ filter.text }}" placeholder="Search reason, resource, account…" maxlength="200" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
   </label>
   <label><span>Kind</span>
     <select name="kind"><option value="">All events</option><option value="auth.*"{% if filter.kind == "auth.*" %} selected{% endif %}>auth.* (all sign-ins and denials)</option>{% for k in kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>

@@ -1,1 +1,1 @@
-<nav class="tabs presets" aria-label="Time range">{% for p in presets %}<a href="{{ p.href }}"{% if p.active %} aria-current="true"{% endif %}>{{ p.label }}</a>{% endfor %}</nav>
+<div class="range-row"><span class="tb-label">Period</span><nav class="tabs presets" aria-label="Time range">{% for p in presets %}<a href="{{ p.href }}"{% if p.active %} aria-current="true"{% endif %}>{{ p.label }}</a>{% endfor %}</nav></div>

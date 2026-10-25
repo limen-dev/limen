@@ -392,3 +392,33 @@ input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3);
 
 /* The panel chooser uses the same look. */
 .chooser button { height: 34px; padding-top: 0; padding-bottom: 0; }
+
+/* Review fixes: labelled period row, a "/" hint in the search box, tidier tiles and charts. */
+.range-row { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.range-row .tabs { margin-bottom: 0; }
+.range-row .tb-label { color: var(--text-3); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+.filters .grow { position: relative; }
+.kbd-hint { position: absolute; right: 10px; bottom: 8px; padding: 0 6px; height: 20px; line-height: 18px; border: 1px solid var(--border-strong); border-radius: 5px; font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--sunken); pointer-events: none; }
+.filters .grow input:focus ~ .kbd-hint { display: none; }
+.stat b { white-space: nowrap; }
+.chart { max-height: 280px; }
+
+/* Date picker: themed calendar (the native one cannot be styled). */
+.dp { position: relative; display: block; }
+.filters .dp input { width: 170px; padding-right: 36px; }
+.dp-btn { position: absolute; right: 4px; top: 4px; height: 28px; width: 28px; padding: 0; justify-content: center; background: none; border: 0; color: var(--text-3); border-radius: 6px; }
+.dp-btn:hover { background: var(--sunken); color: var(--text); border: 0; }
+.dp-btn .i { width: 16px; height: 16px; }
+.dp-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 272px; padding: 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .22); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+.dp-nav { width: 28px; height: 28px; padding: 0; justify-content: center; background: none; border: 1px solid transparent; color: var(--text-2); font-size: 18px; line-height: 1; border-radius: 7px; }
+.dp-nav:hover { background: var(--sunken); border-color: var(--border); }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.dp-dow { font-size: 11px; color: var(--text-3); padding: 4px 0; font-weight: 600; }
+.dp-day { height: 32px; padding: 0; justify-content: center; background: none; border: 1px solid transparent; color: var(--text); font-weight: 450; border-radius: 8px; font-size: 13px; }
+.dp-day:hover { background: var(--sunken); border-color: var(--border); }
+.dp-day.today { border-color: var(--accent); }
+.dp-day.sel, .dp-day.sel:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.dp-foot { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.dp-foot .link { color: var(--accent-text); font-size: 13px; padding: 2px 4px; }
+.dp-foot .link:hover { background: none; text-decoration: underline; }
