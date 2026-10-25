@@ -1,6 +1,7 @@
 //! Limen control plane: API, identity, policy, CA, worker registry, and
 //! audit emission. Stateless: all state is in PostgreSQL (ADR-0010).
 
+pub mod access;
 pub mod adopt;
 pub mod bots;
 pub mod ca_store;
@@ -106,7 +107,13 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         config.unauthenticated_rate_per_minute,
         config.unauthenticated_burst,
     ));
+    let notifier = access::notify::Notifier::start(
+        config
+            .notify_config()
+            .map_err(|e| anyhow::anyhow!("notifier configuration: {e}"))?,
+    )?;
     Ok(AppState {
+        notifier,
         config,
         pipeline,
         console,
@@ -211,6 +218,7 @@ pub async fn run(
     state.pipeline.start_sinks(&state.db);
     tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
+    tokio::spawn(jobs::access_expiry(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),

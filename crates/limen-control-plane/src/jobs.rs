@@ -37,6 +37,20 @@ pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
     }
 }
 
+/// Lapse access requests nobody answered and note grants that ended.
+pub async fn access_expiry(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::access::expire(&state).await {
+            tracing::warn!(error = %e, "expiring access requests failed");
+        }
+    }
+}
+
 /// Whether a replica that last managed a heartbeat `since_ok` ago must stop
 /// shipping to S3: its row goes stale 15 seconds after the last success, and
 /// then another process may take the id over and write the same chain.

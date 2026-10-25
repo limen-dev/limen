@@ -12,6 +12,8 @@ use limen_core::secret::Secret;
 use crate::replicas::SpoolMode;
 
 #[derive(Debug, Clone, Args)]
+// A command line: its switches are the bools.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     /// Stable identifier of this replica. Appears in audit events and its
     /// certificate, and is the audit manifest writer. Defaults to the
@@ -291,6 +293,38 @@ pub struct Config {
     #[arg(long, env = "LIMEN_UNAUTHENTICATED_BURST", default_value_t = 10,
           value_parser = clap::value_parser!(u32).range(1..=100_000))]
     pub unauthenticated_burst: u32,
+
+    /// Tell this URL when an access request needs approval, is decided, or a
+    /// break-glass grant is made (ADR-0025): a JSON POST signed with
+    /// `--notify-webhook-secret`. It carries a request id and a console
+    /// link, never the approval: approving happens only in Limen. `https`
+    /// (or `http` to localhost, for development).
+    #[arg(long, env = "LIMEN_NOTIFY_WEBHOOK_URL", value_parser = parse_secret)]
+    pub notify_webhook_url: Option<Secret<String>>,
+
+    /// Key for the `X-Limen-Signature` of the webhook:
+    /// `HMAC-SHA256(secret, timestamp "." body)`.
+    #[arg(long, env = "LIMEN_NOTIFY_WEBHOOK_SECRET", value_parser = parse_secret)]
+    pub notify_webhook_secret: Option<Secret<String>>,
+
+    /// A Slack incoming-webhook URL for the same notices. The URL is the
+    /// credential.
+    #[arg(long, env = "LIMEN_NOTIFY_SLACK_URL", value_parser = parse_secret)]
+    pub notify_slack_url: Option<Secret<String>>,
+
+    /// Also send break-glass grants here (a Slack incoming-webhook URL, for
+    /// a channel people actually watch).
+    #[arg(long, env = "LIMEN_BREAK_GLASS_SLACK_URL", value_parser = parse_secret)]
+    pub break_glass_slack_url: Option<Secret<String>>,
+
+    /// Also send break-glass grants to this webhook (signed like the other).
+    #[arg(long, env = "LIMEN_BREAK_GLASS_WEBHOOK_URL", value_parser = parse_secret)]
+    pub break_glass_webhook_url: Option<Secret<String>>,
+
+    /// Put the requester, role, resource, and reason in notices. Off by
+    /// default so resource names don't leave Limen.
+    #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]
+    pub notify_include_details: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -397,6 +431,45 @@ fn pick_hostname(env: Option<String>, file: impl FnOnce() -> Option<String>) -> 
 }
 
 impl Config {
+    /// The notifiers these flags configure. Refuses a URL that is not
+    /// `https` (or loopback `http`).
+    pub fn notify_config(&self) -> Result<crate::access::notify::NotifyConfig, String> {
+        use crate::access::notify::{Target, validate_url};
+        let check = |name: &str, url: &Secret<String>| {
+            validate_url(url.expose()).map_err(|e| format!("{name}: {e}"))
+        };
+        let mut cfg = crate::access::notify::NotifyConfig {
+            include_details: self.notify_include_details,
+            ..Default::default()
+        };
+        if let Some(url) = &self.notify_webhook_url {
+            check("--notify-webhook-url", url)?;
+            cfg.targets.push(Target::Webhook {
+                url: url.clone(),
+                secret: self.notify_webhook_secret.clone(),
+            });
+        } else if self.notify_webhook_secret.is_some() {
+            return Err("--notify-webhook-secret needs --notify-webhook-url".into());
+        }
+        if let Some(url) = &self.notify_slack_url {
+            check("--notify-slack-url", url)?;
+            cfg.targets.push(Target::Slack { url: url.clone() });
+        }
+        if let Some(url) = &self.break_glass_slack_url {
+            check("--break-glass-slack-url", url)?;
+            cfg.break_glass_targets
+                .push(Target::Slack { url: url.clone() });
+        }
+        if let Some(url) = &self.break_glass_webhook_url {
+            check("--break-glass-webhook-url", url)?;
+            cfg.break_glass_targets.push(Target::Webhook {
+                url: url.clone(),
+                secret: self.notify_webhook_secret.clone(),
+            });
+        }
+        Ok(cfg)
+    }
+
     /// Where peers reach this replica's ingest service.
     #[must_use]
     pub fn ingest_url(&self) -> String {

@@ -111,7 +111,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
     };
     // `slot` counts this request in the worker's load until the response (or
     // the stream it upgrades to) is over.
-    let (session_id, worker, inbound, outbound, slot) = opened;
+    let (session_id, worker, inbound, outbound, slot, request_ids) = opened;
     let worker_id = worker.id;
 
     let io = TokioIo::new(bridge(inbound, outbound));
@@ -178,7 +178,8 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
             };
             let (mut client, mut worker_side) = (TokioIo::new(client), TokioIo::new(worker_side));
             let sid = session_id.to_string();
-            let revoked = watch_revocation(&proxy, &username, &login_id, &sid, &worker);
+            let revoked =
+                watch_revocation(&proxy, &username, &login_id, &sid, &worker, &request_ids);
             tokio::select! {
                 _ = tokio::io::copy_bidirectional(&mut client, &mut worker_side) => {}
                 why = revoked => {
@@ -289,7 +290,17 @@ async fn open(
     user: &UserIdentity,
     user_cert_der: Vec<u8>,
     cluster: &str,
-) -> Result<(uuid::Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
+) -> Result<
+    (
+        uuid::Uuid,
+        SessionWorker,
+        Inbound,
+        Outbound,
+        Slot,
+        Vec<String>,
+    ),
+    Denial,
+> {
     let now = OffsetDateTime::now_utc();
     let snapshot = proxy
         .policy
@@ -301,11 +312,14 @@ async fn open(
     {
         return Err(sessions::denied(why));
     }
-    let groups = snapshot.policy.kube_groups(&user.roles, cluster);
+    // Roles from approved access requests count (ADR-0025).
+    let effective = snapshot.roles_for(&user.username, &user.roles, cluster, now);
+    let groups = snapshot.policy.kube_groups(&effective.roles, cluster);
     if groups.is_empty() {
         return Err(sessions::denied(format!("access denied to {cluster}")));
     }
-    sessions::open_session(
+    let request_ids = effective.request_ids.clone();
+    let opened = sessions::open_session(
         proxy,
         &snapshot.policy,
         user,
@@ -317,10 +331,21 @@ async fn open(
             database: "",
             groups,
             session_id: None,
+            roles: &effective.roles,
+            request_ids: effective.request_ids,
+            deadline_unix: effective.earliest_expiry_unix,
         },
         now,
     )
-    .await
+    .await?;
+    Ok((
+        opened.0,
+        opened.1,
+        opened.2,
+        opened.3,
+        opened.4,
+        request_ids,
+    ))
 }
 
 async fn refuse(
@@ -438,6 +463,7 @@ async fn watch_revocation(
     login_id: &str,
     session_id: &str,
     worker_id: &str,
+    request_ids: &[String],
 ) -> &'static str {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
@@ -448,6 +474,13 @@ async fn watch_revocation(
             }
             if snapshot.restrictions.is_revoked(worker_id) {
                 return "worker revoked";
+            }
+            if !request_ids.is_empty()
+                && snapshot
+                    .restrictions
+                    .grant_ended(request_ids, OffsetDateTime::now_utc().unix_timestamp())
+            {
+                return "access grant ended";
             }
         }
     }

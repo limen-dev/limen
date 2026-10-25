@@ -209,7 +209,7 @@ impl Policy {
             } else {
                 out.misses.push(RuleNote {
                     rule: i,
-                    text: miss_reason(rule, resource, principal),
+                    text: miss_reason(rule, resource, Some(principal)),
                 });
             }
         }
@@ -217,8 +217,83 @@ impl Policy {
     }
 }
 
+impl Policy {
+    /// An admin's view of a resource when no principal is named: for each
+    /// role, which rules reach it, what they offer, and why the others don't.
+    #[must_use]
+    pub fn explain_resource(
+        &self,
+        held: &[String],
+        eligible: &[String],
+        resource: &str,
+    ) -> Vec<String> {
+        let Some(res) = self.resources.get(resource) else {
+            return vec!["The resource does not exist.".to_owned()];
+        };
+        let kind = resource_kind(res);
+        let labels: Vec<String> = res
+            .metadata
+            .labels
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        let mut lines = vec![format!(
+            "{resource} is a {} resource ({}).",
+            kind.as_str(),
+            if labels.is_empty() {
+                "no labels".to_owned()
+            } else {
+                labels.join(", ")
+            }
+        )];
+        let reachable = self
+            .accessible(held)
+            .into_iter()
+            .find(|r| r.name == resource);
+        lines.push(match &reachable {
+            Some(r) => format!("Reachable now as: {}.", r.principals.join(", ")),
+            None => "Not reachable with the roles held.".to_owned(),
+        });
+        let mut roles: Vec<(&str, &str)> = held.iter().map(|r| (r.as_str(), "held")).collect();
+        roles.extend(
+            eligible
+                .iter()
+                .filter(|r| !held.contains(r))
+                .map(|r| (r.as_str(), "requestable")),
+        );
+        for (name, how) in roles {
+            let Some(role) = self.roles.get(name) else {
+                lines.push(format!("  role {name} ({how}): not in the policy"));
+                continue;
+            };
+            for (i, rule) in role.spec.deny.iter().enumerate() {
+                if selector_matches(&rule.resources, res) {
+                    let what = if rule_has_no_principals(rule) {
+                        "denies the resource entirely".to_owned()
+                    } else {
+                        format!("denies {}", rule_principals(rule, kind).join(", "))
+                    };
+                    lines.push(format!("  role {name} ({how}): deny rule {} {what}", i + 1));
+                }
+            }
+            for (i, rule) in role.spec.allow.iter().enumerate() {
+                let text = if selector_matches(&rule.resources, res) {
+                    format!("allows {}", rule_principals(rule, kind).join(", "))
+                } else {
+                    miss_reason(rule, res, None)
+                };
+                lines.push(format!(
+                    "  role {name} ({how}): allow rule {} {text}",
+                    i + 1
+                ));
+            }
+        }
+        lines
+    }
+}
+
 /// Why an allow rule didn't apply, first reason only.
-fn miss_reason(rule: &Rule, resource: &ResourceDoc, principal: &Principal) -> String {
+fn miss_reason(rule: &Rule, resource: &ResourceDoc, principal: Option<&Principal>) -> String {
     let kind = resource_kind(resource);
     let sel = &rule.resources;
     if !sel.kind.contains(&kind) {
@@ -246,14 +321,14 @@ fn miss_reason(rule: &Rule, resource: &ResourceDoc, principal: &Principal) -> St
         }
     }
     let offered = rule_principals(rule, kind);
-    if offered.is_empty() {
-        format!("grants no {} access", kind.as_str())
-    } else {
-        format!(
+    match (offered.is_empty(), principal) {
+        (true, _) => format!("grants no {} access", kind.as_str()),
+        (false, Some(p)) => format!(
             "grants {}, not {}",
             offered.join(", "),
-            describe_principal(principal)
-        )
+            describe_principal(p)
+        ),
+        (false, None) => format!("grants {}", offered.join(", ")),
     }
 }
 

@@ -1289,6 +1289,12 @@ fn summarize(doc: &Document) -> String {
             .map(|k| k.as_str())
             .collect::<Vec<_>>()
             .join(", "),
+        Document::Discovery(d) => format!(
+            "{} matchers in {}",
+            d.spec.matchers.len(),
+            d.spec.regions.join(", ")
+        ),
+        Document::PolicyTest(t) => format!("{} cases", t.spec.cases.len()),
     }
 }
 
@@ -1299,6 +1305,8 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
         ("Role mappings", "role_mapping"),
         ("Resources", "resource"),
         ("Bots", "bot"),
+        ("Discovery", "discovery"),
+        ("Policy tests", "policy_test"),
     ]
     .into_iter()
     .map(|(title, kind)| PolicyGroup {

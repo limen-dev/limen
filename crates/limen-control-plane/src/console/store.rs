@@ -351,13 +351,32 @@ fn text<'a>(data: &'a serde_json::Value, key: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
+/// The access requests whose grants allowed a session (`data.request_ids`).
+/// Only well-formed ids are kept: the column is matched against grant ids.
+fn request_ids(data: &serde_json::Value) -> Vec<String> {
+    data.get("request_ids")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|s| Uuid::parse_str(s).is_ok())
+                .take(16)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn number(data: &serde_json::Value, key: &str) -> Option<i64> {
     data.get(key).and_then(serde_json::Value::as_i64)
 }
 
 /// Data fields that may appear in the console's audit trail, in display
 /// order. Everything else (statements, claims, groups) stays in the sinks.
-const SUMMARY_KEYS: [&str; 23] = [
+const SUMMARY_KEYS: [&str; 27] = [
+    "request_id",
+    "role",
+    "what",
     "action",
     "target_user",
     "component_id",
@@ -376,6 +395,7 @@ const SUMMARY_KEYS: [&str; 23] = [
     "worker_id",
     "worker_name",
     "bot",
+    "break_glass",
     "method",
     // kube.request
     "verb",
@@ -591,13 +611,13 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group, request_ids)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                      ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
                        resource = EXCLUDED.resource, login = EXCLUDED.login, worker_id = EXCLUDED.worker_id,
                        proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at,
                        actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci,
-                       conn_group = EXCLUDED.conn_group",
+                       conn_group = EXCLUDED.conn_group, request_ids = EXCLUDED.request_ids",
                 )
                 .bind(session_id)
                 .bind(&e.user)
@@ -615,6 +635,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(text(&e.data, "actor_type").unwrap_or("user"))
                 .bind(e.data.get("ci").filter(|c| c.is_object()))
                 .bind(text(&e.data, "group"))
+                .bind(request_ids(&e.data))
                 .execute(&mut *tx)
                 .await?;
             }

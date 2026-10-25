@@ -211,7 +211,8 @@ pub async fn login_callback(
         )
         .into_iter()
         .collect();
-    if roles.is_empty() {
+    if roles.is_empty() && !crate::access::takes_part(&state, &identity.username, &identity.groups)
+    {
         return denied(
             &state,
             addr.0,
@@ -239,8 +240,23 @@ pub async fn login_callback(
         }
     }
     let loaded = state.policy.current();
+    // Roles from approved access requests count (ADR-0025).
+    let effective = match crate::access::effective_roles_now(
+        &state,
+        &identity.username,
+        &roles,
+        &login.resource,
+    )
+    .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "reading access grants");
+            return unavailable();
+        }
+    };
     let grant = loaded.policy.evaluate(&AccessRequest {
-        roles: &roles,
+        roles: &effective.roles,
         resource: &login.resource,
         principal: Principal::WebAccess,
     });

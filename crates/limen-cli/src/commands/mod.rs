@@ -1,5 +1,6 @@
 //! Command implementations.
 
+pub mod access;
 pub mod admin;
 pub mod bot;
 pub mod conns;
@@ -9,6 +10,7 @@ pub mod kube;
 pub mod login;
 pub mod mongo;
 pub mod mq;
+pub mod policy;
 pub mod redis;
 pub mod search;
 pub mod ssh;
@@ -193,13 +195,16 @@ pub async fn kind_of(proxy: Option<&str>, name: &str) -> anyhow::Result<String> 
 }
 
 async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
+    Ok(fetch_all(proxy).await?.resources)
+}
+
+async fn fetch_all(proxy: Option<&str>) -> anyhow::Result<limen_proto::v1::ListResourcesResponse> {
     let (_, channel) = api::authenticated(proxy)?;
     Ok(ResourcesClient::new(channel)
         .list_resources(ListResourcesRequest {})
         .await
         .map_err(|s| api::status_error(&s))?
-        .into_inner()
-        .resources)
+        .into_inner())
 }
 
 fn sorted_labels(r: &Resource) -> Vec<String> {
@@ -227,17 +232,42 @@ pub async fn ls(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::
 
 async fn ls_once(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow::Result<()> {
     let filtered = !kinds.is_empty() || !f.labels.is_empty() || f.query.is_some();
-    let resources: Vec<_> = fetch_resources(proxy)
-        .await?
+    let all = fetch_all(proxy).await?;
+    let resources: Vec<_> = all
+        .resources
         .into_iter()
         .filter(|r| matches_filters(r, kinds, f))
+        .collect();
+    // What the user could get by asking (ADR-0025): names and kinds only.
+    let requestable: Vec<_> = all
+        .requestable
+        .into_iter()
+        .filter(|r| {
+            (kinds.is_empty() || kinds.contains(&r.kind.as_str()))
+                && f.query
+                    .as_deref()
+                    .is_none_or(|q| r.name.to_lowercase().contains(&q.to_lowercase()))
+        })
         .collect();
     if f.json {
         let items: Vec<_> = resources
             .iter()
-            .map(|r| serde_json::json!({ "name": r.name, "kind": r.kind, "labels": r.labels, "principals": r.principals }))
+            .map(|r| serde_json::json!({ "name": r.name, "kind": r.kind, "labels": r.labels, "principals": r.principals, "grant_expires_at": (r.grant_expires_at_unix > 0).then_some(r.grant_expires_at_unix) }))
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items)?);
+        if requestable.is_empty() {
+            println!("{}", serde_json::to_string_pretty(&items)?);
+        } else {
+            let ask: Vec<_> = requestable
+                .iter()
+                .map(|r| serde_json::json!({ "name": r.name, "kind": r.kind, "roles": r.roles }))
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({ "resources": items, "requestable": ask })
+                )?
+            );
+        }
         return Ok(());
     }
     if f.quiet {
@@ -250,24 +280,37 @@ async fn ls_once(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow:
         if filtered {
             ui::info("No resources match those filters.");
             ui::hint("Run `limen ls` without filters to see everything you can reach.");
-        } else {
+        } else if requestable.is_empty() {
             ui::info("No resources are available to you.");
             ui::hint("Your roles don't grant access to anything yet. Ask an admin.");
+        } else {
+            ui::info("You don't have standing access to anything yet.");
         }
+        print_requestable(&requestable);
         return Ok(());
     }
     let rows: Vec<[String; 4]> = resources
         .iter()
         .map(|r| {
+            let until = if r.grant_expires_at_unix > 0 {
+                let left = time::OffsetDateTime::from_unix_timestamp(r.grant_expires_at_unix)
+                    .map_or(time::Duration::ZERO, |t| {
+                        t - time::OffsetDateTime::now_utc()
+                    });
+                format!("  {}", ui::expiry(left))
+            } else {
+                String::new()
+            };
             [
                 ui::bold(&r.name),
                 ui::kind_label(&r.kind),
-                r.principals.join(", "),
+                format!("{}{until}", r.principals.join(", ")),
                 ui::dim(&sorted_labels(r).join(" ")),
             ]
         })
         .collect();
     ui::print_table(["name", "kind", "access as", "labels"], &rows);
+    print_requestable(&requestable);
     let n = resources.len();
     let hint = if n == 1 {
         format!(
@@ -279,6 +322,26 @@ async fn ls_once(proxy: Option<&str>, f: &ListFilter, kinds: &[&str]) -> anyhow:
     };
     ui::hint(&hint);
     Ok(())
+}
+
+/// "You can ask for" lines after the table.
+fn print_requestable(requestable: &[limen_proto::v1::RequestableResource]) {
+    if requestable.is_empty() {
+        return;
+    }
+    anstream::println!("\n{}", ui::bold("You can ask for"));
+    let rows: Vec<[String; 3]> = requestable
+        .iter()
+        .map(|r| {
+            [
+                ui::bold(&r.name),
+                ui::kind_label(&r.kind),
+                ui::dim(&r.roles.join(", ")),
+            ]
+        })
+        .collect();
+    ui::print_table(["name", "kind", "through"], &rows);
+    ui::hint("Ask with `limen request <name> --for 30m --reason \"...\"`.");
 }
 
 /// `limen show <resource>`: everything the control plane tells this user about one resource.

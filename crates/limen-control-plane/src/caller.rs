@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use base64::Engine as _;
 use limen_ca::verify::{ComponentIdentity, UserIdentity, verify_component, verify_user};
-use limen_core::identity::{ADMIN_ROLE, ComponentKind};
+use limen_core::identity::{ADMIN_ROLE, AUDITOR_ROLE, ComponentKind};
 use limen_proto::relay;
 use limen_tunnel::PeerInfo;
 use rustls_pki_types::CertificateDer;
@@ -64,6 +64,18 @@ impl Caller {
         } else {
             Err(Status::permission_denied(format!(
                 "the {ADMIN_ROLE} role is required"
+            )))
+        }
+    }
+
+    /// An admin or an auditor: someone who may read the record (ADR-0026).
+    pub fn reader(&self) -> Result<&UserIdentity, Status> {
+        let user = self.user()?;
+        if user.has_role(ADMIN_ROLE) || user.has_role(AUDITOR_ROLE) {
+            Ok(user)
+        } else {
+            Err(Status::permission_denied(format!(
+                "the {ADMIN_ROLE} or {AUDITOR_ROLE} role is required"
             )))
         }
     }

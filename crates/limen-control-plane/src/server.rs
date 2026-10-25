@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use limen_ca::ComponentCertRequest;
 use limen_core::identity::ComponentKind;
+use limen_proto::v1::access_server::AccessServer;
 use limen_proto::v1::admin_server::AdminServer;
 use limen_proto::v1::audit_handoff_server::AuditHandoffServer;
 use limen_proto::v1::audit_ingest_server::AuditIngestServer;
@@ -29,6 +30,7 @@ use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tonic::server::NamedService;
 
+use crate::services::access::AccessService;
 use crate::services::admin::AdminService;
 use crate::services::auth::AuthService;
 use crate::services::enrollment::EnrollmentService;
@@ -91,8 +93,9 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 }
 
 /// The gRPC services the API serves (the names clients put in the path).
-fn grpc_services() -> [&'static str; 9] {
+fn grpc_services() -> [&'static str; 10] {
     [
+        AccessServer::<AccessService>::NAME,
         AuthServer::<AuthService>::NAME,
         ResourcesServer::<ResourcesService>::NAME,
         AdminServer::<AdminService>::NAME,
@@ -152,6 +155,10 @@ pub async fn serve_api(
     )
     .add_service(
         AdminServer::new(AdminService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AccessServer::new(AccessService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
     )
     .add_service(
         EnrollmentServer::new(EnrollmentService(state.clone()))

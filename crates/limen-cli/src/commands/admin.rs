@@ -28,6 +28,9 @@ pub enum AdminCommand {
         /// Where the policy came from, recorded in the audit trail (for example a Git SHA).
         #[arg(long)]
         source_ref: Option<String>,
+        /// Refuse to apply unless the policy's own `policy_test` cases pass.
+        #[arg(long)]
+        require_tests: bool,
     },
     /// Show the active policy version.
     Policy,
@@ -57,6 +60,36 @@ pub enum AdminCommand {
         /// Why. Recorded in the audit trail.
         #[arg(long)]
         reason: String,
+    },
+    /// Active access grants, from approved requests and break-glass.
+    Grants {
+        /// Also grants that ended in the last 30 days.
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// End an access grant, and the sessions it allowed.
+    RevokeGrant {
+        /// The request id, from `limen admin grants`.
+        request_id: String,
+        /// Why. Recorded in the audit trail.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Approve an access request (the same as `limen approve`).
+    #[command(hide = true)]
+    Approve {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Deny an access request (the same as `limen deny`).
+    #[command(hide = true)]
+    Deny {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
     },
     /// End one live session.
     KillSession {
@@ -93,6 +126,7 @@ pub enum TokenCommand {
     },
 }
 
+#[allow(clippy::too_many_lines)] // one arm per command
 pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<()> {
     let (_, channel) = api::authenticated(proxy)?;
     let mut admin = AdminClient::new(channel);
@@ -101,6 +135,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             paths,
             dry_run,
             source_ref,
+            require_tests,
         } => {
             let sources = collect_sources(&paths)?;
             let resp = admin
@@ -108,6 +143,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     sources,
                     dry_run,
                     source_ref: source_ref.unwrap_or_default(),
+                    require_tests,
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?
@@ -121,6 +157,33 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             }
             for name in &diff.removed {
                 anstream::println!("{}", ui::red(&format!("- {name}")));
+            }
+            if !resp.access_changes.is_empty() {
+                anstream::println!("\n{}", ui::bold("Who gains or loses access"));
+                for line in &resp.access_changes {
+                    match line.strip_prefix("+ ") {
+                        Some(text) => anstream::println!("  {}", ui::yellow(&format!("+ {text}"))),
+                        None => anstream::println!("  {}", ui::green(line)),
+                    }
+                }
+                println!();
+            }
+            for w in &resp.warnings {
+                ui::warn(w);
+            }
+            let failed = resp.test_results.iter().filter(|t| !t.passed).count();
+            if !resp.test_results.is_empty() {
+                if failed == 0 {
+                    ui::success(&format!(
+                        "{} policy test case(s) pass.",
+                        resp.test_results.len()
+                    ));
+                } else {
+                    ui::warn(&format!(
+                        "{failed} of {} policy test case(s) fail; run `limen policy test` for details.",
+                        resp.test_results.len()
+                    ));
+                }
             }
             if diff.added.is_empty() && diff.changed.is_empty() && diff.removed.is_empty() {
                 ui::success(&format!(
@@ -235,6 +298,16 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 ["id", "name", "kind", "labels", "last seen", "tunnels"],
                 &rows,
             );
+        }
+        AdminCommand::Grants { all, json } => super::access::grants(proxy, all, json).await?,
+        AdminCommand::RevokeGrant { request_id, reason } => {
+            super::access::revoke_grant(proxy, &request_id, &reason).await?;
+        }
+        AdminCommand::Approve { id, comment } => {
+            super::access::decide(proxy, &id, true, comment.as_deref()).await?;
+        }
+        AdminCommand::Deny { id, comment } => {
+            super::access::decide(proxy, &id, false, comment.as_deref()).await?;
         }
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }
@@ -368,7 +441,7 @@ fn parse_ttl(s: &str) -> anyhow::Result<Duration> {
 }
 
 /// Read YAML files, recursing into directories. Sorted for stable output.
-fn collect_sources(paths: &[PathBuf]) -> anyhow::Result<Vec<PolicySource>> {
+pub(crate) fn collect_sources(paths: &[PathBuf]) -> anyhow::Result<Vec<PolicySource>> {
     let mut files = Vec::new();
     for path in paths {
         collect(path, &mut files)?;

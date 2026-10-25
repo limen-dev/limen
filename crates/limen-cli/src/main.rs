@@ -142,6 +142,75 @@ enum Command {
         #[arg(long = "type", value_name = "KIND")]
         kind: Option<String>,
     },
+    /// Ask for access to a resource for a limited time, with a reason.
+    Request {
+        resource: String,
+        /// Which requestable role, when more than one reaches the resource.
+        #[arg(long)]
+        role: Option<String>,
+        /// How long you need it, such as 30m or 2h. The role sets the limit.
+        #[arg(long = "for", value_name = "DURATION")]
+        duration: Option<String>,
+        /// Why. Approvers and auditors read it; some roles want a ticket id in it.
+        #[arg(long, short = 'm')]
+        reason: Option<String>,
+        /// Use a break-glass role: granted at once, and reviewed afterwards.
+        #[arg(long)]
+        break_glass: bool,
+        /// Wait for an approver instead of returning.
+        #[arg(long)]
+        wait: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Your access requests. `--approvals` shows the ones waiting for you.
+    Requests {
+        /// Requests you may approve or deny.
+        #[arg(long, conflicts_with = "all")]
+        approvals: bool,
+        /// Every request (limen:admin or limen:auditor).
+        #[arg(long)]
+        all: bool,
+        /// pending, approved, denied, expired, cancelled, or revoked.
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Approve an access request. Never your own.
+    Approve {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Deny an access request.
+    Deny {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Withdraw an access request of yours that is still waiting.
+    Cancel { id: String },
+    /// Say why you can or cannot reach a resource.
+    Explain {
+        resource: String,
+        /// What you would use on it, such as login=ubuntu or db_role=limen_read.
+        #[arg(long = "as", value_name = "KIND=NAME")]
+        principal: Option<String>,
+        /// With db_role or mongo_role: the database.
+        #[arg(long)]
+        database: Option<String>,
+        /// Explain for this user, with the full trace (limen:admin).
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask a policy questions: test it, who can reach what, what changes.
+    Policy {
+        #[command(subcommand)]
+        command: commands::policy::PolicyCommand,
+    },
     /// Open any resource by name: picks `ssh`, `db connect`, `redis connect`, ... from its type.
     Connect {
         resource: String,
@@ -595,6 +664,69 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Web {
             command: WebCommand::Ls(args),
         } => commands::ls(proxy, &args.into(), &["web"]).await,
+        Command::Request {
+            resource,
+            role,
+            duration,
+            reason,
+            break_glass,
+            wait,
+            json,
+        } => {
+            commands::access::request(
+                proxy,
+                commands::access::RequestArgs {
+                    resource: &resource,
+                    role: role.as_deref(),
+                    duration: duration.as_deref(),
+                    reason: reason.as_deref(),
+                    break_glass,
+                    wait,
+                    json,
+                },
+            )
+            .await
+        }
+        Command::Requests {
+            approvals,
+            all,
+            status,
+            json,
+        } => {
+            let scope = if approvals {
+                "approvable"
+            } else if all {
+                "all"
+            } else {
+                "mine"
+            };
+            commands::access::requests(proxy, scope, status.as_deref(), json).await
+        }
+        Command::Approve { id, comment } => {
+            commands::access::decide(proxy, &id, true, comment.as_deref()).await
+        }
+        Command::Deny { id, comment } => {
+            commands::access::decide(proxy, &id, false, comment.as_deref()).await
+        }
+        Command::Cancel { id } => commands::access::cancel(proxy, &id).await,
+        Command::Explain {
+            resource,
+            principal,
+            database,
+            user,
+            json,
+        } => {
+            commands::access::explain(
+                proxy,
+                &resource,
+                principal.as_deref(),
+                database.as_deref(),
+                user.as_deref(),
+                json,
+            )
+            .await
+        }
+        Command::Policy { command } => commands::policy::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,

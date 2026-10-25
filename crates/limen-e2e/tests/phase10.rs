@@ -151,6 +151,7 @@ async fn search_through_limen() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: policy(&target),
             dry_run: false,
             source_ref: String::new(),

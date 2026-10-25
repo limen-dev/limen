@@ -31,10 +31,32 @@ service Resources {
   rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
 }
 
+// Just-in-time access (ADR-0025) and the questions around it (ADR-0028). Any
+// signed-in user may call these; what each call allows depends on the policy
+// and the caller. Approval only ever happens here, inside an authenticated
+// Limen session.
+service Access {
+  // Ask for a requestable role on one resource. A break-glass role is granted
+  // at once.
+  rpc RequestAccess(RequestAccessRequest) returns (AccessRequestInfo);
+  rpc ListAccessRequests(ListAccessRequestsRequest) returns (ListAccessRequestsResponse);
+  // Approve or deny a pending request. Never your own.
+  rpc DecideAccessRequest(DecideAccessRequestRequest) returns (AccessRequestInfo);
+  // The requester withdraws a pending request.
+  rpc CancelAccessRequest(CancelAccessRequestRequest) returns (AccessRequestInfo);
+  // Admin: active grants, and ending one (which ends the sessions it allowed).
+  rpc ListAccessGrants(ListAccessGrantsRequest) returns (ListAccessGrantsResponse);
+  rpc RevokeAccessGrant(RevokeAccessGrantRequest) returns (RevokeAccessGrantResponse);
+  // Why the caller can or cannot reach a resource. Admins may ask about anyone.
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
+}
+
 // Requires the limen:admin role.
 service Admin {
   rpc ApplyPolicy(ApplyPolicyRequest) returns (ApplyPolicyResponse);
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  // The active policy's documents, for `limen policy who-can|what-can|diff`.
+  rpc GetPolicyDocuments(GetPolicyDocumentsRequest) returns (GetPolicyDocumentsResponse);
   rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse);
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
   // Refuse a user's logins and sessions and end their open sessions.
@@ -168,11 +190,24 @@ message Resource {
   // Browser URL for an authorized web app. Empty for other resources or if
   // browser SSO is not configured.
   string web_url = 6;
+  // When the access ends, if the user reaches this resource only through an
+  // approved access request (ADR-0025). 0 for standing access.
+  int64 grant_expires_at_unix = 7;
 }
 
 message ListResourcesResponse {
   repeated Resource resources = 1;
   int64 policy_version = 2;
+  // Resources the user could get by asking (ADR-0025): a hint with no address.
+  repeated RequestableResource requestable = 3;
+}
+
+message RequestableResource {
+  string name = 1;
+  string kind = 2;
+  map<string, string> labels = 3;
+  // The requestable roles that would grant it.
+  repeated string roles = 4;
 }
 
 message PolicySource {
@@ -185,6 +220,9 @@ message ApplyPolicyRequest {
   bool dry_run = 2;
   // Optional reference to where the policy came from, such as a Git commit SHA.
   string source_ref = 3;
+  // Refuse to apply unless the policy's `policy_test` documents all pass
+  // (and there is at least one).
+  bool require_tests = 4;
 }
 
 message PolicyDiff {
@@ -199,6 +237,30 @@ message ApplyPolicyResponse {
   int64 version = 2;
   string digest = 3;
   bool applied = 4;
+  // Who gains or loses access to what, one line each (ADR-0028).
+  repeated string access_changes = 5;
+  // Valid, but probably not what was meant.
+  repeated string warnings = 6;
+  // Results of the `policy_test` documents in the new policy.
+  repeated PolicyTestResult test_results = 7;
+}
+
+message PolicyTestResult {
+  string test = 1;
+  uint32 case_number = 2;
+  string name = 3;
+  bool passed = 4;
+  string expected = 5;
+  string got = 6;
+  string detail = 7;
+}
+
+message GetPolicyDocumentsRequest {}
+
+message GetPolicyDocumentsResponse {
+  int64 version = 1;
+  // JSON array of policy documents, as in a policy snapshot.
+  string documents_json = 2;
 }
 
 message GetPolicyRequest {}
@@ -377,4 +439,120 @@ message RevokeComponentResponse {
 message KillSessionResponse {
   // False if it was already marked for ending.
   bool killed = 1;
+}
+
+message RequestAccessRequest {
+  string resource = 1;
+  // Which requestable role, when more than one reaches the resource.
+  string role = 2;
+  uint32 duration_seconds = 3;
+  string reason = 4;
+  // Select a break-glass role: granted at once, reviewed after.
+  bool break_glass = 5;
+}
+
+message AccessApproval {
+  string approver = 1;
+  // "approve" or "deny".
+  string decision = 2;
+  string comment = 3;
+  int64 decided_at_unix = 4;
+}
+
+message AccessRequestInfo {
+  string id = 1;
+  string requester = 2;
+  string role = 3;
+  string resource = 4;
+  string reason = 5;
+  uint32 duration_seconds = 6;
+  // pending, approved, denied, expired, cancelled, or revoked.
+  string status = 7;
+  bool break_glass = 8;
+  uint32 approvals_required = 9;
+  repeated AccessApproval approvals = 10;
+  int64 created_at_unix = 11;
+  // A pending request lapses at this time.
+  int64 expires_at_unix = 12;
+  // When the grant ends, once approved. 0 before.
+  int64 grant_expires_at_unix = 13;
+  // True when the caller may approve or deny it now.
+  bool can_decide = 14;
+  // What the requester did on this resource in the past 30 days: the context
+  // an approver needs.
+  uint32 requester_sessions_30d = 15;
+  int64 requester_last_session_unix = 16;
+}
+
+message ListAccessRequestsRequest {
+  // "mine" (default), "approvable" (pending, and the caller may decide), or
+  // "all" (admins and auditors).
+  string scope = 1;
+  // Optional status filter.
+  string status = 2;
+  uint32 limit = 3;
+}
+
+message ListAccessRequestsResponse {
+  repeated AccessRequestInfo requests = 1;
+}
+
+message DecideAccessRequestRequest {
+  string id = 1;
+  bool approve = 2;
+  string comment = 3;
+}
+
+message CancelAccessRequestRequest {
+  string id = 1;
+}
+
+message AccessGrantInfo {
+  string request_id = 1;
+  string username = 2;
+  string role = 3;
+  string resource = 4;
+  string reason = 5;
+  bool break_glass = 6;
+  int64 granted_at_unix = 7;
+  int64 expires_at_unix = 8;
+  repeated string approvers = 9;
+}
+
+message ListAccessGrantsRequest {
+  // Include ended grants from the last 30 days.
+  bool include_ended = 1;
+}
+
+message ListAccessGrantsResponse {
+  repeated AccessGrantInfo grants = 1;
+}
+
+message RevokeAccessGrantRequest {
+  string request_id = 1;
+  string reason = 2;
+}
+
+message RevokeAccessGrantResponse {
+  // False if it had already ended.
+  bool revoked = 1;
+  // Sessions ended with it.
+  uint32 sessions_ended = 2;
+}
+
+message ExplainRequest {
+  string resource = 1;
+  // The principal to check, as `kind=value` (login=ubuntu, db_role=limen_read,
+  // ...). Optional: without one, explains the resource as a whole.
+  string principal = 2;
+  // The database for `db_role` and `mongo_role`.
+  string database = 3;
+  // Admin only: explain for this user instead of the caller, with the full trace.
+  string user = 4;
+}
+
+message ExplainResponse {
+  repeated string lines = 1;
+  // Whether the answer is the full trace (admin) or the user-safe one.
+  bool full_trace = 2;
 }

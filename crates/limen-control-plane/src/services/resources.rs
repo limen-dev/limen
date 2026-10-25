@@ -19,11 +19,15 @@ impl Resources for ResourcesService {
         let caller = caller::resolve(&request, &self.0.cas)?;
         let user = caller.user()?;
         let loaded = self.0.policy.current();
-        let resources = loaded
-            .policy
-            .accessible(&user.roles)
+        let reachable = crate::access::reachable(&self.0, &user.username, &user.roles)
+            .await
+            .map_err(|e| crate::state::internal("reading access grants", e))?;
+        let requestable = crate::access::requestable_for(&self.0, &user.username, &user.roles)
+            .await
+            .map_err(|e| crate::state::internal("reading groups", e))?;
+        let resources = reachable
             .into_iter()
-            .map(|r| {
+            .map(|(r, grant_expires_at_unix)| {
                 let default_database = loaded
                     .policy
                     .resource(&r.name)
@@ -56,12 +60,22 @@ impl Resources for ResourcesService {
                     principals: r.principals,
                     default_database,
                     web_url,
+                    grant_expires_at_unix,
                 }
             })
             .collect();
         Ok(Response::new(ListResourcesResponse {
             resources,
             policy_version: loaded.version,
+            requestable: requestable
+                .into_iter()
+                .map(|r| limen_proto::v1::RequestableResource {
+                    name: r.name,
+                    kind: r.kind.as_str().to_owned(),
+                    labels: r.labels.into_iter().collect(),
+                    roles: r.roles,
+                })
+                .collect(),
         }))
     }
 }

@@ -36,6 +36,9 @@ pub struct AppState {
     /// Signs policy snapshots with this replica's own (rotating) key. Set
     /// once the server certificate is issued.
     pub snapshot_signer: Arc<RwLock<Option<Arc<limen_session::envelope::EnvelopeSigner>>>>,
+    /// Tells people an access request needs them (ADR-0025). Does nothing
+    /// unless a notifier is configured.
+    pub notifier: crate::access::notify::Notifier,
 }
 
 impl AppState {

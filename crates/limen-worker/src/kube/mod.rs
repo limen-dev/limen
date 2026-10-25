@@ -147,9 +147,17 @@ pub(crate) fn admit(
     ) {
         return Err(Status::permission_denied(why));
     }
+    let roles = snapshot
+        .roles_for(
+            &verified.user.username,
+            &verified.user.roles,
+            &grant.resource,
+            now,
+        )
+        .roles;
     for group in &grant.groups {
         let decision = snapshot.policy.evaluate(&AccessRequest {
-            roles: &verified.user.roles,
+            roles: &roles,
             resource: &grant.resource,
             principal: Principal::KubeGroup(group.clone()),
         });

@@ -127,6 +127,7 @@ async fn mongodb_through_limen() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: policy(&target, &ca, creds.to_str().expect("utf8")),
             dry_run: false,
             source_ref: String::new(),

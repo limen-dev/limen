@@ -115,6 +115,46 @@ pub enum Principal {
     TcpAccess,
 }
 
+impl Principal {
+    /// Parse `kind=value` (`login=ubuntu`, `db_role=limen_read`, `kube_group=…`,
+    /// `redis_user=…`, `mongo_role=…`, `search_role=…`, `mq_user=…`,
+    /// `kafka_user=…`) or `web` / `tcp`. `database` goes with the database
+    /// kinds.
+    pub fn parse(spec: &str, database: &str) -> Result<Self, String> {
+        let (kind, value) = spec.split_once('=').unwrap_or((spec, ""));
+        let need = |what: &str| {
+            if value.is_empty() {
+                Err(format!("{what} needs a value, as {what}=NAME"))
+            } else {
+                Ok(value.to_owned())
+            }
+        };
+        Ok(match kind {
+            "login" => Principal::SshLogin(need("login")?),
+            "db_role" => Principal::DbRole {
+                role: need("db_role")?,
+                database: database.to_owned(),
+            },
+            "mongo_role" => Principal::MongoRole {
+                role: need("mongo_role")?,
+                database: database.to_owned(),
+            },
+            "kube_group" => Principal::KubeGroup(need("kube_group")?),
+            "redis_user" => Principal::RedisUser(need("redis_user")?),
+            "search_role" => Principal::SearchRole(need("search_role")?),
+            "mq_user" => Principal::MqUser(need("mq_user")?),
+            "kafka_user" => Principal::KafkaUser(need("kafka_user")?),
+            "web" if value.is_empty() => Principal::WebAccess,
+            "tcp" if value.is_empty() => Principal::TcpAccess,
+            other => {
+                return Err(format!(
+                    "unknown principal {other:?}; use login=, db_role=, mongo_role=, kube_group=, redis_user=, search_role=, mq_user=, kafka_user=, web, or tcp"
+                ));
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AccessRequest<'a> {
     pub roles: &'a [String],
@@ -261,7 +301,9 @@ impl Policy {
                     ));
                 }
                 for role in &m.roles {
-                    if role != ADMIN_ROLE && !policy.roles.contains_key(role) {
+                    if !limen_core::identity::is_builtin_role(role)
+                        && !policy.roles.contains_key(role)
+                    {
                         return Err(invalid(
                             "role_mapping",
                             doc_name,
@@ -607,6 +649,27 @@ impl Policy {
             })
             .map(|r| r.metadata.name.clone())
             .collect()
+    }
+
+    /// Whether the person takes part in access requests at all: they may ask
+    /// for a role, or approve requests for one. Such people can sign in even
+    /// when no role is mapped to their groups (ADR-0025).
+    #[must_use]
+    pub fn takes_part_in_requests<'a>(
+        &self,
+        username: &str,
+        groups: impl IntoIterator<Item = &'a str>,
+    ) -> bool {
+        let groups: BTreeSet<&str> = groups.into_iter().collect();
+        self.requestable_roles().any(|role| {
+            role.spec.request.as_ref().is_some_and(|q| {
+                q.who
+                    .iter()
+                    .chain(&q.approvers)
+                    .any(|g| groups.contains(g.as_str()))
+                    || q.approver_users.iter().any(|u| u == username)
+            })
+        })
     }
 
     /// Whether `username`, a member of `groups`, may approve requests for
