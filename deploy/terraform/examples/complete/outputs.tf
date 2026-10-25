@@ -18,3 +18,8 @@ output "ecs_services" {
 output "worker_groups" {
   value = module.ec2.groups
 }
+
+output "discovery_role_arn" {
+  description = "role_arn for the discovery document (docs/guides/discovery.md)."
+  value       = one(module.discovery[*].role_arn)
+}

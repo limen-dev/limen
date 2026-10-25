@@ -62,17 +62,24 @@ variable "proxies" {
 }
 
 variable "workers" {
-  description = "Worker groups on EC2, one per network they reach. Each lives in an existing VPC (the one of the hosts and databases it connects to) and dials the proxy named by \"proxy\" (a key of var.proxies)."
+  description = "Worker groups on EC2, one per network they reach. With discovery = true the group runs resource discovery (modules/discovery creates the describe-only role it assumes). Each lives in an existing VPC (the one of the hosts and databases it connects to) and dials the proxy named by \"proxy\" (a key of var.proxies)."
   type = map(object({
     vpc_id           = string
     subnet_ids       = list(string)
     proxy            = string
     desired_capacity = optional(number, 3)
     max_sessions     = optional(number, 200)
+    discovery        = optional(bool, false)
   }))
 
   validation {
     condition     = alltrue([for w in var.workers : contains(keys(var.proxies), w.proxy)])
     error_message = "Each worker's proxy must be a key of var.proxies."
   }
+}
+
+variable "discovery_sources" {
+  description = "Sources the discovery role may read. Used when any worker group sets discovery = true."
+  type        = set(string)
+  default     = ["ec2", "rds", "redshift", "elasticache", "eks"]
 }

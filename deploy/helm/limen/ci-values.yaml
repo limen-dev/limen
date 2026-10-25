@@ -17,5 +17,10 @@ proxies:
 workerDefaults: { namePrefix: prod }
 workers:
   prod-db: { proxy: public }
-  staging: { proxy: public, replicas: 2, joinSecret: staging-worker-join }
+  staging:
+    proxy: public
+    replicas: 2
+    joinSecret: staging-worker-join
+    discovery: true
+    serviceAccount: { annotations: { eks.amazonaws.com/role-arn: "arn:aws:iam::111122223333:role/limen-worker" } }
   partner: { proxy: partner, maxSessions: 50 }

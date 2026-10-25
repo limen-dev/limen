@@ -86,6 +86,9 @@ workerDefaults:
   proxyAddr: ""                     # overrides proxy: host:port
   proxyName: ""                     # overrides proxy: the proxy's certificate name
   joinSecret: ""                    # default: existingSecrets.workerJoin
+  discovery: false                  # run resource discovery (ADR-0027); see docs/guides/discovery.md
+  # IRSA role the worker uses (the one modules/discovery trusts). Creates the service account.
+  serviceAccount: { annotations: {} }
   resources:
     requests: { cpu: 250m, memory: 256Mi }
   extraEnv: []

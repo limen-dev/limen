@@ -5,6 +5,7 @@
 | `audit` | S3 audit store, KMS, Glue and Athena |
 | `datadog` | Datadog sink monitors |
 | `foundation` | Everything Limen depends on: PostgreSQL (RDS), four KMS signing keys, the audit store, join tokens, secrets, control plane IAM and optional EKS IRSA role. Wraps `terraform-aws-modules` `rds`, `kms`, `secrets-manager`, `iam` |
+| `discovery` | The describe-only IAM role workers assume for resource discovery (ADR-0027): trust limited to the worker roles, optional external id, read actions per enabled source. Wraps `terraform-aws-modules` `iam-role` |
 | `ecs` | Limen services on Fargate, built on `terraform-aws-modules/ecs` (cluster and service submodules) |
 | `ec2` | Limen Auto Scaling groups of Amazon Linux 2023 instances running the container under systemd, built on `terraform-aws-modules/autoscaling` and `security-group` |
 

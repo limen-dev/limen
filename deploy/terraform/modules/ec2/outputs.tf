@@ -5,6 +5,7 @@ output "groups" {
       autoscaling_group_name = asg.autoscaling_group_name
       security_group_id      = module.security_group[key].id
       role_name              = asg.iam_role_name
+      role_arn               = asg.iam_role_arn
     }
   }
 }
