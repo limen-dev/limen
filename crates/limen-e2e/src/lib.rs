@@ -13,12 +13,12 @@ use std::time::Duration;
 use clap::Parser;
 use limen_proto::v1::LoginFlow;
 use limen_testkit::idp::{Claims, MockIdp};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel};
 use limen_tunnel::tls::{Identity, client_config};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256, PublicKeyData};
 use sqlx::Connection;
 use tokio::sync::watch;
-use tonic::transport::Channel;
 
 pub const CLIENT_ID: &str = "limen-cli";
 pub const CONSOLE_CLIENT_ID: &str = "limen-console";

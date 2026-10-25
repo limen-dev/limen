@@ -102,6 +102,12 @@ clap = { version = "4.6", features = ["derive", "env"] }
 clap_complete = "4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+# OTLP trace export over HTTP/protobuf (ADR-0040). Off unless an endpoint is set.
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
+# internal-logs: export failures show up as tracing warnings instead of being silent.
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace", "internal-logs"] }
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
 webbrowser = "1.2.4"
 
 # MD5 password login, for Redshift only (ADR-0033). Not used for anything else.

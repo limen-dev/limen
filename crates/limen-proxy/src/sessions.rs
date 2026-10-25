@@ -11,6 +11,8 @@
 
 use std::time::{Duration, Instant};
 
+use tracing::Instrument as _;
+
 use limen_audit::{Context, EventKind};
 use limen_ca::verify::{UserIdentity, verify_user};
 use limen_core::resource::ResourceKind;
@@ -92,6 +94,17 @@ struct Resolved {
     request_ids: Vec<String>,
 }
 
+/// The proxy's span for one session, from the handshake to the end. Exported
+/// (ADR-0040): ids and kind only, never the user or the resource.
+fn session_span() -> tracing::Span {
+    limen_core::trace_span!(
+        "session",
+        session = tracing::field::Empty,
+        kind = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
+    )
+}
+
 pub(crate) async fn handle(
     proxy: &Proxy,
     mut tls: TlsStream<TcpStream>,
@@ -112,7 +125,11 @@ pub(crate) async fn handle(
         };
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
-    match establish(proxy, &user, user_cert_der, &request, protocol, None).await {
+    let span = session_span();
+    match establish(proxy, &user, user_cert_der, &request, protocol, None)
+        .instrument(span.clone())
+        .await
+    {
         Ok((session_id, worker, inbound, outbound, _slot, resolved)) => {
             // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
@@ -130,9 +147,12 @@ pub(crate) async fn handle(
                 outbound,
                 &resolved,
             )
+            .instrument(span)
             .await;
         }
         Err(denial) => {
+            // Status only: the reason can name users and resources.
+            span.record("otel.status_code", "ERROR");
             if denial.audit {
                 let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
                 if protocol.has_database() {
@@ -504,6 +524,7 @@ pub(crate) async fn open_web_stream(
         principal: host.to_owned(),
         ..Default::default()
     };
+    let span = session_span();
     let (session_id, worker, inbound, outbound, _slot, resolved) = establish(
         proxy,
         user,
@@ -512,6 +533,7 @@ pub(crate) async fn open_web_stream(
         Protocol::Web,
         Some(session_id),
     )
+    .instrument(span.clone())
     .await?;
     let (client, relay_io) = tokio::io::duplex(256 * 1024);
     let proxy = proxy.clone();
@@ -529,6 +551,7 @@ pub(crate) async fn open_web_stream(
             outbound,
             &resolved,
         )
+        .instrument(span)
         .await;
     });
     Ok(client)
@@ -733,6 +756,8 @@ async fn open_on(
     tx.send(TunnelFrame {
         frame: Some(Frame::Open(SessionOpen {
             grant: Some(signed),
+            // `open_on` runs inside the `session` span.
+            traceparent: limen_core::telemetry::current_traceparent().unwrap_or_default(),
         })),
     })
     .await
@@ -800,6 +825,10 @@ async fn relay<IO>(
 {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
+    // Runs inside the `session` span (see `session_span`).
+    let span = tracing::Span::current();
+    span.record("session", tracing::field::display(session_id));
+    span.record("kind", kind);
     // Redis, MongoDB, and the brokers name the upstream identity for what it is, not `login`.
     let principal_field = match kind {
         "redis" => "redis_user",

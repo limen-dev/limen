@@ -6,6 +6,7 @@
 //! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
+use tracing::Instrument as _;
 
 use limen_policy::{AccessRequest, Principal};
 use limen_proto::v1::ssh_certificates_client::SshCertificatesClient;
@@ -60,13 +61,26 @@ pub(crate) async fn open(
             "the first frame must open the session",
         ));
     };
+    // Exported as a trace span (ADR-0040): the session id only. Opened before
+    // admission so the worker's own calls to the control plane (SSH
+    // certificates) are filed under it, in the proxy's trace.
+    let span = limen_core::trace_span!(
+        "session",
+        session = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
+    );
+    limen_core::telemetry::set_parent_from_traceparent(&span, &open.traceparent);
     let signed = open
         .grant
         .ok_or_else(|| Status::invalid_argument("missing grant"))?;
-    let admitted = admit(&worker, &signed).await.map_err(|e| {
-        tracing::warn!(error = %e, "session refused");
-        e
-    })?;
+    let admitted = admit(&worker, &signed)
+        .instrument(span.clone())
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "session refused");
+            span.record("otel.status_code", "ERROR");
+            e
+        })?;
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<TunnelFrame, Status>>(64);
     let _ = tx
@@ -99,6 +113,7 @@ pub(crate) async fn open(
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
     let kube_worker = worker.clone();
+    span.record("session", tracing::field::display(&session_id));
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -277,7 +292,8 @@ pub(crate) async fn open(
                 })),
             }))
             .await;
-    });
+    }
+    .instrument(span));
     Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
 }
 

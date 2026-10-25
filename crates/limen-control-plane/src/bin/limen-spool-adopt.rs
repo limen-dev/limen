@@ -23,7 +23,7 @@ struct Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    args.log.init();
+    let _telemetry = args.log.init("limen-spool-adopt");
     match adopt::run(args.adopt).await {
         Ok(done) => match done.peer {
             Some(peer) => eprintln!("OK: handed {} audit records to {peer}", done.sent),

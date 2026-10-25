@@ -1,4 +1,4 @@
-# Metrics and alerts
+# Metrics, traces and alerts
 
 Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics text at `/metrics` on its admin port (`--admin-listen`, `LIMEN_ADMIN_LISTEN`), next to `/healthz` and `/readyz`. Scrape it with Prometheus or the Datadog Agent's OpenMetrics check.
 
@@ -26,6 +26,10 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_recordings_pending` | gauge | | worker |
 
 Protocol-specific counters (`limen_mongo_*`, `limen_search_*`, `limen_broker_*`, `limen_kube_requests_total`) are described in the guide for each protocol.
+
+## Traces
+
+Set `--otlp-endpoint` (`LIMEN_OTLP_ENDPOINT`) on a component to export traces over OTLP/HTTP to a Datadog Agent or any OpenTelemetry collector. Off by default. A session is one trace across the proxy, the worker and the control plane, and log lines written inside it carry its `trace_id`. The flags, the spans, what is attached and how to try it locally are in the [tracing guide](tracing.md).
 
 ## Alerts
 

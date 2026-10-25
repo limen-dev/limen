@@ -6,6 +6,8 @@ x-limen-image: &limen-build
   args:
     RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
     DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
+    # A checkout that builds next to others sets its own cache (see the Dockerfile).
+    LIMEN_BUILD_CACHE: ${LIMEN_BUILD_CACHE:-limen-target}
 
 services:
   # Stands in for GitHub Actions' token service (ADR-0019, Phase 4 demo).

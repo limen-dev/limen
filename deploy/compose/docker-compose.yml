@@ -23,7 +23,7 @@ x-limen-image: &limen-build
   args:
     RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
     DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
-    # A checkout that builds beside others names its own cargo cache (see the Dockerfile).
+    # A checkout that builds next to others sets its own cache (see the Dockerfile).
     LIMEN_BUILD_CACHE: ${LIMEN_BUILD_CACHE:-limen-target}
 
 x-dev-tokens:
@@ -134,6 +134,8 @@ services:
     image: limen-proxy:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
     depends_on: [control-plane]
+    env_file:
+      - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh: tracing endpoint
     environment:
       RUST_LOG: info
       LIMEN_CONTROL_PLANE_ADDR: control-plane:3080

@@ -41,7 +41,7 @@ impl Fixture {
         Some(Self { h, proxy, admin })
     }
 
-    fn admin_client(&self) -> AdminClient<tonic::transport::Channel> {
+    fn admin_client(&self) -> AdminClient<limen_tunnel::connect::TracedChannel> {
         AdminClient::new(self.h.channel(Some(self.proxy.clone())))
     }
 

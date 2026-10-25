@@ -477,7 +477,7 @@ async fn review_discovered(
 
 /// Locks and session kills (ADR-0017).
 async fn run_locks(
-    admin: &mut AdminClient<tonic::transport::Channel>,
+    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
     command: AdminCommand,
 ) -> anyhow::Result<()> {
     match command {

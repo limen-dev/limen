@@ -91,7 +91,7 @@ const HOP_BY_HOP: [&str; 8] = [
 /// the query string, and no client certificate is forwarded: the console
 /// authenticates with its own session cookie.
 async fn relay_console(
-    channel: tonic::transport::Channel,
+    channel: limen_tunnel::connect::TracedChannel,
     req: Request<Incoming>,
 ) -> Response<tonic::body::Body> {
     let peer = req.extensions().get::<PeerInfo>().cloned();
@@ -254,7 +254,7 @@ fn plain(status: http::StatusCode, text: &'static str) -> Response<tonic::body::
 }
 
 async fn relay(
-    channel: tonic::transport::Channel,
+    channel: limen_tunnel::connect::TracedChannel,
     req: Request<Incoming>,
 ) -> Response<tonic::body::Body> {
     let path = req.uri().path().to_owned();

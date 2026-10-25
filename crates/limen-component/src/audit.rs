@@ -12,8 +12,8 @@ use limen_audit::spool::{Spool, SpoolConfig};
 use limen_audit::{Emitter, FailureMode};
 use limen_proto::v1::IngestRequest;
 use limen_proto::v1::audit_ingest_client::AuditIngestClient;
+use limen_tunnel::connect::TracedChannel as Channel;
 use tokio::sync::watch;
-use tonic::transport::Channel;
 
 pub const TO_CONTROL_PLANE: &str = "control-plane";
 
