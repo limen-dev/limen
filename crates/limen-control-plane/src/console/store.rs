@@ -1832,6 +1832,37 @@ pub async fn kube_filter_options(db: &Db) -> Result<(Vec<String>, Vec<String>), 
     Ok((clusters, verbs))
 }
 
+/// Which of Access and Reviews are worth a place in this person's menu: Access
+/// if they can ask for or approve a role, or have asked; Reviews if an item
+/// is, or was, assigned to them. A failure shows both, so nothing hides.
+pub async fn menu_pages(state: &crate::state::AppState, username: &str) -> (bool, bool) {
+    let groups = crate::access::store::user_groups(&state.db, username)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let takes_part = state
+        .policy
+        .current()
+        .policy
+        .takes_part_in_requests(username, groups.iter().map(String::as_str));
+    let asked: Result<bool, _> =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM access_requests WHERE requester = $1)")
+            .bind(username)
+            .fetch_one(&state.db)
+            .await;
+    let reviewing: Result<bool, _> = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM review_items WHERE lower(reviewer) = lower($1))",
+    )
+    .bind(username)
+    .fetch_one(&state.db)
+    .await;
+    (
+        takes_part || asked.unwrap_or(true),
+        reviewing.unwrap_or(true),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

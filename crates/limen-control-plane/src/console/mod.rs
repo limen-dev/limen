@@ -257,6 +257,7 @@ pub fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 // ---- the signed-in user -------------------------------------------------------
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // independent flags, not a state machine
 pub struct Auth {
     pub username: String,
     pub roles: Vec<String>,
@@ -265,6 +266,9 @@ pub struct Auth {
     pub is_admin: bool,
     /// Holds `limen:auditor`: reads the record, changes nothing (ADR-0026).
     pub is_auditor: bool,
+    /// Show the Access and Reviews pages in the menu: for people with something there.
+    pub sees_access: bool,
+    pub sees_reviews: bool,
     pub expires_at: time::OffsetDateTime,
     pub addr: Option<IpAddr>,
 }
@@ -367,9 +371,18 @@ impl FromRequestParts<AppState> for Auth {
             ));
         }
         let addr = parts.extensions.get::<ClientAddr>().and_then(|a| a.0);
+        let is_admin = session.roles.iter().any(|r| r == ADMIN_ROLE);
+        let is_auditor = session.roles.iter().any(|r| r == AUDITOR_ROLE);
+        let (sees_access, sees_reviews) = if is_admin || is_auditor {
+            (true, true)
+        } else {
+            store::menu_pages(state, &session.username).await
+        };
         Ok(Auth {
-            is_admin: session.roles.iter().any(|r| r == ADMIN_ROLE),
-            is_auditor: session.roles.iter().any(|r| r == AUDITOR_ROLE),
+            is_admin,
+            is_auditor,
+            sees_access,
+            sees_reviews,
             username: session.username,
             roles: session.roles,
             csrf: session.csrf,

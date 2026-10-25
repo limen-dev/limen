@@ -11,6 +11,7 @@ use super::store::{SessionRow, UserRow};
 use super::{Auth, html};
 
 /// Page chrome: who is signed in, and the navigation state.
+#[allow(clippy::struct_excessive_bools)] // independent flags, not a state machine
 pub struct Chrome {
     pub username: String,
     pub initial: String,
@@ -19,6 +20,8 @@ pub struct Chrome {
     pub is_auditor: bool,
     /// Admin or auditor: sees the audit record.
     pub reads_record: bool,
+    pub sees_access: bool,
+    pub sees_reviews: bool,
     pub csrf: String,
     pub active: &'static str,
     pub version: &'static str,
@@ -40,6 +43,8 @@ impl Chrome {
             is_admin: auth.is_admin,
             is_auditor: auth.is_auditor,
             reads_record: auth.reads_record(),
+            sees_access: auth.sees_access,
+            sees_reviews: auth.sees_reviews,
             csrf: auth.csrf.clone(),
             active,
             version: limen_core::VERSION,
