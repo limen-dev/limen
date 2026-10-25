@@ -541,6 +541,7 @@ pub struct SessionsQuery {
     addr: Option<String>,
     end: Option<String>,
     repo: Option<String>,
+    since: Option<String>,
     from: Option<String>,
     to: Option<String>,
     offset: Option<i64>,
@@ -564,14 +565,26 @@ pub async fn sessions(
     if q.actor.as_deref().is_some_and(|a| !a.is_empty()) && actor.is_none() {
         problems.push("Ignored the actor filter: use user or bot.".to_owned());
     }
-    let (from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
+    let (mut from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
     problems.extend(ignored);
+    let since = since_param(q.since.as_ref(), from.is_some());
+    if let Some(key) = &since {
+        from = query::since(key);
+    }
+    let since_text = since.unwrap_or_default();
     let actor_text = actor.clone().unwrap_or_default();
     let when = |t: Option<time::OffsetDateTime>, raw: &Option<String>| {
         t.map(|_| raw.clone().unwrap_or_default().trim().to_owned())
             .unwrap_or_default()
     };
-    let (from_text, to_text) = (when(from, &q.from), when(to, &q.to));
+    let (from_text, to_text) = (
+        if since_text.is_empty() {
+            when(from, &q.from)
+        } else {
+            String::new()
+        },
+        when(to, &q.to),
+    );
     let shown_user = if auth.is_admin {
         user_filter.clone().unwrap_or_default()
     } else {
@@ -592,6 +605,7 @@ pub async fn sessions(
         ("addr", q.addr.as_ref()),
         ("end", q.end.as_ref()),
         ("repo", q.repo.as_ref()),
+        ("since", Some(&since_text)),
         ("from", Some(&from_text)),
         ("to", Some(&to_text)),
     ]);
@@ -649,6 +663,18 @@ pub async fn sessions(
                 to: to_text.clone(),
             },
             chips: chips("/console/sessions", &applied),
+            presets: presets("/console/sessions", &applied),
+            suggest: store::suggestions(
+                &state.db,
+                (!auth.is_admin).then_some(auth.username.as_str()),
+            )
+            .await,
+            more_open: !from_text.is_empty() || !to_text.is_empty(),
+            clear: if active_only {
+                "/console/sessions?filter=active".to_owned()
+            } else {
+                "/console/sessions".to_owned()
+            },
             problems,
             newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
             older: has_more.then(|| link(offset + PAGE_SIZE)),
@@ -1593,6 +1619,7 @@ pub struct AuditQuery {
     actor: Option<String>,
     q: Option<String>,
     session: Option<String>,
+    since: Option<String>,
     from: Option<String>,
     to: Option<String>,
     offset: Option<i64>,
@@ -1603,7 +1630,7 @@ fn present<'a>(fields: &[(&'a str, Option<&String>)]) -> Vec<(&'a str, String)> 
     fields
         .iter()
         .filter_map(|(k, v)| {
-            v.map(|v| v.trim().to_owned())
+            v.map(|v| v.trim().chars().take(200).collect::<String>())
                 .filter(|v| !v.is_empty())
                 .map(|v| (*k, v))
         })
@@ -1625,6 +1652,7 @@ fn filter_name(key: &str) -> &'static str {
         "end" => "Ended",
         "repo" => "Repository",
         "filter" => "Show",
+        "since" => "Period",
         _ => "Filter",
     }
 }
@@ -1640,8 +1668,16 @@ fn chips(base: &str, applied: &[(&str, String)]) -> Vec<views::FilterChip> {
                 .filter(|(k, _)| k != key)
                 .map(|(k, v)| (*k, v.as_str()))
                 .collect();
+            let shown = if *key == "since" {
+                query::PRESETS
+                    .iter()
+                    .find(|p| p.0 == value)
+                    .map_or(value.as_str(), |p| p.1)
+            } else {
+                value.as_str()
+            };
             views::FilterChip {
-                label: format!("{}: {value}", filter_name(key)),
+                label: format!("{}: {shown}", filter_name(key)),
                 remove: query::href(base, &rest),
             }
         })
@@ -1652,6 +1688,37 @@ fn chips(base: &str, applied: &[(&str, String)]) -> Vec<views::FilterChip> {
 fn actor_param(raw: Option<&String>) -> Option<String> {
     raw.map(|a| a.trim().to_ascii_lowercase())
         .filter(|a| a == "user" || a == "bot")
+}
+
+/// A quick range: its key if known (and no explicit `from`), else nothing.
+fn since_param(raw: Option<&String>, explicit_from: bool) -> Option<String> {
+    raw.map(|k| k.trim().to_owned())
+        .filter(|k| !explicit_from && query::since(k).is_some())
+}
+
+/// The quick-range links for a page; `applied` is what's in effect now.
+fn presets(base: &str, applied: &[(&str, String)]) -> Vec<views::Preset> {
+    let current = applied
+        .iter()
+        .find(|(k, _)| *k == "since")
+        .map_or("", |(_, v)| v.as_str());
+    let custom = applied.iter().any(|(k, _)| *k == "from" || *k == "to");
+    query::PRESETS
+        .iter()
+        .map(|(key, label, _)| {
+            let mut pairs: Vec<(&str, &str)> = applied
+                .iter()
+                .filter(|(k, _)| !matches!(*k, "since" | "from" | "to"))
+                .map(|(k, v)| (*k, v.as_str()))
+                .collect();
+            pairs.push(("since", key));
+            views::Preset {
+                label,
+                href: query::href(base, &pairs),
+                active: !custom && current == *key,
+            }
+        })
+        .collect()
 }
 
 pub async fn audit(
@@ -1679,21 +1746,34 @@ pub async fn audit(
             }
             id
         });
-    let (from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
+    let (mut from, to, ignored) = query::parse_range(q.from.as_deref(), q.to.as_deref());
     problems.extend(ignored);
+    let since = since_param(q.since.as_ref(), from.is_some());
+    if let Some(key) = &since {
+        from = query::since(key);
+    }
+    let since_text = since.unwrap_or_default();
     let actor_text = actor.clone().unwrap_or_default();
     let session_text = session.map(|id| id.to_string()).unwrap_or_default();
     let when = |t: Option<time::OffsetDateTime>, raw: &Option<String>| {
         t.map(|_| raw.clone().unwrap_or_default().trim().to_owned())
             .unwrap_or_default()
     };
-    let (from_text, to_text) = (when(from, &q.from), when(to, &q.to));
+    let (from_text, to_text) = (
+        if since_text.is_empty() {
+            when(from, &q.from)
+        } else {
+            String::new()
+        },
+        when(to, &q.to),
+    );
     let applied = present(&[
         ("kind", q.kind.as_ref()),
         ("user", q.user.as_ref()),
         ("actor", Some(&actor_text)),
         ("q", q.q.as_ref()),
         ("session", Some(&session_text)),
+        ("since", Some(&since_text)),
         ("from", Some(&from_text)),
         ("to", Some(&to_text)),
     ]);
@@ -1741,6 +1821,10 @@ pub async fn audit(
                 to: to_text.clone(),
             },
             chips: chips("/console/audit", &applied),
+            presets: presets("/console/audit", &applied),
+            suggest: store::suggestions(&state.db, None).await,
+            more_open: !from_text.is_empty() || !to_text.is_empty(),
+            clear: "/console/audit".to_owned(),
             problems,
             newer: (offset > 0).then(|| link((offset - PAGE_SIZE).max(0))),
             older: has_more.then(|| link(offset + PAGE_SIZE)),

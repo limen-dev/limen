@@ -12,25 +12,33 @@
     <a href="/console/sessions?filter=active"{% if active_only %} aria-current="true"{% endif %}>Active</a>
   </div>
 </div>
-<form method="get" action="/console/sessions" class="filters">
+{% include "filter_presets.html" %}
+<form method="get" action="/console/sessions" class="filters" data-autosubmit>
   {% if active_only %}<input type="hidden" name="filter" value="active">{% endif %}
-  {% if chrome.is_admin %}<label><span>User</span><input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200"></label>{% endif %}
-  <label><span>Resource</span><input type="text" name="resource" value="{{ filter.resource }}" placeholder="any" maxlength="200"></label>
-  <label><span>Kind</span><input type="text" name="kind" value="{{ filter.kind }}" placeholder="ssh, postgres, …" maxlength="60"></label>
+  {% if chrome.is_admin %}<label><span>User</span><input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200" list="dl-users" autocomplete="off" data-focus-search></label>{% endif %}
+  <label><span>Resource</span><input type="text" name="resource" value="{{ filter.resource }}" placeholder="any" maxlength="200" list="dl-resources" autocomplete="off"></label>
+  <label><span>Kind</span><select name="kind"><option value="">Any</option>{% for k in suggest.kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
   {% if chrome.is_admin %}<label><span>Actor</span>
     <select name="actor"><option value="">People and bots</option><option value="user"{% if filter.actor == "user" %} selected{% endif %}>People</option><option value="bot"{% if filter.actor == "bot" %} selected{% endif %}>Bots</option></select>
   </label>{% endif %}
-  <label><span>Ended</span><input type="text" name="end" value="{{ filter.end }}" placeholder="closed, killed, …" maxlength="60"></label>
-  <label><span>From (UTC)</span><input type="datetime-local" name="from" value="{{ filter.from }}"></label>
-  <label><span>To (UTC)</span><input type="datetime-local" name="to" value="{{ filter.to }}"></label>
-  <input type="hidden" name="login" value="{{ filter.login }}"><input type="hidden" name="addr" value="{{ filter.addr }}"><input type="hidden" name="repo" value="{{ filter.repo }}">
+  <label><span>Ended</span><select name="end"><option value="">Any</option>{% for e in suggest.ends %}<option value="{{ e }}"{% if filter.end == e.as_str() %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
   <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
-  {% if !chips.is_empty() %}<a href="/console/sessions{% if active_only %}?filter=active{% endif %}">Clear</a>{% endif %}
+  <details class="more"{% if more_open || !filter.login.is_empty() || !filter.addr.is_empty() || !filter.repo.is_empty() %} open{% endif %}>
+    <summary>More filters</summary>
+    <div class="more-fields">
+      <label><span>Account</span><input type="text" name="login" value="{{ filter.login }}" placeholder="ubuntu, root…" maxlength="100" autocomplete="off"></label>
+      <label><span>Client address</span><input type="text" name="addr" value="{{ filter.addr }}" placeholder="10.0.0.1" maxlength="100" autocomplete="off"></label>
+      <label><span>Bot repository</span><input type="text" name="repo" value="{{ filter.repo }}" placeholder="acme/infra" maxlength="200" autocomplete="off"></label>
+      {% include "filter_range.html" %}
+    </div>
+  </details>
+  <datalist id="dl-users">{% for u in suggest.users %}<option value="{{ u }}">{% endfor %}</datalist>
+  <datalist id="dl-resources">{% for r in suggest.resources %}<option value="{{ r }}">{% endfor %}</datalist>
 </form>
-{% for p in problems %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ p }}</div>{% endfor %}
-{% if !chips.is_empty() %}<div class="chips applied">{% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Remove this filter">{{ c.label }} ×</a>{% endfor %}</div>{% endif %}
+{% include "filter_feedback.html" %}
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% include "sessions_table.html" %}
+{% if sessions.is_empty() && !chips.is_empty() %}<p class="empty-hint">No sessions match these filters. Remove one above, widen the period, or <a href="{{ clear }}">clear all</a>.</p>{% endif %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
   {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}

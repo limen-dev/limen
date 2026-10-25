@@ -9,34 +9,33 @@
   </div>
 </div>
 <nav class="tabs" aria-label="Audit views"><a href="/console/audit" aria-current="true">All events</a><a href="/console/audit/kubernetes">Kubernetes</a></nav>
-<form method="get" action="/console/audit" class="filters">
-  <label><span>Event</span>
-    <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+{% include "filter_presets.html" %}
+<form method="get" action="/console/audit" class="filters" data-autosubmit>
+  <label class="grow"><span>Search the details</span>
+    <input type="search" class="search" name="q" value="{{ filter.text }}" placeholder="reason, resource, account…  (press / to focus)" maxlength="200" data-focus-search>
+  </label>
+  <label><span>Kind</span>
+    <select name="kind"><option value="">All events</option><option value="auth.*"{% if filter.kind == "auth.*" %} selected{% endif %}>auth.* (all sign-ins and denials)</option>{% for k in kinds %}<option value="{{ k }}"{% if filter.kind == k.as_str() %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
   </label>
   <label><span>User</span>
-    <input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200">
+    <input type="text" name="user" value="{{ filter.user }}" placeholder="anyone" maxlength="200" list="dl-users" autocomplete="off">
   </label>
   <label><span>Actor</span>
     <select name="actor"><option value="">People and bots</option><option value="user"{% if filter.actor == "user" %} selected{% endif %}>People</option><option value="bot"{% if filter.actor == "bot" %} selected{% endif %}>Bots</option></select>
   </label>
-  <label><span>Text in details</span>
-    <input type="text" name="q" value="{{ filter.text }}" placeholder="reason, resource, …" maxlength="200">
-  </label>
-  <label><span>Session</span>
-    <input type="text" name="session" value="{{ filter.session }}" placeholder="session id" maxlength="40">
-  </label>
-  <label><span>From (UTC)</span>
-    <input type="datetime-local" name="from" value="{{ filter.from }}">
-  </label>
-  <label><span>To (UTC)</span>
-    <input type="datetime-local" name="to" value="{{ filter.to }}">
-  </label>
-  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Filter</button>
-  {% if !chips.is_empty() %}<a href="/console/audit">Clear</a>{% endif %}
+  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>Search</button>
+  <details class="more"{% if more_open || !filter.session.is_empty() %} open{% endif %}>
+    <summary>More filters</summary>
+    <div class="more-fields">
+      <label><span>Session id</span><input type="text" name="session" value="{{ filter.session }}" placeholder="paste a session id" maxlength="40" autocomplete="off"></label>
+      {% include "filter_range.html" %}
+    </div>
+  </details>
+  <datalist id="dl-users">{% for u in suggest.users %}<option value="{{ u }}">{% endfor %}</datalist>
 </form>
-{% for p in problems %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ p }}</div>{% endfor %}
-{% if !chips.is_empty() %}<div class="chips applied">{% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Remove this filter">{{ c.label }} ×</a>{% endfor %}</div>{% endif %}
+{% include "filter_feedback.html" %}
 {% include "events_table.html" %}
+{% if events.is_empty() && !chips.is_empty() %}<p class="empty-hint">Nothing matches these filters. Remove one above, widen the period, or <a href="{{ clear }}">clear all</a>.</p>{% endif %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
   {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}

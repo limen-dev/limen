@@ -244,30 +244,30 @@ pub struct RankPanel {
 
 // ---- views ---------------------------------------------------------------------
 
-/// The pickable panels, in page order: `(id, title)`.
-const CATALOG: [(&str, &str); 22] = [
-    ("sessions", "Sessions over time"),
-    ("signins", "Sign-ins and denials"),
-    ("busiest-resources", "Busiest resources"),
-    ("active-people", "Most active people"),
-    ("bot-repos", "Bot sessions by repository"),
-    ("session-length", "Session length"),
-    ("denial-reasons", "Why access was denied"),
-    ("admin-actions", "Admin actions"),
-    ("kinds", "Sessions by kind"),
-    ("endings", "How sessions ended"),
-    ("traffic", "Data transferred"),
-    ("denied-people", "Most refused people"),
-    ("off-hours", "Out-of-hours access"),
-    ("long-sessions", "Longest sessions"),
-    ("logins", "Accounts used"),
-    ("sources", "Where sessions came from"),
-    ("unrecorded", "Finished without a recording"),
-    ("quiet-components", "Components gone quiet"),
-    ("worker-load", "Tunnels per worker"),
-    ("db-errors", "Database statement errors"),
-    ("kube-errors", "Kubernetes API errors"),
-    ("web-errors", "Web app server errors"),
+/// The pickable panels, in page order: `(id, title, group)`.
+const CATALOG: [(&str, &str, &str); 22] = [
+    ("sessions", "Sessions over time", "Activity"),
+    ("signins", "Sign-ins and denials", "Security"),
+    ("busiest-resources", "Busiest resources", "Activity"),
+    ("active-people", "Most active people", "Activity"),
+    ("bot-repos", "Bot sessions by repository", "Activity"),
+    ("session-length", "Session length", "Activity"),
+    ("denial-reasons", "Why access was denied", "Security"),
+    ("admin-actions", "Admin actions", "Security"),
+    ("kinds", "Sessions by kind", "Activity"),
+    ("endings", "How sessions ended", "Reliability"),
+    ("traffic", "Data transferred", "Activity"),
+    ("denied-people", "Most refused people", "Security"),
+    ("off-hours", "Out-of-hours access", "Security"),
+    ("long-sessions", "Longest sessions", "Security"),
+    ("logins", "Accounts used", "Security"),
+    ("sources", "Where sessions came from", "Security"),
+    ("unrecorded", "Finished without a recording", "Security"),
+    ("quiet-components", "Components gone quiet", "Reliability"),
+    ("worker-load", "Tunnels per worker", "Reliability"),
+    ("db-errors", "Database statement errors", "Reliability"),
+    ("kube-errors", "Kubernetes API errors", "Reliability"),
+    ("web-errors", "Web app server errors", "Reliability"),
 ];
 
 /// Named selections of panels; `all` is every one.
@@ -346,6 +346,11 @@ pub struct Choice {
     pub on: bool,
 }
 
+pub struct ChoiceGroup {
+    pub title: &'static str,
+    pub choices: Vec<Choice>,
+}
+
 /// What the query string asked for: a named view, or an explicit list of panels
 /// (`p=<id>` once per panel, from the "Choose panels" form).
 struct Selection {
@@ -386,6 +391,15 @@ impl Selection {
             view: key,
             custom: false,
             ids,
+        }
+    }
+
+    /// `&view=<name>`, or `&p=<id>` for each panel of a custom selection.
+    fn query(&self) -> String {
+        if self.custom {
+            format!("&p={}", self.ids.join("&p="))
+        } else {
+            format!("&view={}", self.view)
         }
     }
 
@@ -452,8 +466,10 @@ pub struct DashboardsPage {
     pub range: &'static str,
     pub view: &'static str,
     pub views: Vec<ViewTab>,
-    pub choices: Vec<Choice>,
+    pub groups: Vec<ChoiceGroup>,
     pub custom: bool,
+    /// The selection as query parameters, to keep it when the range changes.
+    pub keep: String,
     pub tiles: Vec<Tile>,
     pub panels: Vec<Panel>,
     pub ranked: Vec<RankPanel>,
@@ -491,15 +507,23 @@ pub async fn dashboards(
                             label: v.1,
                         })
                         .collect(),
-                    choices: CATALOG
-                        .iter()
-                        .map(|c| Choice {
-                            id: c.0,
-                            title: c.1,
-                            on: selection.has(c.0),
+                    groups: ["Activity", "Security", "Reliability"]
+                        .into_iter()
+                        .map(|title| ChoiceGroup {
+                            title,
+                            choices: CATALOG
+                                .iter()
+                                .filter(|c| c.2 == title)
+                                .map(|c| Choice {
+                                    id: c.0,
+                                    title: c.1,
+                                    on: selection.has(c.0),
+                                })
+                                .collect(),
                         })
                         .collect(),
                     custom: selection.custom,
+                    keep: selection.query(),
                     tiles,
                     panels,
                     ranked,
@@ -1048,6 +1072,13 @@ mod tests {
         let s = Selection::parse(Some("range=24h&p=traffic&p=bogus&p=kinds"));
         assert!(s.custom);
         assert_eq!(s.ids, vec!["traffic", "kinds"]);
+    }
+
+    #[test]
+    fn the_selection_survives_a_range_change() {
+        assert_eq!(Selection::parse(Some("view=sre")).query(), "&view=sre");
+        let custom = Selection::parse(Some("p=kinds&p=traffic"));
+        assert_eq!(Selection::parse(Some(&custom.query()[1..])).ids, custom.ids);
     }
 
     #[test]

@@ -1657,6 +1657,43 @@ pub async fn list_events(
         .collect()
 }
 
+/// Names to complete while typing in a filter box. With `only` set (a person looking at
+/// their own sessions) the lists come from their sessions alone and name no other user.
+pub async fn suggestions(db: &Db, only: Option<&str>) -> super::views::Suggestions {
+    async fn column(db: &Db, sql: &'static str, only: Option<&str>) -> Vec<String> {
+        sqlx::query_scalar(sql)
+            .bind(only)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default()
+    }
+    super::views::Suggestions {
+        users: if only.is_some() {
+            Vec::new()
+        } else {
+            column(db, "SELECT username FROM users WHERE $1::text IS NULL ORDER BY 1 LIMIT 300", only).await
+        },
+        resources: column(
+            db,
+            "SELECT DISTINCT resource FROM sessions WHERE resource IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 300",
+            only,
+        )
+        .await,
+        kinds: column(
+            db,
+            "SELECT DISTINCT kind FROM sessions WHERE kind IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 100",
+            only,
+        )
+        .await,
+        ends: column(
+            db,
+            "SELECT DISTINCT end_reason FROM sessions WHERE end_reason IS NOT NULL AND ($1::text IS NULL OR username = $1) ORDER BY 1 LIMIT 100",
+            only,
+        )
+        .await,
+    }
+}
+
 /// The kinds seen in the trail, for the filter.
 pub async fn event_kinds(db: &Db) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT DISTINCT kind FROM audit_events ORDER BY kind")

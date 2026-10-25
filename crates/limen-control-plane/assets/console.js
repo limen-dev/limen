@@ -76,3 +76,26 @@
     setInterval(tick, secs * 1000);
   });
 })();
+
+// Filter forms: <form data-autosubmit> submits when a dropdown or date changes;
+// "/" focuses the search box; [data-check] buttons tick or clear a checkbox group.
+(function () {
+  document.addEventListener('change', function (e) {
+    var el = e.target;
+    var form = el.closest && el.closest('form[data-autosubmit]');
+    if (!form || !(el.tagName === 'SELECT' || el.type === 'datetime-local')) return;
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    var box = document.querySelector('[data-focus-search]');
+    if (box) { e.preventDefault(); box.focus(); box.select(); }
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-check]');
+    if (!b || !b.form) return;
+    b.form.querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = b.dataset.check === 'all'; });
+  });
+})();

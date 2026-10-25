@@ -516,6 +516,10 @@ pub struct SessionsPage {
     pub user_filter: Option<String>,
     pub filter: SessionFilterView,
     pub chips: Vec<FilterChip>,
+    pub presets: Vec<Preset>,
+    pub suggest: Suggestions,
+    pub more_open: bool,
+    pub clear: String,
     pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
@@ -767,6 +771,10 @@ pub struct AuditPage {
     pub kinds: Vec<String>,
     pub filter: AuditFilterView,
     pub chips: Vec<FilterChip>,
+    pub presets: Vec<Preset>,
+    pub suggest: Suggestions,
+    pub more_open: bool,
+    pub clear: String,
     pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
@@ -782,6 +790,22 @@ pub struct AuditFilterView {
     pub session: String,
     pub from: String,
     pub to: String,
+}
+
+/// A quick time range: a link that applies it and keeps the other filters.
+pub struct Preset {
+    pub label: &'static str,
+    pub href: String,
+    pub active: bool,
+}
+
+/// Names to offer while typing in the filter boxes.
+#[derive(Debug, Default)]
+pub struct Suggestions {
+    pub users: Vec<String>,
+    pub resources: Vec<String>,
+    pub kinds: Vec<String>,
+    pub ends: Vec<String>,
 }
 
 /// An applied filter, with the link that removes just that one.

@@ -63,6 +63,24 @@ pub fn parse_when(s: &str, end: bool) -> Option<OffsetDateTime> {
     .map(PrimitiveDateTime::assume_utc)
 }
 
+/// The quick ranges offered beside the date pickers: `(key, label, duration)`.
+pub const PRESETS: [(&str, &str, Duration); 5] = [
+    ("1h", "Last hour", Duration::hours(1)),
+    ("24h", "24 hours", Duration::hours(24)),
+    ("7d", "7 days", Duration::days(7)),
+    ("30d", "30 days", Duration::days(30)),
+    ("", "Any time", Duration::ZERO),
+];
+
+/// The start of a quick range such as `24h`, counted back from now.
+#[must_use]
+pub fn since(key: &str) -> Option<OffsetDateTime> {
+    PRESETS
+        .iter()
+        .find(|p| !p.0.is_empty() && p.0 == key)
+        .map(|p| OffsetDateTime::now_utc() - p.2)
+}
+
 /// A `from`/`to` pair from the query string; the second value lists what was ignored.
 #[must_use]
 pub fn parse_range(

@@ -1,28 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Dashboards{% endblock %}
-{% block refresh %} data-refresh="10"{% endblock %}
+{% block refresh %} data-refresh="30"{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
     <h1>Dashboards</h1>
     <p class="sub">What has been happening, from the console's own records (kept for 30 days). Times are UTC. Click a number, a bar or a row to see the events or sessions behind it.</p>
   </div>
-  <div class="tabs">
-    <a href="/console/dashboards?range=24h&amp;view={{ view }}"{% if range == "24h" %} aria-current="true"{% endif %}>24 hours</a>
-    <a href="/console/dashboards?range=7d&amp;view={{ view }}"{% if range == "7d" %} aria-current="true"{% endif %}>7 days</a>
-    <a href="/console/dashboards?range=30d&amp;view={{ view }}"{% if range == "30d" %} aria-current="true"{% endif %}>30 days</a>
-  </div>
 </div>
-<div class="tabs">
-{% for v in views %}  <a href="/console/dashboards?range={{ range }}&amp;view={{ v.key }}"{% if view == v.key %} aria-current="true"{% endif %}>{{ v.label }}</a>
-{% endfor %}{% if custom %}  <a href="/console/dashboards?range={{ range }}" aria-current="true">Custom</a>{% endif %}
+<div class="toolbar">
+  <div class="tb-label">Period
+    <nav class="tabs" aria-label="Period">
+      <a href="/console/dashboards?range=24h{{ keep }}"{% if range == "24h" %} aria-current="true"{% endif %}>24 hours</a>
+      <a href="/console/dashboards?range=7d{{ keep }}"{% if range == "7d" %} aria-current="true"{% endif %}>7 days</a>
+      <a href="/console/dashboards?range=30d{{ keep }}"{% if range == "30d" %} aria-current="true"{% endif %}>30 days</a>
+    </nav>
+  </div>
+  <div class="tb-label">View
+    <nav class="tabs" aria-label="View">
+{% for v in views %}      <a href="/console/dashboards?range={{ range }}&amp;view={{ v.key }}"{% if view == v.key %} aria-current="true"{% endif %}>{{ v.label }}</a>
+{% endfor %}{% if custom %}      <a href="/console/dashboards?range={{ range }}{{ keep }}" aria-current="true">Custom</a>{% endif %}
+    </nav>
+  </div>
 </div>
 <details{% if custom %} open{% endif %}>
   <summary>Choose panels</summary>
-  <form method="get" action="/console/dashboards" class="pick">
+  <form method="get" action="/console/dashboards" class="chooser">
     <input type="hidden" name="range" value="{{ range }}">
-    {% for c in choices %}<label><input type="checkbox" name="p" value="{{ c.id }}"{% if c.on %} checked{% endif %}> {{ c.title }}</label>
-    {% endfor %}<button type="submit">Show</button>
+    {% for g in groups %}<fieldset><legend>{{ g.title }}</legend><div class="opts">{% for c in g.choices %}<label><input type="checkbox" name="p" value="{{ c.id }}"{% if c.on %} checked{% endif %}> {{ c.title }}</label>{% endfor %}</div></fieldset>
+    {% endfor %}<div class="actions"><button type="submit">Show these panels</button><button type="button" class="secondary" data-check="all">Select all</button><button type="button" class="secondary" data-check="none">Clear</button></div>
   </form>
 </details>
 <section class="stats">

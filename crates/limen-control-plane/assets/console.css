@@ -325,11 +325,70 @@ td.empty { text-align: center; }
 .bot-head .sub { margin: 2px 0 0; }
 .bot-head .avatar .i { width: 20px; height: 20px; }
 
-.pick { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 14px; align-items: center; }
-.pick label { display: inline-flex; gap: 6px; align-items: center; }
 .chips.applied { margin: 0 0 12px; }
 .chips.applied a.chip { text-decoration: none; }
 .filters a { align-self: center; }
-a.stat.drill { color: inherit; text-decoration: none; }
-a.stat.drill:hover { border-color: var(--text-3); }
+a.stat.drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chart a.bar-link:hover rect { opacity: .8; }
+
+/* Filters: quick ranges, a primary row, and the rest under "More filters". */
+.presets { margin: 0 0 12px; }
+.applied { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 13px; font-weight: 500; text-decoration: none; }
+.fchip:hover { text-decoration: none; filter: brightness(.95); }
+.fchip .i { width: 13px; height: 13px; opacity: .7; }
+.applied .clear { font-size: 13px; margin-left: 4px; }
+.empty-hint { text-align: center; color: var(--text-3); margin: 14px 0; }
+
+/* Dashboards: toolbar and the panel chooser. */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; margin-bottom: 14px; }
+.toolbar .tabs { margin-bottom: 0; }
+.toolbar .tb-label { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
+.chooser { padding: 14px 16px; display: grid; gap: 14px; }
+.chooser fieldset { border: 0; margin: 0; padding: 0; }
+.chooser legend { font-weight: 600; font-size: 12.5px; color: var(--text-2); padding: 0; margin-bottom: 6px; }
+.chooser .opts { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.chooser label { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: 13px; }
+.chooser label:has(input:checked) { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.chooser .actions { display: flex; gap: 8px; align-items: center; }
+
+/* ---- Form controls: one look for every text, search, date and select box. ---- */
+input[type=search], input[type=datetime-local], input[type=date] {
+  font: inherit; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface); color: var(--text); width: 100%;
+}
+input[type=search]::-webkit-search-cancel-button { cursor: pointer; }
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 32px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a2b3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+input[type=datetime-local]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .7; }
+input[type=datetime-local]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3); }
+
+/* ---- Filter bar: a card with aligned, equal-height controls. ---- */
+.filters {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 12px; margin: 0 0 14px;
+  padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.filters label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-3); }
+.filters input, .filters select { height: 36px; padding-top: 0; padding-bottom: 0; font-size: 14px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); width: 170px; }
+.filters input[type=datetime-local] { width: 205px; }
+.filters .grow { flex: 1 1 280px; }
+.filters .grow input { width: 100%; }
+.filters input.search {
+  padding-left: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a2b3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 12px center;
+}
+.filters button { height: 36px; padding-top: 0; padding-bottom: 0; }
+.filters > a { align-self: center; font-size: 13px; }
+.more { flex-basis: 100%; background: none; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; margin: 2px 0 0; padding-top: 4px; }
+.more > summary { padding: 6px 0; color: var(--text-2); font-size: 13px; font-weight: 550; }
+.more-fields { display: flex; flex-wrap: wrap; gap: 14px 12px; padding: 6px 0 2px; }
+.presets { margin: 0 0 12px; }
+
+/* The panel chooser uses the same look. */
+.chooser button { height: 34px; padding-top: 0; padding-bottom: 0; }
