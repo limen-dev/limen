@@ -10,12 +10,14 @@ pub mod config;
 pub mod console;
 pub mod db;
 pub mod discovery;
+pub mod evidence;
 pub mod handoff_client;
 pub mod http_client;
 pub mod jobs;
 pub mod oidc;
 pub mod pipeline;
 pub mod replicas;
+pub mod reviews;
 pub mod search;
 pub mod server;
 pub mod services;
@@ -222,6 +224,7 @@ pub async fn run(
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
     tokio::spawn(jobs::access_expiry(state.clone(), stop.clone()));
     tokio::spawn(jobs::discovery_sweep(state.clone(), stop.clone()));
+    tokio::spawn(jobs::reviews_tick(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),

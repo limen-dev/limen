@@ -13,6 +13,7 @@ pub mod mongo;
 pub mod mq;
 pub mod policy;
 pub mod redis;
+pub mod review;
 pub mod search;
 pub mod ssh;
 pub mod tcp;

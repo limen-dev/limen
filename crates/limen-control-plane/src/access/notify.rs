@@ -69,6 +69,8 @@ pub enum Event {
     BreakGlass,
     /// An admin ended a grant early.
     Revoked,
+    /// Access review items are waiting for their reviewer.
+    ReviewDue,
 }
 
 impl Event {
@@ -79,6 +81,7 @@ impl Event {
             Event::Denied => "access.denied",
             Event::BreakGlass => "access.break_glass",
             Event::Revoked => "access.revoked",
+            Event::ReviewDue => "review.due",
         }
     }
 
@@ -89,6 +92,7 @@ impl Event {
             Event::Denied => "was denied",
             Event::BreakGlass => "BREAK-GLASS access was granted",
             Event::Revoked => "was revoked",
+            Event::ReviewDue => "has items waiting for a reviewer",
         }
     }
 }

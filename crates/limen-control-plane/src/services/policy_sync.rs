@@ -59,7 +59,9 @@ impl PolicySync for PolicySyncService {
             grants: crate::access::active_for_snapshot(&self.0)
                 .await
                 .map_err(|e| internal("reading access grants", e))?,
-            denies: Vec::new(),
+            denies: crate::reviews::active_denies(&self.0.db)
+                .await
+                .map_err(|e| internal("reading access overrides", e))?,
         };
         let signed = limen_session::snapshot::sign(
             &key,

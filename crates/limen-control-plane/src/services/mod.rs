@@ -11,6 +11,7 @@ pub mod ops;
 pub mod policy_sync;
 pub mod registry;
 pub mod resources;
+pub mod reviews;
 pub mod ssh_certs;
 
 use base64::Engine as _;

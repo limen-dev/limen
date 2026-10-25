@@ -61,6 +61,22 @@ pub enum AdminCommand {
         #[arg(long)]
         reason: String,
     },
+    /// Access reviews and the roles they withhold (ADR-0029).
+    Review {
+        #[command(subcommand)]
+        command: super::review::ReviewCommand,
+    },
+    /// A signed pack of compliance evidence for a period.
+    Evidence {
+        /// First day, as 2026-01-01.
+        #[arg(long)]
+        from: String,
+        /// The day after the last, as 2026-04-01.
+        #[arg(long)]
+        to: String,
+        #[arg(long, default_value = "limen-evidence.json")]
+        out: PathBuf,
+    },
     /// Resources workers found in a cloud account, waiting for you (ADR-0027).
     Discovery {
         #[command(subcommand)]
@@ -327,6 +343,10 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 ["id", "name", "kind", "labels", "last seen", "tunnels"],
                 &rows,
             );
+        }
+        AdminCommand::Review { command } => super::review::run(proxy, command).await?,
+        AdminCommand::Evidence { from, to, out } => {
+            super::review::evidence(proxy, &from, &to, &out).await?;
         }
         AdminCommand::Discovery { command } => discovery(&mut admin, command).await?,
         AdminCommand::Grants { all, json } => super::access::grants(proxy, all, json).await?,

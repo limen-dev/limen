@@ -83,6 +83,21 @@ pub async fn discovery_sweep(state: AppState, mut shutdown: watch::Receiver<bool
     }
 }
 
+/// Lift confirmed overrides, remind and escalate reviewers, and start the
+/// scheduled access review (ADR-0029).
+pub async fn reviews_tick(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(300));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::reviews::tick(&state).await {
+            tracing::warn!(error = %e, "the access review tick failed");
+        }
+    }
+}
+
 /// Whether a replica that last managed a heartbeat `since_ok` ago must stop
 /// shipping to S3: its row goes stale 15 seconds after the last success, and
 /// then another process may take the id over and write the same chain.

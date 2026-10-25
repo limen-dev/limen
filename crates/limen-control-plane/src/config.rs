@@ -338,6 +338,11 @@ pub struct Config {
     #[arg(long, env = "LIMEN_SEARCH_HISTORY_URL")]
     pub search_history_url: Option<String>,
 
+    /// How often an access review starts by itself (ADR-0029). 0 turns the
+    /// schedule off; admins can still start one.
+    #[arg(long, env = "LIMEN_REVIEW_INTERVAL", value_parser = parse_duration_or_zero, default_value = "90d")]
+    pub review_interval: Duration,
+
     /// Put the requester, role, resource, and reason in notices. Off by
     /// default so resource names don't leave Limen.
     #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]

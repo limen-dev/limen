@@ -684,3 +684,135 @@ message ReviewDiscoveredRequest {
   bool accept = 2;
   string note = 3;
 }
+
+// Access reviews, deny overrides, and evidence (ADR-0029).
+service Reviews {
+  // Admin: take a snapshot of who holds what and assign it to owners.
+  rpc StartReview(StartReviewRequest) returns (ReviewInfo);
+  // Admin and auditors: every review. Anyone: the ones with items for them.
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc ListReviewItems(ListReviewItemsRequest) returns (ListReviewItemsResponse);
+  // The reviewer certifies or flags an item. Never their own access.
+  rpc DecideReviewItem(DecideReviewItemRequest) returns (ReviewItemInfo);
+  rpc ListDenies(ListDeniesRequest) returns (ListDeniesResponse);
+  rpc LiftDeny(LiftDenyRequest) returns (LiftDenyResponse);
+  // Admin and auditors: a signed pack of the period's evidence.
+  rpc ExportEvidence(ExportEvidenceRequest) returns (ExportEvidenceResponse);
+}
+
+message StartReviewRequest {
+  string name = 1;
+  // Days the reviewers have. Default 14.
+  uint32 due_days = 2;
+  // Days a flagged role stays withheld. Default 30.
+  uint32 override_days = 3;
+}
+
+message ReviewInfo {
+  string id = 1;
+  string name = 2;
+  string started_by = 3;
+  int64 started_at_unix = 4;
+  int64 due_at_unix = 5;
+  string status = 6;
+  uint32 items = 7;
+  uint32 decided = 8;
+  uint32 flagged = 9;
+  // Certified without a comment.
+  uint32 certified_silently = 10;
+  bool overdue = 11;
+}
+
+message ListReviewsRequest {
+  // "mine" (reviews with items for the caller) or "all" (admins, auditors).
+  string scope = 1;
+}
+
+message ListReviewsResponse {
+  repeated ReviewInfo reviews = 1;
+}
+
+message ListReviewItemsRequest {
+  string review_id = 1;
+  // Only the caller's own items (default for non-admins).
+  bool mine = 2;
+  // Only undecided items.
+  bool open_only = 3;
+}
+
+message ReviewReach {
+  string name = 1;
+  string kind = 2;
+  repeated string principals = 3;
+}
+
+message ReviewItemInfo {
+  string id = 1;
+  string review_id = 2;
+  string subject = 3;
+  string subject_type = 4;
+  string role = 5;
+  string via = 6;
+  repeated ReviewReach reaches = 7;
+  uint32 sessions_90d = 8;
+  int64 last_used_unix = 9;
+  string reviewer = 10;
+  string decision = 11;
+  string comment = 12;
+  string decided_by = 13;
+  int64 decided_at_unix = 14;
+  // Nothing used the access in 90 days: worth a closer look.
+  bool unused = 15;
+  bool can_decide = 16;
+}
+
+message ListReviewItemsResponse {
+  repeated ReviewItemInfo items = 1;
+}
+
+message DecideReviewItemRequest {
+  string item_id = 1;
+  // true: certify. false: flag for removal (needs a comment).
+  bool certify = 2;
+  string comment = 3;
+}
+
+message DenyInfo {
+  string id = 1;
+  string username = 2;
+  string role = 3;
+  string reason = 4;
+  string created_by = 5;
+  int64 created_at_unix = 6;
+  int64 expires_at_unix = 7;
+  bool active = 8;
+}
+
+message ListDeniesRequest {
+  bool include_ended = 1;
+}
+
+message ListDeniesResponse {
+  repeated DenyInfo denies = 1;
+}
+
+message LiftDenyRequest {
+  string id = 1;
+  string reason = 2;
+}
+
+message LiftDenyResponse {
+  bool lifted = 1;
+}
+
+message ExportEvidenceRequest {
+  int64 from_unix = 1;
+  int64 to_unix = 2;
+}
+
+message ExportEvidenceResponse {
+  // JSON, signed by the control plane. Verify offline with
+  // `limen-audit-verify --evidence`.
+  bytes pack = 1;
+  string manifest_sha256 = 2;
+}

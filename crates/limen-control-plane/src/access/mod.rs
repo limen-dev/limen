@@ -925,6 +925,11 @@ pub async fn effective_roles_now(
             .into_iter()
             .filter(|g| g.username == username && g.resource == resource)
             .collect(),
+        denies: crate::reviews::active_denies(&state.db)
+            .await?
+            .into_iter()
+            .filter(|d| d.username == username)
+            .collect(),
         ..Default::default()
     };
     Ok(restrictions.effective_roles(
@@ -945,13 +950,25 @@ pub async fn reachable(
 ) -> Result<Vec<(limen_policy::AccessibleResource, i64)>, sqlx::Error> {
     let loaded = state.policy.current();
     let policy = &loaded.policy;
+    // Roles an access review took away count for nothing, from any source.
+    let denied: Vec<String> = crate::reviews::active_denies(&state.db)
+        .await?
+        .into_iter()
+        .filter(|d| d.username == username)
+        .map(|d| d.role)
+        .collect();
+    let cert_roles: Vec<String> = cert_roles
+        .iter()
+        .filter(|r| !denied.contains(r))
+        .cloned()
+        .collect();
+    let cert_roles = cert_roles.as_slice();
     let mut out: std::collections::BTreeMap<String, (limen_policy::AccessibleResource, i64)> =
         policy
             .accessible(cert_roles)
             .into_iter()
             .map(|r| (r.name.clone(), (r, 0)))
             .collect();
-    let denied = state_denied_roles(state, username);
     let grants: Vec<_> = store::active_grants(&state.db)
         .await?
         .into_iter()
@@ -984,12 +1001,6 @@ pub async fn reachable(
         }
     }
     Ok(out.into_values().collect())
-}
-
-/// Roles withheld from the user by an access review. (None yet; reviews add
-/// them in ADR-0029.)
-fn state_denied_roles(_state: &AppState, _username: &str) -> Vec<String> {
-    Vec::new()
 }
 
 /// What the user could get by asking, for `limen ls`.
