@@ -84,6 +84,14 @@ The `ecs` and `ec2` modules under `deploy/terraform/modules` build on community 
 | `terraform-aws-modules/ecs/aws` (`cluster`, `service`) | 7.6.1 | 2026-09-18 | Fargate cluster, services, task and execution roles, service security group, autoscaling | Adopt |
 | `terraform-aws-modules/autoscaling/aws` | 9.3.2 | 2026-09-18 | Launch template, Auto Scaling group, instance profile and role | Adopt |
 | `terraform-aws-modules/security-group/aws` | 6.0.0 | 2026-06-03 | Instance security groups | Adopt |
+| `terraform-aws-modules/rds/aws` | 7.2.2 | 2026-09-18 | PostgreSQL | Adopt |
+| `terraform-aws-modules/kms/aws` | 4.2.2 | 2026-09-18 | CA signing keys | Adopt |
+| `terraform-aws-modules/secrets-manager/aws` | 2.2.0 | 2026-09-28 | Database URL, join tokens, CA secret | Adopt |
+| `terraform-aws-modules/iam/aws` (`iam-role`) | 6.8.2 | 2026-09-18 | Control plane IRSA role | Adopt |
+| `terraform-aws-modules/vpc/aws` | 6.7.3 | 2026-09-18 | Example VPC | Adopt |
+| `terraform-aws-modules/alb/aws` | 10.5.1 | 2026-08-26 | Example Network Load Balancers | Adopt |
+
+Two helper container images are referenced by default in `modules/ecs` (`public.ecr.aws/aws-cli/aws-cli:2.38.0`, `public.ecr.aws/docker/library/busybox:1.37.0`) and one in the Kubernetes guide (`busybox:1.37.0`).
 
 Advisory check: not done against a Terraform advisory source (none is wired into CI); the modules are widely used and maintained. Re-check when bumping.
 

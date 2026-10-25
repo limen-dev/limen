@@ -1,44 +1,31 @@
 # Copy to my.tfvars. Every map entry adds a service; the keys are yours.
 image_registry = "ghcr.io/your-org"
 image_tag      = "0.1.0"
-oidc_issuer    = "https://idp.example.com"
-oidc_client_id = "limen"
 
-ca_key_arns = {
-  internal_ca = "arn:aws:kms:eu-west-1:111122223333:key/..."
-  user_ca     = "arn:aws:kms:eu-west-1:111122223333:key/..."
-  ssh_user_ca = "arn:aws:kms:eu-west-1:111122223333:key/..."
-  ssh_host_ca = "arn:aws:kms:eu-west-1:111122223333:key/..."
+oidc = {
+  issuer    = "https://idp.example.com"
+  client_id = "limen"
 }
-database_url_secret_arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:limen-database-..."
-control_plane_addr      = "limen-cp.internal.example.com:3080"
 
 control_planes = {
-  core = { vpc_id = "vpc-core", subnet_ids = ["subnet-a", "subnet-b", "subnet-c"] }
+  core = {} # 3 tasks; raise desired_count to scale
 }
 
 proxies = {
-  public = {
-    vpc_id                = "vpc-core"
-    subnet_ids            = ["subnet-a", "subnet-b", "subnet-c"]
-    dns_name              = "limen.example.com"
-    target_group_arn      = "arn:aws:elasticloadbalancing:eu-west-1:111122223333:targetgroup/limen/..."
-    join_token_secret_arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:limen-proxy-join-..."
-  }
+  public = { dns_name = "limen.example.com" }
 }
 
+# Workers live in the VPCs of the hosts and databases they reach.
 workers = {
   prod-db = {
-    vpc_id                = "vpc-prod"
-    subnet_ids            = ["subnet-p1", "subnet-p2"]
-    proxy                 = "public"
-    join_token_secret_arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:limen-worker-join-..."
+    vpc_id     = "vpc-0123456789abcdef0"
+    subnet_ids = ["subnet-0aaa", "subnet-0bbb"]
+    proxy      = "public"
   }
   staging = {
-    vpc_id                = "vpc-staging"
-    subnet_ids            = ["subnet-s1", "subnet-s2"]
-    proxy                 = "public"
-    desired_capacity      = 2
-    join_token_secret_arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:limen-worker-join-staging-..."
+    vpc_id           = "vpc-0fedcba9876543210"
+    subnet_ids       = ["subnet-0ccc", "subnet-0ddd"]
+    proxy            = "public"
+    desired_capacity = 2
   }
 }

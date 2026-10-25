@@ -48,6 +48,19 @@ variable "ami_ssm_parameter" {
   default     = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
 }
 
+variable "internal_ca" {
+  description = <<-EOT
+    Pass { secret_arn = ... }: the Secrets Manager secret for the Limen internal CA certificate (the
+    foundation module creates it). Control plane instances publish the
+    certificate they export into it; proxy and worker instances wait for it
+    and write it to the file LIMEN_CA_FILE points at.
+  EOT
+  type = object({
+    secret_arn = string
+  })
+  default = null
+}
+
 variable "log_retention_days" {
   description = "Retention of each group's CloudWatch log group."
   type        = number
