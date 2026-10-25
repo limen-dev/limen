@@ -9,6 +9,7 @@ pub mod caller;
 pub mod config;
 pub mod console;
 pub mod db;
+pub mod discovery;
 pub mod handoff_client;
 pub mod http_client;
 pub mod jobs;
@@ -220,6 +221,7 @@ pub async fn run(
     tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
     tokio::spawn(jobs::access_expiry(state.clone(), stop.clone()));
+    tokio::spawn(jobs::discovery_sweep(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),

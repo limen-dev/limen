@@ -10,11 +10,12 @@ use limen_policy::Policy;
 use limen_proto::v1::admin_server::Admin;
 use limen_proto::v1::{
     ApplyPolicyRequest, ApplyPolicyResponse, Component, CreateJoinTokenRequest,
-    CreateJoinTokenResponse, GetPolicyDocumentsRequest, GetPolicyDocumentsResponse,
+    CreateJoinTokenResponse, DiscoveredInfo, GetPolicyDocumentsRequest, GetPolicyDocumentsResponse,
     GetPolicyRequest, GetPolicyResponse, KillSessionRequest, KillSessionResponse,
-    ListComponentsRequest, ListComponentsResponse, ListLocksRequest, ListLocksResponse, Lock,
-    LockUserRequest, LockUserResponse, PolicyDiff, PolicyTestResult, RevokeComponentRequest,
-    RevokeComponentResponse, TunnelInfo, UnlockUserRequest, UnlockUserResponse,
+    ListComponentsRequest, ListComponentsResponse, ListDiscoveredRequest, ListDiscoveredResponse,
+    ListLocksRequest, ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff,
+    PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
+    TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -68,7 +69,8 @@ impl Admin for AdminService {
                 .map(|s| (s.name.as_str(), s.content.as_str())),
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let current = self.0.policy.current();
+        // Versions and diffs are about what admins applied, not discovered resources.
+        let current = self.0.policy.base();
         let diff = current.policy.diff(&next);
         let digest = next.digest();
         let proto_diff = PolicyDiff {
@@ -193,6 +195,26 @@ impl Admin for AdminService {
         });
         tracing::info!(version, %digest, author = %admin.username, "policy applied");
         Ok(Response::new(response(version, true)))
+    }
+
+    async fn list_discovered(
+        &self,
+        request: Request<ListDiscoveredRequest>,
+    ) -> Result<Response<ListDiscoveredResponse>, Status> {
+        caller::resolve(&request, &self.0.cas)?.admin()?;
+        let items = crate::discovery::list(&self.0.db, &request.into_inner().state).await?;
+        Ok(Response::new(ListDiscoveredResponse { items }))
+    }
+
+    async fn review_discovered(
+        &self,
+        request: Request<ReviewDiscoveredRequest>,
+    ) -> Result<Response<DiscoveredInfo>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let r = request.into_inner();
+        crate::discovery::review(&self.0, &admin.username, "api", &r.key, r.accept, &r.note)
+            .await
+            .map(Response::new)
     }
 
     async fn get_policy_documents(

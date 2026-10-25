@@ -57,6 +57,10 @@ service Admin {
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
   // The active policy's documents, for `limen policy who-can|what-can|diff`.
   rpc GetPolicyDocuments(GetPolicyDocumentsRequest) returns (GetPolicyDocumentsResponse);
+  // Resources workers found in a cloud account (ADR-0027), and the admin's
+  // decision on each.
+  rpc ListDiscovered(ListDiscoveredRequest) returns (ListDiscoveredResponse);
+  rpc ReviewDiscovered(ReviewDiscoveredRequest) returns (DiscoveredInfo);
   rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse);
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
   // Refuse a user's logins and sessions and end their open sessions.
@@ -593,4 +597,90 @@ message SearchResponse {
   bool truncated = 2;
   // The same search in the full-history store, if one is configured.
   string history_url = 3;
+}
+
+// Cloud discovery (ADR-0027). Workers describe a cloud account with a
+// describe-only role and report facts. The control plane never calls the
+// customer's account, and a report can only add a *pending* resource.
+service Discovery {
+  rpc Report(ReportDiscoveryRequest) returns (ReportDiscoveryResponse);
+}
+
+message ReportDiscoveryRequest {
+  // The `discovery` document the scan ran for.
+  string document = 1;
+  repeated DiscoveredItem items = 2;
+  // The scopes this scan covered to the end. Only for these can a resource
+  // that was not seen count towards going stale; a scan that failed halfway
+  // proves nothing about what is missing.
+  repeated ScanScope complete = 3;
+}
+
+message ScanScope {
+  uint32 matcher = 1;
+  string account = 2;
+  string region = 3;
+}
+
+message DiscoveredItem {
+  uint32 matcher = 1;
+  // ec2, rds, redshift, elasticache, or eks.
+  string source = 2;
+  string account = 3;
+  string region = 4;
+  string provider_id = 5;
+  // host:port to dial, or the cluster name for EKS.
+  string target = 6;
+  // Only the tags the matcher uses.
+  map<string, string> tags = 7;
+  map<string, string> facts = 8;
+}
+
+message ReportDiscoveryResponse {
+  uint32 accepted = 1;
+  // Items the document doesn't ask for (wrong account, region, or tags).
+  uint32 dropped = 2;
+}
+
+message DiscoveredInfo {
+  string key = 1;
+  string document = 2;
+  string source = 3;
+  string kind = 4;
+  string name = 5;
+  map<string, string> labels = 6;
+  string target = 7;
+  string account = 8;
+  string region = 9;
+  string provider_id = 10;
+  // pending, accepted, rejected, or stale.
+  string state = 11;
+  // An accepted resource whose labels, name, or target changed since it was
+  // accepted. The old values stay in force until an admin accepts the new.
+  bool change_pending = 12;
+  repeated string blockers = 13;
+  // What the pending change is, one line each.
+  repeated string changes = 14;
+  int64 first_seen_unix = 15;
+  int64 last_seen_unix = 16;
+  uint32 missed_cycles = 17;
+  string accepted_name = 18;
+  string accepted_by = 19;
+  string reported_by = 20;
+}
+
+message ListDiscoveredRequest {
+  // Empty for all, or one of the states.
+  string state = 1;
+}
+
+message ListDiscoveredResponse {
+  repeated DiscoveredInfo items = 1;
+}
+
+message ReviewDiscoveredRequest {
+  string key = 1;
+  // Accept the resource (or its pending change), or reject it.
+  bool accept = 2;
+  string note = 3;
 }

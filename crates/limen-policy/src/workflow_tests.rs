@@ -803,3 +803,248 @@ fn discovery_documents_refuse_what_a_tag_could_abuse() {
         assert!(err.to_string().contains(expect), "{expect}: {err}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Discovery: from what a worker saw to a proposed resource
+
+mod proposals {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::discovery::{Found, Source, propose, resource_doc};
+
+    const DOC: &str = r"
+kind: discovery
+version: v1
+metadata: { name: aws-prod }
+spec:
+  provider: aws
+  accounts: [{ role_arn: 'arn:aws:iam::111122223333:role/limen-discovery' }]
+  regions: [eu-west-1]
+  worker_selector: { pool: prod }
+  match:
+    - type: ec2
+      tags: { limen/managed: ['true'] }
+      labels_from_tags: [env, team]
+      labels: { owner: platform }
+    - type: rds
+      name_template: 'rds-{{ id }}'
+    - type: eks
+";
+
+    fn doc() -> crate::discovery::DiscoveryDoc {
+        Policy::parse_yaml([("d.yaml", DOC)])
+            .expect("doc")
+            .discovery()
+            .next()
+            .expect("discovery")
+            .clone()
+    }
+
+    fn tags(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    fn ec2(extra_tags: &[(&str, &str)]) -> Found {
+        let mut t = vec![("limen/managed", "true"), ("Name", "Web Prod 1")];
+        t.extend_from_slice(extra_tags);
+        Found {
+            source: Source::Ec2,
+            account: "111122223333".into(),
+            region: "eu-west-1".into(),
+            provider_id: "i-0abc123".into(),
+            target: "10.0.1.5:22".into(),
+            tags: tags(&t),
+            facts: tags(&[(
+                "host_key",
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+            )]),
+        }
+    }
+
+    #[test]
+    fn an_instance_gets_its_name_from_the_template_and_only_allowed_tags_become_labels() {
+        let p = propose(
+            &doc(),
+            0,
+            &ec2(&[("env", "prod"), ("team", "payments"), ("secret", "x")]),
+        )
+        .expect("proposal");
+        assert_eq!(p.name, "web-prod-1");
+        assert_eq!(p.labels["env"], "prod");
+        assert_eq!(p.labels["team"], "payments");
+        assert_eq!(
+            p.labels["owner"], "platform",
+            "static labels from the document"
+        );
+        assert!(
+            !p.labels.contains_key("secret"),
+            "tags not listed never become labels"
+        );
+        assert!(!p.labels.contains_key("name"));
+        assert_eq!(p.labels["limen.io/region"], "eu-west-1");
+        assert_eq!(p.labels["limen.io/discovered"], "true");
+        assert_eq!(p.blockers, Vec::<String>::new());
+        assert_eq!(p.kind, limen_core::resource::ResourceKind::Ssh);
+        // And the result is a valid resource that only the document's workers serve.
+        let selector: limen_core::labels::Labels =
+            serde_json::from_value(serde_json::json!({ "pool": "prod" })).expect("labels");
+        let res = resource_doc(&p.name, &p.labels, &p.spec, &selector).expect("resource");
+        let policy = Policy::from_documents([Document::Resource(res)]).expect("valid");
+        let r = policy.resource("web-prod-1").expect("resource");
+        assert_eq!(r.spec.worker_selector.get("pool"), Some("prod"));
+    }
+
+    #[test]
+    fn a_tag_cannot_set_the_labels_limen_sets() {
+        // A hostile `limen.io/account` tag isn't in labels_from_tags, and the
+        // control plane's own values win anyway.
+        let mut found = ec2(&[("env", "prod")]);
+        found
+            .tags
+            .insert("limen.io/account".into(), "999999999999".into());
+        let p = propose(&doc(), 0, &found).expect("proposal");
+        assert_eq!(p.labels["limen.io/account"], "111122223333");
+    }
+
+    #[test]
+    fn an_invalid_label_value_is_skipped_not_trusted() {
+        let p =
+            propose(&doc(), 0, &ec2(&[("env", "pr\u{0}od"), ("team", "ok")])).expect("proposal");
+        assert!(!p.labels.contains_key("env"));
+        assert_eq!(p.labels["team"], "ok");
+    }
+
+    #[test]
+    fn reports_outside_the_document_are_dropped() {
+        let mut other_region = ec2(&[]);
+        other_region.region = "us-east-1".into();
+        assert!(
+            propose(&doc(), 0, &other_region)
+                .expect_err("refused")
+                .contains("region")
+        );
+        let mut other_account = ec2(&[]);
+        other_account.account = "999999999999".into();
+        assert!(
+            propose(&doc(), 0, &other_account)
+                .expect_err("refused")
+                .contains("account")
+        );
+        let mut untagged = ec2(&[]);
+        untagged.tags.remove("limen/managed");
+        assert!(
+            propose(&doc(), 0, &untagged)
+                .expect_err("refused")
+                .contains("filter")
+        );
+        assert!(
+            propose(&doc(), 1, &ec2(&[]))
+                .expect_err("refused")
+                .contains("looks for rds")
+        );
+        assert!(propose(&doc(), 9, &ec2(&[])).is_err());
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_built_falls_back_to_the_id() {
+        let mut found = ec2(&[]);
+        found.tags.remove("Name");
+        assert_eq!(
+            propose(&doc(), 0, &found).expect("proposal").name,
+            "i-0abc123"
+        );
+        found.tags.insert("Name".into(), "***".into());
+        assert_eq!(
+            propose(&doc(), 0, &found).expect("proposal").name,
+            "i-0abc123"
+        );
+    }
+
+    #[test]
+    fn an_instance_without_a_known_host_key_cannot_be_accepted() {
+        let mut found = ec2(&[]);
+        found.facts.clear();
+        let p = propose(&doc(), 0, &found).expect("proposal");
+        assert_eq!(p.blockers.len(), 1);
+        assert!(p.blockers[0].contains("host key"));
+    }
+
+    fn rds(engine: &str, iam: &str) -> Found {
+        Found {
+            source: Source::Rds,
+            account: "111122223333".into(),
+            region: "eu-west-1".into(),
+            provider_id: "orders".into(),
+            target: "orders.abc.eu-west-1.rds.amazonaws.com:5432".into(),
+            tags: BTreeMap::new(),
+            facts: tags(&[("engine", engine), ("iam_auth", iam)]),
+        }
+    }
+
+    #[test]
+    fn databases_become_postgres_or_mysql_resources() {
+        let p = propose(&doc(), 1, &rds("aurora-postgresql", "true")).expect("postgres");
+        assert_eq!(p.name, "rds-orders");
+        assert_eq!(p.kind, limen_core::resource::ResourceKind::Postgres);
+        assert_eq!(p.spec["postgres"]["iam_auth"], true);
+        assert_eq!(
+            p.spec["postgres"]["endpoint"],
+            "orders.abc.eu-west-1.rds.amazonaws.com:5432"
+        );
+        let p = propose(&doc(), 1, &rds("mysql", "false")).expect("mysql");
+        assert_eq!(p.kind, limen_core::resource::ResourceKind::Mysql);
+        assert_eq!(p.spec["mysql"]["iam_auth"], false);
+        let p = propose(&doc(), 1, &rds("oracle-ee", "false")).expect("proposal");
+        assert!(p.blockers[0].contains("oracle-ee"));
+    }
+
+    #[test]
+    fn a_cluster_becomes_a_kubernetes_resource() {
+        let found = Found {
+            source: Source::Eks,
+            account: "111122223333".into(),
+            region: "eu-west-1".into(),
+            provider_id: "prod-eks".into(),
+            target: "prod-eks".into(),
+            tags: BTreeMap::new(),
+            facts: BTreeMap::new(),
+        };
+        let p = propose(&doc(), 2, &found).expect("proposal");
+        assert_eq!(p.spec["kubernetes"]["cluster_name"], "prod-eks");
+        assert_eq!(found.key(), "aws:111122223333:eu-west-1:eks:prod-eks");
+    }
+
+    #[test]
+    fn discovered_resources_never_replace_a_static_one() {
+        let base = base();
+        let p = propose(&doc(), 0, &ec2(&[])).expect("proposal");
+        let selector = limen_core::labels::Labels::default();
+        let fresh = resource_doc(&p.name, &p.labels, &p.spec, &selector).expect("resource");
+        let clash = resource_doc("web-prod", &p.labels, &p.spec, &selector).expect("resource");
+        let (merged, skipped) = base.with_discovered([fresh, clash]);
+        assert!(merged.resource("web-prod-1").is_some());
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].0, "web-prod");
+        // The static web-prod is untouched.
+        assert_eq!(
+            merged
+                .resource("web-prod")
+                .expect("static")
+                .spec
+                .ssh
+                .as_ref()
+                .expect("ssh")
+                .address,
+            "10.0.0.2:22"
+        );
+        // Roles select the discovered one by label, like any other.
+        let can = merged
+            .what_can(&["sre".to_owned()], None)
+            .expect("what_can");
+        assert!(can.standing.iter().any(|r| r.name == "web-prod"));
+    }
+}

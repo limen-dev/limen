@@ -1,6 +1,7 @@
 //! Shared test fixtures: temporary directories, a mock OIDC provider, and
 //! access to the test database.
 
+pub mod fake_aws;
 pub mod fake_datadog;
 pub mod idp;
 pub mod kube_api;

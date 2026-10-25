@@ -3128,6 +3128,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "url",
  "uuid",
 ]
 
@@ -3184,6 +3185,7 @@ dependencies = [
  "limen-policy",
  "limen-proto",
  "limen-session",
+ "limen-testkit",
  "limen-tunnel",
  "md-5",
  "metrics",

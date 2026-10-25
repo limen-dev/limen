@@ -721,6 +721,42 @@ impl Policy {
         out.into_values().collect()
     }
 
+    /// This policy plus accepted discovered resources (ADR-0027). Discovered
+    /// resources look like static ones to roles, which select them by labels
+    /// as before. A name already taken by a static resource is never
+    /// replaced, and a resource that fails validation is skipped; both come
+    /// back in the second value so the caller can say so.
+    #[must_use]
+    pub fn with_discovered(
+        &self,
+        discovered: impl IntoIterator<Item = ResourceDoc>,
+    ) -> (Policy, Vec<(String, String)>) {
+        let mut out = self.clone();
+        let mut skipped = Vec::new();
+        for resource in discovered {
+            let name = resource.metadata.name.clone();
+            if out.resources.contains_key(&name) {
+                skipped.push((name, "a resource with that name already exists".to_owned()));
+                continue;
+            }
+            if let Err(e) = validate_resource(&resource) {
+                skipped.push((name, e.to_string()));
+                continue;
+            }
+            if let Some(web) = &resource.spec.web
+                && out
+                    .resources
+                    .values()
+                    .any(|r| r.spec.web.as_ref().is_some_and(|w| w.host == web.host))
+            {
+                skipped.push((name, "web host already in use".to_owned()));
+                continue;
+            }
+            out.resources.insert(name, resource);
+        }
+        (out, skipped)
+    }
+
     /// Every discovery document, in name order.
     pub fn discovery(&self) -> impl Iterator<Item = &discovery::DiscoveryDoc> {
         self.discovery.values()

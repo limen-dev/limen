@@ -61,6 +61,11 @@ pub enum AdminCommand {
         #[arg(long)]
         reason: String,
     },
+    /// Resources workers found in a cloud account, waiting for you (ADR-0027).
+    Discovery {
+        #[command(subcommand)]
+        command: DiscoveryCommand,
+    },
     /// Active access grants, from approved requests and break-glass.
     Grants {
         /// Also grants that ended in the last 30 days.
@@ -98,6 +103,30 @@ pub enum AdminCommand {
         /// Why. Recorded in the audit trail.
         #[arg(long)]
         reason: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiscoveryCommand {
+    /// List discovered resources. Pending ones and pending changes come first.
+    Status {
+        /// pending, accepted, rejected, stale, or changed.
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Make a discovered resource (or its pending change) real.
+    Accept {
+        key: String,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Turn a discovered resource away.
+    Reject {
+        key: String,
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -299,6 +328,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 &rows,
             );
         }
+        AdminCommand::Discovery { command } => discovery(&mut admin, command).await?,
         AdminCommand::Grants { all, json } => super::access::grants(proxy, all, json).await?,
         AdminCommand::RevokeGrant { request_id, reason } => {
             super::access::revoke_grant(proxy, &request_id, &reason).await?;
@@ -314,6 +344,113 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
         | AdminCommand::Locks
         | AdminCommand::Revoke { .. }
         | AdminCommand::KillSession { .. }) => run_locks(&mut admin, lock_command).await?,
+    }
+    Ok(())
+}
+
+/// Discovered resources (ADR-0027).
+async fn discovery(
+    admin: &mut AdminClient<tonic::transport::Channel>,
+    command: DiscoveryCommand,
+) -> anyhow::Result<()> {
+    use limen_proto::v1::ListDiscoveredRequest;
+    match command {
+        DiscoveryCommand::Status { state, json } => {
+            let items = admin
+                .list_discovered(ListDiscoveredRequest {
+                    state: state.unwrap_or_default(),
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .items;
+            if json {
+                let v: Vec<_> = items
+                    .iter()
+                    .map(|i| serde_json::json!({
+                        "key": i.key, "name": i.name, "kind": i.kind, "state": i.state, "labels": i.labels,
+                        "target": i.target, "change_pending": i.change_pending, "changes": i.changes,
+                        "blockers": i.blockers, "document": i.document,
+                    }))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&v)?);
+                return Ok(());
+            }
+            if items.is_empty() {
+                ui::info("Nothing discovered yet.");
+                return Ok(());
+            }
+            let rows: Vec<[String; 5]> = items
+                .iter()
+                .map(|i| {
+                    let state = match (i.state.as_str(), i.change_pending) {
+                        ("accepted", true) => ui::yellow("accepted, change pending"),
+                        ("pending", _) => ui::yellow("pending"),
+                        ("accepted", _) => ui::green("accepted"),
+                        ("stale", _) => ui::red("stale"),
+                        (s, _) => ui::dim(s),
+                    };
+                    let mut labels: Vec<_> = i
+                        .labels
+                        .iter()
+                        .filter(|(k, _)| !k.starts_with("limen.io/"))
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect();
+                    labels.sort();
+                    let note = if i.blockers.is_empty() {
+                        labels.join(" ")
+                    } else {
+                        ui::red(&i.blockers.join("; "))
+                    };
+                    [
+                        ui::bold(&i.name),
+                        ui::kind_label(&i.kind),
+                        state,
+                        ui::dim(&i.key),
+                        note,
+                    ]
+                })
+                .collect();
+            ui::print_table(["name", "kind", "state", "key", "labels"], &rows);
+            for i in items.iter().filter(|i| i.change_pending) {
+                for c in &i.changes {
+                    anstream::println!("  {} {}", ui::bold(&i.name), c);
+                }
+            }
+            ui::hint("Accept with `limen admin discovery accept <key>`.");
+        }
+        DiscoveryCommand::Accept { key, note } => {
+            review_discovered(admin, &key, note, true).await?;
+        }
+        DiscoveryCommand::Reject { key, note } => {
+            review_discovered(admin, &key, note, false).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn review_discovered(
+    admin: &mut AdminClient<tonic::transport::Channel>,
+    key: &str,
+    note: Option<String>,
+    accept: bool,
+) -> anyhow::Result<()> {
+    let info = admin
+        .review_discovered(limen_proto::v1::ReviewDiscoveredRequest {
+            key: key.to_owned(),
+            accept,
+            note: note.unwrap_or_default(),
+        })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner();
+    if accept {
+        ui::success(&format!(
+            "Accepted {}. Roles that select its labels can now reach it.",
+            ui::bold(&info.name)
+        ));
+    } else {
+        ui::success(&format!("Rejected {}.", ui::bold(&info.name)));
     }
     Ok(())
 }

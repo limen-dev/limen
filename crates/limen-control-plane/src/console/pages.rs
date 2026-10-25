@@ -1299,7 +1299,7 @@ fn summarize(doc: &Document) -> String {
 }
 
 fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
-    let docs = state.policy.current().policy.documents();
+    let docs = state.policy.base().policy.documents();
     [
         ("Roles", "role"),
         ("Role mappings", "role_mapping"),
@@ -1326,7 +1326,7 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
 }
 
 fn policy_page(state: &AppState, auth: &Auth, pasted: String, result: Option<DryRun>) -> Response {
-    let loaded = state.policy.current();
+    let loaded = state.policy.base();
     html(
         PolicyPage {
             chrome: chrome(state, auth, "policy"),
@@ -1385,7 +1385,7 @@ pub async fn dry_run(
     }
     let result = match limen_policy::Policy::parse_yaml([("pasted", form.yaml.as_str())]) {
         Ok(next) => {
-            let diff = state.policy.current().policy.diff(&next);
+            let diff = state.policy.base().policy.diff(&next);
             DryRun {
                 error: None,
                 no_changes: diff.is_empty(),

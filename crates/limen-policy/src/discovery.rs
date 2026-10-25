@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use limen_core::labels::Labels;
+use limen_core::resource::ResourceKind;
 use serde::{Deserialize, Serialize};
 
 use crate::duration::DurationStr;
@@ -60,6 +61,16 @@ pub struct DiscoverySpec {
 }
 
 impl DiscoverySpec {
+    /// Whether a worker with these labels (from its certificate) runs this
+    /// document: every `worker_selector` label must match exactly. An empty
+    /// selector means every worker. A component's display name never matches.
+    #[must_use]
+    pub fn worker_runs(&self, worker_labels: &BTreeMap<String, String>) -> bool {
+        self.worker_selector.iter().all(|(k, v)| {
+            k != limen_core::names::NAME_LABEL && worker_labels.get(k).is_some_and(|a| a == v)
+        })
+    }
+
     #[must_use]
     pub fn interval(&self) -> Duration {
         self.interval.map_or(DEFAULT_INTERVAL, |d| d.0)
@@ -131,6 +142,18 @@ pub enum Source {
 }
 
 impl Source {
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "ec2" => Source::Ec2,
+            "rds" => Source::Rds,
+            "redshift" => Source::Redshift,
+            "elasticache" => Source::Elasticache,
+            "eks" => Source::Eks,
+            _ => return None,
+        })
+    }
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -383,6 +406,240 @@ fn valid_role_arn(arn: &str) -> bool {
             b.is_ascii_alphanumeric()
                 || matches!(b, b'+' | b'=' | b',' | b'.' | b'@' | b'_' | b'-' | b'/')
         })
+}
+
+// ---------------------------------------------------------------------------
+// From what a worker saw to a proposed resource.
+
+/// One thing a worker saw in a cloud account. It reports facts, not names or
+/// labels: the control plane turns them into a [`Proposal`] with the
+/// `discovery` document, so a compromised worker can't choose either.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Found {
+    pub source: Source,
+    pub account: String,
+    pub region: String,
+    /// The provider's id: an instance id, a DB instance identifier, a cluster name.
+    pub provider_id: String,
+    /// Where to dial: `host:port`, or the cluster name for EKS.
+    pub target: String,
+    /// Only the tags the matcher uses (its filter, its name template, its
+    /// `labels_from_tags`), never the rest.
+    pub tags: BTreeMap<String, String>,
+    /// Source facts: `engine`, `iam_auth`, `tls`, `host_key`, `cluster_identifier`, ...
+    pub facts: BTreeMap<String, String>,
+}
+
+impl Found {
+    /// The identity of the thing across scans: stable while it exists.
+    #[must_use]
+    pub fn key(&self) -> String {
+        format!(
+            "aws:{}:{}:{}:{}",
+            self.account,
+            self.region,
+            self.source.as_str(),
+            self.provider_id
+        )
+    }
+}
+
+/// What the control plane would make of a [`Found`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Proposal {
+    pub name: String,
+    pub labels: BTreeMap<String, String>,
+    pub kind: ResourceKind,
+    pub target: String,
+    /// The protocol section of the resource (`{"postgres": {...}}`).
+    pub spec: serde_json::Value,
+    /// Things that stop it being accepted until they are fixed.
+    pub blockers: Vec<String>,
+}
+
+/// Labels the control plane puts on every discovered resource, from facts it
+/// checked rather than from tags.
+pub const LABEL_SOURCE: &str = "limen.io/source";
+pub const LABEL_REGION: &str = "limen.io/region";
+pub const LABEL_ACCOUNT: &str = "limen.io/account";
+pub const LABEL_DISCOVERED: &str = "limen.io/discovered";
+
+fn tag_matches(filter: &BTreeMap<String, Vec<String>>, tags: &BTreeMap<String, String>) -> bool {
+    filter.iter().all(|(key, values)| {
+        tags.get(key)
+            .is_some_and(|actual| values.iter().any(|v| v == "*" || v == actual))
+    })
+}
+
+fn account_of(role_arn: &str) -> Option<&str> {
+    role_arn.split(':').nth(4)
+}
+
+/// Turn what a worker saw into a proposed resource, applying the document's
+/// rules: the account and region must be the document's, the tags must match
+/// its filter, the name comes from its template, and only its allow-listed
+/// tags become labels. `Err` means the worker reported something the document
+/// doesn't ask for, and the report is dropped.
+pub fn propose(doc: &DiscoveryDoc, matcher: usize, found: &Found) -> Result<Proposal, String> {
+    let m = doc
+        .spec
+        .matchers
+        .get(matcher)
+        .ok_or("no such matcher in the discovery document")?;
+    if m.source != found.source {
+        return Err(format!(
+            "matcher {matcher} looks for {}, not {}",
+            m.source.as_str(),
+            found.source.as_str()
+        ));
+    }
+    if !doc.spec.regions.contains(&found.region) {
+        return Err(format!("region {} is not in the document", found.region));
+    }
+    if !doc.spec.accounts.is_empty()
+        && !doc
+            .spec
+            .accounts
+            .iter()
+            .any(|a| account_of(&a.role_arn) == Some(found.account.as_str()))
+    {
+        return Err(format!("account {} is not in the document", found.account));
+    }
+    if found.account.len() != 12 || !found.account.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("the account is not a 12-digit id".into());
+    }
+    if found.provider_id.is_empty() || found.provider_id.len() > 200 {
+        return Err("the provider id is missing or too long".into());
+    }
+    if !tag_matches(&m.tags, &found.tags) {
+        return Err("the tags don't match the matcher's filter".into());
+    }
+
+    let default_template = if m.source == Source::Ec2 {
+        "{{ tag.Name }}"
+    } else {
+        "{{ id }}"
+    };
+    let template = m.name_template.as_deref().unwrap_or(default_template);
+    let name = render_name(template, |placeholder| match placeholder {
+        "id" => Some(found.provider_id.clone()),
+        "region" => Some(found.region.clone()),
+        "account" => Some(found.account.clone()),
+        other => other
+            .strip_prefix("tag.")
+            .and_then(|k| found.tags.get(k).cloned()),
+    })
+    // A name that can't be built from the tags falls back to the id: the
+    // resource is still found, and the admin sees why it has that name.
+    .or_else(|| render_name("{{ id }}", |_| Some(found.provider_id.clone())))
+    .ok_or("no usable name")?;
+
+    // Static labels first, tag labels over them, ours over everything.
+    let mut labels: BTreeMap<String, String> = m
+        .labels
+        .iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+    for key in &m.labels_from_tags {
+        if let Some(value) = found.tags.get(key) {
+            let label = key.to_lowercase();
+            let mut probe = Labels::default();
+            if probe.insert(label.clone(), value.clone()).is_ok() {
+                labels.insert(label, value.clone());
+            }
+        }
+    }
+    labels.insert(LABEL_DISCOVERED.into(), "true".into());
+    labels.insert(LABEL_SOURCE.into(), m.source.as_str().into());
+    labels.insert(LABEL_REGION.into(), found.region.clone());
+    labels.insert(LABEL_ACCOUNT.into(), found.account.clone());
+
+    let fact = |k: &str| found.facts.get(k).map(String::as_str);
+    let mut blockers = Vec::new();
+    let (kind, spec) = match m.source {
+        Source::Ec2 => {
+            let host_key = fact("host_key").filter(|k| !k.is_empty());
+            if host_key.is_none() {
+                blockers.push(
+                    "the instance's SSH host key is not known (its console output has none); the worker refuses unpinned hosts"
+                        .to_owned(),
+                );
+            }
+            (
+                ResourceKind::Ssh,
+                serde_json::json!({ "ssh": { "address": found.target, "host_key": host_key } }),
+            )
+        }
+        Source::Rds => {
+            let engine = fact("engine").unwrap_or_default();
+            let (kind, section) = if engine.contains("postgres") {
+                (ResourceKind::Postgres, "postgres")
+            } else if engine.contains("mysql") || engine.contains("mariadb") {
+                (ResourceKind::Mysql, "mysql")
+            } else {
+                blockers.push(format!("engine {engine:?} is not PostgreSQL or MySQL"));
+                (ResourceKind::Postgres, "postgres")
+            };
+            (
+                kind,
+                serde_json::json!({ section: {
+                    "endpoint": found.target,
+                    "region": found.region,
+                    "iam_auth": fact("iam_auth") == Some("true"),
+                    "password_dir": (fact("iam_auth") != Some("true")).then_some("/etc/limen/passwords"),
+                }}),
+            )
+        }
+        Source::Redshift => (
+            ResourceKind::Redshift,
+            serde_json::json!({ "redshift": {
+                "endpoint": found.target,
+                "region": found.region,
+                "iam_auth": true,
+                "cluster_identifier": found.provider_id,
+            }}),
+        ),
+        Source::Elasticache => (
+            ResourceKind::Redis,
+            serde_json::json!({ "redis": {
+                "endpoint": found.target,
+                "region": found.region,
+                "iam_auth": fact("iam_auth") == Some("true"),
+                "cache_name": fact("replication_group").unwrap_or(&found.provider_id),
+                "tls": fact("tls") != Some("false"),
+            }}),
+        ),
+        Source::Eks => (
+            ResourceKind::Kubernetes,
+            serde_json::json!({ "kubernetes": { "cluster_name": found.target } }),
+        ),
+    };
+    Ok(Proposal {
+        name,
+        labels,
+        kind,
+        target: found.target.clone(),
+        spec,
+        blockers,
+    })
+}
+
+/// The resource document for an accepted proposal. `worker_selector` comes
+/// from the discovery document, so only workers it names serve the resource.
+pub fn resource_doc(
+    name: &str,
+    labels: &BTreeMap<String, String>,
+    spec: &serde_json::Value,
+    worker_selector: &Labels,
+) -> Result<crate::model::ResourceDoc, String> {
+    let mut spec = spec.clone();
+    spec["worker_selector"] = serde_json::to_value(worker_selector).map_err(|e| e.to_string())?;
+    let doc = serde_json::json!({
+        "version": "v1",
+        "metadata": { "name": name, "labels": labels },
+        "spec": spec,
+    });
+    serde_json::from_value(doc).map_err(|e| format!("not a valid resource: {e}"))
 }
 
 #[cfg(test)]

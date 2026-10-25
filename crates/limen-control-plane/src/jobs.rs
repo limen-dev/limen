@@ -60,6 +60,29 @@ pub async fn access_expiry(state: AppState, mut shutdown: watch::Receiver<bool>)
     }
 }
 
+/// Keep the accepted discovered resources in the policy in step with the
+/// database (another replica may have accepted one), and sweep the stale
+/// (ADR-0027).
+pub async fn discovery_sweep(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(10));
+    let mut n: u32 = 0;
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::discovery::refresh_overlay(&state).await {
+            tracing::warn!(error = %e, "refreshing discovered resources failed; keeping the last");
+        }
+        n = n.wrapping_add(1);
+        if n.is_multiple_of(6)
+            && let Err(e) = crate::discovery::sweep(&state).await
+        {
+            tracing::warn!(error = %e, "sweeping discovered resources failed");
+        }
+    }
+}
+
 /// Whether a replica that last managed a heartbeat `since_ok` ago must stop
 /// shipping to S3: its row goes stale 15 seconds after the last success, and
 /// then another process may take the id over and write the same chain.

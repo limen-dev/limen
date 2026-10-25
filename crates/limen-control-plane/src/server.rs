@@ -16,6 +16,7 @@ use limen_proto::v1::audit_handoff_server::AuditHandoffServer;
 use limen_proto::v1::audit_ingest_server::AuditIngestServer;
 use limen_proto::v1::audit_search_server::AuditSearchServer;
 use limen_proto::v1::auth_server::AuthServer;
+use limen_proto::v1::discovery_server::DiscoveryServer;
 use limen_proto::v1::enrollment_server::EnrollmentServer;
 use limen_proto::v1::policy_sync_server::PolicySyncServer;
 use limen_proto::v1::registry_server::RegistryServer;
@@ -35,6 +36,7 @@ use crate::services::access::AccessService;
 use crate::services::admin::AdminService;
 use crate::services::audit_search::AuditSearchService;
 use crate::services::auth::AuthService;
+use crate::services::discovery::DiscoveryService;
 use crate::services::enrollment::EnrollmentService;
 use crate::services::handoff::HandoffService;
 use crate::services::ingest::IngestService;
@@ -95,8 +97,9 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 }
 
 /// The gRPC services the API serves (the names clients put in the path).
-fn grpc_services() -> [&'static str; 11] {
+fn grpc_services() -> [&'static str; 12] {
     [
+        DiscoveryServer::<DiscoveryService>::NAME,
         AuditSearchServer::<AuditSearchService>::NAME,
         AccessServer::<AccessService>::NAME,
         AuthServer::<AuthService>::NAME,
@@ -166,6 +169,10 @@ pub async fn serve_api(
     .add_service(
         AuditSearchServer::new(AuditSearchService(state.clone()))
             .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        DiscoveryServer::new(DiscoveryService(state.clone()))
+            .max_decoding_message_size(8 * 1024 * 1024),
     )
     .add_service(
         EnrollmentServer::new(EnrollmentService(state.clone()))
