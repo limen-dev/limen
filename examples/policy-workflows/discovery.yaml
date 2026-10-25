@@ -1,5 +1,5 @@
 # Cloud discovery (ADR-0027). Needs a worker started with --discovery and a
-# describe-only role (deploy/terraform/modules/discovery). Discovered
+# describe-only IAM role (see docs/guides/discovery.md, "IAM"). Discovered
 # resources are pending until an admin accepts them.
 kind: discovery
 version: v1

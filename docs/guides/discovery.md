@@ -2,7 +2,7 @@
 
 Hosts, databases, and clusters come and go; writing them by hand does not survive autoscaling. Discovery finds them in your AWS accounts **without ever granting access by itself** ([ADR-0027](../adr/0027-resource-discovery.md)).
 
-> **Unverified against real AWS.** The parsers follow AWS's documented response shapes and are tested against a stand-in (`limen-testkit`'s `fake_aws`) that insists on signed, read-only calls. Nothing here has run against a real account yet; that is part of Phase 14's verification.
+> **Unverified against real AWS.** The parsers follow AWS's documented response shapes and are tested against a stand-in (`limen-testkit`'s `fake_aws`) that insists on signed, read-only calls. Nothing here has run against a real account yet; that is tracked in #123.
 
 ## How it works
 
@@ -62,7 +62,17 @@ Seen, then not seen in `stale_after_cycles` **complete** scans marks it **stale*
 
 ## IAM
 
-`deploy/terraform/modules/discovery` creates the role: `Describe*`/`List*` for the sources you choose, plus `ec2:GetConsoleOutput`; no `iam:PassRole`, nothing that reads or writes data. Only the roles you list can assume it, optionally with an external id.
+Create one role per account that your workers can assume (no Terraform module yet; it is part of #68). It only reads:
+
+| Source | Actions |
+|---|---|
+| ec2 | `ec2:DescribeInstances`, `ec2:GetConsoleOutput` |
+| rds | `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:ListTagsForResource` |
+| redshift | `redshift:DescribeClusters` |
+| elasticache | `elasticache:DescribeReplicationGroups`, `elasticache:ListTagsForResource` |
+| eks | `eks:ListClusters`, `eks:DescribeCluster` |
+
+Grant only the sources your `match` list uses, on resource `*` (describe calls cannot be scoped). No `iam:PassRole`, nothing that reads or writes data. Trust only the roles your workers run as, optionally with an `sts:ExternalId`, and put that role's ARN in `role_arn`.
 
 ## Operating
 

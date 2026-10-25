@@ -213,7 +213,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: secrets reach the search index | Masked before indexing (passwords, tokens, keys, URLs with credentials); the index is a copy, the originals stay under the sinks' controls. *Residual:* masking is best effort |
 | E: a tag steers a discovered resource into a role (ADR-0027) | Only `labels_from_tags` become labels; a new resource and any change to name, labels, or target wait for an admin (`auto_accept` only for named label keys, never name or target); `limen.io/*` labels are set from checked facts and win; the validator warns on roles selecting tag-derived labels |
 | S/T: a compromised worker reports fake resources | The control plane makes names and labels; a report outside the document's accounts, regions, tag filter, and matchers is dropped; only workers named by `worker_selector` may report; everything lands pending |
-| E: over-broad discovery IAM | The Terraform module grants only `Describe*`/`List*` for chosen sources and `ec2:GetConsoleOutput`; no `iam:PassRole`, no data plane |
+| E: over-broad discovery IAM | The role (permissions listed in the discovery guide) grants only `Describe*`/`List*` for chosen sources and `ec2:GetConsoleOutput`; no `iam:PassRole`, no data plane |
 | T: a hostile AWS answer exhausts the worker | The XML reader is bounded in size, depth, and nodes; paging is bounded |
 | D/E: stale or vanished targets | Not seen for several *complete* scans, a resource is stale and refused; removed later, never from under an open session |
 | E: an owner certifies their own access (ADR-0029) | Self-review is refused and routed to the admin pool; an admin cannot decide an item about themselves; overdue items escalate |

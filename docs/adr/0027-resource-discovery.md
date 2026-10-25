@@ -29,7 +29,7 @@ Resources (hosts, databases, clusters) are written by hand in policy YAML. That 
 - **Tag injection is the main risk, so changes are quarantined.** Labels come from tags, and anyone who can write an EC2 tag could otherwise steer a resource into a role's selector. Defences: only the listed tag keys become labels; a *new* resource or a *changed label* on a known one is held as **pending** until an admin accepts it in the console (or `limen admin discovery accept`), unless the document opts into `auto_accept` for specific keys; every change emits `resource.discovered` or `resource.relabel`; the policy validator warns when a role selects on a tag-derived label.
 - **Lifecycle:** seen, then missing for N cycles marks it *stale* (new sessions are refused, fail closed), then it is removed after a TTL. A resource with open sessions is never removed from under them.
 - **Console and CLI:** a "Discovered" tab on Resources (pending, accepted, stale) with accept and reject; `limen admin discovery status`. Dashboard panel: resources by state.
-- **Terraform:** a module for the worker's describe-only IAM role (least privilege, per source) in `deploy/terraform/modules/discovery`.
+- **Terraform:** not part of Phase 13. The describe-only IAM role is in the scope of the Terraform modules issue (#68, Phase 14); the guide lists the permissions to create it by hand.
 - **Testing:** unit tests with recorded API responses and, in compose, a LocalStack stand-in for EC2 `DescribeInstances` (assumption to verify when the phase starts). Everything is labelled **unverified against real AWS** until Phase 14.
 
 ## Threats this design has to survive

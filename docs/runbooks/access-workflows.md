@@ -19,7 +19,7 @@ Nothing to do for events: the index fills from the audit stream and keeps 30 day
 
 ## Turn on discovery
 
-1. Create the IAM role: `deploy/terraform/modules/discovery`, one per account, trusting the roles your workers run as.
+1. Create the describe-only IAM role (permissions in the discovery guide, "IAM"), one per account, trusting the roles your workers run as.
 2. Add a `kind: discovery` document ([example](../../examples/policy-workflows/discovery.yaml)). Set `worker_selector` to the pool of workers that can reach the targets, because it is also the selector of what they find.
 3. Start those workers with `--discovery`. Watch `limen_discovery_scans_total{outcome}` and the worker log.
 4. Review: console *Resources → Discovered*, or `limen admin discovery status`. Accept what you recognise. Roles that select a label copied from a tag are a risk the console warns about; prefer `auto_accept` only for labels no role selects on.
