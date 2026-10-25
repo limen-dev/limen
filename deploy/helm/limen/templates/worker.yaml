@@ -6,6 +6,15 @@
 {{- $pxc := include "limen.merged" (dict "defaults" $.Values.proxyDefaults "over" $px) | fromYaml }}
 {{- $dns := first (splitList "," $pxc.dnsNames) }}
 ---
+{{- if $c.serviceAccount.annotations }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{ include "limen.labels" $ref | nindent 4 }}
+  annotations: {{ toYaml $c.serviceAccount.annotations | nindent 4 }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +31,9 @@ spec:
     metadata:
       labels: {{ include "limen.labels" $ref | nindent 8 }}
     spec:
+      {{- if $c.serviceAccount.annotations }}
+      serviceAccountName: {{ $name }}
+      {{- end }}
       {{- include "limen.pullSecrets" $ | nindent 6 }}
       {{- if le (int $c.terminationGracePeriodSeconds) (int $c.drainTimeoutSecs) }}
       {{- fail "workers.<key>.terminationGracePeriodSeconds must exceed worker.drainTimeoutSecs" }}
@@ -51,6 +63,9 @@ spec:
             - name: LIMEN_JOIN_TOKEN
               valueFrom: { secretKeyRef: { name: {{ $c.joinSecret | default $.Values.existingSecrets.workerJoin | quote }}, key: token } }
             - { name: LIMEN_DATA_DIR, value: /var/lib/limen/worker }
+            {{- if $c.discovery }}
+            - { name: LIMEN_DISCOVERY, value: "true" }
+            {{- end }}
             {{- with $c.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

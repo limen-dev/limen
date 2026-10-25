@@ -82,6 +82,10 @@ Terraform creates what is not Kubernetes; the chart installs Limen. You bring th
 
 The `limen-values.yaml` includes the IRSA role annotation, so the control plane can reach KMS and S3 without keys. The debug-container step is unverified; if your cluster disallows ephemeral containers, `kubectl cp` needs `tar`, which the image lacks, so mount the export directory on a volume instead.
 
+## Discovery
+
+Workers can find EC2 instances, databases, caches and clusters ([discovery guide](discovery.md)). Set `discovery = true` on a worker group in `examples/complete`: it sets `LIMEN_DISCOVERY` and creates the describe-only role through `modules/discovery`; use the `discovery_role_arn` output as `role_arn` in your discovery document. On Kubernetes, apply `modules/discovery` with your worker IRSA role in `worker_role_arns`, then set `discovery: true` and `serviceAccount.annotations` on the worker group. Discovery in other accounts needs one `modules/discovery` per account and the `assume_policy_arn` on the worker role.
+
 ## Not covered yet
 
 - **The proxy's public TLS certificate.** Design §91 leaves it open (ACM exportable certificate or one supplied from Secrets Manager). The load balancers pass TCP through, as the design requires, and nothing here provisions the certificate. This blocks real browser and CLI trust until it is decided.

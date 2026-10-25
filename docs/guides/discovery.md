@@ -62,7 +62,7 @@ Seen, then not seen in `stale_after_cycles` **complete** scans marks it **stale*
 
 ## IAM
 
-Create one role per account that your workers can assume (no Terraform module yet; it is part of #68). It only reads:
+Create one role per account that your workers can assume. `deploy/terraform/modules/discovery` does it (inputs: the worker role ARNs, the `sources`, an optional `external_id`; outputs: `role_arn` for the document and a policy for cross-account workers), and `examples/complete` shows it wired to a worker group with `discovery = true` (sets `LIMEN_DISCOVERY`). On Kubernetes set `discovery: true` and `serviceAccount.annotations` (the IRSA role) on a worker group in the Helm chart. The module is unverified until it has run against a real account (#123). It only reads:
 
 | Source | Actions |
 |---|---|

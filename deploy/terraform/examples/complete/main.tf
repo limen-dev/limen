@@ -169,12 +169,15 @@ locals {
       desired_capacity = v.desired_capacity
       min_size         = min(v.desired_capacity, 1)
       max_size         = max(v.desired_capacity * 2, 2)
-      environment = {
-        LIMEN_PROXY_ADDR         = "${var.proxies[v.proxy].dns_name}:443"
-        LIMEN_PROXY_NAME         = var.proxies[v.proxy].dns_name
-        LIMEN_MAX_SESSIONS       = tostring(v.max_sessions)
-        LIMEN_DRAIN_TIMEOUT_SECS = "300"
-      }
+      environment = merge(
+        {
+          LIMEN_PROXY_ADDR         = "${var.proxies[v.proxy].dns_name}:443"
+          LIMEN_PROXY_NAME         = var.proxies[v.proxy].dns_name
+          LIMEN_MAX_SESSIONS       = tostring(v.max_sessions)
+          LIMEN_DRAIN_TIMEOUT_SECS = "300"
+        },
+        v.discovery ? { LIMEN_DISCOVERY = "true" } : {},
+      )
       secrets = { LIMEN_JOIN_TOKEN = module.foundation.join_token_secret_arns["worker-${k}"] }
     }
   }
@@ -206,4 +209,18 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_control_plane" {
   ip_protocol                  = "tcp"
   from_port                    = 5432
   to_port                      = 5432
+}
+
+# ------------------------------------------------------------------ discovery
+# Workers with discovery = true assume this describe-only role to find EC2
+# instances, databases, caches and clusters (ADR-0027, docs/guides/discovery.md).
+# Create one per account you discover in; this one covers the account Limen runs in.
+module "discovery" {
+  source = "../../modules/discovery"
+
+  count = anytrue([for w in var.workers : w.discovery]) ? 1 : 0
+
+  name             = "${var.name}-discovery"
+  sources          = var.discovery_sources
+  worker_role_arns = [for k, w in var.workers : module.ec2.groups["worker-${k}"].role_arn if w.discovery]
 }
