@@ -152,14 +152,14 @@ fn split_utf8(bytes: &[u8]) -> (String, usize) {
 /// Serve the taps: ask who is being watched, and ship their output.
 pub async fn run(
     hub: Arc<Hub>,
-    mut channel: impl FnMut() -> anyhow::Result<tonic::transport::Channel> + Send + 'static,
+    mut channel: impl FnMut() -> anyhow::Result<limen_tunnel::connect::TracedChannel> + Send + 'static,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut tick = tokio::time::interval(FLUSH_EVERY);
     let mut last_poll = Instant::now()
         .checked_sub(POLL_EVERY)
         .unwrap_or_else(Instant::now);
-    let mut client: Option<WatchClient<tonic::transport::Channel>> = None;
+    let mut client: Option<WatchClient<limen_tunnel::connect::TracedChannel>> = None;
     loop {
         tokio::select! {
             _ = tick.tick() => {}

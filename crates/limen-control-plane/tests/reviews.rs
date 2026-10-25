@@ -18,8 +18,9 @@ use limen_proto::v1::{
     ReviewItemInfo, StartReviewRequest,
 };
 use limen_testkit::users::{ADMIN, AUDITOR, CONTRACTOR, DEVELOPER, ONCALL};
+use limen_tunnel::connect::TracedChannel as Channel;
 use rustls_pki_types::CertificateDer;
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 
 const POLICY: &str = r"
 kind: resource

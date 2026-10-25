@@ -14,7 +14,9 @@ use time::OffsetDateTime;
 
 use crate::{api, ui};
 
-fn client(proxy: Option<&str>) -> anyhow::Result<AccessClient<tonic::transport::Channel>> {
+fn client(
+    proxy: Option<&str>,
+) -> anyhow::Result<AccessClient<limen_tunnel::connect::TracedChannel>> {
     let (_, channel) = api::authenticated(proxy)?;
     Ok(AccessClient::new(channel))
 }

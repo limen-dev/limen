@@ -20,9 +20,10 @@ use limen_proto::v1::{
     ReportDiscoveryRequest, ReviewDiscoveredRequest, ScanScope,
 };
 use limen_testkit::users::{ADMIN, ONCALL};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::tls::Identity;
 use rustls_pki_types::CertificateDer;
-use tonic::{Code, transport::Channel};
+use tonic::Code;
 
 const WORKER_TOKEN: &str = "static-worker-token-0123456789abcdef0123456789";
 const HOST_KEY: &str =

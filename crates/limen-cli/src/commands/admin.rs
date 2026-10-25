@@ -370,7 +370,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
 
 /// Discovered resources (ADR-0027).
 async fn discovery(
-    admin: &mut AdminClient<tonic::transport::Channel>,
+    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
     command: DiscoveryCommand,
 ) -> anyhow::Result<()> {
     use limen_proto::v1::ListDiscoveredRequest;
@@ -450,7 +450,7 @@ async fn discovery(
 }
 
 async fn review_discovered(
-    admin: &mut AdminClient<tonic::transport::Channel>,
+    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
     key: &str,
     note: Option<String>,
     accept: bool,

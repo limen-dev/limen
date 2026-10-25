@@ -219,7 +219,11 @@ impl Rig {
         panic!("the grant never reached the proxy and the worker");
     }
 
-    async fn access(&self, user: &str, groups: &[&str]) -> AccessClient<tonic::transport::Channel> {
+    async fn access(
+        &self,
+        user: &str,
+        groups: &[&str],
+    ) -> AccessClient<limen_tunnel::connect::TracedChannel> {
         let id = self.identity(user, groups).await;
         AccessClient::new(self.d.proxy_channel(Some(id)))
     }
