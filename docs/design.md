@@ -26,6 +26,8 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 
 ## 2. Components
 
+A drawn version for presentations is in [`diagrams/`](diagrams/README.md) (draw.io source plus SVG).
+
 ```mermaid
 flowchart LR
   subgraph Laptop

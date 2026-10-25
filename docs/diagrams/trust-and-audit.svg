@@ -1,0 +1,463 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1600 1260" width="1600" height="1260" role="img" aria-labelledby="t d" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Limen credentials, audit pipeline and failure behavior</title><desc id="d">Four CA keys in KMS sign short-lived credentials; audit events are spooled, hash-chained and shipped to S3 and Datadog; a table shows what keeps working when each dependency is down.</desc>
+<defs><marker id="ah1F2A44" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#1F2A44"/></marker><marker id="ah5B6B7F" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#5B6B7F"/></marker><filter id="sh" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity=".12"/></filter></defs>
+<rect width="1600" height="1260" fill="#ffffff"/>
+<image x="36" y="18" width="168" height="60" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1NjAgMjAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEwIDEwKSBzY2FsZSgwLjcpIj4KICAgIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxsaW5lIHgxPSIzNiIgeTE9IjIyMCIgeDI9IjIyMCIgeTI9IjIyMCIgc3Ryb2tlPSIjMTRCOEE2IiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICAgIDxjaXJjbGUgY3g9IjEyOCIgY3k9IjE0MCIgcj0iMTUiIGZpbGw9IiMxNEI4QTYiLz4KICA8L2c+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjMyIDUwKSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjEyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPHBhdGggZD0iTTEwIDAgVjEwMCIvPgogICAgPHBhdGggZD0iTTQyIDQwIFYxMDAiLz4KICAgIDxjaXJjbGUgY3g9IjQyIiBjeT0iMTIiIHI9IjciIGZpbGw9IiMxNEI4QTYiIHN0cm9rZT0ibm9uZSIvPgogICAgPHBhdGggZD0iTTc0IDQwIFYxMDAgTTc0IDYyIGEyMiAyMiAwIDAgMSA0NCAwIFYxMDAgTTExOCA2MiBhMjIgMjIgMCAwIDEgNDQgMCBWMTAwIi8+CiAgICA8cGF0aCBkPSJNMTgyIDcwIEgyNDIgQTMwIDMwIDAgMSAwIDIzMyA5MSIvPgogICAgPHBhdGggZD0iTTI2MiA0MCBWMTAwIE0yNjIgNjIgYTIyIDIyIDAgMCAxIDQ0IDAgVjEwMCIvPgogIDwvZz4KPC9zdmc+Cg==" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1NjAgMjAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEwIDEwKSBzY2FsZSgwLjcpIj4KICAgIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxsaW5lIHgxPSIzNiIgeTE9IjIyMCIgeDI9IjIyMCIgeTI9IjIyMCIgc3Ryb2tlPSIjMTRCOEE2IiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICAgIDxjaXJjbGUgY3g9IjEyOCIgY3k9IjE0MCIgcj0iMTUiIGZpbGw9IiMxNEI4QTYiLz4KICA8L2c+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjMyIDUwKSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjEyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPHBhdGggZD0iTTEwIDAgVjEwMCIvPgogICAgPHBhdGggZD0iTTQyIDQwIFYxMDAiLz4KICAgIDxjaXJjbGUgY3g9IjQyIiBjeT0iMTIiIHI9IjciIGZpbGw9IiMxNEI4QTYiIHN0cm9rZT0ibm9uZSIvPgogICAgPHBhdGggZD0iTTc0IDQwIFYxMDAgTTc0IDYyIGEyMiAyMiAwIDAgMSA0NCAwIFYxMDAgTTExOCA2MiBhMjIgMjIgMCAwIDEgNDQgMCBWMTAwIi8+CiAgICA8cGF0aCBkPSJNMTgyIDcwIEgyNDIgQTMwIDMwIDAgMSAwIDIzMyA5MSIvPgogICAgPHBhdGggZD0iTTI2MiA0MCBWMTAwIE0yNjIgNjIgYTIyIDIyIDAgMCAxIDQ0IDAgVjEwMCIvPgogIDwvZz4KPC9zdmc+Cg=="/>
+<rect x="222" y="28" width="2" height="42" rx="0" fill="#CBD5E1" stroke="none" stroke-width="0"/>
+<text x="242" y="50" font-size="22" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="242" dy="0">Trust, audit, and failure</tspan>
+</text>
+<text x="242" y="72" font-size="13" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="242" dy="0">How credentials are issued and how short they live, where every event goes, and what happens when a dependency is down</tspan>
+</text>
+<rect x="30" y="120" width="760" height="650" rx="10" fill="#fff" stroke="#CBD5E1" stroke-width="1.4"/>
+<text x="50" y="150" font-size="16" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">Credentials: signed by keys that never leave KMS</tspan>
+</text>
+<text x="50" y="169" font-size="11.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">Every credential is short-lived and names exactly who it is for</tspan>
+</text>
+<image x="50" y="190" width="48" height="48" href="data:image/png;base64,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" xlink:href="data:image/png;base64,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"/>
+<text x="110" y="207" font-size="13" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="110" dy="0">Four CA keys in AWS KMS</tspan>
+</text>
+<rect x="110" y="216" width="158" height="26" rx="13" fill="#FEF2F2" stroke="#DD344C" stroke-width="1.2"/>
+<text x="189" y="233" font-size="11" font-weight="bold" fill="#9F1239" text-anchor="middle">
+<tspan x="189" dy="0">Internal mTLS CA</tspan>
+</text>
+<rect x="276" y="216" width="158" height="26" rx="13" fill="#FEF2F2" stroke="#DD344C" stroke-width="1.2"/>
+<text x="355" y="233" font-size="11" font-weight="bold" fill="#9F1239" text-anchor="middle">
+<tspan x="355" dy="0">User X.509 CA</tspan>
+</text>
+<rect x="442" y="216" width="158" height="26" rx="13" fill="#FEF2F2" stroke="#DD344C" stroke-width="1.2"/>
+<text x="521" y="233" font-size="11" font-weight="bold" fill="#9F1239" text-anchor="middle">
+<tspan x="521" dy="0">SSH user CA</tspan>
+</text>
+<rect x="608" y="216" width="158" height="26" rx="13" fill="#FEF2F2" stroke="#DD344C" stroke-width="1.2"/>
+<text x="687" y="233" font-size="11" font-weight="bold" fill="#9F1239" text-anchor="middle">
+<tspan x="687" dy="0">SSH host CA</tspan>
+</text>
+<text x="50" y="268" font-size="11" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">kms:Sign is granted only to the control plane's role. CloudTrail records every Sign. Keys cannot be exported.</tspan>
+</text>
+<polyline points="400,278 400,296" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<rect x="50" y="298" width="720" height="44" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.6"/>
+<image x="62" y="304" width="32" height="32" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="106" y="325" font-size="12" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="106" dy="0">The control plane signs only after checking the ID token, the grant, and current policy</tspan>
+</text>
+<polyline points="400,342 400,366" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<text x="50" y="384" font-size="11" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">Credential and who signs it</tspan>
+</text>
+<text x="300" y="384" font-size="11" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="300" dy="0">Lifetime (log scale)</tspan>
+</text>
+<text x="50" y="414" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">Session grant</tspan>
+</text>
+<text x="50" y="428" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">signed by the proxy</tspan>
+</text>
+<rect x="300" y="406" width="30.0" height="18" rx="4" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="340.0" y="420" font-size="11.5" font-weight="bold" fill="#14B8A6" text-anchor="start">
+<tspan x="340.0" dy="0">60 seconds</tspan>
+</text>
+<text x="50" y="452" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">SSH user certificate</tspan>
+</text>
+<text x="50" y="466" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">per session · SSH user CA</tspan>
+</text>
+<rect x="300" y="444" width="30.0" height="18" rx="4" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="340.0" y="458" font-size="11.5" font-weight="bold" fill="#14B8A6" text-anchor="start">
+<tspan x="340.0" dy="0">1 minute</tspan>
+</text>
+<text x="50" y="490" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">SSH host certificate</tspan>
+</text>
+<text x="50" y="504" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">per session · SSH host CA</tspan>
+</text>
+<rect x="300" y="482" width="89.4124503685616" height="18" rx="4" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="399.4124503685616" y="496" font-size="11.5" font-weight="bold" fill="#14B8A6" text-anchor="start">
+<tspan x="399.4124503685616" dy="0">5 minutes</tspan>
+</text>
+<text x="50" y="528" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">User certificate</tspan>
+</text>
+<text x="50" y="542" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">user X.509 CA</tspan>
+</text>
+<rect x="300" y="520" width="115.0" height="18" rx="4" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="425.0" y="534" font-size="11.5" font-weight="bold" fill="#14B8A6" text-anchor="start">
+<tspan x="425.0" dy="0">10 minutes by default</tspan>
+</text>
+<text x="50" y="566" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">Join token</tspan>
+</text>
+<text x="50" y="580" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">single use · stored as a hash</tspan>
+</text>
+<rect x="300" y="558" width="129.96775701973291" height="18" rx="4" fill="#1F2A44" stroke="none" stroke-width="0"/>
+<text x="439.9677570197329" y="572" font-size="11.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="439.9677570197329" dy="0">15 minutes</tspan>
+</text>
+<text x="50" y="604" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">Bot login</tspan>
+</text>
+<text x="50" y="618" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">user X.509 CA · never refreshed</tspan>
+</text>
+<rect x="300" y="596" width="181.1428562826097" height="18" rx="4" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="491.1428562826097" y="610" font-size="11.5" font-weight="bold" fill="#14B8A6" text-anchor="start">
+<tspan x="491.1428562826097" dy="0">up to 1 hour</tspan>
+</text>
+<text x="50" y="642" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">Longest session</tspan>
+</text>
+<text x="50" y="656" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">per-role limit</tspan>
+</text>
+<rect x="300" y="634" width="257.9055051769249" height="18" rx="4" fill="#5B6B7F" stroke="none" stroke-width="0"/>
+<text x="567.9055051769249" y="648" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="567.9055051769249" dy="0">8 hours by default</tspan>
+</text>
+<text x="50" y="680" font-size="12" font-weight="bold" fill="#232F3E" text-anchor="start">
+<tspan x="50" dy="0">Worker and proxy certificate</tspan>
+</text>
+<text x="50" y="694" font-size="10" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">internal CA · renewed at 50%</tspan>
+</text>
+<rect x="300" y="672" width="298.4608118280962" height="18" rx="4" fill="#1F2A44" stroke="none" stroke-width="0"/>
+<text x="608.4608118280962" y="686" font-size="11.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="608.4608118280962" dy="0">24 hours</tspan>
+</text>
+<text x="50" y="740" font-size="11.5" font-weight="bold" fill="#0F766E" text-anchor="start">
+<tspan x="50" dy="0">A stolen credential is useless within minutes. Lock or kill-session ends access sooner.</tspan>
+</text>
+<rect x="810" y="120" width="760" height="650" rx="10" fill="#fff" stroke="#CBD5E1" stroke-width="1.4"/>
+<text x="830" y="150" font-size="16" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="830" dy="0">Audit: written before access is allowed to continue</tspan>
+</text>
+<text x="830" y="169" font-size="11.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="830" dy="0">At-least-once delivery, hash-chained, and fail-closed by default</tspan>
+</text>
+<rect x="830" y="190" width="160" height="112" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.6"/>
+<image x="840" y="200" width="30" height="30" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="880" y="221" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="880" dy="0">Emit</tspan>
+</text>
+<text x="844" y="252" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="844" dy="0">Proxy, worker, control</tspan>
+<tspan x="844" dy="14">plane: session.start,</tspan>
+<tspan x="844" dy="14">ssh.exec, db.query,</tspan>
+<tspan x="844" dy="14">auth.denied …</tspan>
+</text>
+<rect x="1015" y="190" width="160" height="112" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.6"/>
+<text x="1029" y="221" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1029" dy="0">Local spool</tspan>
+</text>
+<text x="1029" y="252" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1029" dy="0">Append-only file,</tspan>
+<tspan x="1029" dy="14">fsync'd, CRC-framed.</tspan>
+<tspan x="1029" dy="14">Survives restarts and</tspan>
+<tspan x="1029" dy="14">outages.</tspan>
+</text>
+<rect x="1200" y="190" width="160" height="112" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.6"/>
+<image x="1210" y="200" width="30" height="30" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="1250" y="221" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1250" dy="0">Ingest</tspan>
+</text>
+<text x="1214" y="252" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1214" dy="0">Acknowledges only after</tspan>
+<tspan x="1214" dy="14">its own spool is on disk.</tspan>
+<tspan x="1214" dy="14">Duplicates are removed</tspan>
+<tspan x="1214" dy="14">by event_id later.</tspan>
+</text>
+<rect x="1385" y="190" width="155" height="112" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.6"/>
+<text x="1399" y="221" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1399" dy="0">Control plane spool</tspan>
+</text>
+<text x="1399" y="252" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1399" dy="0">Source for every sink.</tspan>
+<tspan x="1399" dy="14">A gap in a producer's</tspan>
+<tspan x="1399" dy="14">seq number shows</tspan>
+<tspan x="1399" dy="14">as a dashboard alert.</tspan>
+</text>
+<polyline points="990,246 1015,246" fill="none" stroke="#1F2A44" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<polyline points="1175,246 1200,246" fill="none" stroke="#1F2A44" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<polyline points="1360,246 1385,246" fill="none" stroke="#1F2A44" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<polyline points="1462,302 1462,332" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="955,332 1462,332" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="955,332 955,366" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<polyline points="1190,332 1190,366" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<polyline points="1460,332 1460,366" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<rect x="830" y="366" width="250" height="126" rx="8" fill="#fff" stroke="#7AA116" stroke-width="1.6"/>
+<image x="840" y="376" width="34" height="34" href="data:image/png;base64,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" xlink:href="data:image/png;base64,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"/>
+<text x="884" y="397" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="884" dy="0">S3: event batches</tspan>
+</text>
+<text x="844" y="428" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="844" dy="0">JSONL.gz every 5 MiB or 60 s,</tspan>
+<tspan x="844" dy="14">SSE-KMS, optional Object Lock.</tspan>
+<tspan x="844" dy="14">Each batch has a manifest</tspan>
+<tspan x="844" dy="14">signed by the control plane and</tspan>
+<tspan x="844" dy="14">chained to the previous one.</tspan>
+</text>
+<rect x="1090" y="366" width="200" height="126" rx="8" fill="#fff" stroke="#7AA116" stroke-width="1.6"/>
+<image x="1100" y="376" width="34" height="34" href="data:image/png;base64,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" xlink:href="data:image/png;base64,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"/>
+<text x="1144" y="397" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1144" dy="0">S3: recordings</tspan>
+</text>
+<text x="1104" y="428" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1104" dy="0">Terminal and session</tspan>
+<tspan x="1104" dy="14">recordings, stored with</tspan>
+<tspan x="1104" dy="14">their SHA-256. A changed</tspan>
+<tspan x="1104" dy="14">recording will not play.</tspan>
+</text>
+<rect x="1300" y="366" width="250" height="126" rx="8" fill="#fff" stroke="#632CA6" stroke-width="1.6"/>
+<image x="1310" y="376" width="34" height="34" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjNjMyQ0E2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+RGF0YWRvZzwvdGl0bGU+PHBhdGggZD0iTTE5LjU3IDE3LjA0bC0xLjk5Ny0xLjMxNi0xLjY2NSAyLjc4Mi0xLjkzNy0uNTY3LTEuNzA2IDIuNjA0LjA4Ny44MiA5LjI3NC0xLjcxLS41MzgtNS43OTR6bS04LjY0OS0yLjQ5OGwxLjQ4OC0uMjA0Yy4yNDEuMTA4LjQwOS4xNS42OTcuMjIzLjQ1LjExNy45Ny4yMyAxLjc0MS0uMTYuMTgtLjA4OC41NTMtLjQzLjcwNC0uNjI1bDYuMDk2LTEuMTA2LjYyMiA3LjUyNy0xMC40NDQgMS44ODJ6bTExLjMyNS0yLjcxMmwtLjYwMi4xMTVMMjAuNDg4IDAgLjc4OSAyLjI4NWwyLjQyNyAxOS42OTMgMi4zMDYtLjMzNGMtLjE4NC0uMjYzLS40NzEtLjU4MS0uOTYtLjk4OS0uNjgtLjU2NC0uNDQtMS41MjItLjAzOS0yLjEyNy41My0xLjAyMiAzLjI2LTIuMzIyIDMuMTA2LTMuOTU2LS4wNTYtLjU5NC0uMTUtMS4zNjgtLjcwMi0xLjg5OC0uMDIuMjIuMDE3LjQzMi4wMTcuNDMycy0uMjI3LS4yODktLjM0LS42ODNjLS4xMTItLjE1LS4yLS4xOTktLjMxOS0uNC0uMDg1LjIzMy0uMDczLjUwMy0uMDczLjUwM3MtLjE4Ni0uNDM3LS4yMTYtLjgwN2MtLjExLjE2Ni0uMTM3LjQ4LS4xMzcuNDhzLS4yNDEtLjY5LS4xODYtMS4wNjJjLS4xMS0uMzIzLS40MzYtLjk2NS0uMzQzLTIuNDI0LjYuNDIxIDEuOTI0LjMyMSAyLjQ0LS40MzkuMTcxLS4yNTEuMjg4LS45MzktLjA4Ni0yLjI5My0uMjQtLjg2OC0uODM1LTIuMTYtMS4wNjYtMi42NTFsLS4wMjguMDJjLjEyMi4zOTUuMzc0IDEuMjIzLjQ3IDEuNjI1LjI5MyAxLjIxOC4zNzIgMS42NDIuMjM0IDIuMjA0LS4xMTYuNDg4LS4zOTcuODA4LTEuMTA3IDEuMTY1LS43MS4zNTgtMS42NTMtLjUxNC0xLjcxMy0uNTYyLS42OS0uNTUtMS4yMjQtMS40NDctMS4yODQtMS44ODMtLjA2Mi0uNDc3LjI3NS0uNzYzLjQ0NS0xLjE1My0uMjQzLjA3LS41MTQuMTkyLS41MTQuMTkycy4zMjMtLjMzNC43MjItLjYyNGMuMTY1LS4xMDkuMjYyLS4xNzguNDM2LS4zMjNhOS43NjIgOS43NjIgMCAwIDAtLjQ1Ni4wMDNzLjQyLS4yMjcuODU1LS4zOTJjLS4zMTgtLjAxNC0uNjIzLS4wMDMtLjYyMy0uMDAzcy45MzctLjQxOSAxLjY3OC0uNzI3Yy41MDktLjIwOCAxLjAwNi0uMTQ3IDEuMjg2LjI1Ny4zNjcuNTMuNzUyLjgxNyAxLjU2OS45OTYuNTAxLS4yMjMuNjUzLS4zMzcgMS4yODQtLjUwOS41NTQtLjYxLjk5LS42ODguOTktLjY4OHMtLjIxNi4xOTgtLjI3NC41MWMuMzE0LS4yNDkuNjYtLjQ1NS42Ni0uNDU1cy0uMTM0LjE2NC0uMjU5LjQyNmwuMDMuMDQzYy4zNjYtLjIyLjc5Ny0uMzk0Ljc5Ny0uMzk0cy0uMTIzLjE1Ni0uMjY4LjM1OGMuMjc3LS4wMDIuODM4LjAxMiAxLjA1Ni4wMzcgMS4yODUuMDI4IDEuNTUyLTEuMzc0IDIuMDQ1LTEuNTUuNjE4LS4yMi44OTQtLjM1MyAxLjk0Ny42OC45MDMuODg4IDEuNjA5IDIuNDc3IDEuMjU5IDIuODMzLS4yOTQuMjk1LS44NzQtLjExNS0xLjUxNi0uOTE2YTMuNDY2IDMuNDY2IDAgMCAxLS43MTYtMS41NjIgMS41MzMgMS41MzMgMCAwIDAtLjQ5Ny0uODVzLjIzLjUxLjIzLjk2YzAgLjI0Ni4wMyAxLjE2NS40MjQgMS42OC0uMDM5LjA3Ni0uMDU3LjM3NC0uMS40My0uNDU4LS41NTQtMS40NDMtLjk1LTEuNjA0LTEuMDY3LjU0NC40NDUgMS43OTMgMS40NjggMi4yNzMgMi40NDkuNDUzLjkyNy4xODYgMS43NzcuNDE2IDEuOTk3LjA2NS4wNjMuOTc2IDEuMTk3IDEuMTUgMS43NjcuMzA2Ljk5NC4wMTkgMi4wMzgtLjM4MSAyLjY4NWwtMS4xMTcuMTc0Yy0uMTYzLS4wNDUtLjI3My0uMDY4LS40Mi0uMTUzLjA4LS4xNDMuMjQxLS41LjI0My0uNTcybC0uMDYzLS4xMTFjLS4zNDguNDkyLS45My45Ny0xLjQxNCAxLjI0NS0uNjMzLjM1OS0xLjM2My4zMDQtMS44MzguMTU2LTEuMzQ4LS40MTUtMi42MjMtMS4zMjctMi45My0xLjU2NiAwIDAtLjAxLjE5MS4wNDguMjM0LjM0LjM4MyAxLjExOSAxLjA3NyAxLjg3MiAxLjU2bC0xLjYwNS4xNzcuNzU5IDUuOTA4Yy0uMzM3LjA0OC0uMzkuMDcxLS43NTcuMTI0LS4zMjUtMS4xNDctLjk0Ni0xLjg5NS0xLjYyNC0yLjMzMi0uNTk5LS4zODQtMS40MjQtLjQ3LTIuMjE0LS4zMTRsLS4wNS4wNTlhMi44NTEgMi44NTEgMCAwIDEgMS44NjMuNDQ0Yy42NTQuNDEzIDEuMTgxIDEuNDgxIDEuMzc1IDIuMTI0LjI0OC44MjIuNDIgMS43LS4yNDggMi42MzItLjQ3Ni42NjItMS44NjQgMS4wMjgtMi45ODYuMjM3LjMuNDgxLjcwNS44NzYgMS4yNS45NS44MDkuMTEgMS41NzctLjAzIDIuMTA2LS41NzQuNDUyLS40NjQuNjktMS40MzQuNjI4LTIuNDU2bC43MTQtLjEwNC4yNTggMS44MzQgMTEuODI3LTEuNDI0ek0xNS4wNSA2Ljg0OGMtLjAzNC4wNzUtLjA4NS4xMjUtLjAwNy4zN2wuMDA0LjAxNC4wMTMuMDMyLjAzMi4wNzNjLjE0LjI4Ny4yOTUuNTU4LjU1Mi42OTYuMDY3LS4wMTEuMTM2LS4wMTkuMjA3LS4wMjMuMjQyLS4wMS4zOTUuMDI4LjQ5Mi4wOC4wMDktLjA0OC4wMS0uMTE5LjAwNS0uMjIyLS4wMTgtLjM2NC4wNzItLjk4Mi0uNjI2LTEuMzA4LS4yNjQtLjEyMi0uNjM0LS4wODQtLjc1Ny4wNjhhLjMwMi4zMDIgMCAwIDEgLjA1OC4wMTNjLjE4Ni4wNjYuMDYuMTMuMDI3LjIwN20xLjk1OCAzLjM5MmMtLjA5Mi0uMDUtLjUyLS4wMy0uODIxLjAwNS0uNTc0LjA2OC0xLjE5My4yNjctMS4zMjguMzcyLS4yNDcuMTkxLS4xMzUuNTIzLjA0Ny42Ni41MTEuMzgyLjk2LjYzOCAxLjQzMi41NzUuMjktLjAzOC41NDYtLjQ5Ny43MjgtLjkxNC4xMjQtLjI4OC4xMjQtLjU5OC0uMDU4LS42OThtLTUuMDc3LTIuOTQyYy4xNjItLjE1NC0uODA1LS4zNTUtMS41NTYuMTU2LS41NTQuMzc4LS41NzEgMS4xODctLjA0MSAxLjY0Ni4wNTMuMDQ2LjA5Ni4wNzguMTM3LjEwNGE0Ljc3IDQuNzcgMCAwIDEgMS4zOTYtLjQxMmMuMTEzLS4xMjUuMjQzLS4zNDUuMjEtLjc0NS0uMDQ0LS41NDItLjQ1NS0uNDU2LS4xNDYtLjc0OSIvPjwvc3ZnPg==" xlink:href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjNjMyQ0E2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+RGF0YWRvZzwvdGl0bGU+PHBhdGggZD0iTTE5LjU3IDE3LjA0bC0xLjk5Ny0xLjMxNi0xLjY2NSAyLjc4Mi0xLjkzNy0uNTY3LTEuNzA2IDIuNjA0LjA4Ny44MiA5LjI3NC0xLjcxLS41MzgtNS43OTR6bS04LjY0OS0yLjQ5OGwxLjQ4OC0uMjA0Yy4yNDEuMTA4LjQwOS4xNS42OTcuMjIzLjQ1LjExNy45Ny4yMyAxLjc0MS0uMTYuMTgtLjA4OC41NTMtLjQzLjcwNC0uNjI1bDYuMDk2LTEuMTA2LjYyMiA3LjUyNy0xMC40NDQgMS44ODJ6bTExLjMyNS0yLjcxMmwtLjYwMi4xMTVMMjAuNDg4IDAgLjc4OSAyLjI4NWwyLjQyNyAxOS42OTMgMi4zMDYtLjMzNGMtLjE4NC0uMjYzLS40NzEtLjU4MS0uOTYtLjk4OS0uNjgtLjU2NC0uNDQtMS41MjItLjAzOS0yLjEyNy41My0xLjAyMiAzLjI2LTIuMzIyIDMuMTA2LTMuOTU2LS4wNTYtLjU5NC0uMTUtMS4zNjgtLjcwMi0xLjg5OC0uMDIuMjIuMDE3LjQzMi4wMTcuNDMycy0uMjI3LS4yODktLjM0LS42ODNjLS4xMTItLjE1LS4yLS4xOTktLjMxOS0uNC0uMDg1LjIzMy0uMDczLjUwMy0uMDczLjUwM3MtLjE4Ni0uNDM3LS4yMTYtLjgwN2MtLjExLjE2Ni0uMTM3LjQ4LS4xMzcuNDhzLS4yNDEtLjY5LS4xODYtMS4wNjJjLS4xMS0uMzIzLS40MzYtLjk2NS0uMzQzLTIuNDI0LjYuNDIxIDEuOTI0LjMyMSAyLjQ0LS40MzkuMTcxLS4yNTEuMjg4LS45MzktLjA4Ni0yLjI5My0uMjQtLjg2OC0uODM1LTIuMTYtMS4wNjYtMi42NTFsLS4wMjguMDJjLjEyMi4zOTUuMzc0IDEuMjIzLjQ3IDEuNjI1LjI5MyAxLjIxOC4zNzIgMS42NDIuMjM0IDIuMjA0LS4xMTYuNDg4LS4zOTcuODA4LTEuMTA3IDEuMTY1LS43MS4zNTgtMS42NTMtLjUxNC0xLjcxMy0uNTYyLS42OS0uNTUtMS4yMjQtMS40NDctMS4yODQtMS44ODMtLjA2Mi0uNDc3LjI3NS0uNzYzLjQ0NS0xLjE1My0uMjQzLjA3LS41MTQuMTkyLS41MTQuMTkycy4zMjMtLjMzNC43MjItLjYyNGMuMTY1LS4xMDkuMjYyLS4xNzguNDM2LS4zMjNhOS43NjIgOS43NjIgMCAwIDAtLjQ1Ni4wMDNzLjQyLS4yMjcuODU1LS4zOTJjLS4zMTgtLjAxNC0uNjIzLS4wMDMtLjYyMy0uMDAzcy45MzctLjQxOSAxLjY3OC0uNzI3Yy41MDktLjIwOCAxLjAwNi0uMTQ3IDEuMjg2LjI1Ny4zNjcuNTMuNzUyLjgxNyAxLjU2OS45OTYuNTAxLS4yMjMuNjUzLS4zMzcgMS4yODQtLjUwOS41NTQtLjYxLjk5LS42ODguOTktLjY4OHMtLjIxNi4xOTgtLjI3NC41MWMuMzE0LS4yNDkuNjYtLjQ1NS42Ni0uNDU1cy0uMTM0LjE2NC0uMjU5LjQyNmwuMDMuMDQzYy4zNjYtLjIyLjc5Ny0uMzk0Ljc5Ny0uMzk0cy0uMTIzLjE1Ni0uMjY4LjM1OGMuMjc3LS4wMDIuODM4LjAxMiAxLjA1Ni4wMzcgMS4yODUuMDI4IDEuNTUyLTEuMzc0IDIuMDQ1LTEuNTUuNjE4LS4yMi44OTQtLjM1MyAxLjk0Ny42OC45MDMuODg4IDEuNjA5IDIuNDc3IDEuMjU5IDIuODMzLS4yOTQuMjk1LS44NzQtLjExNS0xLjUxNi0uOTE2YTMuNDY2IDMuNDY2IDAgMCAxLS43MTYtMS41NjIgMS41MzMgMS41MzMgMCAwIDAtLjQ5Ny0uODVzLjIzLjUxLjIzLjk2YzAgLjI0Ni4wMyAxLjE2NS40MjQgMS42OC0uMDM5LjA3Ni0uMDU3LjM3NC0uMS40My0uNDU4LS41NTQtMS40NDMtLjk1LTEuNjA0LTEuMDY3LjU0NC40NDUgMS43OTMgMS40NjggMi4yNzMgMi40NDkuNDUzLjkyNy4xODYgMS43NzcuNDE2IDEuOTk3LjA2NS4wNjMuOTc2IDEuMTk3IDEuMTUgMS43NjcuMzA2Ljk5NC4wMTkgMi4wMzgtLjM4MSAyLjY4NWwtMS4xMTcuMTc0Yy0uMTYzLS4wNDUtLjI3My0uMDY4LS40Mi0uMTUzLjA4LS4xNDMuMjQxLS41LjI0My0uNTcybC0uMDYzLS4xMTFjLS4zNDguNDkyLS45My45Ny0xLjQxNCAxLjI0NS0uNjMzLjM1OS0xLjM2My4zMDQtMS44MzguMTU2LTEuMzQ4LS40MTUtMi42MjMtMS4zMjctMi45My0xLjU2NiAwIDAtLjAxLjE5MS4wNDguMjM0LjM0LjM4MyAxLjExOSAxLjA3NyAxLjg3MiAxLjU2bC0xLjYwNS4xNzcuNzU5IDUuOTA4Yy0uMzM3LjA0OC0uMzkuMDcxLS43NTcuMTI0LS4zMjUtMS4xNDctLjk0Ni0xLjg5NS0xLjYyNC0yLjMzMi0uNTk5LS4zODQtMS40MjQtLjQ3LTIuMjE0LS4zMTRsLS4wNS4wNTlhMi44NTEgMi44NTEgMCAwIDEgMS44NjMuNDQ0Yy42NTQuNDEzIDEuMTgxIDEuNDgxIDEuMzc1IDIuMTI0LjI0OC44MjIuNDIgMS43LS4yNDggMi42MzItLjQ3Ni42NjItMS44NjQgMS4wMjgtMi45ODYuMjM3LjMuNDgxLjcwNS44NzYgMS4yNS45NS44MDkuMTEgMS41NzctLjAzIDIuMTA2LS41NzQuNDUyLS40NjQuNjktMS40MzQuNjI4LTIuNDU2bC43MTQtLjEwNC4yNTggMS44MzQgMTEuODI3LTEuNDI0ek0xNS4wNSA2Ljg0OGMtLjAzNC4wNzUtLjA4NS4xMjUtLjAwNy4zN2wuMDA0LjAxNC4wMTMuMDMyLjAzMi4wNzNjLjE0LjI4Ny4yOTUuNTU4LjU1Mi42OTYuMDY3LS4wMTEuMTM2LS4wMTkuMjA3LS4wMjMuMjQyLS4wMS4zOTUuMDI4LjQ5Mi4wOC4wMDktLjA0OC4wMS0uMTE5LjAwNS0uMjIyLS4wMTgtLjM2NC4wNzItLjk4Mi0uNjI2LTEuMzA4LS4yNjQtLjEyMi0uNjM0LS4wODQtLjc1Ny4wNjhhLjMwMi4zMDIgMCAwIDEgLjA1OC4wMTNjLjE4Ni4wNjYuMDYuMTMuMDI3LjIwN20xLjk1OCAzLjM5MmMtLjA5Mi0uMDUtLjUyLS4wMy0uODIxLjAwNS0uNTc0LjA2OC0xLjE5My4yNjctMS4zMjguMzcyLS4yNDcuMTkxLS4xMzUuNTIzLjA0Ny42Ni41MTEuMzgyLjk2LjYzOCAxLjQzMi41NzUuMjktLjAzOC41NDYtLjQ5Ny43MjgtLjkxNC4xMjQtLjI4OC4xMjQtLjU5OC0uMDU4LS42OThtLTUuMDc3LTIuOTQyYy4xNjItLjE1NC0uODA1LS4zNTUtMS41NTYuMTU2LS41NTQuMzc4LS41NzEgMS4xODctLjA0MSAxLjY0Ni4wNTMuMDQ2LjA5Ni4wNzguMTM3LjEwNGE0Ljc3IDQuNzcgMCAwIDEgMS4zOTYtLjQxMmMuMTEzLS4xMjUuMjQzLS4zNDUuMjEtLjc0NS0uMDQ0LS41NDItLjQ1NS0uNDU2LS4xNDYtLjc0OSIvPjwvc3ZnPg=="/>
+<text x="1354" y="397" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1354" dy="0">Datadog (optional)</tspan>
+</text>
+<text x="1314" y="428" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1314" dy="0">Logs intake, plus monitors and</tspan>
+<tspan x="1314" dy="14">metrics. May see rare duplicates</tspan>
+<tspan x="1314" dy="14">under failure.</tspan>
+</text>
+<polyline points="955,492 955,546" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<rect x="830" y="546" width="250" height="100" rx="8" fill="#fff" stroke="#8C4FFF" stroke-width="1.6"/>
+<image x="840" y="556" width="34" height="34" href="data:image/png;base64,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" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAQKADAAQAAAABAAAAQAAAAABGUUKwAAAKEklEQVRoBe2ZCXCV1RXH/y9hXyOBEExkDasICoiyCegg1rJbWytaxaWd0k47bR2n1co4VDva2nZ0Su02Oq21FFGgaJECRTRi2EG2CIQ1LGEP+yZJf+fdl48vj7z3vpeQFmdy5k34lvvde8495/zP/1xCL40u1RdZUr7IypvuNQb8vz1Y44EaD1RxB2pCqIobWOXPazxQ5S2s4gS1qvi993ntemrTU6062a9xc9VrrDr1dfqYTh3VySM6sltbl2nvZyq90sQlVHUu1Kqzeg5Xp/7Chvhy5ri2LtfymWbPlZIqGdAsW4MeVM4tYWVKtTtfhWu1b7OO7NHZEzp/Vg2aquE1atRMWV1tGOOR0hKtX6i8qTpx+ApYUVkDQuo9yrRPraXzZ7T6Pa1boGP7Eyh0zbW68W71vMu++vy8Fv7RvqqiVMYAQmXEE2rfx5b+dK4+mWqxjtRrpNY9dF13NW+j+k1Up4GImVNHVFykbStVuE4XL9iwpi01YLy63mbXq/+lRa+p5KJdV06SNgDtx01SdjedOaG5L2vbCluX2OgzWl0Hq1admGpcOKuNi5Q3zdIa6TZUw75t43eu0czndPHzmB/Gf5GcASmpuneysq/XiUN66xkV7zMN+n1NfcaIVyDMvk0qWKqD2w15zp40PzRsppYdlNNXmTlSSBfOacVM5b1lmZDZUWOesiTZsFBzX4mvZ8y3yRkw5FH1HmnJN+0pi3jWHvtT0w/VN35gsXT8YMyVSAAip3N/M4Ndf+8ls7BFW339BYOv3L9q2YyY38Z5kXpnl2fjvPa/Iuhvf9zidcZkHdqpJi10/4sWPCj99iRLhnOn/cOjr8GlzZ9o11q1660W7dTxVn2Wa7twuFCdB6p1T21fZX5LVoJSCSJkyCM2ee4bFick6LhnrGDtydfffqT9W4Oua+Of0IFtwiGjf2JwRMitmKVQSIMnBJ3EPy5oJSZBWRKAX/WufU7+pbe2ekT+nTsVmRCfZHWzWE9rpboNrRIDO7wFo4oKVLTZSgTBdvKw3pms8b+04jD0MS34vZZMV/c7DBioFdiTlAQ1YMMHholAPiEEZegySKDKzOcj2pOsmERUEN8VCvYjBMz832nnpzpdrFnP64FfqcdwrXnfAhJ0Ij7Bg+oyQKURxESPgQ+YNstnGQo5Me37GcJsX6m9+eYoQJbbWrUtQQH+jHbq0NcuxjytP3/LkPTgDlO91wgNfsgcsvbfGjheGe1tTMKCGFk1/E/QHPC+aZlj8Ic3CFxPmmXZJRsJYytYph2rVbRFh3dZbuzeoG3LjQJhG7sA7JI5TpZMMze27WVKUwcodkgObkxGAoXQw68opWwg5RYBT1jbk2MHLCUcFeUh2hD6DCBHSXeSwS/HD0Tu8BJ1EAhC6ZX/VMESi0zSgOvgEsgDaddaBrsf4Y6wmF+c04FIh4ypqUbj2NdG6aY98ErcwxoQrHK8w32+JTxPh5vtrnCD/W3e2v4Gl7KNjfvF698xmDMJ6ZEpCqUYnvjFGUBKzH81PCpk3uh3n/I/1KaPIzSBwLvpy9HxTaQhoBaCYSAEHibMoHoBJZAH0A9Cxo/AQHuyM6pmOQPYcidgJVwVyB82UQMfjAS9e+tGesq5ytUwLbxBpRGaRIEPLvE88NgfoudxmUAGRwm2IZ4BXIOG8A72EpIH1BDrjopSKKAeXuHjIdBMmFE3YBbMTIoTflF2Ri3nv41ngF8h/zf1G/vv7Nqt1yTD/ANLQ/I/Un6uoSc8r/OAsqYnTLlHPqnXJkYotGV5ffvEVUMaUQSTgks8A/70ePQ86DdhikE72HLex3xcarJzjdN9fK7UKMOcX+ujv+j623XzWNVtYBMS5c5Irl20UBaIOhKM3g0BnYJLPAMqpJaAPTEAXwBz/HKsKIw8mT4Dyl7DHZZOV49hZgCVGNJm6oaFzEZcBDZoYpycBLs8RN3gCv/GM8D7gGTw6oCLH9A6yoDi/aK7T2tpndflgmZWv2Ddi8ohDPMgrisiPRBwyfOP3SeSQCgEnBMb7kdeIpxBuAtv/uPhhjhW2qA94XequJz2JK6rAI7/GJWSMZGkJJAHSIZIHQjPTUtJIwJQLn370lpHw7wIRgS/37tJlFsXJ+w98dZrlI08uvfSeK5uvddyCU/ynGGuyd60uNyYhDeBDHBdrDfX4jeNk/UdZ3XKyxNYEKFMf3P3D20gJYnMxga22RkPtkA5PWEkdY2gIsUR6DQjgVdIXlKSREfGvMAi9RKy2aKNMUfOIIjpknA/Tu1cv8C4PkK0oE3tuhZmID3j183XvN/qwPaIbiTSV5+zpOeAiFYOWBv9Y8NTGstkDQjkAbesNcQjtOh1rZyteVMELSWQ6MpnvxhBcbYchszPbAiZDSUl5dDWzQObGvu00jK1v0D/CddKnAmegrkbP3RDkvgbKIndfJy6AdU0A/Atqub0SVb5cQK9Vfp10UsSPIzx1wo3AgimjwGviL1ZP7ecbnuTbvmKvYQIElHJShIhRKo1zbCMBDqgaGgA9ceA9GxrrNhCIhgnxBKAaOijuuObVsigSZwDAEpkwj3PRgAtu7s5ISrRY83mPU/CAL6hU3EHb+17G3jDIDhNIaAJp1YdjfOA5VQrIIUf20llxV2d+mnQNzRkglVAknvVbDsRI6eJQE4GYHJ0F/DtrC6GzuTA0T2eeokvkjsXYj72j/xjbeLn3V/YXiLc0s7SNJreMYRsBiIX/90QFgFwv/R9S1+g7P2XrXhx6gE0YyHTBu+MkzaAtQHvUU+qzY2Gkmzn4qmRyAFVsCGrq9lDpoIqQBZ2Aq/0kzAIF2C4hVYBZkFGrZ2nBa9eYhacrMBesYFjry15MXai/OPKGMAM7DRb3vceu4B70QSiSkIOg+qcTvcaaQjrBASLUvS2h4z2BbchuRzwjGfv4TzsK1lIEpPKeJ+9xwn0kxAyY/+l4SOJDCsa3YZYDgx+2M5V3WFW4XrDAwKJKkHx9oRkoHow7PJX3hj/RSU94J+CtEZ7DhfQzC9AZBRfwjCCm6Mx10mCyAAo0T/nN2EM9X3sXuEHXoF4caSSHvDPSFIC4fTsbCQRj0BdU2vbDz8QV4d2aXOeZQtcelPupQNQWFBKisEaNI48gah7Enl1gyUVNvvPAbwx7uIKeCBqRu8WhwQ59Seh+99necwJO6DsF87q4EsE6oyf+R+Xu06iEpf7LsBNEO2ZJu8f+vhNox53fc8onV8c283s5H8WfV2NBkQvFfuefo1Db2wY/l3dALyWiWuRL5wpu6/o3/J5V9GI/82zZe9YNoOhd040VrJmjv3XDvYgO9bEU6EacyDesjHegWbUMtc/uCEwrjd+YLwwllwtHnD6QdQ58xtwvzUbHLRAvQgtd+ISy4CrywOxtIzz/KpI4jj6JXxVY0DCLarmATUeqOYNTjh9jQcSblE1D6jxQDVvcMLp/wst/9gGDXIC6gAAAABJRU5ErkJggg=="/>
+<text x="884" y="577" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="884" dy="0">Athena</tspan>
+</text>
+<text x="844" y="608" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="844" dy="0">SQL over the audit trail,</tspan>
+<tspan x="844" dy="14">duplicates removed by event_id.</tspan>
+</text>
+<polyline points="1080,596 1110,596" fill="none" stroke="#5B6B7F" stroke-width="2.0" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<rect x="1110" y="546" width="240" height="100" rx="8" fill="#fff" stroke="#ED7100" stroke-width="1.6"/>
+<image x="1120" y="556" width="34" height="34" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRjQ2ODAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+R3JhZmFuYTwvdGl0bGU+PHBhdGggZD0iTTIzLjAyIDEwLjU5YTguNTc4IDguNTc4IDAgMCAwLS44NjItMy4wMzQgOC45MTEgOC45MTEgMCAwIDAtMS43ODktMi40NDVjLjMzNy0xLjM0Mi0uNDEzLTIuNTA1LS40MTMtMi41MDUtMS4yOTItLjA4LTIuMTEzLjQtMi40MTYuNjItLjA1Mi0uMDItLjEwMi0uMDQ0LS4xNTQtLjA2NC0uMjItLjA4OS0uNDQ2LS4xNzItLjY3Ny0uMjQ3LS4yMzEtLjA3My0uNDctLjE0LS43MTEtLjE5N2E5Ljg2NyA5Ljg2NyAwIDAgMC0uODc1LS4xNjFDMTQuNTU3Ljc1MyAxMi45NCAwIDEyLjk0IDBjLTEuODA0IDEuMTQ1LTIuMTQ3IDIuNzQ0LTIuMTQ3IDIuNzQ0bC0uMDE4LjA5M2MtLjA5OC4wMjktLjIuMDU3LS4yOTguMDg4LS4xMzguMDQyLS4yNzUuMDk0LS40MTMuMTQzLS4xMzguMDU1LS4yNzUuMTA3LS40MS4xNjZhOC44NjkgOC44NjkgMCAwIDAtMS41NTcuODdsLS4wNjMtLjAyOWMtMi40OTctLjk1NS00LjcxNi4xOTUtNC43MTYuMTk1LS4yMDMgMi42NTguOTk2IDQuMzMgMS4yMzUgNC42MzZhMTEuNjA4IDExLjYwOCAwIDAgMC0uNjA3IDIuNjM1QzEuNjM2IDEyLjY3Ny45NTMgMTUuMDE0Ljk1MyAxNS4wMTRjMS45MjYgMi4yMTQgNC4xNzEgMi4zNTEgNC4xNzEgMi4zNTEuMDAzLS4wMDIuMDA2LS4wMDIuMDA2LS4wMDUuMjg1LjUwOS42MTUuOTk0Ljk4NiAxLjQ0Ni4xNTYuMTkuMzIuMzcxLjQ4OC41NDgtLjcwNCAyLjAwOS4wOTkgMy42OC4wOTkgMy42OCAyLjE0NC4wOCAzLjU1My0uOTM3IDMuODQ5LTEuMTczYTkuNzg0IDkuNzg0IDAgMCAwIDMuMTY0LjUwMWguMDhsLjA1NS0uMDAzLjEwNy0uMDAyLjEwMy0uMDA1LjAwMy4wMDJjMS4wMSAxLjQ0IDIuNzg4IDEuNjQ2IDIuNzg4IDEuNjQ2IDEuMjY0LTEuMzMyIDEuMzM3LTIuNjUzIDEuMzM3LTIuOTR2LS4wNThjMC0uMDItLjAwMy0uMDM5LS4wMDMtLjA2LjI2NS0uMTg3LjUyLS4zODcuNzU4LS42YTcuODc1IDcuODc1IDAgMCAwIDEuNDE1LTEuN2MxLjQzLjA4MyAyLjQzNy0uODg1IDIuNDM3LS44ODUtLjIzNi0xLjQ5LTEuMDg1LTIuMjE2LTEuMjY0LTIuMzU0bC0uMDE4LS4wMTMtLjAxNi0uMDEzYS4yMTcuMjE3IDAgMCAxLS4wMzEtLjAyYy4wMDgtLjA5Mi4wMTYtLjE4LjAyLS4yNy4wMTEtLjE2Mi4wMTYtLjMyMy4wMTYtLjQ4di0uMjUzbC0uMDA1LS4wOTgtLjAwOC0uMTM1YTEuODkxIDEuODkxIDAgMCAwLS4wMS0uMTNjLS4wMDMtLjA0Mi0uMDA4LS4wODMtLjAxMy0uMTI1bC0uMDE2LS4xMjQtLjAxOC0uMTIyYTYuMjE1IDYuMjE1IDAgMCAwLTIuMDMyLTMuNzMgNi4wMTUgNi4wMTUgMCAwIDAtMy4yMjItMS40NiA2LjI5MiA2LjI5MiAwIDAgMC0uODUtLjA0OGwtLjEwNy4wMDJoLS4wNjNsLS4wNDQuMDAzLS4xMDQuMDA4YTQuNzc3IDQuNzc3IDAgMCAwLTMuMzM1IDEuNjk1Yy0uMzMyLjQtLjU5Mi44NC0uNzY4IDEuMjk3YTQuNTk0IDQuNTk0IDAgMCAwLS4zMTIgMS44MTdsLjAwMy4wOTFjLjAwNS4wNTUuMDA3LjExLjAxMy4xNjRhMy42MTUgMy42MTUgMCAwIDAgLjY5OCAxLjgyIDMuNTMgMy41MyAwIDAgMCAxLjgyNyAxLjI4MmMuMzMuMDk4LjY2LjE0Ljk3MS4xMzcuMDM5IDAgLjA3OCAwIC4xMTQtLjAwMmwuMDYzLS4wMDNjLjAyIDAgLjA0MS0uMDAzLjA2Mi0uMDAzLjAzNC0uMDAyLjA2NS0uMDA3LjA5OS0uMDEuMDA3IDAgLjAxOC0uMDAzLjAyOC0uMDAzbC4wMzEtLjAwNS4wNi0uMDA4YTEuMTggMS4xOCAwIDAgMCAuMTEyLS4wMmMuMDM2LS4wMDguMDcyLS4wMTMuMTA5LS4wMjRhMi42MzQgMi42MzQgMCAwIDAgLjkxNC0uNDE1Yy4wMjgtLjAyLjA1Ni0uMDQxLjA4NS0uMDY1YS4yNDguMjQ4IDAgMCAwIC4wMzktLjM1LjI0NC4yNDQgMCAwIDAtLjMwOS0uMDZsLS4wNzguMDQyYy0uMDkuMDQ0LS4xODQuMDgzLS4yODMuMTE2YTIuNDc2IDIuNDc2IDAgMCAxLS40NzUuMDk2Yy0uMDI4LjAwMy0uMDU0LjAwNi0uMDgzLjAwNmwtLjA4My4wMDJjLS4wMjYgMC0uMDU0IDAtLjA4LS4wMDJsLS4xMDItLjAwNmgtLjAxMmwtLjAyNC4wMDZjLS4wMTYtLjAwMy0uMDMxLS4wMDMtLjA0NC0uMDA2LS4wMzEtLjAwMi0uMDYtLjAwNy0uMDkxLS4wMWEyLjU5IDIuNTkgMCAwIDEtLjcyNC0uMjEzIDIuNTU3IDIuNTU3IDAgMCAxLS42NjctLjQzOCAyLjUyIDIuNTIgMCAwIDEtLjgwNS0xLjQ3NSAyLjMwNiAyLjMwNiAwIDAgMS0uMDI5LS40NDRsLjAwNi0uMTIydi0uMDIzbC4wMDItLjAzMWMuMDAzLS4wMjEuMDAzLS4wNC4wMDUtLjA2YTMuMTYzIDMuMTYzIDAgMCAxIDEuMzUyLTIuMjkgMy4xMiAzLjEyIDAgMCAxIC45MzctLjQzIDIuOTQ2IDIuOTQ2IDAgMCAxIC43NzYtLjEwMWguMDZsLjA3LjAwMi4wNDUuMDAzaC4wMjZsLjA3LjAwNWE0LjA0MSA0LjA0MSAwIDAgMSAxLjYzNS40OSAzLjk0IDMuOTQgMCAwIDEgMS42MDIgMS42NjIgMy43NyAzLjc3IDAgMCAxIC4zOTcgMS40MTRsLjAwNS4wNzYuMDAzLjA3NWMuMDAyLjAyNi4wMDIuMDUuMDAyLjA3NSAwIC4wMjQuMDAzLjA1MiAwIC4wN3YuMDY1bC0uMDAyLjA3My0uMDA4LjE3NGE2LjE5NSA2LjE5NSAwIDAgMS0uMDguNjM5IDUuMSA1LjEgMCAwIDEtLjI2Ny45MjcgNS4zMSA1LjMxIDAgMCAxLS42MjQgMS4xMyA1LjA1MiA1LjA1MiAwIDAgMS0zLjIzNyAyLjAxNCA0LjgyIDQuODIgMCAwIDEtLjY0OS4wNjZsLS4wMzkuMDAzaC0uMjg3YTYuNjA3IDYuNjA3IDAgMCAxLTEuNzE2LS4yNjUgNi43NzYgNi43NzYgMCAwIDEtMy40LTIuMjc0IDYuNzUgNi43NSAwIDAgMS0uNzQ2LTEuMTUgNi42MTYgNi42MTYgMCAwIDEtLjcxNC0yLjU5NmwtLjAwNS0uMDgzLS4wMDItLjAydi0uMDU2bC0uMDAzLS4wNzN2LS4wOTZsLS4wMDMtLjEwNHYtLjA3bC4wMDMtLjE2M2MuMDA4LS4yMi4wMjYtLjQ1LjA1NC0uNjc4YTguNzA3IDguNzA3IDAgMCAxIC4yOC0xLjM1NWMuMTI4LS40NDQuMjg2LS44NzIuNDczLTEuMjc3YTcuMDQgNy4wNCAwIDAgMSAxLjQ1Ni0yLjEgNS45MjUgNS45MjUgMCAwIDEgLjk1My0uNzYzYy4xNjktLjExMS4zNDMtLjIxMy41MjQtLjMwNi4wODktLjA1LjE4Mi0uMDkxLjI3My0uMTM1LjA0Ny0uMDIuMDkzLS4wNDIuMTM4LS4wNjJhNy4xNzcgNy4xNzcgMCAwIDEgLjcxNC0uMjY3bC4xNDUtLjA0NWMuMDQ5LS4wMTUuMDk4LS4wMjYuMTQ4LS4wNDEuMDk4LS4wMjkuMTk3LS4wNTIuMjk2LS4wNzYuMDQ5LS4wMTMuMS0uMDIuMTUtLjAzM2wuMTUtLjAzMi4xNTEtLjAyOC4wNzYtLjAxMy4wNzUtLjAxLjE1My0uMDI0Yy4wNTctLjAxLjExNC0uMDEzLjE3MS0uMDIzbC4xNjktLjAyMWMuMDM2LS4wMDMuMDczLS4wMDguMTA2LS4wMWwuMDczLS4wMDguMDM2LS4wMDMuMDQyLS4wMDJjLjA1Ny0uMDAzLjExNC0uMDA4LjE3MS0uMDFsLjA4Ni0uMDA2aC4wMjNsLjAzNy0uMDAzLjE0NS0uMDA3YTcuOTk5IDcuOTk5IDAgMCAxIDEuNzA4LjEyNSA3LjkxNyA3LjkxNyAwIDAgMSAyLjA0OC42OCA4LjI1MyA4LjI1MyAwIDAgMSAxLjY3MiAxLjA5bC4wOS4wNzcuMDg5LjA3OGMuMDYuMDUyLjExNC4xMDcuMTcxLjE1OS4wNTcuMDUyLjExMi4xMDYuMTY2LjE2LjA1Mi4wNTUuMTA3LjEwNy4xNTkuMTY0YTguNjcxIDguNjcxIDAgMCAxIDEuNDEgMS45NzhjLjAxMi4wMjYuMDI4LjA1Mi4wNC4wNzhsLjA0LjA3OC4wNzUuMTU2Yy4wMjMuMDUxLjA1LjEuMDcuMTUzbC4wNjUuMTVhOC44NDggOC44NDggMCAwIDEgLjQ1IDEuMzQuMTkuMTkgMCAwIDAgLjIwMS4xNDIuMTg2LjE4NiAwIDAgMCAuMTcyLS4xODRjLjAxLS4yNDYuMDAyLS41MzItLjAyNC0uODU2eiIvPjwvc3ZnPg==" xlink:href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRjQ2ODAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+R3JhZmFuYTwvdGl0bGU+PHBhdGggZD0iTTIzLjAyIDEwLjU5YTguNTc4IDguNTc4IDAgMCAwLS44NjItMy4wMzQgOC45MTEgOC45MTEgMCAwIDAtMS43ODktMi40NDVjLjMzNy0xLjM0Mi0uNDEzLTIuNTA1LS40MTMtMi41MDUtMS4yOTItLjA4LTIuMTEzLjQtMi40MTYuNjItLjA1Mi0uMDItLjEwMi0uMDQ0LS4xNTQtLjA2NC0uMjItLjA4OS0uNDQ2LS4xNzItLjY3Ny0uMjQ3LS4yMzEtLjA3My0uNDctLjE0LS43MTEtLjE5N2E5Ljg2NyA5Ljg2NyAwIDAgMC0uODc1LS4xNjFDMTQuNTU3Ljc1MyAxMi45NCAwIDEyLjk0IDBjLTEuODA0IDEuMTQ1LTIuMTQ3IDIuNzQ0LTIuMTQ3IDIuNzQ0bC0uMDE4LjA5M2MtLjA5OC4wMjktLjIuMDU3LS4yOTguMDg4LS4xMzguMDQyLS4yNzUuMDk0LS40MTMuMTQzLS4xMzguMDU1LS4yNzUuMTA3LS40MS4xNjZhOC44NjkgOC44NjkgMCAwIDAtMS41NTcuODdsLS4wNjMtLjAyOWMtMi40OTctLjk1NS00LjcxNi4xOTUtNC43MTYuMTk1LS4yMDMgMi42NTguOTk2IDQuMzMgMS4yMzUgNC42MzZhMTEuNjA4IDExLjYwOCAwIDAgMC0uNjA3IDIuNjM1QzEuNjM2IDEyLjY3Ny45NTMgMTUuMDE0Ljk1MyAxNS4wMTRjMS45MjYgMi4yMTQgNC4xNzEgMi4zNTEgNC4xNzEgMi4zNTEuMDAzLS4wMDIuMDA2LS4wMDIuMDA2LS4wMDUuMjg1LjUwOS42MTUuOTk0Ljk4NiAxLjQ0Ni4xNTYuMTkuMzIuMzcxLjQ4OC41NDgtLjcwNCAyLjAwOS4wOTkgMy42OC4wOTkgMy42OCAyLjE0NC4wOCAzLjU1My0uOTM3IDMuODQ5LTEuMTczYTkuNzg0IDkuNzg0IDAgMCAwIDMuMTY0LjUwMWguMDhsLjA1NS0uMDAzLjEwNy0uMDAyLjEwMy0uMDA1LjAwMy4wMDJjMS4wMSAxLjQ0IDIuNzg4IDEuNjQ2IDIuNzg4IDEuNjQ2IDEuMjY0LTEuMzMyIDEuMzM3LTIuNjUzIDEuMzM3LTIuOTR2LS4wNThjMC0uMDItLjAwMy0uMDM5LS4wMDMtLjA2LjI2NS0uMTg3LjUyLS4zODcuNzU4LS42YTcuODc1IDcuODc1IDAgMCAwIDEuNDE1LTEuN2MxLjQzLjA4MyAyLjQzNy0uODg1IDIuNDM3LS44ODUtLjIzNi0xLjQ5LTEuMDg1LTIuMjE2LTEuMjY0LTIuMzU0bC0uMDE4LS4wMTMtLjAxNi0uMDEzYS4yMTcuMjE3IDAgMCAxLS4wMzEtLjAyYy4wMDgtLjA5Mi4wMTYtLjE4LjAyLS4yNy4wMTEtLjE2Mi4wMTYtLjMyMy4wMTYtLjQ4di0uMjUzbC0uMDA1LS4wOTgtLjAwOC0uMTM1YTEuODkxIDEuODkxIDAgMCAwLS4wMS0uMTNjLS4wMDMtLjA0Mi0uMDA4LS4wODMtLjAxMy0uMTI1bC0uMDE2LS4xMjQtLjAxOC0uMTIyYTYuMjE1IDYuMjE1IDAgMCAwLTIuMDMyLTMuNzMgNi4wMTUgNi4wMTUgMCAwIDAtMy4yMjItMS40NiA2LjI5MiA2LjI5MiAwIDAgMC0uODUtLjA0OGwtLjEwNy4wMDJoLS4wNjNsLS4wNDQuMDAzLS4xMDQuMDA4YTQuNzc3IDQuNzc3IDAgMCAwLTMuMzM1IDEuNjk1Yy0uMzMyLjQtLjU5Mi44NC0uNzY4IDEuMjk3YTQuNTk0IDQuNTk0IDAgMCAwLS4zMTIgMS44MTdsLjAwMy4wOTFjLjAwNS4wNTUuMDA3LjExLjAxMy4xNjRhMy42MTUgMy42MTUgMCAwIDAgLjY5OCAxLjgyIDMuNTMgMy41MyAwIDAgMCAxLjgyNyAxLjI4MmMuMzMuMDk4LjY2LjE0Ljk3MS4xMzcuMDM5IDAgLjA3OCAwIC4xMTQtLjAwMmwuMDYzLS4wMDNjLjAyIDAgLjA0MS0uMDAzLjA2Mi0uMDAzLjAzNC0uMDAyLjA2NS0uMDA3LjA5OS0uMDEuMDA3IDAgLjAxOC0uMDAzLjAyOC0uMDAzbC4wMzEtLjAwNS4wNi0uMDA4YTEuMTggMS4xOCAwIDAgMCAuMTEyLS4wMmMuMDM2LS4wMDguMDcyLS4wMTMuMTA5LS4wMjRhMi42MzQgMi42MzQgMCAwIDAgLjkxNC0uNDE1Yy4wMjgtLjAyLjA1Ni0uMDQxLjA4NS0uMDY1YS4yNDguMjQ4IDAgMCAwIC4wMzktLjM1LjI0NC4yNDQgMCAwIDAtLjMwOS0uMDZsLS4wNzguMDQyYy0uMDkuMDQ0LS4xODQuMDgzLS4yODMuMTE2YTIuNDc2IDIuNDc2IDAgMCAxLS40NzUuMDk2Yy0uMDI4LjAwMy0uMDU0LjAwNi0uMDgzLjAwNmwtLjA4My4wMDJjLS4wMjYgMC0uMDU0IDAtLjA4LS4wMDJsLS4xMDItLjAwNmgtLjAxMmwtLjAyNC4wMDZjLS4wMTYtLjAwMy0uMDMxLS4wMDMtLjA0NC0uMDA2LS4wMzEtLjAwMi0uMDYtLjAwNy0uMDkxLS4wMWEyLjU5IDIuNTkgMCAwIDEtLjcyNC0uMjEzIDIuNTU3IDIuNTU3IDAgMCAxLS42NjctLjQzOCAyLjUyIDIuNTIgMCAwIDEtLjgwNS0xLjQ3NSAyLjMwNiAyLjMwNiAwIDAgMS0uMDI5LS40NDRsLjAwNi0uMTIydi0uMDIzbC4wMDItLjAzMWMuMDAzLS4wMjEuMDAzLS4wNC4wMDUtLjA2YTMuMTYzIDMuMTYzIDAgMCAxIDEuMzUyLTIuMjkgMy4xMiAzLjEyIDAgMCAxIC45MzctLjQzIDIuOTQ2IDIuOTQ2IDAgMCAxIC43NzYtLjEwMWguMDZsLjA3LjAwMi4wNDUuMDAzaC4wMjZsLjA3LjAwNWE0LjA0MSA0LjA0MSAwIDAgMSAxLjYzNS40OSAzLjk0IDMuOTQgMCAwIDEgMS42MDIgMS42NjIgMy43NyAzLjc3IDAgMCAxIC4zOTcgMS40MTRsLjAwNS4wNzYuMDAzLjA3NWMuMDAyLjAyNi4wMDIuMDUuMDAyLjA3NSAwIC4wMjQuMDAzLjA1MiAwIC4wN3YuMDY1bC0uMDAyLjA3My0uMDA4LjE3NGE2LjE5NSA2LjE5NSAwIDAgMS0uMDguNjM5IDUuMSA1LjEgMCAwIDEtLjI2Ny45MjcgNS4zMSA1LjMxIDAgMCAxLS42MjQgMS4xMyA1LjA1MiA1LjA1MiAwIDAgMS0zLjIzNyAyLjAxNCA0LjgyIDQuODIgMCAwIDEtLjY0OS4wNjZsLS4wMzkuMDAzaC0uMjg3YTYuNjA3IDYuNjA3IDAgMCAxLTEuNzE2LS4yNjUgNi43NzYgNi43NzYgMCAwIDEtMy40LTIuMjc0IDYuNzUgNi43NSAwIDAgMS0uNzQ2LTEuMTUgNi42MTYgNi42MTYgMCAwIDEtLjcxNC0yLjU5NmwtLjAwNS0uMDgzLS4wMDItLjAydi0uMDU2bC0uMDAzLS4wNzN2LS4wOTZsLS4wMDMtLjEwNHYtLjA3bC4wMDMtLjE2M2MuMDA4LS4yMi4wMjYtLjQ1LjA1NC0uNjc4YTguNzA3IDguNzA3IDAgMCAxIC4yOC0xLjM1NWMuMTI4LS40NDQuMjg2LS44NzIuNDczLTEuMjc3YTcuMDQgNy4wNCAwIDAgMSAxLjQ1Ni0yLjEgNS45MjUgNS45MjUgMCAwIDEgLjk1My0uNzYzYy4xNjktLjExMS4zNDMtLjIxMy41MjQtLjMwNi4wODktLjA1LjE4Mi0uMDkxLjI3My0uMTM1LjA0Ny0uMDIuMDkzLS4wNDIuMTM4LS4wNjJhNy4xNzcgNy4xNzcgMCAwIDEgLjcxNC0uMjY3bC4xNDUtLjA0NWMuMDQ5LS4wMTUuMDk4LS4wMjYuMTQ4LS4wNDEuMDk4LS4wMjkuMTk3LS4wNTIuMjk2LS4wNzYuMDQ5LS4wMTMuMS0uMDIuMTUtLjAzM2wuMTUtLjAzMi4xNTEtLjAyOC4wNzYtLjAxMy4wNzUtLjAxLjE1My0uMDI0Yy4wNTctLjAxLjExNC0uMDEzLjE3MS0uMDIzbC4xNjktLjAyMWMuMDM2LS4wMDMuMDczLS4wMDguMTA2LS4wMWwuMDczLS4wMDguMDM2LS4wMDMuMDQyLS4wMDJjLjA1Ny0uMDAzLjExNC0uMDA4LjE3MS0uMDFsLjA4Ni0uMDA2aC4wMjNsLjAzNy0uMDAzLjE0NS0uMDA3YTcuOTk5IDcuOTk5IDAgMCAxIDEuNzA4LjEyNSA3LjkxNyA3LjkxNyAwIDAgMSAyLjA0OC42OCA4LjI1MyA4LjI1MyAwIDAgMSAxLjY3MiAxLjA5bC4wOS4wNzcuMDg5LjA3OGMuMDYuMDUyLjExNC4xMDcuMTcxLjE1OS4wNTcuMDUyLjExMi4xMDYuMTY2LjE2LjA1Mi4wNTUuMTA3LjEwNy4xNTkuMTY0YTguNjcxIDguNjcxIDAgMCAxIDEuNDEgMS45NzhjLjAxMi4wMjYuMDI4LjA1Mi4wNC4wNzhsLjA0LjA3OC4wNzUuMTU2Yy4wMjMuMDUxLjA1LjEuMDcuMTUzbC4wNjUuMTVhOC44NDggOC44NDggMCAwIDEgLjQ1IDEuMzQuMTkuMTkgMCAwIDAgLjIwMS4xNDIuMTg2LjE4NiAwIDAgMCAuMTcyLS4xODRjLjAxLS4yNDYuMDAyLS41MzItLjAyNC0uODU2eiIvPjwvc3ZnPg=="/>
+<text x="1164" y="577" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1164" dy="0">Grafana (on ECS)</tspan>
+</text>
+<text x="1124" y="608" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1124" dy="0">Who accessed what, denied</tspan>
+<tspan x="1124" dy="14">attempts, active sessions,</tspan>
+<tspan x="1124" dy="14">ingestion lag, seq gaps.</tspan>
+</text>
+<rect x="1370" y="546" width="180" height="100" rx="8" fill="#FFF7ED" stroke="#ED7100" stroke-width="1.6"/>
+<text x="1384" y="572" font-size="12.5" font-weight="bold" fill="#9A3412" text-anchor="start">
+<tspan x="1384" dy="0">Fails closed</tspan>
+</text>
+<text x="1384" y="592" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1384" dy="0">Spool full or sink</tspan>
+<tspan x="1384" dy="14">down: no new sessions</tspan>
+<tspan x="1384" dy="14">and no logins. Nothing</tspan>
+<tspan x="1384" dy="14">is dropped silently.</tspan>
+</text>
+<rect x="830" y="686" width="720" height="56" rx="8" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.4"/>
+<text x="846" y="710" font-size="12.5" font-weight="bold" fill="#0F766E" text-anchor="start">
+<tspan x="846" dy="0">Verify any time</tspan>
+</text>
+<text x="846" y="728" font-size="11" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="846" dy="0">limen-audit-verify walks every writer's chain and reports a missing, reordered, modified or unsigned batch.</tspan>
+</text>
+<rect x="30" y="790" width="1540" height="440" rx="10" fill="#fff" stroke="#CBD5E1" stroke-width="1.4"/>
+<text x="50" y="820" font-size="16" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">What keeps working when something is down</tspan>
+</text>
+<text x="50" y="839" font-size="11.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">Running sessions are never cut by a control plane failure. New access fails closed where it must, and degrades gracefully where it can</tspan>
+</text>
+<text x="50" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">Down</tspan>
+</text>
+<text x="280" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="280" dy="0">Running sessions</tspan>
+</text>
+<text x="500" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="500" dy="0">New SSH</tspan>
+</text>
+<text x="760" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="760" dy="0">New database, Redis, Kubernetes</tspan>
+</text>
+<text x="1070" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="1070" dy="0">Login</tspan>
+</text>
+<text x="1270" y="876" font-size="11.5" font-weight="bold" fill="#5B6B7F" text-anchor="start">
+<tspan x="1270" dy="0">Audit</tspan>
+</text>
+<rect x="40" y="888" width="1520" height="40" rx="6" fill="#F8FAFC" stroke="none" stroke-width="0"/>
+<text x="50" y="912" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">All control planes</tspan>
+</text>
+<rect x="276" y="895" width="198" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="286" y="912" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="286" dy="0">Continue</tspan>
+</text>
+<rect x="496" y="895" width="238" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="506" y="912" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="506" dy="0">Fail closed: needs a fresh certificate</tspan>
+</text>
+<rect x="756" y="895" width="288" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="766" y="912" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="766" dy="0">Allowed for a 5-minute policy grace</tspan>
+</text>
+<rect x="1066" y="895" width="178" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="1076" y="912" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="1076" dy="0">Fails</tspan>
+</text>
+<rect x="1266" y="895" width="268" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="1276" y="912" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="1276" dy="0">Spools locally</tspan>
+</text>
+<rect x="40" y="932" width="1520" height="40" rx="6" fill="#fff" stroke="none" stroke-width="0"/>
+<text x="50" y="956" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">One control plane</tspan>
+</text>
+<rect x="276" y="939" width="198" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="286" y="956" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="286" dy="0">Continue</tspan>
+</text>
+<rect x="496" y="939" width="238" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="506" y="956" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="506" dy="0">OK</tspan>
+</text>
+<rect x="756" y="939" width="288" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="766" y="956" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="766" dy="0">OK</tspan>
+</text>
+<rect x="1066" y="939" width="178" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1076" y="956" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1076" dy="0">OK</tspan>
+</text>
+<rect x="1266" y="939" width="268" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1276" y="956" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1276" dy="0">OK</tspan>
+</text>
+<rect x="40" y="976" width="1520" height="40" rx="6" fill="#F8FAFC" stroke="none" stroke-width="0"/>
+<text x="50" y="1000" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">One proxy</tspan>
+</text>
+<rect x="276" y="983" width="198" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="286" y="1000" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="286" dy="0">Its sessions drop</tspan>
+</text>
+<rect x="496" y="983" width="238" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="506" y="1000" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="506" dy="0">OK through another proxy</tspan>
+</text>
+<rect x="756" y="983" width="288" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="766" y="1000" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="766" dy="0">OK</tspan>
+</text>
+<rect x="1066" y="983" width="178" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1076" y="1000" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1076" dy="0">OK</tspan>
+</text>
+<rect x="1266" y="983" width="268" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1276" y="1000" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1276" dy="0">OK</tspan>
+</text>
+<rect x="40" y="1020" width="1520" height="40" rx="6" fill="#fff" stroke="none" stroke-width="0"/>
+<text x="50" y="1044" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">One worker</tspan>
+</text>
+<rect x="276" y="1027" width="198" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="286" y="1044" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="286" dy="0">Its sessions drop</tspan>
+</text>
+<rect x="496" y="1027" width="238" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="506" y="1044" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="506" dy="0">OK if a replica serves it</tspan>
+</text>
+<rect x="756" y="1027" width="288" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="766" y="1044" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="766" dy="0">OK if a replica serves it</tspan>
+</text>
+<rect x="1066" y="1027" width="178" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1076" y="1044" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1076" dy="0">OK</tspan>
+</text>
+<rect x="1266" y="1027" width="268" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1276" y="1044" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1276" dy="0">OK</tspan>
+</text>
+<rect x="40" y="1064" width="1520" height="40" rx="6" fill="#F8FAFC" stroke="none" stroke-width="0"/>
+<text x="50" y="1088" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">Aurora PostgreSQL</tspan>
+</text>
+<rect x="276" y="1071" width="198" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="286" y="1088" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="286" dy="0">Continue</tspan>
+</text>
+<rect x="496" y="1071" width="238" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="506" y="1088" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="506" dy="0">Fail closed</tspan>
+</text>
+<rect x="756" y="1071" width="288" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="766" y="1088" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="766" dy="0">Allowed for the grace period</tspan>
+</text>
+<rect x="1066" y="1071" width="178" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="1076" y="1088" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="1076" dy="0">Fails</tspan>
+</text>
+<rect x="1266" y="1071" width="268" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="1276" y="1088" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="1276" dy="0">Control plane spools</tspan>
+</text>
+<rect x="40" y="1108" width="1520" height="40" rx="6" fill="#fff" stroke="none" stroke-width="0"/>
+<text x="50" y="1132" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">KMS</tspan>
+</text>
+<rect x="276" y="1115" width="198" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="286" y="1132" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="286" dy="0">Continue</tspan>
+</text>
+<rect x="496" y="1115" width="238" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="506" y="1132" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="506" dy="0">Fail closed</tspan>
+</text>
+<rect x="756" y="1115" width="288" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="766" y="1132" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="766" dy="0">Allowed for the grace period</tspan>
+</text>
+<rect x="1066" y="1115" width="178" height="26" rx="13" fill="#FEE2E2" stroke="none" stroke-width="0"/>
+<text x="1076" y="1132" font-size="11" font-weight="bold" fill="#991B1B" text-anchor="start">
+<tspan x="1076" dy="0">Fails: no certificates</tspan>
+</text>
+<rect x="1266" y="1115" width="268" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="1276" y="1132" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="1276" dy="0">Unaffected</tspan>
+</text>
+<rect x="40" y="1152" width="1520" height="40" rx="6" fill="#F8FAFC" stroke="none" stroke-width="0"/>
+<text x="50" y="1176" font-size="12.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="50" dy="0">S3 or Datadog</tspan>
+</text>
+<rect x="276" y="1159" width="198" height="26" rx="13" fill="#DCFCE7" stroke="none" stroke-width="0"/>
+<text x="286" y="1176" font-size="11" font-weight="bold" fill="#166534" text-anchor="start">
+<tspan x="286" dy="0">Continue</tspan>
+</text>
+<rect x="496" y="1159" width="238" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="506" y="1176" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="506" dy="0">OK until the spool fills</tspan>
+</text>
+<rect x="756" y="1159" width="288" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="766" y="1176" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="766" dy="0">OK until the spool fills</tspan>
+</text>
+<rect x="1066" y="1159" width="178" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="1076" y="1176" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="1076" dy="0">OK until the spool fills</tspan>
+</text>
+<rect x="1266" y="1159" width="268" height="26" rx="13" fill="#FEF3C7" stroke="none" stroke-width="0"/>
+<text x="1276" y="1176" font-size="11" font-weight="bold" fill="#92400E" text-anchor="start">
+<tspan x="1276" dy="0">Spool grows, alert fires</tspan>
+</text>
+<text x="50" y="1212" font-size="11" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="50" dy="0">Policy grace: proxies and workers keep using their last signed policy snapshot for 5 minutes (default), then fail closed.</tspan>
+</text>
+</svg>

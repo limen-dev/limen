@@ -60,6 +60,12 @@ Where a managed AWS service exists, each target works with it and compatible sel
   </tr>
 </table>
 
+## How it works
+
+[![How Limen works: people and bots log in through your IdP, connect through one public load balancer to proxies, and reach targets through outbound-only workers; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+
+[Two more diagrams](docs/diagrams/README.md) walk through one connection step by step and show how credentials, audit, and failures behave.
+
 ## Where it runs
 
 <table>
@@ -161,7 +167,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 ## Documentation
 - Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md), [metrics and alerts](docs/guides/metrics.md), [tracing](docs/guides/tracing.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
-- [Design](docs/design.md): architecture, data paths, failure semantics
+- [Design](docs/design.md): architecture, data paths, failure semantics, and the [architecture diagram](docs/diagrams/README.md)
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
 - [Threat model](docs/threat-model.md)
 - [Policy reference](docs/policy.md)
