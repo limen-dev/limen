@@ -79,6 +79,9 @@ pub async fn run_consumer<F, Fut>(
     Fut: Future<Output = Result<(), ShipError>> + Send,
 {
     let mut backoff = Backoff::new(Duration::from_millis(200), Duration::from_secs(30));
+    // Create the error counter at 0 so `increase()` sees the first failure.
+    metrics::counter!("limen_audit_ship_errors_total", "consumer" => config.name.clone())
+        .increment(0);
     loop {
         if *deadline.borrow() {
             return;
@@ -266,6 +269,13 @@ mod tests {
         }
         task.abort();
         assert!(seen, "{}", handle.render());
+        assert!(
+            handle
+                .render()
+                .contains("limen_audit_ship_errors_total{consumer=\"lingering\"} 0"),
+            "the error counter exists at 0 before any failure: {}",
+            handle.render()
+        );
     }
 
     async fn spool_with(dir: &std::path::Path, n: u32) -> Spool {

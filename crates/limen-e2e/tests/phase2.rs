@@ -77,6 +77,7 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),
@@ -368,6 +369,7 @@ async fn ssh_through_a_peer_proxy() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),

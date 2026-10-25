@@ -26,6 +26,7 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
 use limen_proto::v1::{PingRequest, ReportTunnelsRequest, TunnelReport};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel, retry_if_went_away};
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::tls::{ClientAuth, client_config, server_config};
@@ -35,7 +36,6 @@ use rustls::ServerConfig;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
-use tonic::transport::Channel;
 
 pub use config::Config;
 use tunnels::{Tunnel, Tunnels};

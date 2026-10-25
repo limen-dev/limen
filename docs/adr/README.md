@@ -29,12 +29,12 @@ Each ADR's status line gives its approval date.
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Accepted |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
 | [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Accepted |
-| [0025](0025-access-requests.md) | Access requests and just-in-time approval (with break-glass) | Proposed |
-| [0026](0026-audit-and-recording-search.md) | Searching audit events and recordings, and the auditor role | Proposed |
-| [0027](0027-resource-discovery.md) | Resource discovery by workers, with quarantine for tag-derived labels | Proposed |
-| [0028](0028-policy-tooling.md) | Policy tooling: test, simulate, diff, explain | Proposed |
-| [0029](0029-access-reviews-and-evidence.md) | Access reviews and compliance evidence packs | Proposed |
-| [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Proposed |
+| [0025](0025-access-requests.md) | Access requests and just-in-time approval (with break-glass) | Accepted (built in Phase 13) |
+| [0026](0026-audit-and-recording-search.md) | Searching audit events and recordings, and the auditor role | Accepted (built in Phase 13) |
+| [0027](0027-resource-discovery.md) | Resource discovery by workers, with quarantine for tag-derived labels | Accepted (built in Phase 13) |
+| [0028](0028-policy-tooling.md) | Policy tooling: test, simulate, diff, explain | Accepted (built in Phase 13) |
+| [0029](0029-access-reviews-and-evidence.md) | Access reviews and compliance evidence packs | Accepted (built in Phase 13) |
+| [0030](0030-live-session-watch.md) | Watching a live session (read-only) | Accepted (built in Phase 13) |
 | [0031](0031-positioning.md) | Positioning: access you can prove (provable, explainable, justified, agent-ready, open) | Proposed |
 | [0032](0032-ai-agents-as-principals.md) | AI agents as principals: a bot flavour with accountable owners and per-action approval | Proposed |
 | [0033](0033-sql-database-access.md) | SQL database access: PostgreSQL, MySQL, Aurora, Redshift (Phase 6) | Accepted |
@@ -43,6 +43,7 @@ Each ADR's status line gives its approval date.
 | [0036](0036-search-access.md) | OpenSearch and Elasticsearch access (Phase 10): HTTP front in the worker, policy by method class and index pattern | Accepted |
 | [0038](0038-kubernetes-access.md) | Kubernetes (EKS) access through impersonation, with recorded exec (Phase 8) | Accepted |
 | [0039](0039-detached-connections.md) | Detached connections (`--detach`) and `limen conns` | Accepted |
+| [0040](0040-trace-export.md) | Trace export over OTLP | Accepted |
 | [0037](0037-messaging-access.md) | RabbitMQ, Amazon MQ, Kafka, and MSK access (Phase 11): AMQP and Kafka codecs in the worker, multi-broker slot rewrite, bodies never logged | Proposed |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

@@ -194,6 +194,7 @@ mod tests {
             worker_id: "w1".into(),
             database: String::new(),
             groups: Vec::new(),
+            request_ids: Vec::new(),
         }
     }
 

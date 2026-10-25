@@ -13,7 +13,7 @@
 # Limen: docker-compose.yml (one of each component) or, with --scale,
 # stacks/scale.yml (3 control planes, 3 proxies, 3 workers).
 # Stacks (each a compose file and a profile of the same name):
-STACK_NAMES=(ssh db redis mongo search messaging observability bots kube tcp web)
+STACK_NAMES=(ssh db redis mongo search messaging observability tracing bots kube tcp web)
 compose=() STACK_FLAGS=() # set by stack_setup
 POLICY_FILES=()
 
@@ -26,7 +26,7 @@ stack_policy_files() {
     case "$s" in
       db) kind=database ;;
       ssh|redis|mongo|search|messaging|bots|kube|tcp|web) kind="$s" ;;
-      observability) continue ;;
+      observability|tracing) continue ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
     case "$selected" in *" $kind "*) continue ;; esac
@@ -104,6 +104,8 @@ stack_setup() {
                  env+=(LIMEN_BROKER_CREDENTIALS_FILE=/etc/limen/broker-credentials.json) ;;
       observability) files+=(-f "$here/stacks/observability.yml")
                env+=(LIMEN_DATADOG_LOGS_URL=http://fake-datadog:8126/api/v2/logs DD_API_KEY=dev-only-datadog-key) ;;
+      tracing) files+=(-f "$here/stacks/tracing.yml")
+               env+=(LIMEN_OTLP_ENDPOINT=http://jaeger:4318) ;;
       bots) files+=(-f "$here/stacks/bots.yml")
             env+=(LIMEN_BOT_ALLOW_INSECURE_ISSUERS=true) ;;
       kube) files+=(-f "$here/stacks/kube.yml")
@@ -140,6 +142,7 @@ stack_describe() {
     search) echo "Elasticsearch 8 and OpenSearch 2 with security on (limen search connect)" ;;
     messaging) echo "RabbitMQ and a three-broker Kafka cluster (limen mq connect, limen kafka connect)" ;;
     observability) echo "fake Datadog intake, plus Trino and Grafana over the audit log" ;;
+    tracing) echo "Jaeger, receiving the traces every component exports (OTLP)" ;;
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
     kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
     tcp) echo "a raw TCP echo target (limen tcp)" ;;
@@ -193,6 +196,7 @@ PORTS
   for s in "$@"; do
     case "$s" in
       observability) printf '%s\n' '8126|fake Datadog|GET /fake/received shows the audit events' '3000|Grafana|audit dashboards (admin / limen-dev-only)' ;;
+      tracing) printf '%s\n' "${LIMEN_PORT_JAEGER:-16686}|Jaeger|traces from every component" ;;
       bots) printf '%s\n' '8130|fake CI issuer|mints identity tokens for bot logins' ;;
     esac
   done
@@ -370,10 +374,10 @@ YAML
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
 stack_endpoints() {
   ui_init
-  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_bots=false has_kube=false has_tcp=false has_web=false
+  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_tracing=false has_bots=false has_kube=false has_tcp=false has_web=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
-    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; esac
+    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; tracing) has_tracing=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; esac
   done
   local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
   if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube || $has_tcp || $has_web; then
@@ -388,9 +392,10 @@ stack_endpoints() {
     $has_tcp && printf "$row" "TCP" "limen tcp tcp-echo"
     $has_web && printf "$row" "Web app" "limen web open web-demo"
   fi
-  if $has_obs || $has_bots; then
+  if $has_obs || $has_tracing || $has_bots; then
     ui_section "Other"
     $has_obs && printf "$row" "Grafana" "http://localhost:3000   admin / limen-dev-only" "Datadog stub" "http://localhost:8126/fake/received"
+    $has_tracing && printf "$row" "Jaeger" "http://localhost:${LIMEN_PORT_JAEGER:-16686}"
     $has_bots && printf "$row" "CI issuer" "http://localhost:8130"
   fi
   ui_section "Connect"

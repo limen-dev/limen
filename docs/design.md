@@ -2,7 +2,7 @@
 
 # Limen design
 
-Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-18 (Phase 9 built). Phase status is in §13 only.
+Status: **Accepted (Phase 0, approved 2026-10-13)**. Last updated 2026-10-25 (Phase 13 built). Phase status is in §13 only.
 
 Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers log in through their identity provider (IdP). In return they get short-lived, audited access to SSH hosts, RDS and Aurora databases, ElastiCache Redis, and EKS clusters. No static SSH keys, shared database passwords, or hand-made users are involved.
 
@@ -25,6 +25,8 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 **Design target:** about 500 users, 5,000 resources, and 500 concurrent sessions. The larger-scale path is noted where it matters.
 
 ## 2. Components
+
+A drawn version for presentations is in [`diagrams/`](diagrams/README.md) (draw.io source plus SVG).
 
 ```mermaid
 flowchart LR
@@ -346,8 +348,7 @@ Top-level directories are listed in [CONTRIBUTING.md](../CONTRIBUTING.md#reposit
 crates/
   limen-core/            # ids, labels, resource kinds, telemetry init, secret newtypes
   limen-proto/           # tonic/prost generated code
-  limen-policy/          # YAML model, validation, evaluator, signed snapshots
-  limen-auth/            # OIDC (PKCE, device), group→role mapping, IdP trait
+  limen-policy/          # YAML model (roles, group→role mappings, resources), validation, evaluator, signed snapshots
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
@@ -356,7 +357,7 @@ crates/
   limen-kube/            # Kubernetes request classification and exec/port-forward stream decoding
   limen-testkit/         # fixtures, in-process cluster harness
   limen-e2e/             # end-to-end tests: control plane, proxy and worker in one process
-  limen-control-plane/   # bin
+  limen-control-plane/   # bin; includes the OIDC login (the CLI has the client side)
   limen-proxy/           # bin
   limen-worker/          # bin; protocol modules: ssh, db (pg, mysql), redis, mongo, search, amqp, kafka, kube
   limen-cli/             # bin `limen`
@@ -385,7 +386,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 10 ✅ | **Search**: OpenSearch and Elasticsearch (ADR-0018, ADR-0036) | `curl` and the official clients through `limen search connect`; requests audited with index and method class; policy by index pattern; SigV4 for OpenSearch Service tested against a signature fixture. Dashboards are served through the Phase 12 web-app integration |
 | 11 ✅ | **Messaging**: RabbitMQ and Amazon MQ, then Kafka and MSK (ADR-0018, ADR-0037) | An AMQP client and `kcat` work through Limen against compose brokers; connection and topic/exchange audit with no message bodies; the Kafka multi-broker design from the spike is proven |
 | 12 ✅ | **Internal web apps and TCP services** (ADR-0022) | Browser OIDC SSO, host-bound app sessions, per-request policy/audit, WebSockets, `limen web open`, and fixed-target `limen tcp` are implemented. The combined Compose demo and TCP e2e test pass. Exit criteria: browser reaches a Compose web app after SSO; denied users and bots are refused; every request is audited; WebSockets work; `limen tcp` reaches a raw TCP service |
-| 13 | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access |
+| 13 ✅ | **Access workflows and insight** (ADR-0025 to ADR-0030). *Must:* access requests with approval and break-glass, search across audit and recordings (and a `limen:auditor` role), resource discovery, policy tooling (test, who-can, diff, explain). *Should:* access reviews and evidence packs. *Nice:* live session watch | A developer requests `orders-prod` for 30 minutes, an approver grants it in the console, the session is recorded with its justification and the grant expires on its own. An auditor finds a statement by its text and lands on the recording at that moment. A tagged EC2 instance appears as a pending resource and becomes reachable only after an admin accepts it. `limen policy test` fails CI on a policy that opens production, and `limen policy diff` shows who gained access | Built: requests with scoped, expiring grants and break-glass; search with a link to the recording moment; discovery of EC2, RDS/Aurora, Redshift, ElastiCache, and EKS with quarantine; policy tests, who-can, effective-access diff, explain; reviews with deny overrides and signed evidence packs; read-only live watch. Verified end to end against a real control plane, proxy, worker, and SSH target; AWS-side behavior is unverified (see §14) |
 | 14 | Hardening: chaos and failure suite, ECS, EC2, and Kubernetes Terraform/Helm examples, IAM join, Okta guide, runbooks | Chaos suite. `terraform apply` of the example. Okta guide. Runbooks |
 
 ## 14. Assumptions and open items
@@ -398,6 +399,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
   - Phase 9: Atlas (SCRAM, X.509, `MONGODB-AWS`, public-CA TLS, SRV-only deployments), DocumentDB (`MONGODB-AWS`, SCRAM-SHA-1, its command subset, the AWS bundle), the primary hop on a multi-node replica set, `mongos`. The `MONGODB-AWS` SigV4 signature is checked against a fixture; SCRAM against the RFC vectors.
   - Phase 10: Amazon OpenSearch Service (SigV4 acceptance, fine-grained access control), OpenSearch Serverless, Elastic Cloud API keys, TLS with the Amazon bundle.
   - Phase 11: Amazon MQ, MSK (the `AWS_MSK_IAM` payload, the AWS bundle), MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
+  - Phase 13: discovery against real AWS (the describe response shapes, `GetConsoleOutput` host keys, `AssumeRole` across accounts, ElastiCache and Redshift tags), the Slack and webhook notifiers against real endpoints, and the audit-search history link to Athena. Not built: automatic approval from context, a signed Slack approval button, a PDF evidence pack, ElastiCache cluster mode in discovery, watching protocols other than SSH.
   - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - **Deferred to Phase 14:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
 - **Deferred and not yet scheduled in §13:**

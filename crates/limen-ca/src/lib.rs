@@ -70,3 +70,13 @@ pub enum CaError {
     #[error("internal error: {0}")]
     Internal(String),
 }
+
+/// Record one signing operation: latency (the KMS round trip dominates in
+/// production) and, on failure, an error count. `kind` is `x509` or `ssh`.
+pub(crate) fn record_sign(kind: &'static str, started: std::time::Instant, ok: bool) {
+    metrics::histogram!("limen_ca_sign_seconds", "kind" => kind)
+        .record(started.elapsed().as_secs_f64());
+    // Always touch the counter so the series exists at 0 before the first
+    // failure; `increase()` misses a counter's first appearance.
+    metrics::counter!("limen_ca_sign_errors_total", "kind" => kind).increment(u64::from(!ok));
+}

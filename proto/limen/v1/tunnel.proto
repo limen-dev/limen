@@ -27,6 +27,9 @@ message TunnelFrame {
 message SessionOpen {
   // Session grant signed by the proxy. The worker verifies it before serving.
   Signed grant = 1;
+  // W3C `traceparent` of the proxy's session span, empty when tracing is off.
+  // Only a parent link for the worker's span: never trusted for anything else.
+  string traceparent = 2;
 }
 
 message SessionOpened {}

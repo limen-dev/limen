@@ -6,7 +6,10 @@
     <span class="kind lg {{ kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ icon }}"/></svg></span>
     <div><h1>{{ name }}</h1><p class="sub">{{ kind }}{% if !description.is_empty() %} · {{ description }}{% endif %}</p></div>
   </div>
-  <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All resources</a>
+  <div class="row">
+    {% if can_request %}<a class="button" href="/console/access?resource={{ name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg>Request access</a>{% endif %}
+    <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All resources</a>
+  </div>
 </div>
 <div class="card facts-card"><table class="facts">
   <tr><th>Labels</th><td><div class="chips">{% for l in labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td></tr>
@@ -18,13 +21,20 @@
   {% if !principals.is_empty() %}<tr><th>Connect</th><td>{% if let Some(phase) = connect.planned %}<span class="cmd soon"><code>{{ connect.command }}</code></span> <span class="pill">{{ phase }}</span> <span class="hint">Not available yet: you can list it, but nothing serves it until then.</span>{% else %}<span class="cmd"><code>{{ connect.command }}</code><button type="button" class="secondary" data-copy="{{ connect.command }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% endif %}</td></tr>{% endif %}
 </table></div>
 
-{% if chrome.is_admin %}
-<h2>Who can access it</h2>
-{% if roles.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>No role grants access to this resource.</div></div>{% else %}
+{% if chrome.reads_record %}
+<h2>Who can reach it</h2>
+{% if who_can.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>Nobody. No role that selects it is held by a group or a bot, or can be requested.</div></div>{% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>Role</th><th>Principals</th></tr></thead>
-  <tbody>{% for a in roles %}<tr><td><span class="chip c{{ a.chip.c }}">{{ a.chip.text }}</span></td><td><div class="chips">{% for p in a.principals %}<span class="chip">{{ p }}</span>{% endfor %}</div></td></tr>{% endfor %}</tbody>
+  <thead><tr><th>Role</th><th>How</th><th>As</th><th>Who</th><th>Approved by</th></tr></thead>
+  <tbody>{% for a in who_can %}<tr>
+    <td><span class="chip c{{ a.role.c }}">{{ a.role.text }}</span></td>
+    <td>{% if a.how == "standing" %}standing{% else if a.how == "break-glass" %}<span class="pill bad">break-glass</span>{% else %}<span class="pill warn">by request</span>{% endif %}</td>
+    <td><div class="chips">{% for p in a.principals.split(", ") %}<span class="chip">{{ p }}</span>{% endfor %}</div></td>
+    <td>{{ a.who }}</td><td>{% if a.approvers.is_empty() %}—{% else %}{{ a.approvers }}{% endif %}</td>
+  </tr>{% endfor %}</tbody>
 </table></div>{% endif %}
+{% endif %}
+{% if chrome.is_admin %}
 
 <h2>Workers that can serve it <span class="count">{{ workers.len() }}</span></h2>
 {% if workers.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plug"/></svg><div>No enrolled worker matches the selector, so sessions to this resource will fail.</div></div>{% else %}

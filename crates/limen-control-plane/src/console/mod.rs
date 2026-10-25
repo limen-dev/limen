@@ -20,9 +20,11 @@ mod auth;
 mod dashboards;
 pub mod oidc_flow;
 mod pages;
+mod query;
 pub mod store;
 mod views;
 pub(crate) mod web_auth;
+mod workflows;
 
 use std::net::IpAddr;
 
@@ -38,7 +40,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use limen_ca::verify::verify_component;
-use limen_core::identity::{ADMIN_ROLE, ComponentKind};
+use limen_core::identity::{ADMIN_ROLE, AUDITOR_ROLE, ComponentKind};
 use limen_proto::relay;
 use limen_tunnel::PeerInfo;
 use sha2::{Digest, Sha256};
@@ -100,6 +102,44 @@ pub fn router(state: AppState) -> Router {
         .route("/console/dashboards", get(dashboards::dashboards))
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))
+        .route("/console/policy/simulate", post(pages::simulate))
+        .route("/console/access", get(workflows::access_page))
+        .route("/console/access/request", post(workflows::access_request))
+        .route("/console/access/{id}", get(workflows::access_detail))
+        .route(
+            "/console/access/{id}/decide",
+            post(workflows::access_decide),
+        )
+        .route(
+            "/console/access/{id}/cancel",
+            post(workflows::access_cancel),
+        )
+        .route(
+            "/console/access/grants/{id}/revoke",
+            post(workflows::access_revoke),
+        )
+        .route("/console/reviews", get(workflows::reviews_page))
+        .route("/console/reviews/start", post(workflows::review_start))
+        .route("/console/reviews/evidence", get(workflows::evidence))
+        .route("/console/reviews/{id}", get(workflows::review_page))
+        .route(
+            "/console/reviews/items/{id}/decide",
+            post(workflows::review_decide),
+        )
+        .route(
+            "/console/reviews/overrides/{id}/lift",
+            post(workflows::deny_lift),
+        )
+        .route("/console/discovered", get(workflows::discovered_page))
+        .route(
+            "/console/discovered/review",
+            post(workflows::discovered_review),
+        )
+        .route("/console/sessions/{id}/watch", get(workflows::watch_page))
+        .route(
+            "/console/sessions/{id}/watch/stream",
+            get(workflows::watch_stream),
+        )
         // Not `.fallback()`: the gRPC router this is merged with has one.
         .route(
             "/console/{*rest}",
@@ -217,17 +257,43 @@ pub fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 // ---- the signed-in user -------------------------------------------------------
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // independent flags, not a state machine
 pub struct Auth {
     pub username: String,
     pub roles: Vec<String>,
     pub csrf: String,
     pub token_hash: Vec<u8>,
     pub is_admin: bool,
+    /// Holds `limen:auditor`: reads the record, changes nothing (ADR-0026).
+    pub is_auditor: bool,
+    /// Show the Access and Reviews pages in the menu: for people with something there.
+    pub sees_access: bool,
+    pub sees_reviews: bool,
     pub expires_at: time::OffsetDateTime,
     pub addr: Option<IpAddr>,
 }
 
 impl Auth {
+    /// Admins and auditors read the whole record: every session, the audit
+    /// trail, recordings, search. Only admins change anything.
+    #[must_use]
+    pub fn reads_record(&self) -> bool {
+        self.is_admin || self.is_auditor
+    }
+
+    /// 403 page unless the user may read the record.
+    pub fn reader(&self) -> Result<(), Response> {
+        if self.reads_record() {
+            Ok(())
+        } else {
+            Err(views::error_page(
+                StatusCode::FORBIDDEN,
+                "Auditors and admins only",
+                "You don't have a role that reads the audit record, so this page isn't available to you.",
+            ))
+        }
+    }
+
     /// 403 page unless the user is an admin.
     pub fn admin(&self) -> Result<(), Response> {
         if self.is_admin {
@@ -305,8 +371,18 @@ impl FromRequestParts<AppState> for Auth {
             ));
         }
         let addr = parts.extensions.get::<ClientAddr>().and_then(|a| a.0);
+        let is_admin = session.roles.iter().any(|r| r == ADMIN_ROLE);
+        let is_auditor = session.roles.iter().any(|r| r == AUDITOR_ROLE);
+        let (sees_access, sees_reviews) = if is_admin || is_auditor {
+            (true, true)
+        } else {
+            store::menu_pages(state, &session.username).await
+        };
         Ok(Auth {
-            is_admin: session.roles.iter().any(|r| r == ADMIN_ROLE),
+            is_admin,
+            is_auditor,
+            sees_access,
+            sees_reviews,
             username: session.username,
             roles: session.roles,
             csrf: session.csrf,

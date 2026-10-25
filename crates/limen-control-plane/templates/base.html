@@ -23,7 +23,13 @@
     <nav class="nav" aria-label="Main">
       <a href="/console/"{% if chrome.active == "home" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#layout-dashboard"/></svg><span>Overview</span></a>
       <a href="/console/resources"{% if chrome.active == "resources" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#database"/></svg><span>Resources</span></a>
-      <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#terminal"/></svg><span>{% if chrome.is_admin %}Sessions{% else %}My sessions{% endif %}</span></a>
+      <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#terminal"/></svg><span>{% if chrome.reads_record %}Sessions{% else %}My sessions{% endif %}</span></a>
+      {% if chrome.sees_access %}<a href="/console/access"{% if chrome.active == "access" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg><span>Access</span></a>{% endif %}
+      {% if chrome.sees_reviews %}<a href="/console/reviews"{% if chrome.active == "reviews" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg><span>Reviews</span></a>{% endif %}
+      {% if chrome.is_auditor && !chrome.is_admin %}
+      <div class="nav-label">Record</div>
+      <a href="/console/audit"{% if chrome.active == "audit" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#activity"/></svg><span>Audit trail</span></a>
+      {% endif %}
       {% if chrome.is_admin %}
       <div class="nav-label">Administration</div>
       <a href="/console/users"{% if chrome.active == "users" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><span>Users</span></a>
@@ -42,7 +48,7 @@
       </div>
       <form method="post" action="/console/logout" class="me">
         <span class="avatar {{ chrome.avatar }}" aria-hidden="true">{{ chrome.initial }}</span>
-        <span class="me-text"><span class="me-name" title="{{ chrome.username }}">{{ chrome.username }}</span><br><span class="me-role">{% if chrome.is_admin %}Administrator{% else %}Member{% endif %}</span></span>
+        <span class="me-text"><span class="me-name" title="{{ chrome.username }}">{{ chrome.username }}</span><br><span class="me-role">{% if chrome.is_admin %}Administrator{% else if chrome.is_auditor %}Auditor{% else %}Member{% endif %}</span></span>
         <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
         <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#log-out"/></svg></button>
       </form>

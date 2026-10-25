@@ -36,6 +36,9 @@ pub struct AppState {
     /// Signs policy snapshots with this replica's own (rotating) key. Set
     /// once the server certificate is issued.
     pub snapshot_signer: Arc<RwLock<Option<Arc<limen_session::envelope::EnvelopeSigner>>>>,
+    /// Tells people an access request needs them (ADR-0025). Does nothing
+    /// unless a notifier is configured.
+    pub notifier: crate::access::notify::Notifier,
 }
 
 impl AppState {
@@ -59,41 +62,105 @@ pub struct LoadedPolicy {
     pub created_at: Option<OffsetDateTime>,
 }
 
+/// The policy the control plane decides from: what an admin applied (the
+/// *base*, which versions and diffs are about), plus accepted discovered
+/// resources (the *overlay*, ADR-0027). [`PolicyStore::current`] is the sum,
+/// which is also what snapshots carry.
 #[derive(Debug, Clone)]
-pub struct PolicyStore(Arc<RwLock<Arc<LoadedPolicy>>>);
+pub struct PolicyStore(Arc<RwLock<Layers>>);
+
+#[derive(Debug)]
+struct Layers {
+    base: Arc<LoadedPolicy>,
+    overlay: Arc<Vec<limen_policy::model::ResourceDoc>>,
+    effective: Arc<LoadedPolicy>,
+}
+
+impl Layers {
+    fn new(base: Arc<LoadedPolicy>, overlay: Arc<Vec<limen_policy::model::ResourceDoc>>) -> Self {
+        let effective = if overlay.is_empty() {
+            Arc::clone(&base)
+        } else {
+            let (policy, skipped) = base.policy.with_discovered(overlay.iter().cloned());
+            for (name, why) in skipped {
+                tracing::warn!(resource = %name, %why, "a discovered resource is not in the policy");
+            }
+            Arc::new(LoadedPolicy {
+                version: base.version,
+                policy: Arc::new(policy),
+                author: base.author.clone(),
+                created_at: base.created_at,
+            })
+        };
+        Self {
+            base,
+            overlay,
+            effective,
+        }
+    }
+}
 
 impl PolicyStore {
     #[must_use]
     pub fn empty() -> Self {
-        Self(Arc::new(RwLock::new(Arc::new(LoadedPolicy {
+        let base = Arc::new(LoadedPolicy {
             version: 0,
             policy: Arc::new(Policy::default()),
             author: String::new(),
             created_at: None,
-        }))))
+        });
+        Self(Arc::new(RwLock::new(Layers::new(base, Arc::default()))))
     }
 
+    /// The policy to decide from: applied policy plus accepted discovered resources.
     #[must_use]
     pub fn current(&self) -> Arc<LoadedPolicy> {
         Arc::clone(
             &self
                 .0
                 .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .effective,
+        )
+    }
+
+    /// The policy as applied, without discovered resources. What versions,
+    /// diffs, and `limen admin apply` are about.
+    #[must_use]
+    pub fn base(&self) -> Arc<LoadedPolicy> {
+        Arc::clone(
+            &self
+                .0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .base,
         )
     }
 
     pub fn set(&self, loaded: LoadedPolicy) {
-        *self
+        let mut layers = self
             .0
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(loaded);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *layers = Layers::new(Arc::new(loaded), Arc::clone(&layers.overlay));
+    }
+
+    /// Replace the accepted discovered resources. A no-op if they are the same.
+    pub fn set_overlay(&self, docs: Vec<limen_policy::model::ResourceDoc>) {
+        let mut layers = self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *layers.overlay == docs {
+            return;
+        }
+        *layers = Layers::new(Arc::clone(&layers.base), Arc::new(docs));
     }
 
     /// Reload from the database if another replica applied a newer version.
     pub async fn refresh(&self, db: &Db) -> anyhow::Result<()> {
         let latest = db::latest_policy_version(db).await?.unwrap_or(0);
-        if latest == self.current().version {
+        if latest == self.base().version {
             return Ok(());
         }
         let Some(row) = db::latest_policy(db).await? else {
@@ -119,6 +186,9 @@ pub struct Limits {
     /// Browser sign-ins (two requests each: start and callback). Separate, so
     /// the console and the CLI don't share one budget.
     pub console_login: DefaultKeyedRateLimiter<IpAddr>,
+    /// Searches of the audit trail, per person (ADR-0026): search is also a
+    /// way to read a lot at once.
+    pub search: DefaultKeyedRateLimiter<String>,
 }
 
 impl Default for Limits {
@@ -141,6 +211,8 @@ impl Limits {
         Self {
             unauthenticated: RateLimiter::keyed(quota),
             console_login: RateLimiter::keyed(console),
+            // Thirty a minute, bursts of ten, whatever the sign-in limits are.
+            search: RateLimiter::keyed(Quota::per_minute(nz(30)).allow_burst(nz(10))),
         }
     }
 }
@@ -160,8 +232,15 @@ impl Limits {
             .map_err(|_| Status::resource_exhausted("too many sign-in attempts; slow down"))
     }
 
+    pub fn check_search(&self, username: &str) -> Result<(), Status> {
+        self.search
+            .check_key(&username.to_owned())
+            .map_err(|_| Status::resource_exhausted("too many searches; slow down"))
+    }
+
     /// Drop state for idle keys. Call periodically.
     pub fn shrink(&self) {
+        self.search.retain_recent();
         self.unauthenticated.retain_recent();
         self.console_login.retain_recent();
     }

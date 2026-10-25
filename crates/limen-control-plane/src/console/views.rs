@@ -11,11 +11,17 @@ use super::store::{SessionRow, UserRow};
 use super::{Auth, html};
 
 /// Page chrome: who is signed in, and the navigation state.
+#[allow(clippy::struct_excessive_bools)] // independent flags, not a state machine
 pub struct Chrome {
     pub username: String,
     pub initial: String,
     pub avatar: String,
     pub is_admin: bool,
+    pub is_auditor: bool,
+    /// Admin or auditor: sees the audit record.
+    pub reads_record: bool,
+    pub sees_access: bool,
+    pub sees_reviews: bool,
     pub csrf: String,
     pub active: &'static str,
     pub version: &'static str,
@@ -35,6 +41,10 @@ impl Chrome {
             avatar: avatar_class(&auth.username),
             username: auth.username.clone(),
             is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            reads_record: auth.reads_record(),
+            sees_access: auth.sees_access,
+            sees_reviews: auth.sees_reviews,
             csrf: auth.csrf.clone(),
             active,
             version: limen_core::VERSION,
@@ -82,6 +92,98 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
         "tcp" => ("network", "k-tcp"),
         _ => ("database", "k-other"),
     }
+}
+
+/// A group of audit event kinds, shown as a tab and as the icon beside each event.
+pub struct Category {
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    /// Comma-separated kinds and `prefix.*` patterns, as the `kind` filter takes them.
+    pub kinds: &'static str,
+}
+
+pub const CATEGORIES: [Category; 10] = [
+    Category {
+        label: "Sign-ins",
+        icon: "key-round",
+        kclass: "k-auth",
+        kinds: "auth.*",
+    },
+    Category {
+        label: "Sessions",
+        icon: "terminal",
+        kclass: "k-ssh",
+        kinds: "session.*,ssh.*",
+    },
+    Category {
+        label: "SQL",
+        icon: "k-postgres",
+        kclass: "k-postgres",
+        kinds: "db.*",
+    },
+    Category {
+        label: "MongoDB",
+        icon: "k-mongodb",
+        kclass: "k-mongodb",
+        kinds: "mongo.*",
+    },
+    Category {
+        label: "Redis",
+        icon: "k-redis",
+        kclass: "k-redis",
+        kinds: "redis.*",
+    },
+    Category {
+        label: "Search",
+        icon: "k-opensearch",
+        kclass: "k-opensearch",
+        kinds: "search.*",
+    },
+    Category {
+        label: "Messaging",
+        icon: "k-kafka",
+        kclass: "k-kafka",
+        kinds: "kafka.*,mq.*",
+    },
+    Category {
+        label: "Web",
+        icon: "globe",
+        kclass: "k-web",
+        kinds: "web.*",
+    },
+    Category {
+        label: "Kubernetes",
+        icon: "k-kubernetes",
+        kclass: "k-kubernetes",
+        kinds: "kube.*",
+    },
+    Category {
+        label: "Admin",
+        icon: "shield-check",
+        kclass: "k-admin",
+        kinds: "policy.*,component.*,join_token.*,worker.*,user.*",
+    },
+];
+
+/// The category an event kind belongs to.
+#[must_use]
+pub fn category_of(kind: &str) -> Option<&'static Category> {
+    CATEGORIES.iter().find(|c| {
+        c.kinds.split(',').any(|p| match p.strip_suffix('*') {
+            Some(prefix) => kind.starts_with(prefix),
+            None => kind == p,
+        })
+    })
+}
+
+/// One tab of the audit trail's category bar.
+pub struct CategoryTab {
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub href: String,
+    pub active: bool,
 }
 
 /// How to open a resource: the command, and the phase that delivers it while
@@ -514,8 +616,30 @@ pub struct SessionsPage {
     pub sessions: Vec<SessionView>,
     pub active_only: bool,
     pub user_filter: Option<String>,
+    pub filter: SessionFilterView,
+    pub chips: Vec<FilterChip>,
+    pub presets: Vec<Preset>,
+    pub suggest: Suggestions,
+    pub more_open: bool,
+    pub clear: String,
+    pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
+}
+
+/// The values to put back in the sessions filter form.
+#[derive(Default)]
+pub struct SessionFilterView {
+    pub user: String,
+    pub resource: String,
+    pub kind: String,
+    pub actor: String,
+    pub login: String,
+    pub addr: String,
+    pub end: String,
+    pub repo: String,
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Template)]
@@ -523,6 +647,13 @@ pub struct SessionsPage {
 pub struct SessionPage {
     pub chrome: Chrome,
     pub s: SessionView,
+    /// Seconds into the recording to start at (a search hit's moment).
+    pub start_at: i64,
+    /// The access requests whose grants allowed this session (ADR-0025).
+    pub allowed_by: Vec<String>,
+    /// Who watched it live, and when (ADR-0030).
+    pub watched: Vec<(String, String, String)>,
+    pub can_watch: bool,
     /// Database sessions: the statements sent, oldest first.
     pub statements: Vec<StatementView>,
     /// kubectl sessions: the API requests, oldest first.
@@ -672,6 +803,7 @@ pub struct BotView {
 pub struct BotsPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
+    pub query: String,
     pub bots: Vec<BotView>,
 }
 
@@ -681,6 +813,7 @@ pub struct UsersPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub users: Vec<UserView>,
+    pub query: String,
     pub orphan_locks: Vec<UserView>,
 }
 
@@ -690,6 +823,9 @@ pub struct UserPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub u: UserView,
+    /// What the user's roles reach under the active policy.
+    pub access: Vec<ResourceView>,
+    pub policy_version: i64,
     pub sessions: Vec<SessionView>,
     pub events: Vec<EventView>,
 }
@@ -711,6 +847,26 @@ pub struct ComponentView {
     pub revoked: bool,
 }
 
+impl ComponentView {
+    /// The day and the clock time of a "2026-10-25 09:27:38 UTC" text, for a two-line cell.
+    pub fn last_seen_day(&self) -> &str {
+        split_when(&self.last_seen).0
+    }
+    pub fn last_seen_clock(&self) -> &str {
+        split_when(&self.last_seen).1
+    }
+    pub fn cert_day(&self) -> &str {
+        split_when(&self.cert_expires).0
+    }
+    pub fn cert_clock(&self) -> &str {
+        split_when(&self.cert_expires).1
+    }
+}
+
+fn split_when(t: &str) -> (&str, &str) {
+    t.split_once(' ').unwrap_or((t, ""))
+}
+
 pub struct PendingTokenView {
     pub kind: String,
     /// The name or pattern it approves, if any.
@@ -727,12 +883,15 @@ pub struct PendingTokenView {
 pub struct Workers {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
+    pub query: String,
     pub components: Vec<ComponentView>,
     pub pending: Vec<PendingTokenView>,
 }
 
 pub struct EventView {
     pub at: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
     pub kind: String,
     pub tone: &'static str,
     pub user: Option<String>,
@@ -745,12 +904,78 @@ pub struct EventView {
 #[template(path = "audit.html")]
 pub struct AuditPage {
     pub chrome: Chrome,
+    /// The search box, and its results when something was searched for.
+    pub q: String,
+    pub search: Option<SearchView>,
     pub events: Vec<EventView>,
     pub kinds: Vec<String>,
-    pub kind_filter: Option<String>,
-    pub user_filter: Option<String>,
+    pub tabs: Vec<CategoryTab>,
+    pub groups: &'static [Category],
+    pub filter: AuditFilterView,
+    pub chips: Vec<FilterChip>,
+    pub presets: Vec<Preset>,
+    pub suggest: Suggestions,
+    pub more_open: bool,
+    pub clear: String,
+    pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
+}
+
+/// One hit of an audit search: the match marked, and where to go next.
+pub struct HitView {
+    pub at: String,
+    pub kind: String,
+    pub user: String,
+    pub resource: String,
+    pub denied: bool,
+    pub before: String,
+    pub hit: String,
+    pub after: String,
+    /// The session page, at the moment of the hit when it has a recording.
+    pub href: Option<String>,
+    pub moment: Option<String>,
+}
+
+pub struct SearchView {
+    pub error: Option<String>,
+    pub hits: Vec<HitView>,
+    pub truncated: bool,
+    pub history_url: Option<String>,
+}
+
+/// The values to put back in the audit filter form.
+#[derive(Default)]
+pub struct AuditFilterView {
+    pub kind: String,
+    pub user: String,
+    pub actor: String,
+    pub text: String,
+    pub session: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// A quick time range: a link that applies it and keeps the other filters.
+pub struct Preset {
+    pub label: &'static str,
+    pub href: String,
+    pub active: bool,
+}
+
+/// Names to offer while typing in the filter boxes.
+#[derive(Debug, Default)]
+pub struct Suggestions {
+    pub users: Vec<String>,
+    pub resources: Vec<String>,
+    pub kinds: Vec<String>,
+    pub ends: Vec<String>,
+}
+
+/// An applied filter, with the link that removes just that one.
+pub struct FilterChip {
+    pub label: String,
+    pub remove: String,
 }
 
 /// One Kubernetes API request, in kubectl's terms.
@@ -779,6 +1004,7 @@ pub struct KubeView {
 #[template(path = "kube_requests.html")]
 pub struct KubePage {
     pub chrome: Chrome,
+    pub tabs: Vec<CategoryTab>,
     pub requests: Vec<KubeView>,
     pub clusters: Vec<String>,
     pub verbs: Vec<String>,
@@ -811,7 +1037,28 @@ pub struct PolicyGroup {
     pub docs: Vec<PolicyDoc>,
 }
 
+pub struct WhoRow {
+    pub role: Chip,
+    pub how: &'static str,
+    pub principals: String,
+    pub who: String,
+    pub approvers: String,
+}
+
+/// What a group or bot can reach, for the access simulator.
+pub struct Simulation {
+    pub who: String,
+    pub error: Option<String>,
+    pub standing: Vec<(String, String, String)>,
+    pub requestable: Vec<(String, String, String)>,
+}
+
 pub struct DryRun {
+    /// Who gains or loses access, one line each (ADR-0028).
+    pub access: Vec<(bool, String)>,
+    pub warnings: Vec<String>,
+    /// `(passed, line)` for each `policy_test` case in the pasted policy.
+    pub tests: Vec<(bool, String)>,
     pub error: Option<String>,
     pub no_changes: bool,
     pub added: Vec<String>,
@@ -828,13 +1075,14 @@ pub struct PolicyPage {
     pub author: String,
     pub created: String,
     pub groups: Vec<PolicyGroup>,
+    pub query: String,
     pub pasted: String,
     pub result: Option<DryRun>,
+    pub simulation: Option<Simulation>,
 }
 
 pub struct RoleAccess {
     pub chip: Chip,
-    pub principals: Vec<String>,
 }
 
 pub struct WorkerMatch {
@@ -892,6 +1140,10 @@ pub struct ResourcesPage {
 #[template(path = "resource.html")]
 pub struct ResourcePage {
     pub chrome: Chrome,
+    /// The viewer can ask for this resource (ADR-0025).
+    pub can_request: bool,
+    /// Who can reach it, for admins and auditors (ADR-0028).
+    pub who_can: Vec<WhoRow>,
     pub connect: Connect,
     pub name: String,
     pub kind: String,
@@ -904,7 +1156,6 @@ pub struct ResourcePage {
     pub description: String,
     pub principals: Vec<String>,
     pub workers: Vec<WorkerMatch>,
-    pub roles: Vec<RoleAccess>,
     pub sessions: Vec<SessionView>,
 }
 
@@ -1007,5 +1258,33 @@ mod bot_tests {
         assert_eq!(gitlab("https://u@evil.example", "acme/r", "7"), None);
         assert_eq!(run_url(Some(&json!({ "provider": "oidc" }))), None);
         assert_eq!(run_url(None), None);
+    }
+}
+
+#[cfg(test)]
+mod category_tests {
+    use super::category_of;
+
+    #[test]
+    fn every_event_kind_has_a_service_category() {
+        for (kind, label) in [
+            ("auth.denied", "Sign-ins"),
+            ("session.start", "Sessions"),
+            ("ssh.exec", "Sessions"),
+            ("db.query.end", "SQL"),
+            ("mongo.command", "MongoDB"),
+            ("redis.command", "Redis"),
+            ("search.request", "Search"),
+            ("kafka.request", "Messaging"),
+            ("mq.operation", "Messaging"),
+            ("web.websocket", "Web"),
+            ("kube.request", "Kubernetes"),
+            ("policy.change", "Admin"),
+            ("user.lock", "Admin"),
+            ("worker.enroll", "Admin"),
+        ] {
+            assert_eq!(category_of(kind).map(|c| c.label), Some(label), "{kind}");
+        }
+        assert!(category_of("nothing.here").is_none());
     }
 }

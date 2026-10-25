@@ -266,7 +266,10 @@ async fn login(
         )
         .into_iter()
         .collect();
-    if roles.is_empty() {
+    // Someone who can only *ask* for access (ADR-0025) still signs in: with
+    // no roles, they reach nothing until a request is approved.
+    if roles.is_empty() && !crate::access::takes_part(&state, &identity.username, &identity.groups)
+    {
         return Err(deny(
             state.audit.clone(),
             addr,

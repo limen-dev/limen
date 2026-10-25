@@ -111,6 +111,70 @@ pub enum EventKind {
     /// An admin revoked a proxy or worker.
     #[serde(rename = "component.revoke")]
     ComponentRevoke,
+    /// Someone asked for a requestable role on a resource (ADR-0025).
+    /// `data.request_id`, `role`, `resource`, `reason`, `duration_secs`.
+    #[serde(rename = "access.request")]
+    AccessRequest,
+    /// An approver approved a request. Two approvals are two events.
+    #[serde(rename = "access.approve")]
+    AccessApprove,
+    /// An approver denied a request.
+    #[serde(rename = "access.deny")]
+    AccessDeny,
+    /// A request became a grant: the role is held on the resource until
+    /// `data.expires_at`.
+    #[serde(rename = "access.grant")]
+    AccessGrant,
+    /// An admin ended a grant early; its open sessions end with it.
+    #[serde(rename = "access.revoke")]
+    AccessRevoke,
+    /// A pending request lapsed unanswered, or a grant reached its deadline.
+    #[serde(rename = "access.expire")]
+    AccessExpire,
+    /// A break-glass grant was made at once, with a reason, and will be
+    /// reviewed.
+    #[serde(rename = "access.break_glass")]
+    AccessBreakGlass,
+    /// The requester withdrew a pending request.
+    #[serde(rename = "access.cancel")]
+    AccessCancel,
+    /// Someone searched the audit trail (ADR-0026). Holds the query's
+    /// identity and filters, never its results.
+    #[serde(rename = "audit.search")]
+    AuditSearch,
+    /// A worker reported a resource no policy document names (ADR-0027).
+    /// It waits for an admin.
+    #[serde(rename = "resource.discovered")]
+    ResourceDiscovered,
+    /// A known discovered resource came back with different labels. The new
+    /// labels wait for an admin.
+    #[serde(rename = "resource.relabel")]
+    ResourceRelabel,
+    /// An admin accepted or rejected a pending discovered resource or relabel.
+    #[serde(rename = "resource.review")]
+    ResourceReview,
+    /// A discovered resource was not seen for several cycles, or was removed.
+    #[serde(rename = "resource.stale")]
+    ResourceStale,
+    /// An access review started, or an item in it was decided (ADR-0029).
+    #[serde(rename = "review.start")]
+    ReviewStart,
+    #[serde(rename = "review.decide")]
+    ReviewDecide,
+    #[serde(rename = "review.complete")]
+    ReviewComplete,
+    /// A flagged review item took a role away from a user for a while.
+    #[serde(rename = "access.deny_override")]
+    AccessDenyOverride,
+    /// An evidence pack was produced. `data.manifest_sha256` anchors it in
+    /// the audit chain.
+    #[serde(rename = "evidence.export")]
+    EvidenceExport,
+    /// Someone began or stopped watching a live session (ADR-0030).
+    #[serde(rename = "session.watch.start")]
+    SessionWatchStart,
+    #[serde(rename = "session.watch.stop")]
+    SessionWatchStop,
 }
 
 /// Component that emitted the event, plus its per-producer sequence number.

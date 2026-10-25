@@ -5,11 +5,11 @@
 |---|---|
 | `crates/` | Rust workspace: four binaries, shared libraries, and test crates. What each crate does: [design §12](docs/design.md#12-workspace-layout) |
 | `proto/` | Protobuf definitions for the control plane API and the worker tunnel |
-| `deploy/` | `compose/` (the local dev stack, started by `setup.sh`), `cli/` (installer), `docker/`, `grafana/` (dashboards and alert rules, generated for Athena and Trino), `kubernetes/`, `terraform/` (audit store, Datadog monitors) |
+| `deploy/` | `compose/` (the local dev stack, started by `setup.sh`), `docker/`, `grafana/` (dashboards and alert rules, generated for Athena and Trino), `kubernetes/`, `terraform/` (audit store, Datadog monitors) |
 | `demos/` | One demo per phase, which checks its exit criteria against a running stack |
 | `docs/` | Design, ADRs, threat model, policy and component references, guides (for users), runbooks (for operators) |
 | `examples/` | Example policy documents |
-| `scripts/` | Release smoke test and CI helpers |
+| `scripts/` | CLI installer (`install-cli.sh`), release smoke test and CI helpers |
 
 ## Building and testing
 Tools are pinned in `mise.toml`: Rust, protoc, cargo-deny, cargo-audit, actionlint, shellcheck, Python, kind, kubectl, gh, Terraform. A container runtime (OrbStack or Docker) is the one thing it can't install.
@@ -27,7 +27,7 @@ LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 ```
 
-The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `deploy/cli/install.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade).
+The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade).
 
 
 ## Commits
@@ -56,3 +56,4 @@ All terminal output goes through `crates/limen-cli/src/ui.rs` (colour, glyphs, t
 - A new entry point, credential type, or data store needs an update to the [threat model](docs/threat-model.md).
 - A change to the audit event envelope must bump `limen_audit::SCHEMA_VERSION`.
 - No `unsafe` (forbidden workspace-wide). Never put secrets in logs: wrap them in the secret newtype.
+- The logo files in `assets/` are copied into `crates/limen-control-plane/assets/` (compiled into the console) and `deploy/compose/config/dex/theme/` (mounted into Dex), because each needs them next to its own files. Change all copies together.

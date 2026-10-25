@@ -146,6 +146,15 @@ impl AuditIngest for IngestService {
                 tracing::warn!(error = %e, "storing a recording failed; the worker will retry");
                 Status::unavailable("recording store unavailable")
             });
+        // With --search-recordings, the text on screen becomes searchable. Best
+        // effort: the recording is stored either way.
+        if uri.is_ok()
+            && self.0.config.search_recordings
+            && let Ok(id) = uuid::Uuid::parse_str(&session_id)
+            && let Err(e) = crate::search::index::index_recording(&self.0.db, id, &tmp).await
+        {
+            tracing::warn!(session = %id, error = %e, "couldn't index a recording's text");
+        }
         let _ = tokio::fs::remove_file(&tmp).await;
         let uri = uri?;
         let ctx = limen_audit::Context {

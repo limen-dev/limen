@@ -222,6 +222,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let dry = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                require_tests: false,
                 sources: sources(),
                 dry_run: true,
                 source_ref: String::new(),
@@ -232,12 +233,13 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
         .expect("dry run")
         .into_inner();
     assert!(!dry.applied);
-    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 20);
+    assert_eq!(dry.diff.as_ref().expect("diff").added.len(), 24);
     assert_eq!(dry.version, 0);
 
     let applied = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                require_tests: false,
                 sources: sources(),
                 dry_run: false,
                 source_ref: "abc123".into(),
@@ -261,6 +263,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let again = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                require_tests: false,
                 sources: sources(),
                 dry_run: false,
                 source_ref: String::new(),
@@ -317,6 +320,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let err = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                require_tests: false,
                 sources: sources(),
                 dry_run: true,
                 source_ref: String::new(),
@@ -349,6 +353,7 @@ async fn invalid_policy_is_rejected() {
     let err = AdminClient::new(h.channel(Some(proxy)))
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                require_tests: false,
                 sources: bad,
                 dry_run: false,
                 source_ref: String::new(),

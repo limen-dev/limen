@@ -20,7 +20,7 @@ Engineers log in with Okta (Dex or Keycloak locally). Every downstream credentia
   - roles and the login session ID carried as URI SANs in the X.509 cert (`limen://user/…`, `limen://role/…`, `limen://login/…`, with percent-encoded segments; see `limen_core::identity`), and in the SSH cert's key ID and extensions. *Amended in Phase 1:* URI SANs replace the custom extension planned here. They need no private OID arc, they're understood by every X.509 parser, and they verify offline.
 - **Groups → roles** come from `role_mapping` documents (ADR-0008). Groups are read from a configurable claim (default `groups`). For Okta, the custom authorization server needs a groups claim configured; this goes in the Okta setup guide.
 - **No refresh token is stored by default.** Users run `limen login` again, which is silent if the IdP session is alive.
-- The `IdentityProvider` enum is `#[non_exhaustive]`, and identity verification sits behind a trait. That's the SAML seam.
+- OIDC login lives in the control plane (`oidc.rs`) and the CLI. A placeholder `limen-auth` crate with a one-variant `IdentityProvider` enum was removed unused (#86). If SAML is taken on, add the provider seam with it, in the same change.
 
 ## Consequences
 - *Amended in Phase 2:* login issues **no** SSH certificate. SSH certificates are per session (ADR-0007, amendment). Login returns the SSH host CA's public key so the CLI can verify workers.

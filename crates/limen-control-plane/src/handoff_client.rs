@@ -252,7 +252,7 @@ async fn connect(
     peer: &Replica,
     tls: &HandoffTls,
     until: Instant,
-) -> Result<tonic::transport::Channel, String> {
+) -> Result<limen_tunnel::connect::TracedChannel, String> {
     let (addr, name) = target(&peer.ingest_url)?;
     let stream = step(
         until,

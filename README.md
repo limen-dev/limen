@@ -60,6 +60,12 @@ Where a managed AWS service exists, each target works with it and compatible sel
   </tr>
 </table>
 
+## How it works
+
+[![How Limen works: people and bots log in through your IdP, connect through one public load balancer to proxies, and reach targets through outbound-only workers; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+
+[Two more diagrams](docs/diagrams/README.md) walk through one connection step by step and show how credentials, audit, and failures behave.
+
 ## Where it runs
 
 <table>
@@ -70,6 +76,18 @@ Where a managed AWS service exists, each target works with it and compatible sel
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/docker" height="48" alt="Docker Compose"><br><br><b>Docker Compose</b><br><sub>the full local stack</sub><br><sub>✅ Working</sub><br><br></td>
   </tr>
 </table>
+
+## Observability
+
+Every component serves Prometheus metrics at `/metrics`, ships a set of example alerts (Prometheus and Datadog), and can export traces over OpenTelemetry (OTLP). Tracing is opt-in: set `--otlp-endpoint` on a component and a session becomes one trace across the proxy, the worker and the control plane, with the trace id on the log lines written inside it. Only ids and outcomes go into a trace, never user names, statements or tokens.
+
+To see one locally, start the dev stack with Jaeger and open a few sessions:
+
+```sh
+deploy/compose/setup.sh --yes --stacks ssh,tracing   # prints the Jaeger URL
+```
+
+How it works, the flags and the limits: [metrics, traces and alerts](docs/guides/metrics.md) and [tracing](docs/guides/tracing.md).
 
 ## Two ways in: the console and the CLI
 
@@ -114,7 +132,7 @@ You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`
 deploy/compose/setup.sh
 
 # 2. Install the CLI (once; re-run after pulling to upgrade)
-deploy/cli/install.sh
+scripts/install-cli.sh
 
 # 3. Sign in (a browser opens on Dex; the dev admin is admin@example.com, password "password")
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
@@ -147,11 +165,11 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md)
+- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md), [metrics and alerts](docs/guides/metrics.md), [tracing](docs/guides/tracing.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
-- [Design](docs/design.md): architecture, data paths, failure semantics
+- [Design](docs/design.md): architecture, data paths, failure semantics, and the [architecture diagram](docs/diagrams/README.md)
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs
-- [Threat model](docs/threat-model.md)
+- [Threat model](docs/threat-model.md) and the [pentest plan](docs/pentest-plan.md)
 - [Policy reference](docs/policy.md)
 - [Runbooks](docs/runbooks/README.md)
 - A public documentation site and homepage are planned ([ADR-0021](docs/adr/0021-docs-site-and-homepage.md))

@@ -19,6 +19,7 @@ use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
 use limen_proto::v1::worker_tunnel_server::{WorkerTunnel, WorkerTunnelServer};
 use limen_proto::v1::{ListTunnelsRequest, PeerTunnel, PingRequest, PingResponse, TunnelFrame};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::serve::{H2Settings, serve_h2};
 use limen_tunnel::{PeerInfo, alpn};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -28,7 +29,6 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::net::TcpStream;
 use tokio_rustls::server::TlsStream;
 use tokio_stream::StreamExt;
-use tonic::transport::Channel;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::Proxy;

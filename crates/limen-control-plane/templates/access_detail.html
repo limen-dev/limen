@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Access request{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ r.resource }} <span class="pill {{ r.tone }} v-mid">{{ r.status }}</span>{% if r.break_glass %} <span class="pill bad v-mid">break-glass</span>{% endif %}</h1>
+    <p class="sub">{{ r.requester }} asked for <span class="chip c{{ r.role.c }}">{{ r.role.text }}</span> for {{ r.duration }} · <span class="mono">{{ r.id }}</span></p>
+  </div>
+  <a class="button secondary" href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>Access</a>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+<div class="card facts-card"><table class="facts">
+  <tr><th>Why</th><td>{% if r.reason.is_empty() %}—{% else %}{{ r.reason }}{% endif %}</td></tr>
+  <tr><th>Asked</th><td>{{ r.created }}</td></tr>
+  {% if r.status == "pending" %}<tr><th>Approvals</th><td>{{ r.approvals }} · lapses {{ r.lapses }}</td></tr>{% endif %}
+  {% if !r.ends.is_empty() %}<tr><th>Access ends</th><td>{{ r.ends }}</td></tr>{% endif %}
+  {% if r.can_decide || r.sessions_30d > 0 %}<tr><th>Past 30 days</th><td>{{ r.sessions_30d }} session{% if r.sessions_30d != 1 %}s{% endif %} on this resource{% if !r.last_session.is_empty() %}, the latest {{ r.last_session }}{% endif %}</td></tr>{% endif %}
+</table></div>
+{% if !r.approvers.is_empty() %}
+<h2>Decisions</h2>
+<ul class="plain">
+  {% for (who, yes, comment) in r.approvers %}<li>{% if *yes %}<span class="pill ok">approved</span>{% else %}<span class="pill bad">denied</span>{% endif %} {{ who }}{% if !comment.is_empty() %}: {{ comment }}{% endif %}</li>{% endfor %}
+</ul>
+{% endif %}
+{% if r.can_decide %}
+<h2>Your decision</h2>
+<div class="card">
+<form method="post" action="/console/access/{{ r.id }}/decide" class="stack wide">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <input type="text" name="comment" placeholder="A comment (kept in the audit trail)" maxlength="500">
+  <div class="row">
+    <button type="submit" name="decision" value="approve"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Approve</button>
+    <button type="submit" name="decision" value="deny" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Deny</button>
+  </div>
+  <p class="hint">You decide as {{ chrome.username }}. Your own requests can never be yours to decide.</p>
+</form>
+</div>
+{% endif %}
+{% if r.can_cancel %}
+<form method="post" action="/console/access/{{ r.id }}/cancel" class="danger-zone">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <button type="submit" class="secondary">Withdraw this request</button>
+</form>
+{% endif %}
+{% endblock %}

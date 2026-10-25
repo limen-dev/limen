@@ -66,5 +66,6 @@ tracing.workspace = true
 workspace = true
 
 [dev-dependencies]
+limen-testkit.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true

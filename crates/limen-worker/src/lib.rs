@@ -5,8 +5,10 @@
 pub mod amqp;
 pub mod broker;
 pub mod db;
+pub mod discovery;
 pub mod kafka;
 mod kube;
+pub mod live;
 pub mod mongo;
 pub mod recording;
 mod recordings;
@@ -192,6 +194,17 @@ pub struct Config {
     #[arg(long, env = "LIMEN_ALLOW_INSECURE_WEB_TARGETS")]
     pub allow_insecure_web_targets: bool,
 
+    /// Run the `discovery` documents that name this worker (ADR-0027): look
+    /// for EC2 instances, databases, caches, and clusters with a describe-only
+    /// AWS role and report them. Reports only ever add *pending* resources.
+    #[arg(long, env = "LIMEN_DISCOVERY")]
+    pub discovery: bool,
+
+    /// Send discovery's AWS calls to this URL instead of the regional AWS
+    /// endpoints. For a stand-in in tests and the dev stack only.
+    #[arg(long, env = "LIMEN_DISCOVERY_ENDPOINT_URL", requires = "discovery")]
+    pub discovery_endpoint_url: Option<String>,
+
     #[command(flatten)]
     pub kube: kube::KubeConfig,
 }
@@ -268,6 +281,8 @@ pub struct Worker {
     /// The cluster this worker serves, if it is a kube worker (ADR-0038).
     pub(crate) kube: Option<Arc<kube::Upstream>>,
     audit_spool: limen_audit::spool::Spool,
+    /// Output of live SSH sessions, for the people watching them (ADR-0030).
+    pub(crate) live: Arc<live::Hub>,
 }
 
 impl Worker {
@@ -353,6 +368,7 @@ impl Worker {
                 aws: Arc::default(),
                 kube,
                 audit_spool,
+                live: live::Hub::new(),
             },
             tx,
         ))
@@ -470,7 +486,7 @@ impl Worker {
 
     /// A channel to the control plane through the proxy, presenting this
     /// worker's certificate (which the proxy forwards).
-    pub(crate) fn control_plane(&self) -> anyhow::Result<tonic::transport::Channel> {
+    pub(crate) fn control_plane(&self) -> anyhow::Result<limen_tunnel::connect::TracedChannel> {
         let creds = self.credentials();
         let tls = client_config(
             &[creds.internal_ca()?],
@@ -935,6 +951,17 @@ pub async fn run(
         deadline,
     ));
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
+    {
+        let w = worker.clone();
+        tokio::spawn(live::run(
+            Arc::clone(&worker.live),
+            move || w.control_plane(),
+            flush.clone(),
+        ));
+    }
+    if worker.config.discovery {
+        tokio::spawn(discovery::run(worker.clone(), flush.clone()));
+    }
     if let Some(every) = worker.config.db_bootstrap_interval {
         tokio::spawn(bootstrap_loop(worker.clone(), every, flush.clone()));
     }
@@ -944,6 +971,8 @@ pub async fn run(
         u32::try_from(worker.sessions.max()).unwrap_or(u32::MAX),
     ));
     metrics::gauge!("limen_worker_draining").set(0.0);
+    // Exist at 0 so "no tunnels" is alertable for a worker that never connects.
+    metrics::gauge!("limen_worker_tunnels_up").set(0.0);
     tracing::info!(id = %worker.id(), name = worker.name().as_deref(), tunnels = worker.config.tunnels, "worker running");
 
     let _ = shutdown.wait_for(|stop| *stop).await;

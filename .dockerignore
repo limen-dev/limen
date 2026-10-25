@@ -15,7 +15,6 @@ demos/
 docs/
 examples/
 scripts/
-deploy/cli/
 deploy/compose/
 deploy/grafana/
 deploy/kubernetes/

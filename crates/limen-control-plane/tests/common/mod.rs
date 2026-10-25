@@ -13,13 +13,13 @@ use limen_control_plane::state::AppState;
 use limen_control_plane::{Config, build_state, run};
 use limen_proto::relay;
 use limen_testkit::idp::MockIdp;
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel};
 use limen_tunnel::tls::{Identity, client_config};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256, PublicKeyData};
 use rustls_pki_types::CertificateDer;
 use sqlx::Connection;
 use tokio::sync::watch;
-use tonic::transport::Channel;
 
 pub const CLIENT_ID: &str = "limen-cli";
 pub const STATIC_PROXY_TOKEN: &str = "static-proxy-token-0123456789abcdef0123456789";

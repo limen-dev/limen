@@ -26,6 +26,7 @@ mod tests {
     fn tunnel_frame_round_trips() {
         let frame = TunnelFrame {
             frame: Some(Frame::Open(SessionOpen {
+                traceparent: String::new(),
                 grant: Some(Signed {
                     payload: vec![1, 2, 3],
                     signature: vec![4],

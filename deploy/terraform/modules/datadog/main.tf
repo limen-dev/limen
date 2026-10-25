@@ -26,6 +26,18 @@ locals {
       critical = 240
       message  = "{{host.name}} can't refresh its signed policy from the control plane. Database, Redis, and Kubernetes access stops after the 5-minute grace period; SSH already fails closed."
     }
+    ca_errors = {
+      name     = "Limen: CA signing errors (${var.environment})"
+      query    = "sum(last_10m):sum:${var.metrics_namespace}.limen_ca_sign_errors_total.count{env:${var.environment}} by {kind}.as_count() > 0"
+      critical = 0
+      message  = "The CA failed to sign {{kind.name}} certificates. Logins and new sessions fail while signing is down. With KMS, check the key, its policy and AWS availability."
+    }
+    worker_disconnected = {
+      name     = "Limen: worker without a tunnel (${var.environment})"
+      query    = "max(last_5m):max:${var.metrics_namespace}.limen_worker_tunnels_up{env:${var.environment}} by {host} < 1"
+      critical = 1
+      message  = "Worker {{host.name}} has no tunnel to any proxy: its targets are unreachable."
+    }
     no_workers = {
       name     = "Limen: no worker tunnels (${var.environment})"
       query    = "max(last_5m):sum:${var.metrics_namespace}.limen_proxy_tunnels{env:${var.environment}} < 1"

@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+limen-core.workspace = true
 bytes = "1"
 futures.workspace = true
 http.workspace = true
@@ -28,7 +29,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 limen-ca.workspace = true
-limen-core.workspace = true
+clap.workspace = true
 limen-proto.workspace = true
 rcgen.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

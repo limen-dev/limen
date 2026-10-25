@@ -1,6 +1,6 @@
 # ADR-0025: Access requests and just-in-time approval
 
-- Status: Proposed (owner requested 2026-10-14; priority: **must have**)
+- Status: Accepted and built (Phase 13). The owner asked for the whole phase on 2026-10-25.
 - Date: 2026-10-14
 
 ## Context
@@ -45,3 +45,16 @@ Today access is standing: if a role maps to your groups, you can reach its resou
 - Policy gains `request` and `break_glass`; the validator learns their rules. `Decision::RequiresApproval` finally has a producer, and the "treated as deny" tests become the safety net for it.
 - The snapshot grows with active grants; bounded by their short lifetime.
 - Automatic approval from external context (an open incident, the on-call rota, a ticket's state) is deliberately left out of v1; the approver interface is shaped so it can be added.
+
+## As built (Phase 13)
+Accepted by the owner's request to build the phase. What differs from the proposal, and why:
+
+- **A grant is scoped to one resource**, not to the whole role. The approver approves "`orders-prod` for 30 minutes", and the grant cannot open other databases the same role selects. `Restrictions::effective_roles(user, certificate roles, resource, now)` adds a granted role only for its resource.
+- **Grants and requests share an id.** One request yields at most one grant; the request id is the grant id everywhere (`access_grants.request_id`, `session.start.request_ids`).
+- **Enforcement is by the signed snapshot, not by a re-login.** Certificates are not reissued. Proxies and workers compute the effective roles from the snapshot on every decision, check the deadline against the clock, cap the session to the grant's remaining time, and end it when the grant leaves the snapshot. Revoking also writes session kills for the sessions recorded under the grant. New grants take effect within about 20 seconds (proxy and worker refresh every 10 s).
+- **Approvers and requesters can sign in with no role.** A person whose groups appear in `request.who` or `request.approvers` may log in holding nothing.
+- **Approval-time checks:** the approver's groups are those the IdP reported at their latest login; the requester must still be eligible under today's policy; the grant is clamped to today's `max_duration`. A database trigger refuses a self-approval whatever the code does.
+- **Limits not in the proposal:** one open request per person, role, and resource; 20 open and 100 a day per person; bots cannot request.
+- **Notifiers** are a signed webhook and Slack incoming webhooks, plus separate break-glass targets; messages carry a request id and a console link unless `--notify-include-details`. They never carry an approval.
+- **`Decision::RequiresApproval`** now names the roles that would grant access; `Policy::evaluate_eligible` produces it. Enforcement still calls `evaluate`, which never returns it.
+- **Not built:** automatic approval from context, a signed Slack approval button.

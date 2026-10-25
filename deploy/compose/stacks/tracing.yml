@@ -1,0 +1,11 @@
+# Tracing (profile `tracing`): Jaeger receives the OTLP traces the control plane,
+# proxy and worker export (ADR-0040). setup.sh sets LIMEN_OTLP_ENDPOINT.
+# Open http://localhost:16686 and pick the `limen-proxy` or `limen-worker` service.
+services:
+  jaeger:
+    container_name: jaeger-${LIMEN_ENV:-dev}
+    profiles: ["tracing"]
+    image: ${JAEGER_IMAGE}
+    # Jaeger v2's default configuration: OTLP in on 4318, memory storage only
+    # (traces are gone when it restarts), the UI on 16686.
+    ports: ["127.0.0.1:${LIMEN_PORT_JAEGER:-16686}:16686"]

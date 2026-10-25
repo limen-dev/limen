@@ -48,6 +48,16 @@ const FILES: &[(&str, &str, &[u8])] = &[
         include_bytes!("../../assets/vendor/fonts/jetbrains-mono-latin-wght-normal.woff2"),
     ),
     (
+        "review-init.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../assets/review-init.js"),
+    ),
+    (
+        "watch-init.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../assets/watch-init.js"),
+    ),
+    (
         "asciinema-player.min.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../assets/vendor/asciinema-player.min.js"),

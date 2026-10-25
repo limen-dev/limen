@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Discovered resources{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Resources</h1>
+    <p class="sub">Things workers found in your cloud accounts. Discovery grants nothing: a resource is reachable only after you accept it, and then only by roles that select its labels.</p>
+  </div>
+</div>
+<nav class="tabs" aria-label="Resource views"><a href="/console/resources">Configured</a><a href="/console/discovered" aria-current="true">Discovered{% if pending > 0 %} <span class="count">{{ pending }}</span>{% endif %}</a></nav>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+{% if items.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg><div>Nothing discovered yet. Add a <code>kind: discovery</code> document and run a worker with <code>--discovery</code>.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Resource</th><th>Labels</th><th>State</th><th>Seen</th><th></th></tr></thead>
+  <tbody>
+  {% for i in items %}
+  <tr>
+    <td><div class="kind-cell"><span class="kind {{ i.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ i.icon }}"/></svg></span><div><span class="cell-main">{{ i.name }}</span><div class="cell-sub">{{ i.kind }} · <span class="mono">{{ i.target }}</span> · {{ i.document }}</div></div></div></td>
+    <td><div class="chips">{% for l in i.labels %}<span class="chip">{{ l }}</span>{% endfor %}</div>
+      {% for c in i.changes %}<div class="cell-sub">{{ c }}</div>{% endfor %}</td>
+    <td><span class="pill {{ i.tone }}">{{ i.state }}</span>{% for b in i.blockers %}<div class="cell-sub">{{ b }}</div>{% endfor %}</td>
+    <td class="nowrap">{{ i.seen }}</td>
+    <td>
+      {% if i.reviewable %}
+      <form method="post" action="/console/discovered/review" class="inline">
+        <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+        <input type="hidden" name="key" value="{{ i.key }}">
+        <input type="hidden" name="shown" value="{{ i.shown }}">
+        <input type="text" name="note" placeholder="Note" maxlength="500">
+        <button type="submit" name="decision" value="accept"{% if !i.blockers.is_empty() %} disabled{% endif %}>{% if i.change_pending %}Accept the change{% else %}Accept{% endif %}</button>
+        <button type="submit" name="decision" value="reject" class="secondary">Reject</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

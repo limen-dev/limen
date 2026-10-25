@@ -17,6 +17,7 @@
 # search   Elasticsearch 8 and OpenSearch 2 (security on)        stacks/search.yml
 # messaging  RabbitMQ and a three-broker Kafka cluster          stacks/messaging.yml
 # observability  fake Datadog intake, Trino and Grafana         stacks/observability.yml
+# tracing  Jaeger, receiving OTLP traces from every component   stacks/tracing.yml
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
 # tcp      a raw TCP echo target for `limen tcp`                 stacks/tcp.yml

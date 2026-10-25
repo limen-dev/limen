@@ -1,9 +1,9 @@
 //! Connections to the proxy.
 
 use anyhow::{Context as _, bail};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel};
 use limen_tunnel::tls::{Identity, client_config};
-use tonic::transport::Channel;
 
 use crate::profile::{self, Profile};
 

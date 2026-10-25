@@ -41,6 +41,11 @@ message SessionGrant {
   // Kubernetes only: every group the policy lets the user assume on this
   // cluster. The worker impersonates the user with exactly these groups.
   repeated string groups = 16;
+  // Access requests (ADR-0025) whose grants supplied a role this session
+  // needed. Empty when the user's own roles were enough. The proxy ends the
+  // session if one of them is revoked; every audit event of the session
+  // carries them.
+  repeated string request_ids = 17;
 }
 
 // The policy as of `issued_at` (ADR-0008). Proxies and workers use it for up
@@ -59,6 +64,30 @@ message PolicySnapshot {
   // Logins (the id in a user certificate) that were ended by `limen logout`.
   // Kept for a day, longer than any certificate lives.
   repeated string revoked_logins = 7;
+  // Active just-in-time grants (ADR-0025): a role, held by a user, on one
+  // resource, until a deadline. Revoked and expired grants are absent.
+  repeated AccessGrant grants = 8;
+  // Roles an access review took away from a user for a while (ADR-0029).
+  repeated AccessDeny denies = 9;
+}
+
+// A role a user holds on one resource for a limited time because an access
+// request was approved (ADR-0025). The request id names it everywhere.
+message AccessGrant {
+  string request_id = 1;
+  string username = 2;
+  string role = 3;
+  string resource = 4;
+  int64 expires_at_unix = 5;
+}
+
+// A role withheld from a user, whatever grants it (ADR-0029). Like a lock,
+// but for one role.
+message AccessDeny {
+  string id = 1;
+  string username = 2;
+  string role = 3;
+  int64 expires_at_unix = 4;
 }
 
 // First message on a client session stream (ALPN limen-ssh/1 and friends),

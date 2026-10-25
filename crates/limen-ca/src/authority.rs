@@ -277,7 +277,8 @@ impl CertificateAuthority {
             .as_ref()
             .map(|s| hex(s.as_ref()))
             .unwrap_or_default();
-        let cert = tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let outcome = tokio::task::spawn_blocking(move || {
             let issuer = Issuer::from_ca_cert_der(
                 &ca_der,
                 BlockingSigner {
@@ -288,7 +289,10 @@ impl CertificateAuthority {
             params.signed_by(&csr.public_key, &issuer)
         })
         .await
-        .map_err(|e| CaError::Internal(e.to_string()))??;
+        .map_err(|e| CaError::Internal(e.to_string()))
+        .and_then(|r| r.map_err(CaError::from));
+        crate::record_sign("x509", started, outcome.is_ok());
+        let cert = outcome?;
         Ok(IssuedCert {
             der: cert.der().clone(),
             pem: cert.pem(),

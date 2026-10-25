@@ -17,6 +17,24 @@
   <tr><th>Sign-ins</th><td>{{ u.logins }}</td></tr>
   <tr><th>Status</th><td>{% if u.locked %}Locked by {{ u.locked_by }} on {{ u.locked_at }}: {{ u.lock_reason }}{% else %}Active{% endif %}</td></tr>
 </table></div>
+<h2>What they can reach <span class="count">{{ access.len() }}</span></h2>
+<p class="sub">From their roles at last sign-in and the active policy (v{{ policy_version }}). Roles are fixed at sign-in, so a role change applies at their next one.</p>
+{% if access.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>{{ u.name }}'s roles don't grant access to any resource.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Resource</th><th>Access as</th><th>Labels</th></tr></thead>
+  <tbody>
+  {% for r in access %}
+    <tr>
+      <td><div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><a class="cell-main" href="/console/resources/{{ r.name }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }}</div></div></div></td>
+      <td><div class="chips">{% for p in r.principals %}<span class="chip">{{ p }}</span>{% endfor %}</div></td>
+      <td><div class="chips">{% for l in r.labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
 {% if u.locked %}
 <form method="post" action="/console/users/{{ u.path }}/unlock" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">

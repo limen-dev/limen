@@ -109,6 +109,7 @@ spec:
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: vec![PolicySource {
                 name: "policy.yaml".into(),
                 content: policy,

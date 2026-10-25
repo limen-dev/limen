@@ -1,0 +1,51 @@
+# Check a policy change in a pull request (ADR-0028).
+#
+# Copy this into the repository that holds your Limen policy as
+# .github/workflows/policy-check.yml and adjust `policy/` and the install step.
+#
+# What it does:
+#   1. runs the `policy_test` cases in the policy: a failing case fails the check;
+#   2. compares who can reach what between the base branch and this branch, and
+#      posts that as a comment on the pull request (effective access, not YAML);
+#   3. fails if anyone gains *standing* access, unless the pull request carries
+#      the `access-widening-approved` label, so a reviewer looks at it on purpose.
+name: policy
+on:
+  pull_request:
+    paths: ["policy/**"]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: head }
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.base_ref }}", path: base }
+      - name: Install limen
+        run: |
+          # Put the `limen` binary on PATH however you install it.
+          curl -fsSL "$LIMEN_DOWNLOAD_URL" -o /usr/local/bin/limen && chmod +x /usr/local/bin/limen
+        env:
+          LIMEN_DOWNLOAD_URL: ${{ vars.LIMEN_DOWNLOAD_URL }}
+      - name: Policy tests
+        run: limen policy test head/policy --coverage
+      - name: Effective access diff
+        id: diff
+        run: |
+          limen policy diff base/policy --new head/policy --format markdown > diff.md
+          echo "widens=$(limen policy diff base/policy --new head/policy --fail-on-widening >/dev/null 2>&1 && echo no || echo yes)" >> "$GITHUB_OUTPUT"
+      - name: Comment on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: head/scripts/policy-pr-comment.sh diff.md
+      - name: Standing access widens
+        if: steps.diff.outputs.widens == 'yes' && !contains(github.event.pull_request.labels.*.name, 'access-widening-approved')
+        run: |
+          echo "This change gives someone standing access. Review the comment, then add the access-widening-approved label." >&2
+          exit 1

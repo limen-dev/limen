@@ -1,6 +1,9 @@
+pub mod access;
 pub mod admin;
+pub mod audit_search;
 pub mod auth;
 pub mod bot_login;
+pub mod discovery;
 pub mod enrollment;
 pub mod handoff;
 pub mod ingest;
@@ -8,7 +11,9 @@ pub mod ops;
 pub mod policy_sync;
 pub mod registry;
 pub mod resources;
+pub mod reviews;
 pub mod ssh_certs;
+pub mod watch;
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};

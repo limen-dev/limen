@@ -15,6 +15,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 pub mod locks {
     pub const CA_BOOTSTRAP: i64 = 0x4c49_4d45_4e00_0001;
     pub const CLEANUP_JOB: i64 = 0x4c49_4d45_4e00_0002;
+    pub const REVIEW_SCHEDULE: i64 = 0x4c49_4d45_4e00_0003;
 }
 
 /// Connections a replica's pool may hold unless told otherwise.
@@ -527,6 +528,14 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .await?
         .rows_affected();
     deleted += sqlx::query("DELETE FROM kube_requests WHERE at < now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM watch_chunks WHERE at < now() - interval '2 minutes'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM session_watches WHERE COALESCE(stopped_at, last_seen_at) < now() - interval '2 days'")
         .execute(&mut *tx)
         .await?
         .rows_affected();

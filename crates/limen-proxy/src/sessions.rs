@@ -11,6 +11,8 @@
 
 use std::time::{Duration, Instant};
 
+use tracing::Instrument as _;
+
 use limen_audit::{Context, EventKind};
 use limen_ca::verify::{UserIdentity, verify_user};
 use limen_core::resource::ResourceKind;
@@ -88,6 +90,19 @@ impl Protocol {
 struct Resolved {
     kind: String,
     database: String,
+    /// Access requests whose grants this session depends on (ADR-0025).
+    request_ids: Vec<String>,
+}
+
+/// The proxy's span for one session, from the handshake to the end. Exported
+/// (ADR-0040): ids and kind only, never the user or the resource.
+fn session_span() -> tracing::Span {
+    limen_core::trace_span!(
+        "session",
+        session = tracing::field::Empty,
+        kind = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
+    )
 }
 
 pub(crate) async fn handle(
@@ -110,7 +125,11 @@ pub(crate) async fn handle(
         };
     let client_addr = peer.remote_addr.map(|a| a.to_string());
     let user_cert_der = peer.leaf().map(|c| c.to_vec()).unwrap_or_default();
-    match establish(proxy, &user, user_cert_der, &request, protocol, None).await {
+    let span = session_span();
+    match establish(proxy, &user, user_cert_der, &request, protocol, None)
+        .instrument(span.clone())
+        .await
+    {
         Ok((session_id, worker, inbound, outbound, _slot, resolved)) => {
             // `_slot` counts the session in the worker's load until it ends.
             if respond(&mut tls, Ok(session_id.to_string())).await.is_err() {
@@ -128,9 +147,12 @@ pub(crate) async fn handle(
                 outbound,
                 &resolved,
             )
+            .instrument(span)
             .await;
         }
         Err(denial) => {
+            // Status only: the reason can name users and resources.
+            span.record("otel.status_code", "ERROR");
             if denial.audit {
                 let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
                 if protocol.has_database() {
@@ -445,8 +467,11 @@ async fn establish(
         return Err(denied(why));
     }
     let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
+    // The certificate's roles, plus roles an approved access request gave on
+    // this resource, less any an access review took away (ADR-0025, ADR-0029).
+    let effective = snapshot.roles_for(&user.username, &user.roles, &request.resource, now);
     let decision = policy.evaluate(&AccessRequest {
-        roles: &user.roles,
+        roles: &effective.roles,
         resource: &request.resource,
         principal,
     });
@@ -463,6 +488,9 @@ async fn establish(
         database: &database,
         groups: Vec::new(),
         session_id,
+        roles: &effective.roles,
+        request_ids: effective.request_ids.clone(),
+        deadline_unix: effective.earliest_expiry_unix,
     };
     let (session_id, worker, inbound, outbound, slot) =
         open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
@@ -472,7 +500,11 @@ async fn establish(
         inbound,
         outbound,
         slot,
-        Resolved { kind, database },
+        Resolved {
+            kind,
+            database,
+            request_ids: effective.request_ids,
+        },
     ))
 }
 
@@ -492,6 +524,7 @@ pub(crate) async fn open_web_stream(
         principal: host.to_owned(),
         ..Default::default()
     };
+    let span = session_span();
     let (session_id, worker, inbound, outbound, _slot, resolved) = establish(
         proxy,
         user,
@@ -500,6 +533,7 @@ pub(crate) async fn open_web_stream(
         Protocol::Web,
         Some(session_id),
     )
+    .instrument(span.clone())
     .await?;
     let (client, relay_io) = tokio::io::duplex(256 * 1024);
     let proxy = proxy.clone();
@@ -517,6 +551,7 @@ pub(crate) async fn open_web_stream(
             outbound,
             &resolved,
         )
+        .instrument(span)
         .await;
     });
     Ok(client)
@@ -535,6 +570,14 @@ pub(crate) struct Target<'a> {
     /// Reuse a caller-generated ID so protocol-specific audit events share
     /// the ordinary session timeline.
     pub session_id: Option<Uuid>,
+    /// The roles that decided this request: the certificate's plus any from
+    /// grants. The session's length comes from these.
+    pub roles: &'a [String],
+    /// Access requests whose grants supplied one of `roles`. The worker
+    /// carries them in its audit events.
+    pub request_ids: Vec<String>,
+    /// The earliest deadline among those grants: the session may not outlive it.
+    pub deadline_unix: Option<i64>,
 }
 
 /// Pick a worker that may serve the resource, sign a grant for it, and open
@@ -550,7 +593,15 @@ pub(crate) async fn open_session(
     now: OffsetDateTime,
 ) -> Result<(Uuid, SessionWorker, Inbound, Outbound, Slot), Denial> {
     let session_id = target.session_id.unwrap_or_else(Uuid::now_v7);
-    let ttl = policy.max_session_ttl(&user.roles);
+    let mut ttl = policy.max_session_ttl(target.roles);
+    if let Some(deadline) = target.deadline_unix {
+        // A session started under a grant ends when the grant does.
+        let left = u64::try_from(deadline - now.unix_timestamp()).unwrap_or(0);
+        if left == 0 {
+            return Err(denied("the access grant has ended".to_owned()));
+        }
+        ttl = ttl.min(Duration::from_secs(left));
+    }
     let creds = proxy.credentials();
     // Load figures are a little stale, so the chosen worker (or the peer
     // proxy holding it) may turn out to be full, or to have started
@@ -587,6 +638,7 @@ pub(crate) async fn open_session(
             worker_id: worker_id.clone(),
             database: target.database.to_owned(),
             groups: target.groups.clone(),
+            request_ids: target.request_ids.clone(),
         };
         let signed = limen_session::grant::sign(&proxy.signer(), &grant)
             .map_err(|e| failed(format!("signing grant: {e}")))?;
@@ -704,6 +756,8 @@ async fn open_on(
     tx.send(TunnelFrame {
         frame: Some(Frame::Open(SessionOpen {
             grant: Some(signed),
+            // `open_on` runs inside the `session` span.
+            traceparent: limen_core::telemetry::current_traceparent().unwrap_or_default(),
         })),
     })
     .await
@@ -771,6 +825,10 @@ async fn relay<IO>(
 {
     let kind = resolved.kind.as_str();
     let database = resolved.database.as_str();
+    // Runs inside the `session` span (see `session_span`).
+    let span = tracing::Span::current();
+    span.record("session", tracing::field::display(session_id));
+    span.record("kind", kind);
     // Redis, MongoDB, and the brokers name the upstream identity for what it is, not `login`.
     let principal_field = match kind {
         "redis" => "redis_user",
@@ -798,6 +856,11 @@ async fn relay<IO>(
     }
     if let Some(group) = connection_group(&request.group) {
         start["group"] = json!(group);
+    }
+    if !resolved.request_ids.is_empty() {
+        // Why this session was allowed (ADR-0025): the recording links back
+        // to the request, its reason, and its approvers.
+        start["request_ids"] = json!(resolved.request_ids);
     }
     if user.bot {
         // Which CI run this session belongs to (ADR-0019).
@@ -889,6 +952,17 @@ async fn relay<IO>(
                 }
                 if snapshot.restrictions.is_revoked(worker_id) {
                     return "worker revoked";
+                }
+                // A grant that was revoked, or reached its deadline, ends
+                // the sessions it allowed. Expiry is enforced here, not only
+                // when credentials are issued.
+                if !resolved.request_ids.is_empty()
+                    && snapshot.restrictions.grant_ended(
+                        &resolved.request_ids,
+                        OffsetDateTime::now_utc().unix_timestamp(),
+                    )
+                {
+                    return "access grant ended";
                 }
             }
         }

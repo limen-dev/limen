@@ -6,6 +6,7 @@
 //! frame stream to its SSH server (or database, Redis, or Kubernetes API).
 
 use std::sync::Arc;
+use tracing::Instrument as _;
 
 use limen_policy::{AccessRequest, Principal};
 use limen_proto::v1::ssh_certificates_client::SshCertificatesClient;
@@ -60,13 +61,26 @@ pub(crate) async fn open(
             "the first frame must open the session",
         ));
     };
+    // Exported as a trace span (ADR-0040): the session id only. Opened before
+    // admission so the worker's own calls to the control plane (SSH
+    // certificates) are filed under it, in the proxy's trace.
+    let span = limen_core::trace_span!(
+        "session",
+        session = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
+    );
+    limen_core::telemetry::set_parent_from_traceparent(&span, &open.traceparent);
     let signed = open
         .grant
         .ok_or_else(|| Status::invalid_argument("missing grant"))?;
-    let admitted = admit(&worker, &signed).await.map_err(|e| {
-        tracing::warn!(error = %e, "session refused");
-        e
-    })?;
+    let admitted = admit(&worker, &signed)
+        .instrument(span.clone())
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "session refused");
+            span.record("otel.status_code", "ERROR");
+            e
+        })?;
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<TunnelFrame, Status>>(64);
     let _ = tx
@@ -99,6 +113,7 @@ pub(crate) async fn open(
     let audit = worker.audit.clone();
     let end = worker.end_sessions();
     let kube_worker = worker.clone();
+    span.record("session", tracing::field::display(&session_id));
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();
@@ -277,7 +292,8 @@ pub(crate) async fn open(
                 })),
             }))
             .await;
-    });
+    }
+    .instrument(span));
     Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
 }
 
@@ -334,6 +350,11 @@ impl Admitted {
 struct Checked {
     verified: limen_session::grant::VerifiedGrant,
     snapshot: limen_session::snapshot::Snapshot,
+    /// The roles that decide this session: the certificate's, plus any a
+    /// grant from an approved access request gives on this resource, less any
+    /// an access review took away. Worked out from the worker's own snapshot,
+    /// never from what the proxy claims (ADR-0025).
+    roles: Vec<String>,
 }
 
 /// Every check a session must pass before the worker touches the target.
@@ -365,7 +386,19 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         .policy
         .fresh(now)
         .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
-    let checked = Checked { verified, snapshot };
+    let roles = snapshot
+        .roles_for(
+            &verified.user.username,
+            &verified.user.roles,
+            &verified.grant.resource,
+            now,
+        )
+        .roles;
+    let checked = Checked {
+        verified,
+        snapshot,
+        roles,
+    };
     match kind.as_str() {
         "ssh" => admit_ssh(worker, signed, &checked)
             .await
@@ -539,7 +572,7 @@ fn check_policy(worker: &Worker, checked: &Checked, principal: Principal) -> Res
         return Err(Status::permission_denied(why));
     }
     let decision = snapshot.policy.evaluate(&AccessRequest {
-        roles: &checked.verified.user.roles,
+        roles: &checked.roles,
         resource: &grant.resource,
         principal,
     });
@@ -583,11 +616,11 @@ fn admit_kafka(
         limen_core::broker::KafkaSlot::parse(&grant.database)
             .map_err(|e| Status::invalid_argument(e.to_string()))?
     };
-    let grants = checked.snapshot.policy.kafka_grants(
-        &checked.verified.user.roles,
-        &grant.resource,
-        &grant.principal,
-    );
+    let grants =
+        checked
+            .snapshot
+            .policy
+            .kafka_grants(&checked.roles, &grant.resource, &grant.principal);
     let config = kafka::SessionConfig::new(
         grant.session_id.clone(),
         grant.username.clone(),
@@ -614,11 +647,11 @@ fn admit_mq(worker: &Worker, checked: &Checked) -> Result<amqp::Prepared, Status
         .resource(&grant.resource)
         .and_then(|r| r.spec.rabbitmq.clone())
         .ok_or_else(|| Status::failed_precondition("resource is not a RabbitMQ resource"))?;
-    let grants = checked.snapshot.policy.mq_grants(
-        &checked.verified.user.roles,
-        &grant.resource,
-        &grant.principal,
-    );
+    let grants =
+        checked
+            .snapshot
+            .policy
+            .mq_grants(&checked.roles, &grant.resource, &grant.principal);
     let config = amqp::SessionConfig {
         session_id: grant.session_id.clone(),
         username: grant.username.clone(),
@@ -651,11 +684,11 @@ async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepar
         .resource(&grant.resource)
         .and_then(|r| r.spec.redis.clone())
         .ok_or_else(|| Status::failed_precondition("resource is not a Redis resource"))?;
-    let grants = checked.snapshot.policy.redis_grants(
-        &checked.verified.user.roles,
-        &grant.resource,
-        &grant.principal,
-    );
+    let grants =
+        checked
+            .snapshot
+            .policy
+            .redis_grants(&checked.roles, &grant.resource, &grant.principal);
     let config = redis::SessionConfig::new(
         grant.session_id.clone(),
         grant.username.clone(),
@@ -705,11 +738,11 @@ async fn admit_search(
     };
     let target =
         target.ok_or_else(|| Status::failed_precondition("resource is not a search resource"))?;
-    let grants = checked.snapshot.policy.search_grants(
-        &checked.verified.user.roles,
-        &grant.resource,
-        &grant.principal,
-    );
+    let grants =
+        checked
+            .snapshot
+            .policy
+            .search_grants(&checked.roles, &grant.resource, &grant.principal);
     let session_id = grant
         .session_id
         .parse()
@@ -810,7 +843,7 @@ async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo:
         .map_err(|_| Status::invalid_argument("bad session id"))?;
     let access = crate::mongo::Access::new(
         std::sync::Arc::clone(&checked.snapshot.policy),
-        checked.verified.user.roles.clone(),
+        checked.roles.clone(),
         &grant.resource,
         &grant.principal,
     );
@@ -1015,7 +1048,24 @@ async fn admit_ssh(
     let host_cert = Certificate::from_openssh(&certs.host_certificate)
         .map_err(|e| Status::internal(e.to_string()))?;
 
+    // A role that granted this session may ask that the user be told they
+    // can be observed (ADR-0030).
+    let notify_observed = match snapshot.policy.evaluate(&AccessRequest {
+        roles: &checked.roles,
+        resource: &grant.resource,
+        principal: Principal::SshLogin(grant.principal.clone()),
+    }) {
+        limen_policy::Decision::Allow { matched_roles } => matched_roles.iter().any(|r| {
+            snapshot
+                .policy
+                .role(r)
+                .is_some_and(|r| r.spec.notify_observed)
+        }),
+        _ => false,
+    };
     Ok(SshSessionConfig {
+        tap: Some(worker.live.tap(&grant.session_id)),
+        notify_observed,
         recording_path: worker
             .recordings_dir()
             .join(format!("{}.cast", grant.session_id)),

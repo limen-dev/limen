@@ -16,5 +16,6 @@ Runbooks are added as each component ships. Rows without a link are planned:
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
 | [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |
 | [Onboarding MongoDB, Atlas, or DocumentDB](mongodb-onboarding.md) | 9 ✅ |
+| [Access requests, search, discovery, reviews, and watching](access-workflows.md) | 13 ✅ |
 | Control plane outage | not scheduled |
 | Okta setup | 14 |

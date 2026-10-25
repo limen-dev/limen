@@ -225,7 +225,8 @@ async fn finish_login(
         )
         .into_iter()
         .collect();
-    if roles.is_empty() {
+    // Someone who can only ask for access (ADR-0025) still signs in.
+    if roles.is_empty() && !crate::access::takes_part(state, &identity.username, &identity.groups) {
         return deny(
             state,
             addr,
