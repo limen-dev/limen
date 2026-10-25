@@ -2963,6 +2963,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -2971,6 +2972,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -3137,6 +3139,7 @@ name = "limen-tunnel"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "clap",
  "futures",
  "http",
  "http-body",
@@ -3677,6 +3680,7 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

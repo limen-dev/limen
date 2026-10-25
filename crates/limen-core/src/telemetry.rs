@@ -8,10 +8,10 @@
 use clap::{Args, ValueEnum};
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig as _};
+use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig as _, WithHttpConfig as _};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _, fmt};
@@ -97,6 +97,22 @@ pub struct LogArgs {
     #[arg(long, env = "LIMEN_OTLP_ENDPOINT")]
     pub otlp_endpoint: Option<String>,
 
+    /// PEM file with the CA that signed the collector's certificate, for an
+    /// `https://` endpoint on a private CA. Added to the system roots.
+    #[arg(long, env = "LIMEN_OTLP_CA_FILE")]
+    pub otlp_ca_file: Option<std::path::PathBuf>,
+
+    /// Share of new traces to export, 0 to 1. A trace that a peer already
+    /// sampled (the proxy's session, seen by the worker) is always kept.
+    /// Lower it where the control plane's steady stream of calls costs too much.
+    #[arg(
+        long,
+        env = "LIMEN_TRACE_SAMPLE_RATIO",
+        default_value_t = 1.0,
+        value_parser = parse_ratio
+    )]
+    pub trace_sample_ratio: f64,
+
     /// Deployment environment tag on exported traces (`deployment.environment`).
     /// Shares `LIMEN_ENVIRONMENT` with the control plane's `--environment`.
     #[arg(
@@ -127,7 +143,13 @@ impl LogArgs {
             .as_deref()
             .filter(|e| !e.is_empty())
             .and_then(|endpoint| {
-                match build_provider(endpoint, service, &self.trace_environment) {
+                match build_provider(
+                    endpoint,
+                    service,
+                    &self.trace_environment,
+                    self.trace_sample_ratio,
+                    self.otlp_ca_file.as_deref(),
+                ) {
                     Ok(p) => Some(p),
                     Err(e) => {
                         // Tracing is best effort: never stop the service for it.
@@ -167,27 +189,64 @@ impl Drop for TelemetryGuard {
     }
 }
 
+fn parse_ratio(raw: &str) -> Result<f64, String> {
+    match raw.parse::<f64>() {
+        Ok(r) if (0.0..=1.0).contains(&r) => Ok(r),
+        _ => Err(format!("{raw:?} is not a number from 0 to 1")),
+    }
+}
+
 fn build_provider(
     endpoint: &str,
     service: &'static str,
     environment: &str,
-) -> Result<SdkTracerProvider, opentelemetry_otlp::ExporterBuildError> {
-    let exporter = SpanExporter::builder()
+    sample_ratio: f64,
+    ca_file: Option<&std::path::Path>,
+) -> Result<SdkTracerProvider, Box<dyn std::error::Error>> {
+    let builder = SpanExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary)
-        .with_endpoint(traces_url(endpoint))
-        .build()?;
+        .with_endpoint(traces_url(endpoint));
+    let exporter = match ca_file {
+        Some(path) => builder.with_http_client(client_trusting(path)?),
+        None => builder,
+    }
+    .build()?;
     let resource = Resource::builder()
         .with_service_name(service)
         .with_attributes([
             KeyValue::new("service.version", crate::VERSION),
             KeyValue::new("deployment.environment", environment.to_owned()),
+            // Tells replicas of one service apart.
+            KeyValue::new("service.instance.id", uuid::Uuid::new_v4().to_string()),
         ])
         .build();
     Ok(SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource)
+        .with_sampler(Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(
+            sample_ratio,
+        ))))
         .build())
+}
+
+/// A blocking HTTP client that also trusts the CA in `path`.
+fn client_trusting(
+    path: &std::path::Path,
+) -> Result<reqwest::blocking::Client, Box<dyn std::error::Error>> {
+    let pem = std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let ca = reqwest::Certificate::from_pem(&pem)
+        .map_err(|e| format!("{} is not a PEM certificate: {e}", path.display()))?;
+    // A blocking client cannot be built (or dropped) on an async runtime thread.
+    std::thread::Builder::new()
+        .spawn(move || {
+            reqwest::blocking::Client::builder()
+                .add_root_certificate(ca)
+                .build()
+        })?
+        .join()
+        .map_err(|_| "the HTTP client thread panicked")?
+        .map_err(Into::into)
 }
 
 /// The collector's trace path under a base URL like `http://host:4318`.
@@ -238,9 +297,14 @@ fn install(format: LogFormat, default_filter: &str, tracer: Option<Tracer>) {
     .with_filter(filter);
     // Spans only, and only ours: see the module docs.
     let otel = tracer.map(|t| {
-        tracing_opentelemetry::layer().with_tracer(t).with_filter(
-            tracing_subscriber::filter::filter_fn(|m| m.is_span() && m.target() == TRACE_TARGET),
-        )
+        use tracing_subscriber::filter::Targets;
+        // `Targets` answers per callsite, so tracing caches the decision
+        // exactly. Nothing logs events with this target; `trace_span!` is the
+        // only way in.
+        let ours = Targets::new().with_target(TRACE_TARGET, tracing::Level::TRACE);
+        tracing_opentelemetry::layer()
+            .with_tracer(t)
+            .with_filter(ours)
     });
     let _ = tracing_subscriber::registry()
         .with(logs)

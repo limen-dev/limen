@@ -6,7 +6,6 @@ services:
     container_name: jaeger-${LIMEN_ENV:-dev}
     profiles: ["tracing"]
     image: ${JAEGER_IMAGE}
-    environment:
-      # Memory storage only: traces are gone when it restarts.
-      COLLECTOR_OTLP_ENABLED: "true"
+    # Jaeger v2's default configuration: OTLP in on 4318, memory storage only
+    # (traces are gone when it restarts), the UI on 16686.
     ports: ["127.0.0.1:${LIMEN_PORT_JAEGER:-16686}:16686"]

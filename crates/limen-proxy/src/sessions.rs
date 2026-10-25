@@ -98,7 +98,8 @@ fn session_span() -> tracing::Span {
     limen_core::trace_span!(
         "session",
         session = tracing::field::Empty,
-        kind = tracing::field::Empty
+        kind = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
     )
 }
 
@@ -148,6 +149,8 @@ pub(crate) async fn handle(
             .await;
         }
         Err(denial) => {
+            // Status only: the reason can name users and resources.
+            span.record("otel.status_code", "ERROR");
             if denial.audit {
                 let mut data = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal, "reason": denial.reason, "client_addr": client_addr });
                 if protocol.has_database() {

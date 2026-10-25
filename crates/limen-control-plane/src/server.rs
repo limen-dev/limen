@@ -117,6 +117,13 @@ fn service_label(path: &str) -> &'static str {
         .unwrap_or("http")
 }
 
+fn is_grpc(request: &axum::extract::Request) -> bool {
+    request
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .is_some_and(|v| v.as_bytes().starts_with(b"application/grpc"))
+}
+
 /// Scale signal: API latency per service, for target-tracking policies.
 async fn record_latency(
     request: axum::extract::Request,
@@ -125,9 +132,34 @@ async fn record_latency(
     let service = service_label(request.uri().path());
     let started = std::time::Instant::now();
     // The service is a fixed label (never a path), so it is safe to export.
-    let span = limen_core::trace_span!("api.request", service, status = tracing::field::Empty);
+    let span = limen_core::trace_span!(
+        "api.request",
+        service,
+        "http.response.status_code" = tracing::field::Empty,
+        "otel.status_code" = tracing::field::Empty
+    );
+    // Join the caller's trace, for gRPC callers only: this port also serves
+    // browsers and probes, whose headers mean nothing here.
+    if is_grpc(&request)
+        && let Some(parent) = request
+            .headers()
+            .get("traceparent")
+            .and_then(|v| v.to_str().ok())
+    {
+        limen_core::telemetry::set_parent_from_traceparent(&span, parent);
+    }
     let response = tracing::Instrument::instrument(next.run(request), span.clone()).await;
-    span.record("status", response.status().as_u16());
+    span.record("http.response.status_code", response.status().as_u16());
+    // gRPC reports its status in a header only for calls that fail before a
+    // body (trailers-only); most failures are in trailers, which this layer
+    // does not see.
+    let grpc_failed = response
+        .headers()
+        .get("grpc-status")
+        .is_some_and(|s| s.as_bytes() != b"0");
+    if response.status().is_server_error() || grpc_failed {
+        span.record("otel.status_code", "ERROR");
+    }
     metrics::histogram!("limen_api_request_seconds", "service" => service)
         .record(started.elapsed().as_secs_f64());
     response
@@ -416,6 +448,58 @@ mod latency_tests {
         assert_eq!(service_label("/console/sessions/123"), "http");
         assert_eq!(service_label("/"), "http");
         assert_eq!(service_label(""), "http");
+    }
+
+    #[tokio::test]
+    async fn grpc_calls_join_the_callers_trace_and_other_requests_do_not() {
+        use clap::Parser as _;
+        #[derive(clap::Parser)]
+        struct Cli {
+            #[command(flatten)]
+            log: limen_core::telemetry::LogArgs,
+        }
+        // Nothing listens here: export fails quietly, ids are still real.
+        let cli = Cli::parse_from(["x", "--otlp-endpoint", "http://127.0.0.1:1"]);
+        let _guard = cli.log.init("limen-api-trace-test");
+
+        // The handler reports the trace context it runs under.
+        let app = Router::new()
+            .route(
+                "/limen.v1.SshCertificates/Issue",
+                get(|| async { limen_core::telemetry::current_traceparent().unwrap_or_default() }),
+            )
+            .layer(axum::middleware::from_fn(record_latency));
+        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let call = |content_type: &str| {
+            let request = axum::http::Request::get("/limen.v1.SshCertificates/Issue")
+                .header("content-type", content_type.to_owned())
+                .header("traceparent", parent)
+                .body(axum::body::Body::empty())
+                .expect("request");
+            let app = app.clone();
+            async move {
+                let response = app.oneshot(request).await.expect("response");
+                let body = axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .expect("body");
+                String::from_utf8(body.to_vec()).expect("utf8")
+            }
+        };
+
+        let grpc = call("application/grpc").await;
+        assert_eq!(
+            grpc.split('-').nth(1),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736"),
+            "{grpc}"
+        );
+        assert!(grpc.ends_with("-01"), "sampled like its parent: {grpc}");
+
+        let browser = call("text/html").await;
+        assert_ne!(
+            browser.split('-').nth(1),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736"),
+            "{browser}"
+        );
     }
 
     #[tokio::test]

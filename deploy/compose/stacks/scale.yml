@@ -21,6 +21,8 @@ x-limen-image: &limen-build
   args:
     RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
     DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
+    # A checkout that builds next to others sets its own cache (see the Dockerfile).
+    LIMEN_BUILD_CACHE: ${LIMEN_BUILD_CACHE:-limen-target}
 
 x-control-plane: &control-plane
   build: { <<: *limen-build, target: control-plane }
@@ -37,7 +39,7 @@ x-control-plane: &control-plane
     s3: { condition: service_started }
 
 x-control-plane-env: &control-plane-env
-  RUST_LOG: info
+  RUST_LOG: ${LIMEN_SCALE_CP_LOG:-info}
   LIMEN_DATABASE_URL: postgres://limen:limen-dev-only@postgres:5432/limen
   # Every replica loads the same CA keys: file-backed keys live on one shared
   # volume (with KMS they'd be KMS key ids); the CA certificates are in the

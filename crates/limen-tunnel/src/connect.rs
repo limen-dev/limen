@@ -233,7 +233,7 @@ impl tower::Service<Uri> for TlsConnectorService {
 /// once the connection drops, calls on it fail.
 pub async fn channel_over(
     stream: TlsStream<TcpStream>,
-) -> Result<tonic::transport::Channel, tonic::transport::Error> {
+) -> Result<TracedChannel, tonic::transport::Error> {
     let slot = Arc::new(std::sync::Mutex::new(Some(TokioIo::new(stream))));
     let connector = tower::service_fn(move |_: Uri| {
         let taken = slot
@@ -245,22 +245,56 @@ pub async fn channel_over(
     tonic::transport::Endpoint::from_static("http://limen.invalid")
         .connect_with_connector(connector)
         .await
+        .map(TracedChannel)
 }
 
 /// A lazily connecting tonic channel over our TLS, with HTTP/2 keepalives.
 #[must_use]
-pub fn channel(
-    addr: &str,
-    server_name: &str,
-    config: SharedClientConfig,
-) -> tonic::transport::Channel {
+pub fn channel(addr: &str, server_name: &str, config: SharedClientConfig) -> TracedChannel {
     // The scheme is http because TLS is done by the connector, not by tonic.
-    tonic::transport::Endpoint::from_static("http://limen.invalid")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .http2_keep_alive_interval(std::time::Duration::from_secs(15))
-        .keep_alive_timeout(std::time::Duration::from_secs(45))
-        .keep_alive_while_idle(true)
-        .connect_with_connector_lazy(TlsConnectorService::new(addr, server_name, config))
+    TracedChannel(
+        tonic::transport::Endpoint::from_static("http://limen.invalid")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(15))
+            .keep_alive_timeout(std::time::Duration::from_secs(45))
+            .keep_alive_while_idle(true)
+            .connect_with_connector_lazy(TlsConnectorService::new(addr, server_name, config)),
+    )
+}
+
+/// A tonic channel that adds the W3C `traceparent` of the calling span to every
+/// call, so the callee's span joins the caller's trace (ADR-0040). With tracing
+/// off, or outside an exported span, it adds nothing.
+#[derive(Debug, Clone)]
+pub struct TracedChannel(tonic::transport::Channel);
+
+impl TracedChannel {
+    /// Wrap an existing channel.
+    #[must_use]
+    pub fn new(channel: tonic::transport::Channel) -> Self {
+        Self(channel)
+    }
+}
+
+type GrpcRequest = http::Request<tonic::body::Body>;
+
+impl tower::Service<GrpcRequest> for TracedChannel {
+    type Response = <tonic::transport::Channel as tower::Service<GrpcRequest>>::Response;
+    type Error = <tonic::transport::Channel as tower::Service<GrpcRequest>>::Error;
+    type Future = <tonic::transport::Channel as tower::Service<GrpcRequest>>::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut request: GrpcRequest) -> Self::Future {
+        if let Some(value) = limen_core::telemetry::current_traceparent()
+            .and_then(|tp| http::HeaderValue::from_str(&tp).ok())
+        {
+            request.headers_mut().insert("traceparent", value);
+        }
+        self.0.call(request)
+    }
 }
 
 #[cfg(test)]
