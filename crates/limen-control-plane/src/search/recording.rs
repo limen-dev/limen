@@ -157,8 +157,19 @@ pub fn extract(cast: &[u8]) -> Extracted {
 
     let mut out = Extracted::default();
     let mut current: Option<Chunk> = None;
+    // Masking is per line, so a private key's body (lines with no header of
+    // their own) is dropped by state: from its header to its end line.
+    let mut in_key = false;
     for (t, line) in finished {
-        let line = mask::mask(&line);
+        let line = if in_key {
+            in_key = !line.contains("PRIVATE KEY-----");
+            "[masked:private-key]".to_owned()
+        } else {
+            in_key = line.contains("-----BEGIN")
+                && line.contains("PRIVATE KEY-----")
+                && !line.contains("-----END");
+            mask::mask(&line)
+        };
         if out.bytes + line.len() + 1 > MAX_SESSION_TEXT {
             out.truncated = true;
             break;
@@ -193,6 +204,19 @@ mod tests {
             s.push('\n');
         }
         s.into_bytes()
+    }
+
+    #[test]
+    fn a_private_keys_body_lines_are_masked_too() {
+        let c = cast(&[(
+            "o",
+            0.1,
+            "cat key\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3BlbnNzaC1rZXktdjE\r\nAAAAB\r\n-----END OPENSSH PRIVATE KEY-----\r\nafter\r\n",
+        )]);
+        let text: String = extract(&c).chunks.iter().map(|c| c.text.clone()).collect();
+        assert!(!text.contains("b3BlbnNzaC1"), "{text}");
+        assert!(!text.contains("AAAAB"), "{text}");
+        assert!(text.contains("after") && text.contains("cat key"), "{text}");
     }
 
     #[test]

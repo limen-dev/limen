@@ -255,7 +255,7 @@ async fn deliver(http: reqwest::Client, mut rx: mpsc::Receiver<Job>) {
                 }
                 Err(e) => {
                     // The URL is a credential: never in the log.
-                    tracing::warn!(notifier, attempt, error = %e, "notification failed");
+                    tracing::warn!(notifier, attempt, error = %e.without_url(), "notification failed");
                     tokio::time::sleep(Duration::from_millis(250 * u64::from(attempt))).await;
                 }
             }

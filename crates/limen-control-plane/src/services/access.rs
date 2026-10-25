@@ -171,18 +171,11 @@ pub async fn explain(
     let loaded = state.policy.current();
     let policy = &loaded.policy;
     let now = OffsetDateTime::now_utc();
-    // The roles that decide this resource: the certificate's, plus grants.
-    let grants: Vec<_> = store::active_grants(&state.db)
+    // The roles that decide this resource, as enforcement sees them: the
+    // certificate's, plus grants, minus what a review withheld.
+    let held = crate::access::effective_roles_now(state, subject, cert_roles, resource)
         .await?
-        .into_iter()
-        .filter(|g| g.username == subject && g.resource == resource)
-        .collect();
-    let mut held = cert_roles.to_vec();
-    for g in &grants {
-        if !held.contains(&g.role) {
-            held.push(g.role.clone());
-        }
-    }
+        .roles;
     let groups = store::user_groups(&state.db, subject)
         .await?
         .unwrap_or_default();
@@ -222,6 +215,16 @@ pub async fn explain(
             "{subject} is locked: a lock beats every role and grant."
         ));
     }
+    for r in cert_roles.iter().filter(|r| !held.contains(r)) {
+        lines.push(format!(
+            "The role {r} is withheld from {subject} by an access review."
+        ));
+    }
+    let grants: Vec<_> = store::active_grants(&state.db)
+        .await?
+        .into_iter()
+        .filter(|g| g.username == subject && g.resource == resource && held.contains(&g.role))
+        .collect();
     for g in &grants {
         let left = g.expires_at - now;
         lines.push(format!(

@@ -168,7 +168,7 @@ pub async fn set_status(
     id: Uuid,
     status: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE access_requests SET status = $2, decided_at = now() WHERE id = $1")
+    sqlx::query("UPDATE access_requests SET status = $2, decided_at = COALESCE(decided_at, now()) WHERE id = $1")
         .bind(id)
         .bind(status)
         .execute(&mut **tx)

@@ -159,7 +159,10 @@ fn filters(q: &Query) -> serde_json::Value {
 /// Run a parsed search. No audit, no rate limit: [`search`] does both.
 pub async fn run(state: &AppState, q: &Query, limit: i64) -> Result<Results, Status> {
     let patterns: Vec<String> = q.terms.iter().map(|t| query::like_pattern(t)).collect();
-    let tsq = query::tsquery(&q.terms);
+    // No word-index narrowing: a tsvector matches whole words, and a search
+    // for `passwd` must find `/etc/passwd`. The LIKE match decides, over a
+    // window bounded by `after:` and retention.
+    let tsq: Option<&str> = None;
     let mut tx = state
         .db
         .begin()
@@ -194,7 +197,7 @@ pub async fn run(state: &AppState, q: &Query, limit: i64) -> Result<Results, Sta
     .bind(&q.kinds)
     .bind(q.session)
     .bind(q.outcome.as_deref())
-    .bind(tsq.as_deref())
+    .bind(tsq)
     .bind(&patterns)
     .bind(fetch)
     .fetch_all(&mut *tx)
@@ -245,7 +248,7 @@ pub async fn run(state: &AppState, q: &Query, limit: i64) -> Result<Results, Sta
         .bind(q.session)
         // A recording has no denied/ok outcome: an outcome filter skips it.
         .bind(q.outcome.as_deref())
-        .bind(tsq.as_deref())
+        .bind(tsq)
         .bind(&patterns)
         .bind(fetch)
         .fetch_all(&mut *tx)

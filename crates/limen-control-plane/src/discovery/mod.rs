@@ -230,12 +230,16 @@ pub async fn report(
         .begin()
         .await
         .map_err(|e| internal("starting transaction", e))?;
-    let existing: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM discovered_resources WHERE document = $1")
+    // Only a resource not stored yet counts toward the cap: re-seeing a known
+    // one adds nothing.
+    let mut known: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT key FROM discovered_resources WHERE document = $1")
             .bind(&doc.metadata.name)
-            .fetch_one(&mut *tx)
+            .fetch_all(&mut *tx)
             .await
-            .map_err(|e| internal("counting discovered resources", e))?;
+            .map_err(|e| internal("counting discovered resources", e))?
+            .into_iter()
+            .collect();
     for item in &req.items {
         let matcher = usize::try_from(item.matcher).unwrap_or(usize::MAX);
         let proposal = found_of(item)
@@ -253,11 +257,14 @@ pub async fn report(
         if seen_keys.contains(&key) {
             continue;
         }
-        if existing + i64::try_from(seen_keys.len()).unwrap_or(i64::MAX) >= MAX_ROWS_PER_DOCUMENT {
+        if !known.contains(&key)
+            && i64::try_from(known.len()).unwrap_or(i64::MAX) >= MAX_ROWS_PER_DOCUMENT
+        {
             return Err(Status::resource_exhausted(
                 "too many discovered resources for this document",
             ));
         }
+        known.insert(key.clone());
         seen_keys.push(key.clone());
         kept += 1;
         upsert(
@@ -295,7 +302,9 @@ pub async fn report(
             .map_err(|e| internal("reading rows", e))?
         {
             let missed = row.missed_cycles + 1;
-            let becomes_stale = row.state != "stale"
+            // A rejection is the admin's decision about this instance: it
+            // stays rejected whether or not the instance is still there.
+            let becomes_stale = !matches!(row.state.as_str(), "stale" | "rejected")
                 && u32::try_from(missed).unwrap_or(u32::MAX) >= doc.spec.stale_after_cycles();
             sqlx::query(
                 "UPDATE discovered_resources SET missed_cycles = $2,
@@ -677,8 +686,12 @@ pub async fn review(
         .await
         .map_err(|e| internal("accepting", e))?;
     } else {
+        // Rejecting a pending change to a resource already accepted refuses
+        // the change only: the accepted version stays in force.
         sqlx::query(
-            "UPDATE discovered_resources SET state = 'rejected', change_pending = false,
+            "UPDATE discovered_resources SET
+               state = CASE WHEN change_pending AND accepted IS NOT NULL THEN state ELSE 'rejected' END,
+               change_pending = false,
                reviewed_by = $2, reviewed_at = now(), review_note = $3 WHERE key = $1",
         )
         .bind(key)

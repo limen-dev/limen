@@ -217,19 +217,6 @@ pub fn like_pattern(term: &str) -> String {
     out
 }
 
-/// A `tsquery` that narrows the index for the plain words in the terms
-/// (prefix match, all required), or `None` if no term is a plain word. It
-/// only speeds the search up: the `LIKE` match is what decides.
-#[must_use]
-pub fn tsquery(terms: &[String]) -> Option<String> {
-    let words: Vec<String> = terms
-        .iter()
-        .filter(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric()))
-        .map(|t| format!("{}:*", t.to_lowercase()))
-        .collect();
-    (!words.is_empty()).then(|| words.join(" & "))
-}
-
 #[cfg(test)]
 mod tests {
     use time::macros::datetime;
@@ -330,18 +317,5 @@ mod tests {
     fn like_patterns_escape_wildcards() {
         assert_eq!(like_pattern("100%_done\\"), "%100\\%\\_done\\\\%");
         assert_eq!(like_pattern("plain"), "%plain%");
-    }
-
-    #[test]
-    fn the_index_hint_only_uses_plain_words() {
-        assert_eq!(
-            tsquery(&["Drop".into(), "orders".into()]).as_deref(),
-            Some("drop:* & orders:*")
-        );
-        assert_eq!(tsquery(&["orders_2024".into(), "a b".into()]), None);
-        assert_eq!(
-            tsquery(&["x;--".into(), "ok".into()]).as_deref(),
-            Some("ok:*")
-        );
     }
 }

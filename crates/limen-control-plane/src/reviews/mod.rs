@@ -562,7 +562,9 @@ pub async fn decide(
         sqlx::query(
             "INSERT INTO access_denies (id, username, role, reason, created_by, review_item_id, expires_at)
              VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(days => $7))
-             ON CONFLICT (username, role) WHERE lifted_at IS NULL DO NOTHING",
+             ON CONFLICT (username, role) WHERE lifted_at IS NULL DO UPDATE
+               SET expires_at = excluded.expires_at, reason = excluded.reason,
+                   review_item_id = excluded.review_item_id",
         )
         .bind(Uuid::now_v7())
         .bind(&item.subject)
@@ -752,12 +754,21 @@ pub async fn lift_deny(
 pub async fn tick(state: &AppState) -> Result<(), Status> {
     // The person's roles at their latest login no longer hold the role: the
     // IdP change was made, so the override has done its job.
+    // Only for roles the IdP gives: a role held through a grant is never in
+    // `users.roles`, so those overrides run out on their own instead.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("starting transaction", e))?;
     let confirmed = sqlx::query(
         "UPDATE access_denies d SET lifted_at = now(), lifted_by = 'system', lift_reason = 'the IdP change was confirmed at their next login'
-         FROM users u WHERE d.lifted_at IS NULL AND u.username = d.username AND u.last_login_at > d.created_at
+         FROM users u, review_items i
+         WHERE d.lifted_at IS NULL AND u.username = d.username AND u.last_login_at > d.created_at
+           AND i.id = d.review_item_id AND i.via = 'standing'
            AND NOT (d.role = ANY(u.roles)) RETURNING d.username, d.role",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| internal("confirming overrides", e))?;
     for r in &confirmed {
@@ -773,15 +784,23 @@ pub async fn tick(state: &AppState) -> Result<(), Status> {
         )
         .await?;
     }
+    tx.commit()
+        .await
+        .map_err(|e| internal("committing confirmations", e))?;
 
     // Overdue items go to the admins.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("starting transaction", e))?;
     let escalated = sqlx::query(
         "UPDATE review_items i SET reviewer = '*admin', escalated_at = now()
          FROM access_reviews r WHERE r.id = i.review_id AND r.status = 'open' AND r.due_at < now()
            AND i.decision IS NULL AND i.reviewer <> '*admin' AND i.escalated_at IS NULL
          RETURNING i.id, i.review_id, i.subject, i.role, i.reviewer",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| internal("escalating items", e))?;
     for r in &escalated {
@@ -798,6 +817,9 @@ pub async fn tick(state: &AppState) -> Result<(), Status> {
         )
         .await?;
     }
+    tx.commit()
+        .await
+        .map_err(|e| internal("committing escalations", e))?;
     if !escalated.is_empty() {
         metrics::counter!("limen_review_items_escalated_total").increment(escalated.len() as u64);
     }
