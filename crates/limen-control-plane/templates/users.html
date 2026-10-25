@@ -7,10 +7,14 @@
     <h1>Users</h1>
     <p class="sub">People who have signed in with the CLI or the console. Locked users can't sign in or open sessions, and their open sessions end.</p>
   </div>
+  <form method="get" action="/console/users" class="search" role="search">
+    <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
+    <input type="search" name="q" value="{{ query }}" placeholder="Search name or role" aria-label="Search" maxlength="200" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
+  </form>
 </div>
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% if users.is_empty() %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>Nobody has signed in yet.</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>{% if query.is_empty() %}Nobody has signed in yet.{% else %}No user matches “{{ query }}”. <a href="/console/users">Clear search</a>{% endif %}</div></div>
 {% else %}
 <div class="table-wrap"><table>
   <thead><tr><th>User</th><th>Roles</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>Status</th></tr></thead>

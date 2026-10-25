@@ -468,19 +468,23 @@ async fn console_end_to_end() {
     let _ = ssh_client::exec(&conn, "hostname").await.expect("exec");
     drop(conn);
     wait_until("guest's session in the admin view", 20, async || {
+        // (The user filter's suggestions name her too, so look in the table.)
         admin_user
             .get("/console/sessions")
             .await
             .body
-            .contains(GUEST)
+            .split("<tbody>")
+            .nth(1)
+            .is_some_and(|table| table.contains(GUEST))
     })
     .await;
     let all = admin_user.get("/console/sessions").await;
+    // (The user filter's suggestions also name her, so look at the table rows.)
     let guest_id = all
         .body
-        .split(GUEST)
-        .nth(1)
-        .and_then(|rest| rest.split("/console/sessions/").nth(1))
+        .split("<tr")
+        .find(|row| row.contains(GUEST) && row.contains("/console/sessions/"))
+        .and_then(|row| row.split("/console/sessions/").nth(1))
         .and_then(|s| s.split('"').next())
         .expect("guest's session id")
         .to_owned();
@@ -697,6 +701,37 @@ async fn console_end_to_end() {
             .body
             .contains("https://github.com/acme/infra/actions/runs/424242")
     );
+    // A user's page lists what their roles reach.
+    let detail = admin_user
+        .get(&format!("/console/users/{DEVELOPER_ENC}"))
+        .await;
+    assert_eq!(detail.status, 200);
+    assert!(
+        detail.body.contains("What they can reach"),
+        "user access section"
+    );
+    // Search narrows the list pages.
+    let hit = admin_user.get("/console/bots?q=github+acme").await;
+    assert!(hit.body.contains("bot:deploy-e2e"), "bot search finds it");
+    let miss = admin_user.get("/console/bots?q=no-such-bot-zzz").await;
+    assert!(
+        !miss.body.contains("bot:deploy-e2e") && miss.body.contains("No bot matches"),
+        "bot search misses cleanly"
+    );
+    let miss = admin_user.get("/console/users?q=no-such-user-zzz").await;
+    assert!(miss.body.contains("No user matches"), "user search misses");
+    let miss = admin_user
+        .get("/console/workers?q=no-such-worker-zzz")
+        .await;
+    assert!(
+        miss.body.contains("No component matches"),
+        "worker search misses"
+    );
+    let miss = admin_user.get("/console/policy?q=no-such-doc-zzz").await;
+    assert!(
+        miss.body.contains("No policy document matches"),
+        "policy search misses"
+    );
     let people_page = admin_user.get("/console/users").await;
     assert!(
         !people_page.body.contains("bot%3Adeploy-e2e")
@@ -704,11 +739,14 @@ async fn console_end_to_end() {
         "bots are not listed among people"
     );
     wait_until("the bot's session in the admin view", 20, async || {
+        // (Suggestions in the filter name users too, so look in the table.)
         admin_user
             .get("/console/sessions")
             .await
             .body
-            .contains("bot:deploy-e2e")
+            .split("<tbody>")
+            .nth(1)
+            .is_some_and(|table| table.contains("bot:deploy-e2e"))
     })
     .await;
     let sessions = admin_user
@@ -894,6 +932,42 @@ async fn console_end_to_end() {
         assert!(page.body.contains("<svg class=\"chart\""), "{range}");
         assert!(page.body.contains("Busiest resources"));
     }
+    // Every view and every panel runs its query against the real schema.
+    for view in [
+        "overview", "security", "sre", "bots", "usage", "all", "nonsense",
+    ] {
+        let page = admin_user
+            .get(&format!("/console/dashboards?view={view}"))
+            .await;
+        assert_eq!(page.status, 200, "{view}: {}", page.body);
+    }
+    let all = admin_user.get("/console/dashboards?view=all").await;
+    for title in [
+        "Components gone quiet",
+        "Kubernetes API errors",
+        "Out-of-hours access",
+        "Data transferred",
+    ] {
+        assert!(all.body.contains(&format!("<h2>{title}</h2>")), "{title}");
+    }
+    let picked = admin_user
+        .get("/console/dashboards?p=kinds&p=worker-load")
+        .await;
+    assert!(
+        picked.body.contains("<h2>Sessions by kind</h2>")
+            && picked.body.contains("<h2>Tunnels per worker</h2>")
+            && !picked.body.contains("<h2>Busiest resources</h2>"),
+        "only the chosen panels are drawn"
+    );
+    let custom = admin_user
+        .get("/console/dashboards?p=kinds&p=traffic&range=7d")
+        .await;
+    assert!(
+        custom.body.contains("range=24h&#38;p=kinds&#38;p=traffic")
+            || custom.body.contains("range=24h&amp;p=kinds&amp;p=traffic"),
+        "changing the range keeps a custom selection: {}",
+        custom.body
+    );
     let dash = admin_user.get("/console/dashboards").await;
     assert!(
         dash.body.contains("web-1"),
@@ -904,6 +978,90 @@ async fn console_end_to_end() {
         dash.body.contains("Bot sessions by repository") && dash.body.contains("acme/infra"),
         "the bot's session shows up under its repository"
     );
+
+    // ---- drill-down: dashboard links and the filters behind them ------------------------------
+    assert!(
+        dash.body.contains("/console/audit?kind=auth.denied")
+            && dash.body.contains("/console/audit?kind=auth.login")
+            && dash.body.contains("/console/sessions?actor=bot"),
+        "tiles lead to the records behind them"
+    );
+    let usage = admin_user.get("/console/dashboards?view=usage").await;
+    assert!(
+        usage.body.contains("/console/sessions?kind=ssh") && usage.body.contains("from=20"),
+        "ranked rows lead to the sessions behind them, for the same period"
+    );
+    let bot_sessions = admin_user.get("/console/sessions?actor=bot").await;
+    assert!(
+        rows(&bot_sessions.body).contains("bot:deploy-e2e")
+            && !rows(&bot_sessions.body).contains(DEVELOPER)
+    );
+    let people = admin_user.get("/console/sessions?actor=user").await;
+    assert!(
+        rows(&people.body).contains(DEVELOPER) && !rows(&people.body).contains("bot:deploy-e2e")
+    );
+    let one = admin_user
+        .get("/console/sessions?kind=ssh&resource=web-1&end=nonsense")
+        .await;
+    assert_eq!(one.status, 200);
+    assert!(
+        !rows(&one.body).contains(DEVELOPER),
+        "no session ended that way"
+    );
+    let future = admin_user.get("/console/sessions?from=2999-01-01").await;
+    assert!(!rows(&future.body).contains("web-1"));
+    let bad = admin_user
+        .get("/console/sessions?from=yesterday&actor=robot")
+        .await;
+    assert!(bad.body.contains("Ignored") && rows(&bad.body).contains("web-1"));
+    let chip = admin_user.get("/console/sessions?kind=ssh").await;
+    assert!(chip.body.contains("Remove this filter") && chip.body.contains("Kind: ssh"));
+
+    let prefix = admin_user.get("/console/audit?kind=user.*").await;
+    assert!(prefix.body.contains(">user.lock</span>"));
+    assert!(!prefix.body.contains(">join_token.create</span>"));
+    let text = admin_user.get("/console/audit?q=TARGET_USER").await;
+    assert!(
+        text.body.contains(">user.lock</span>"),
+        "text search ignores case"
+    );
+    let bot_events = admin_user.get("/console/audit?actor=bot").await;
+    assert!(bot_events.body.contains("bot:deploy-e2e"));
+    assert!(
+        !bot_events
+            .body
+            .contains(&format!("/console/users/{DEVELOPER_ENC}\""))
+    );
+    let window = admin_user
+        .get("/console/audit?kind=user.lock&from=2000-01-01&to=2999-01-01")
+        .await;
+    assert!(
+        window.body.contains(">user.lock</span>") && window.body.contains("Remove this filter")
+    );
+    let past = admin_user.get("/console/audit?to=2000-01-01").await;
+    assert!(past.body.contains("No events match"));
+    let junk = admin_user
+        .get("/console/audit?session=nope&from=soon&actor=x")
+        .await;
+    assert_eq!(junk.status, 200);
+    assert_eq!(junk.body.matches("Ignored").count(), 3, "{}", junk.body);
+    let recent = admin_user.get("/console/audit?since=24h").await;
+    assert!(recent.body.contains(">user.lock</span>") && recent.body.contains("Period: 24 hours"));
+    assert!(recent.body.contains("since=1h"), "quick ranges are offered");
+    let sessions_recent = admin_user.get("/console/sessions?since=1h&kind=ssh").await;
+    assert!(sessions_recent.body.contains("Period: Last hour"));
+    let unknown = admin_user.get("/console/audit?since=forever").await;
+    assert!(unknown.status == 200 && !unknown.body.contains("Period:"));
+    let empty = admin_user.get("/console/sessions?resource=nope").await;
+    assert!(
+        empty.body.contains("clear all"),
+        "an empty result offers a way out"
+    );
+    let trail = admin_user
+        .get(&format!("/console/audit?session={id}"))
+        .await;
+    assert_eq!(trail.status, 200);
+    assert!(!trail.body.contains("Ignored"));
 
     // ---- policy browsing and dry run -------------------------------------------------------
     let policy_page = admin_user.get("/console/policy").await;
@@ -1048,4 +1206,9 @@ async fn console_login_is_bound_to_the_browser_that_started_it() {
     assert_eq!(page.status, 303, "first use works for its own browser");
     let replay = attacker.get_once(&callback).await;
     assert_eq!(replay.status, 403, "a login can't be replayed");
+}
+
+/// The rows of a list page's table: the filter's suggestions above it name users and resources too.
+fn rows(body: &str) -> &str {
+    body.split("<tbody>").nth(1).unwrap_or("")
 }

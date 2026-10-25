@@ -1,0 +1,2 @@
+{% for p in problems %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ p }}</div>{% endfor %}
+{% if !chips.is_empty() %}<div class="applied"><span class="hint">Filtered by</span>{% for c in chips %}<a class="fchip" href="{{ c.remove }}" title="Remove this filter"><span>{{ c.label }}</span><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></a>{% endfor %}<a class="clear" href="{{ clear }}">Clear all</a></div>{% endif %}
