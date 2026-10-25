@@ -26,10 +26,14 @@ The proxy puts the W3C `traceparent` of its `session` span in the tunnel's `Sess
 ### 6. Propagation to the control plane
 `limen_tunnel::connect::TracedChannel` wraps tonic's channel and adds the calling span's `traceparent` header to each gRPC call (nothing when tracing is off or outside an exported span). The proxy, worker, component library and CLI channels are all of this type, so a session's grant and certificate calls show up as `api.request` children of the proxy's `session` span. The control plane reads the header only on gRPC requests (`content-type: application/grpc`): the same port serves browsers and probes, whose headers mean nothing. Unauthenticated gRPC callers (login) can therefore choose which trace an `api.request` span is filed under, and nothing else.
 
-### Known limits
-**The control-plane link is not reliable yet.** On the scaled dev stack the control plane's `api.request` span for a session's certificate call shows up in the session's trace for roughly half of the sessions (4 of 6, 5 of 8 in the last runs); the control plane does receive the sampled `traceparent` every time, and the SDK reports no export error, so the spans are lost between creating them and exporting them. Cause not found: adding a log line before the span's creation made all sessions complete, which points at a tracing-subscriber callsite or filter-state interaction rather than at propagation. The proxy-to-worker link has not been seen to fail (every session in every run had both spans).
+### 7. Log lines carry `trace_id`
+A log line written inside an exported span gets a `trace_id` field (JSON logs: a top-level key; text logs: at the end of the line), so a log search can jump to the trace and back. The id is read from OpenTelemetry's current context, not from `tracing::Span::current()`, which is empty inside a log formatter (a formatter runs inside event dispatch, where `tracing` hands out no current span). Lines outside an exported span are unchanged.
 
-Log lines are not stamped with `trace_id` (ADR-0011 intended it). JSON logs inside a `session` span carry that span's `session` field, which is the join key to the trace. The steady background calls (policy refresh, pings) are root `api.request` spans; lower `--trace-sample-ratio` where they cost too much.
+### 8. Trace spans are re-checked against the filters every time
+Per-layer filters pass their verdict to the next span or event on the same thread through a thread-local. A callsite that every filter accepts is never asked, so it reads whatever an earlier check left there, and a check with no event after it (`tracing::enabled!`, which sqlx calls for every statement) leaves a stale "disabled". The next `trace_span!` on that thread then vanished from both the logs and the export. On the scaled dev stack this lost the control plane's `api.request` span for the first certificate call after a quiet period, and roughly half of them overall. `AlwaysCheck` reports `trace_span!` callsites as "sometimes", so `tracing` asks the filters before each one. A test reproduces the stale state and covers the fix.
+
+### Known limits
+The steady background calls (policy refresh, pings) are root `api.request` spans; lower `--trace-sample-ratio` where they cost too much. gRPC failures that arrive only in trailers are not marked as errors.
 
 ## Consequences
 - Outbound data flow added: spans to the configured collector (threat model, cross-cutting).

@@ -71,6 +71,18 @@ Where a managed AWS service exists, each target works with it and compatible sel
   </tr>
 </table>
 
+## Observability
+
+Every component serves Prometheus metrics at `/metrics`, ships a set of example alerts (Prometheus and Datadog), and can export traces over OpenTelemetry (OTLP). Tracing is opt-in: set `--otlp-endpoint` on a component and a session becomes one trace across the proxy, the worker and the control plane, with the trace id on the log lines written inside it. Only ids and outcomes go into a trace, never user names, statements or tokens.
+
+To see one locally, start the dev stack with Jaeger and open a few sessions:
+
+```sh
+deploy/compose/setup.sh --yes --stacks ssh,tracing   # prints the Jaeger URL
+```
+
+How it works, the flags and the limits: [metrics, traces and alerts](docs/guides/metrics.md) and [tracing](docs/guides/tracing.md).
+
 ## Two ways in: the console and the CLI
 
 <table>
@@ -147,7 +159,7 @@ Limen is Latin for "threshold", the root of the English word *liminal*. A thresh
 The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
 
 ## Documentation
-- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md)
+- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md), [metrics and alerts](docs/guides/metrics.md), [tracing](docs/guides/tracing.md)
 - [The three server programs](docs/components.md): what the control plane, proxy and worker each do
 - [Design](docs/design.md): architecture, data paths, failure semantics
 - [ADRs](docs/adr/README.md): key decisions and their trade-offs

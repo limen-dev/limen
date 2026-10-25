@@ -283,29 +283,111 @@ pub fn init_with_default(format: LogFormat, default_filter: &str) {
 
 type Tracer = opentelemetry_sdk::trace::Tracer;
 
+/// The layer that exports [`trace_span!`] spans, and nothing else.
+fn otel_layer<S>(tracer: Tracer) -> impl tracing_subscriber::Layer<S>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    use tracing_subscriber::filter::Targets;
+    // `Targets` answers per callsite, so tracing caches the decision
+    // exactly. Nothing logs events with this target; `trace_span!` is the
+    // only way in.
+    let ours = Targets::new().with_target(TRACE_TARGET, tracing::Level::TRACE);
+    tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_filter(ours)
+        .and_then(AlwaysCheck)
+}
+
+/// Makes `tracing` ask the per-layer filters about every [`trace_span!`], not
+/// once per callsite.
+///
+/// Per-layer filters hand their verdict to the next span or event on the same
+/// thread through a thread-local, and a callsite every filter accepts is never
+/// asked, so it reads whatever an earlier check left there. A check that no
+/// event follows (`tracing::enabled!`, which sqlx uses for every statement)
+/// leaves a stale "disabled", and the next trace span on that thread then
+/// vanishes from both the logs and the export. Reporting these callsites as
+/// "sometimes" makes every span refresh the verdict first.
+struct AlwaysCheck;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for AlwaysCheck {
+    fn register_callsite(
+        &self,
+        metadata: &'static tracing::Metadata<'static>,
+    ) -> tracing::subscriber::Interest {
+        if metadata.target() == TRACE_TARGET {
+            tracing::subscriber::Interest::sometimes()
+        } else {
+            tracing::subscriber::Interest::always()
+        }
+    }
+}
+
+/// The trace id of the span this thread is in, when it is being exported.
+///
+/// Reads OpenTelemetry's own current context, which the layer sets when a span
+/// is entered. `tracing::Span::current()` cannot be used here: a log formatter
+/// runs inside event dispatch, where `tracing` hands out no current span.
+fn current_trace_id() -> Option<String> {
+    use opentelemetry::trace::TraceContextExt as _;
+
+    let cx = opentelemetry::Context::current();
+    let span = cx.span();
+    let ctx = span.span_context();
+    ctx.is_valid().then(|| ctx.trace_id().to_string())
+}
+
+/// Adds `trace_id` to a log line written inside an exported span, so a log
+/// search can jump to the trace and back. Lines outside one are unchanged.
+struct WithTraceId<F>(F);
+
+impl<S, N, F> tracing_subscriber::fmt::FormatEvent<S, N> for WithTraceId<F>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'w> tracing_subscriber::fmt::FormatFields<'w> + 'static,
+    F: tracing_subscriber::fmt::FormatEvent<S, N>,
+{
+    fn format_event(
+        &self,
+        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
+        mut writer: tracing_subscriber::fmt::format::Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let Some(id) = current_trace_id() else {
+            return self.0.format_event(ctx, writer, event);
+        };
+        let mut line = String::new();
+        self.0.format_event(
+            ctx,
+            tracing_subscriber::fmt::format::Writer::new(&mut line),
+            event,
+        )?;
+        // JSON lines get the field first; text lines get it last.
+        match line.strip_prefix('{') {
+            Some(rest) => write!(writer, "{{\"trace_id\":\"{id}\",{rest}"),
+            None => writeln!(writer, "{} trace_id={id}", line.trim_end_matches('\n')),
+        }
+    }
+}
+
 fn install(format: LogFormat, default_filter: &str, tracer: Option<Tracer>) {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
     let logs = match format {
-        LogFormat::Text => fmt::layer().with_writer(std::io::stderr).boxed(),
+        LogFormat::Text => fmt::layer()
+            .event_format(WithTraceId(fmt::format()))
+            .with_writer(std::io::stderr)
+            .boxed(),
         LogFormat::Json => fmt::layer()
             .json()
-            .flatten_event(true)
+            .event_format(WithTraceId(fmt::format().json().flatten_event(true)))
             .with_writer(std::io::stderr)
             .boxed(),
     }
     .with_filter(filter);
     // Spans only, and only ours: see the module docs.
-    let otel = tracer.map(|t| {
-        use tracing_subscriber::filter::Targets;
-        // `Targets` answers per callsite, so tracing caches the decision
-        // exactly. Nothing logs events with this target; `trace_span!` is the
-        // only way in.
-        let ours = Targets::new().with_target(TRACE_TARGET, tracing::Level::TRACE);
-        tracing_opentelemetry::layer()
-            .with_tracer(t)
-            .with_filter(ours)
-    });
+    let otel = tracer.map(otel_layer);
     let _ = tracing_subscriber::registry()
         .with(logs)
         .with(otel)
@@ -349,5 +431,98 @@ mod tests {
         assert_eq!(cli.log.format(), LogFormat::Json);
         let cli = Cli::parse_from(["x", "--log-json", "--log-format", "text"]);
         assert_eq!(cli.log.format(), LogFormat::Text);
+    }
+    #[derive(Clone, Default)]
+    struct Buf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buf {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("lock").extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl fmt::MakeWriter<'_> for Buf {
+        type Writer = Buf;
+        fn make_writer(&self) -> Buf {
+            self.clone()
+        }
+    }
+
+    /// Log lines inside an exported span carry its trace id; others do not.
+    fn lines_with(json: bool) -> Vec<String> {
+        let buf = Buf::default();
+        let tracer = SdkTracerProvider::builder().build().tracer("test");
+        let otel = otel_layer(tracer);
+        let logs = if json {
+            fmt::layer()
+                .json()
+                .event_format(WithTraceId(fmt::format().json().flatten_event(true)))
+                .with_writer(buf.clone())
+                .boxed()
+        } else {
+            fmt::layer()
+                .event_format(WithTraceId(fmt::format()))
+                .with_ansi(false)
+                .with_writer(buf.clone())
+                .boxed()
+        };
+        let subscriber = tracing_subscriber::registry().with(logs).with(otel);
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!("outside");
+            crate::trace_span!("work").in_scope(|| tracing::info!("inside"));
+        });
+        let out = String::from_utf8(buf.0.lock().expect("lock").clone()).expect("utf8");
+        out.lines().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn json_logs_inside_a_trace_carry_its_id() {
+        let lines = lines_with(true);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(!lines[0].contains("trace_id"), "{}", lines[0]);
+        let inside: serde_json::Value = serde_json::from_str(&lines[1]).expect("still valid json");
+        let id = inside["trace_id"].as_str().expect("trace_id");
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(inside["message"], "inside");
+    }
+
+    #[test]
+    fn text_logs_inside_a_trace_end_with_its_id() {
+        let lines = lines_with(false);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(!lines[0].contains("trace_id"), "{}", lines[0]);
+        assert!(lines[1].contains(" trace_id="), "{}", lines[1]);
+    }
+
+    /// A `tracing::enabled!` check that no event follows (sqlx does this for
+    /// every statement) must not hide the next exported span.
+    #[test]
+    fn a_dangling_enabled_check_does_not_hide_the_next_span() {
+        let buf = Buf::default();
+        let tracer = SdkTracerProvider::builder().build().tracer("test");
+        let otel = otel_layer(tracer);
+        let logs = fmt::layer()
+            .event_format(WithTraceId(fmt::format()))
+            .with_ansi(false)
+            .with_writer(buf.clone())
+            .with_filter(EnvFilter::new("info"));
+        let subscriber = tracing_subscriber::registry().with(logs).with(otel);
+        tracing::subscriber::with_default(subscriber, || {
+            for _ in 0..3 {
+                let _ = tracing::enabled!(target: "other", tracing::Level::INFO);
+                crate::trace_span!("work").in_scope(|| tracing::info!("inside"));
+            }
+        });
+        let out = String::from_utf8(buf.0.lock().expect("lock").clone()).expect("utf8");
+        for line in out.lines() {
+            assert!(line.contains("work"), "span missing from: {line}");
+            assert!(line.contains("trace_id="), "span not exported: {line}");
+        }
+        assert_eq!(out.lines().count(), 3);
     }
 }
