@@ -17,12 +17,12 @@ use uuid::Uuid;
 
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, BotView, BotsPage, Chrome, ComponentView, DryRun, EventView, HitView, Home, KindTab,
-    KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage,
-    Chip, ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SessionPage, SessionView,
-    SearchView, SessionsPage, Simulation, StatementView, Stats, TokenPage, UserPage, UserView,
-    UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page, list_text, path_segment,
-    time_text,
+    self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, DryRun, EventView, HitView,
+    Home, KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup,
+    PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView,
+    SessionPage, SessionView, SessionsPage, Simulation, StatementView, Stats, TokenPage, UserPage,
+    UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page, list_text,
+    path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -736,7 +736,8 @@ pub async fn session_detail(
             } else {
                 (Vec::new(), 0, 0)
             };
-            let (allowed_by, watched) = super::workflows::session_extras(&state, row.session_id).await;
+            let (allowed_by, watched) =
+                super::workflows::session_extras(&state, row.session_id).await;
             html(
                 SessionPage {
                     start_at: moment.t.unwrap_or(0).clamp(0, 86_400 * 7),
@@ -1459,7 +1460,12 @@ pub async fn dry_run(
                 access: access
                     .changes
                     .iter()
-                    .map(|c| (c.change == limen_policy::tooling::ChangeKind::Gain, c.text()))
+                    .map(|c| {
+                        (
+                            c.change == limen_policy::tooling::ChangeKind::Gain,
+                            c.text(),
+                        )
+                    })
                     .collect(),
                 warnings: next.warnings(),
                 tests: report
@@ -1471,7 +1477,10 @@ pub async fn dry_run(
                             if r.passed {
                                 format!("{}: {}", r.test, r.name)
                             } else {
-                                format!("{}: {} (expected {}, got {} {})", r.test, r.name, r.expected, r.got, r.detail)
+                                format!(
+                                    "{}: {} (expected {}, got {} {})",
+                                    r.test, r.name, r.expected, r.got, r.detail
+                                )
                             },
                         )
                     })
@@ -1546,7 +1555,10 @@ pub async fn simulate(
             requestable: vec![],
         }
     } else {
-        match current.policy.what_can(&groups, if groups.is_empty() { bot } else { None }) {
+        match current
+            .policy
+            .what_can(&groups, if groups.is_empty() { bot } else { None })
+        {
             Ok(can) => Simulation {
                 who,
                 error: None,
@@ -1772,7 +1784,9 @@ async fn run_search(state: &AppState, auth: &Auth, text: &str) -> SearchView {
                 .hits
                 .iter()
                 .map(|h| {
-                    let moment = h.recording_offset_secs.map(|s| format!("{}:{:02}", s / 60, s % 60));
+                    let moment = h
+                        .recording_offset_secs
+                        .map(|s| format!("{}:{:02}", s / 60, s % 60));
                     HitView {
                         at: time_text(Some(h.at)),
                         kind: h.kind.clone(),

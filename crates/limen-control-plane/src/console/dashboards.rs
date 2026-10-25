@@ -406,6 +406,7 @@ struct TimeSeries {
 }
 
 /// The ranked lists: busiest resources and people, session length, denials, admin actions.
+#[allow(clippy::too_many_lines)]
 async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx::Error> {
     let top_resources = counts(
         db,

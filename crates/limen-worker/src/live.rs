@@ -156,7 +156,9 @@ pub async fn run(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut tick = tokio::time::interval(FLUSH_EVERY);
-    let mut last_poll = Instant::now() - POLL_EVERY;
+    let mut last_poll = Instant::now()
+        .checked_sub(POLL_EVERY)
+        .unwrap_or_else(Instant::now);
     let mut client: Option<WatchClient<tonic::transport::Channel>> = None;
     loop {
         tokio::select! {
@@ -182,10 +184,17 @@ pub async fn run(
                         let was = t.active.swap(on, Ordering::Relaxed);
                         if on && !was {
                             // Someone just started watching: begin with the recent screen.
-                            let mut s = t.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut s = t
+                                .state
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             s.pending = s.ring.iter().copied().collect();
                         } else if !on && was {
-                            t.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).pending.clear();
+                            t.state
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .pending
+                                .clear();
                         }
                     }
                 }
@@ -201,7 +210,10 @@ pub async fn run(
         for t in taps.iter().filter(|t| t.active.load(Ordering::Relaxed)) {
             loop {
                 let (text, cols, rows) = {
-                    let mut s = t.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut s = t
+                        .state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if s.pending.is_empty() {
                         break;
                     }
@@ -220,7 +232,8 @@ pub async fn run(
                     .publish(WatchPublishRequest {
                         session_id: t.session_id.clone(),
                         text,
-                        elapsed_ms: u64::try_from(t.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        elapsed_ms: u64::try_from(t.started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
                         cols,
                         rows,
                     })
@@ -229,7 +242,11 @@ pub async fn run(
                     Ok(r) => {
                         if !r.into_inner().watched {
                             t.active.store(false, Ordering::Relaxed);
-                            t.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).pending.clear();
+                            t.state
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .pending
+                                .clear();
                             break;
                         }
                     }
@@ -280,7 +297,11 @@ mod tests {
         }
         tap.0.active.store(true, Ordering::Relaxed);
         tap.output(&vec![b'y'; PENDING_BYTES + 10]);
-        assert_eq!(tap.0.state.lock().expect("lock").pending.len(), PENDING_BYTES, "a lagging watcher drops, never grows");
+        assert_eq!(
+            tap.0.state.lock().expect("lock").pending.len(),
+            PENDING_BYTES,
+            "a lagging watcher drops, never grows"
+        );
     }
 
     #[test]

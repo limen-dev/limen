@@ -22,8 +22,8 @@ pub mod oidc_flow;
 mod pages;
 pub mod store;
 mod views;
-mod workflows;
 pub(crate) mod web_auth;
+mod workflows;
 
 use std::net::IpAddr;
 
@@ -105,19 +105,40 @@ pub fn router(state: AppState) -> Router {
         .route("/console/access", get(workflows::access_page))
         .route("/console/access/request", post(workflows::access_request))
         .route("/console/access/{id}", get(workflows::access_detail))
-        .route("/console/access/{id}/decide", post(workflows::access_decide))
-        .route("/console/access/{id}/cancel", post(workflows::access_cancel))
-        .route("/console/access/grants/{id}/revoke", post(workflows::access_revoke))
+        .route(
+            "/console/access/{id}/decide",
+            post(workflows::access_decide),
+        )
+        .route(
+            "/console/access/{id}/cancel",
+            post(workflows::access_cancel),
+        )
+        .route(
+            "/console/access/grants/{id}/revoke",
+            post(workflows::access_revoke),
+        )
         .route("/console/reviews", get(workflows::reviews_page))
         .route("/console/reviews/start", post(workflows::review_start))
         .route("/console/reviews/evidence", get(workflows::evidence))
         .route("/console/reviews/{id}", get(workflows::review_page))
-        .route("/console/reviews/items/{id}/decide", post(workflows::review_decide))
-        .route("/console/reviews/overrides/{id}/lift", post(workflows::deny_lift))
+        .route(
+            "/console/reviews/items/{id}/decide",
+            post(workflows::review_decide),
+        )
+        .route(
+            "/console/reviews/overrides/{id}/lift",
+            post(workflows::deny_lift),
+        )
         .route("/console/discovered", get(workflows::discovered_page))
-        .route("/console/discovered/review", post(workflows::discovered_review))
+        .route(
+            "/console/discovered/review",
+            post(workflows::discovered_review),
+        )
         .route("/console/sessions/{id}/watch", get(workflows::watch_page))
-        .route("/console/sessions/{id}/watch/stream", get(workflows::watch_stream))
+        .route(
+            "/console/sessions/{id}/watch/stream",
+            get(workflows::watch_stream),
+        )
         // Not `.fallback()`: the gRPC router this is merged with has one.
         .route(
             "/console/{*rest}",

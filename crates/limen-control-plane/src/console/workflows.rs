@@ -73,7 +73,11 @@ fn relative(unix: i64) -> String {
         5400..=129_599 => format!("{} h", n / 3600),
         _ => format!("{} d", n / 86_400),
     };
-    if secs < 0 { format!("{text} ago") } else { format!("in {text}") }
+    if secs < 0 {
+        format!("{text} ago")
+    } else {
+        format!("in {text}")
+    }
 }
 
 fn duration_text(secs: u32) -> String {
@@ -112,8 +116,12 @@ pub struct PageQuery {
 /// Where a failed form goes back to, with the reason kept short and escaped by the template.
 fn back_with_error(path: &str, status: &tonic::Status) -> Response {
     let msg: String = status.message().chars().take(200).collect();
-    Redirect::to(&format!("{path}{}err={}", if path.contains('?') { '&' } else { '?' }, path_segment(&msg)))
-        .into_response()
+    Redirect::to(&format!(
+        "{path}{}err={}",
+        if path.contains('?') { '&' } else { '?' },
+        path_segment(&msg)
+    ))
+    .into_response()
 }
 
 // ---- access -----------------------------------------------------------------------------
@@ -141,7 +149,11 @@ pub struct RequestView {
 }
 
 fn request_view(r: &limen_proto::v1::AccessRequestInfo, auth: &Auth) -> RequestView {
-    let approved = r.approvals.iter().filter(|a| a.decision == "approve").count();
+    let approved = r
+        .approvals
+        .iter()
+        .filter(|a| a.decision == "approve")
+        .count();
     RequestView {
         id: r.id.clone(),
         requester: r.requester.clone(),
@@ -162,15 +174,29 @@ fn request_view(r: &limen_proto::v1::AccessRequestInfo, auth: &Auth) -> RequestV
         approvers: r
             .approvals
             .iter()
-            .map(|a| (a.approver.clone(), a.decision == "approve", a.comment.clone()))
+            .map(|a| {
+                (
+                    a.approver.clone(),
+                    a.decision == "approve",
+                    a.comment.clone(),
+                )
+            })
             .collect(),
         created: when(r.created_at_unix),
         lapses: relative(r.expires_at_unix),
-        ends: if r.grant_expires_at_unix > 0 { relative(r.grant_expires_at_unix) } else { String::new() },
+        ends: if r.grant_expires_at_unix > 0 {
+            relative(r.grant_expires_at_unix)
+        } else {
+            String::new()
+        },
         can_decide: r.can_decide,
         can_cancel: r.status == "pending" && r.requester.eq_ignore_ascii_case(&auth.username),
         sessions_30d: r.requester_sessions_30d,
-        last_session: if r.requester_last_session_unix > 0 { relative(r.requester_last_session_unix) } else { String::new() },
+        last_session: if r.requester_last_session_unix > 0 {
+            relative(r.requester_last_session_unix)
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -208,9 +234,17 @@ pub struct AccessPage {
     pub breakglass_active: usize,
 }
 
-pub async fn access_page(State(state): State<AppState>, auth: Auth, Query(q): Query<PageQuery>) -> Response {
+pub async fn access_page(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<PageQuery>,
+) -> Response {
     let who = access_who(&auth);
-    let list = |scope: &str| ListAccessRequestsRequest { scope: scope.into(), status: String::new(), limit: 100 };
+    let list = |scope: &str| ListAccessRequestsRequest {
+        scope: scope.into(),
+        status: String::new(),
+        limit: 100,
+    };
     let mine = match access::list_requests(&state, &who, &list("mine")).await {
         Ok(v) => v.iter().map(|r| request_view(r, &auth)).collect::<Vec<_>>(),
         Err(s) => return action_error(&s),
@@ -235,7 +269,11 @@ pub async fn access_page(State(state): State<AppState>, auth: Auth, Query(q): Qu
     let requestable = match access::requestable_for(&state, &auth.username, &auth.roles).await {
         Ok(v) => v
             .into_iter()
-            .map(|r| AskView { name: r.name, kind: r.kind.as_str().to_owned(), roles: r.roles })
+            .map(|r| AskView {
+                name: r.name,
+                kind: r.kind.as_str().to_owned(),
+                roles: r.roles,
+            })
             .collect(),
         Err(e) => return db_error("reading groups", &e),
     };
@@ -253,7 +291,13 @@ pub async fn access_page(State(state): State<AppState>, auth: Auth, Query(q): Qu
             error: q.err.clone(),
             tab,
             reader: auth.reads_record(),
-            prefill: q.resource.clone().unwrap_or_default().chars().take(128).collect(),
+            prefill: q
+                .resource
+                .clone()
+                .unwrap_or_default()
+                .chars()
+                .take(128)
+                .collect(),
             mine,
             approvals,
             grants: grants
@@ -265,7 +309,11 @@ pub async fn access_page(State(state): State<AppState>, auth: Auth, Query(q): Qu
                     resource: g.resource.clone(),
                     reason: g.reason.clone(),
                     break_glass: g.break_glass,
-                    approvers: if g.break_glass { "none (break-glass)".into() } else { g.approvers.join(", ") },
+                    approvers: if g.break_glass {
+                        "none (break-glass)".into()
+                    } else {
+                        g.approvers.join(", ")
+                    },
                     ends: relative(g.expires_at_unix),
                 })
                 .collect(),
@@ -302,7 +350,11 @@ pub async fn access_detail(
             }
             .render(),
         ),
-        Err(_) => error_page(StatusCode::NOT_FOUND, "Not found", "There is no such request."),
+        Err(_) => error_page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "There is no such request.",
+        ),
     }
 }
 
@@ -338,7 +390,9 @@ pub async fn access_request(
     } else {
         match limen_policy::duration::DurationStr::parse(f.duration.trim()) {
             Ok(d) => d.0.as_secs(),
-            Err(e) => return back_with_error("/console/access", &tonic::Status::invalid_argument(e)),
+            Err(e) => {
+                return back_with_error("/console/access", &tonic::Status::invalid_argument(e));
+            }
         }
     };
     let result = access::request_access(
@@ -357,7 +411,11 @@ pub async fn access_request(
         Ok(info) => Redirect::to(&format!(
             "/console/access/{}?done={}",
             path_segment(&info.id),
-            if info.status == "approved" { "granted" } else { "requested" }
+            if info.status == "approved" {
+                "granted"
+            } else {
+                "requested"
+            }
         ))
         .into_response(),
         Err(s) => back_with_error("/console/access", &s),
@@ -389,7 +447,11 @@ pub async fn access_decide(
     let approve = f.decision == "approve";
     let back = format!("/console/access/{}", path_segment(&id));
     match access::decide(&state, &access_who(&auth), &id, approve, &f.comment).await {
-        Ok(_) => Redirect::to(&format!("{back}?done={}", if approve { "approved" } else { "denied" })).into_response(),
+        Ok(_) => Redirect::to(&format!(
+            "{back}?done={}",
+            if approve { "approved" } else { "denied" }
+        ))
+        .into_response(),
         Err(s) => back_with_error(&back, &s),
     }
 }
@@ -470,7 +532,7 @@ fn review_view(r: &ReviewInfo) -> ReviewView {
         status: r.status.clone(),
         overdue: r.overdue,
         progress: format!("{} of {} decided", r.decided, r.items),
-        percent: if r.items == 0 { 100 } else { r.decided * 100 / r.items },
+        percent: (r.decided * 100).checked_div(r.items).unwrap_or(100),
         flagged: r.flagged,
         silent: r.certified_silently,
         due: relative(r.due_at_unix),
@@ -499,7 +561,11 @@ pub struct ReviewsPage {
     pub to: String,
 }
 
-pub async fn reviews_page(State(state): State<AppState>, auth: Auth, Query(q): Query<PageQuery>) -> Response {
+pub async fn reviews_page(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<PageQuery>,
+) -> Response {
     let who = review_who(&auth);
     let list = match reviews::list(&state, &who, auth.reads_record()).await {
         Ok(v) => v.iter().map(review_view).collect(),
@@ -531,8 +597,14 @@ pub async fn reviews_page(State(state): State<AppState>, auth: Auth, Query(q): Q
             reviews: list,
             reader: auth.reads_record(),
             denies,
-            from: q.from.clone().unwrap_or_else(|| (today - time::Duration::days(90)).to_string()),
-            to: q.to.clone().unwrap_or_else(|| (today + time::Duration::days(1)).to_string()),
+            from: q
+                .from
+                .clone()
+                .unwrap_or_else(|| (today - time::Duration::days(90)).to_string()),
+            to: q
+                .to
+                .clone()
+                .unwrap_or_else(|| (today + time::Duration::days(1)).to_string()),
         }
         .render(),
     )
@@ -569,10 +641,18 @@ fn item_view(i: &ReviewItemInfo) -> ItemView {
         usage: if i.sessions_90d == 0 {
             "not used in 90 days".into()
         } else {
-            format!("{} sessions, last {}", i.sessions_90d, relative(i.last_used_unix))
+            format!(
+                "{} sessions, last {}",
+                i.sessions_90d,
+                relative(i.last_used_unix)
+            )
         },
         unused: i.unused,
-        reviewer: if i.reviewer == reviews::ADMIN_POOL { "any admin".into() } else { i.reviewer.clone() },
+        reviewer: if i.reviewer == reviews::ADMIN_POOL {
+            "any admin".into()
+        } else {
+            i.reviewer.clone()
+        },
         decision: i.decision.clone(),
         comment: i.comment.clone(),
         decided_by: i.decided_by.clone(),
@@ -603,7 +683,11 @@ pub async fn review_page(
         Err(s) => return action_error(&s),
     };
     let Some(info) = reviews_list.iter().find(|r| r.id == id) else {
-        return error_page(StatusCode::NOT_FOUND, "Not found", "There is no such review.");
+        return error_page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "There is no such review.",
+        );
     };
     let items = match reviews::items(&state, &who, &id, false, false).await {
         Ok(v) => v.iter().map(item_view).collect(),
@@ -649,8 +733,20 @@ pub async fn review_start(
     if let Err(r) = auth.check_post(console, &headers, &f.csrf) {
         return r;
     }
-    match reviews::start(&state, &review_who(&auth), &f.name, f.due_days, f.override_days).await {
-        Ok(info) => Redirect::to(&format!("/console/reviews/{}?done=started", path_segment(&info.id))).into_response(),
+    match reviews::start(
+        &state,
+        &review_who(&auth),
+        &f.name,
+        f.due_days,
+        f.override_days,
+    )
+    .await
+    {
+        Ok(info) => Redirect::to(&format!(
+            "/console/reviews/{}?done=started",
+            path_segment(&info.id)
+        ))
+        .into_response(),
         Err(s) => back_with_error("/console/reviews", &s),
     }
 }
@@ -681,7 +777,11 @@ pub async fn review_decide(
     let certify = f.decision == "certify";
     let back = format!("/console/reviews/{}", path_segment(&f.review));
     match reviews::decide(&state, &review_who(&auth), &item, certify, &f.comment).await {
-        Ok(_) => Redirect::to(&format!("{back}?done={}", if certify { "certified" } else { "flagged" })).into_response(),
+        Ok(_) => Redirect::to(&format!(
+            "{back}?done={}",
+            if certify { "certified" } else { "flagged" }
+        ))
+        .into_response(),
         Err(s) => back_with_error(&back, &s),
     }
 }
@@ -710,24 +810,40 @@ pub async fn deny_lift(
 }
 
 /// `GET /console/reviews/evidence?from=2026-01-01&to=2026-04-01`: the pack, as a download.
-pub async fn evidence(State(state): State<AppState>, auth: Auth, Query(q): Query<PageQuery>) -> Response {
+pub async fn evidence(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<PageQuery>,
+) -> Response {
     if let Err(r) = auth.reader() {
         return r;
     }
     let day = |s: &Option<String>| {
         s.as_deref()
-            .and_then(|s| time::Date::parse(s, &time::macros::format_description!("[year]-[month]-[day]")).ok())
+            .and_then(|s| {
+                time::Date::parse(
+                    s,
+                    &time::macros::format_description!("[year]-[month]-[day]"),
+                )
+                .ok()
+            })
             .map(|d| d.midnight().assume_utc().unix_timestamp())
     };
     let (Some(from), Some(to)) = (day(&q.from), day(&q.to)) else {
-        return back_with_error("/console/reviews", &tonic::Status::invalid_argument("dates look like 2026-01-31"));
+        return back_with_error(
+            "/console/reviews",
+            &tonic::Status::invalid_argument("dates look like 2026-01-31"),
+        );
     };
     match crate::evidence::export(&state, &auth.username, from, to).await {
         Ok((pack, _)) => (
             [
                 (CONTENT_TYPE, "application/json"),
                 (CACHE_CONTROL, "no-store"),
-                (CONTENT_DISPOSITION, "attachment; filename=\"limen-evidence.json\""),
+                (
+                    CONTENT_DISPOSITION,
+                    "attachment; filename=\"limen-evidence.json\"",
+                ),
             ],
             pack,
         )
@@ -766,7 +882,11 @@ pub struct DiscoveredPage {
     pub pending: usize,
 }
 
-pub async fn discovered_page(State(state): State<AppState>, auth: Auth, Query(q): Query<PageQuery>) -> Response {
+pub async fn discovered_page(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<PageQuery>,
+) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
@@ -774,7 +894,10 @@ pub async fn discovered_page(State(state): State<AppState>, auth: Auth, Query(q)
         Ok(v) => v,
         Err(s) => return action_error(&s),
     };
-    let pending = items.iter().filter(|i| i.state == "pending" || i.change_pending).count();
+    let pending = items
+        .iter()
+        .filter(|i| i.state == "pending" || i.change_pending)
+        .count();
     let views = items
         .iter()
         .map(|i| {
@@ -797,7 +920,11 @@ pub async fn discovered_page(State(state): State<AppState>, auth: Auth, Query(q)
                     ("stale" | "rejected", _) => "bad",
                     _ => "warn",
                 },
-                state: if i.change_pending { "change pending".into() } else { i.state.clone() },
+                state: if i.change_pending {
+                    "change pending".into()
+                } else {
+                    i.state.clone()
+                },
                 labels,
                 target: i.target.clone(),
                 changes: i.changes.clone(),
@@ -847,8 +974,13 @@ pub async fn discovered_review(
         return r;
     }
     let accept = f.decision == "accept";
-    match crate::discovery::review(&state, &auth.username, "console", &f.key, accept, &f.note).await {
-        Ok(_) => Redirect::to(&format!("/console/discovered?done={}", if accept { "accepted" } else { "rejected" })).into_response(),
+    match crate::discovery::review(&state, &auth.username, "console", &f.key, accept, &f.note).await
+    {
+        Ok(_) => Redirect::to(&format!(
+            "/console/discovered?done={}",
+            if accept { "accepted" } else { "rejected" }
+        ))
+        .into_response(),
         Err(s) => back_with_error("/console/discovered", &s),
     }
 }
@@ -868,7 +1000,11 @@ fn may_watch(state: &AppState, auth: &Auth) -> bool {
     crate::live::may_watch(state, auth.is_admin, auth.is_auditor)
 }
 
-pub async fn watch_page(State(state): State<AppState>, auth: Auth, Path(id): Path<String>) -> Response {
+pub async fn watch_page(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> Response {
     if !may_watch(&state, &auth) {
         return error_page(
             StatusCode::FORBIDDEN,
@@ -877,11 +1013,21 @@ pub async fn watch_page(State(state): State<AppState>, auth: Auth, Path(id): Pat
         );
     }
     let Ok(sid) = Uuid::parse_str(&id) else {
-        return error_page(StatusCode::NOT_FOUND, "Not found", "There is no such session.");
+        return error_page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "There is no such session.",
+        );
     };
     let row = match super::store::session(&state.db, sid).await {
         Ok(Some(r)) => r,
-        Ok(None) => return error_page(StatusCode::NOT_FOUND, "Not found", "There is no such session."),
+        Ok(None) => {
+            return error_page(
+                StatusCode::NOT_FOUND,
+                "Not found",
+                "There is no such session.",
+            );
+        }
         Err(e) => return db_error("reading a session", &e),
     };
     if row.kind.as_deref() != Some("ssh") || row.ended_at.is_some() {
@@ -906,7 +1052,11 @@ pub async fn watch_page(State(state): State<AppState>, auth: Auth, Path(id): Pat
 /// `[seconds, "o", text]`). Every few seconds it checks that the watch is
 /// still allowed (not locked, not signed out, not over) and says it is still
 /// here. The user's session never waits on it.
-pub async fn watch_stream(State(state): State<AppState>, auth: Auth, Path(id): Path<String>) -> Response {
+pub async fn watch_stream(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> Response {
     if !may_watch(&state, &auth) {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -942,8 +1092,14 @@ pub async fn watch_stream(State(state): State<AppState>, auth: Auth, Path(id): P
             if recheck.elapsed() >= Duration::from_secs(5) {
                 recheck = tokio::time::Instant::now();
                 // Still signed in and not locked; the session still going; still ours.
-                let signed_in = super::store::console_session(&state.db, &token_hash).await.ok().flatten().is_some();
-                let locked = crate::db::is_locked(&state.db, &watcher.observer).await.unwrap_or(true);
+                let signed_in = super::store::console_session(&state.db, &token_hash)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some();
+                let locked = crate::db::is_locked(&state.db, &watcher.observer)
+                    .await
+                    .unwrap_or(true);
                 if !signed_in || locked {
                     why = "authorization ended";
                     break;
@@ -955,33 +1111,45 @@ pub async fn watch_stream(State(state): State<AppState>, auth: Auth, Path(id): P
                         break;
                     }
                 }
-                if !crate::live::is_live(&state.db, watcher.session_id).await.unwrap_or(false) {
-                    let _ = tx.send(Ok(Event::default().event("done").data("the session ended"))).await;
+                if !crate::live::is_live(&state.db, watcher.session_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    let _ = tx
+                        .send(Ok(Event::default().event("done").data("the session ended")))
+                        .await;
                     why = "session ended";
                     break;
                 }
             }
-            let chunks = match crate::live::chunks(&state.db, watcher.session_id, last).await {
-                Ok(c) => c,
-                Err(_) => {
-                    why = "error";
-                    break;
-                }
+            let Ok(chunks) = crate::live::chunks(&state.db, watcher.session_id, last).await else {
+                why = "error";
+                break;
             };
             for c in chunks {
                 if !sent_header {
                     sent_header = true;
-                    let header = serde_json::json!({ "version": 2, "width": c.cols, "height": c.rows });
-                    if tx.send(Ok(Event::default().data(header.to_string()))).await.is_err() {
+                    let header =
+                        serde_json::json!({ "version": 2, "width": c.cols, "height": c.rows });
+                    if tx
+                        .send(Ok(Event::default().data(header.to_string())))
+                        .await
+                        .is_err()
+                    {
                         break 'stream;
                     }
                     first_start = Some(c.elapsed_ms);
                 }
+                #[allow(clippy::cast_precision_loss)] // milliseconds into a session fit f64 exactly
                 let t = (c.elapsed_ms - first_start.unwrap_or(0)).max(0) as f64 / 1000.0;
                 let ev = serde_json::json!([t, "o", c.text]);
                 last = Some(c.seq);
                 // A slow browser waits here; nothing else does.
-                if tx.send(Ok(Event::default().data(ev.to_string()))).await.is_err() {
+                if tx
+                    .send(Ok(Event::default().data(ev.to_string())))
+                    .await
+                    .is_err()
+                {
                     break 'stream;
                 }
             }
@@ -1008,13 +1176,14 @@ pub async fn session_extras(
     session_id: Uuid,
 ) -> (Vec<String>, Vec<(String, String, String)>) {
     use sqlx::Row as _;
-    let ids: Vec<String> = sqlx::query_scalar("SELECT request_ids FROM sessions WHERE session_id = $1")
-        .bind(session_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let ids: Vec<String> =
+        sqlx::query_scalar("SELECT request_ids FROM sessions WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
     let watched = sqlx::query(
         "SELECT username, kind, at FROM audit_events WHERE session_id = $1
            AND kind IN ('session.watch.start', 'session.watch.stop') ORDER BY at LIMIT 50",
@@ -1028,7 +1197,12 @@ pub async fn session_extras(
         let kind: String = r.try_get("kind").ok()?;
         Some((
             r.try_get::<Option<String>, _>("username").ok()??,
-            if kind.ends_with("start") { "started watching" } else { "stopped watching" }.to_owned(),
+            if kind.ends_with("start") {
+                "started watching"
+            } else {
+                "stopped watching"
+            }
+            .to_owned(),
             time_text(r.try_get("at").ok()),
         ))
     })
