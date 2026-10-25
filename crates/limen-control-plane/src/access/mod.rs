@@ -179,7 +179,7 @@ pub async fn request_access(
     // may ask for reaches: asking must not reveal which resources exist.
     let nothing = || {
         Status::failed_precondition(format!(
-            "there is nothing you can request that reaches `{resource}`"
+            "there is nothing you can request that reaches `{resource}`; `limen ls` shows what you can ask for"
         ))
     };
     let mut candidates: Vec<String> = policy
