@@ -327,7 +327,8 @@ fn rejects_invalid_documents() {
 fn requires_approval_is_not_allowed() {
     assert!(
         !Decision::RequiresApproval {
-            reason: "jit".into()
+            reason: "jit".into(),
+            roles: vec!["r".into()],
         }
         .is_allowed()
     );

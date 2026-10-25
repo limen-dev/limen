@@ -10,10 +10,12 @@ use limen_policy::Policy;
 use limen_proto::v1::admin_server::Admin;
 use limen_proto::v1::{
     ApplyPolicyRequest, ApplyPolicyResponse, Component, CreateJoinTokenRequest,
-    CreateJoinTokenResponse, GetPolicyRequest, GetPolicyResponse, KillSessionRequest,
-    KillSessionResponse, ListComponentsRequest, ListComponentsResponse, ListLocksRequest,
-    ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff, RevokeComponentRequest,
-    RevokeComponentResponse, TunnelInfo, UnlockUserRequest, UnlockUserResponse,
+    CreateJoinTokenResponse, DiscoveredInfo, GetPolicyDocumentsRequest, GetPolicyDocumentsResponse,
+    GetPolicyRequest, GetPolicyResponse, KillSessionRequest, KillSessionResponse,
+    ListComponentsRequest, ListComponentsResponse, ListDiscoveredRequest, ListDiscoveredResponse,
+    ListLocksRequest, ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff,
+    PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
+    TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -67,7 +69,8 @@ impl Admin for AdminService {
                 .map(|s| (s.name.as_str(), s.content.as_str())),
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let current = self.0.policy.current();
+        // Versions and diffs are about what admins applied, not discovered resources.
+        let current = self.0.policy.base();
         let diff = current.policy.diff(&next);
         let digest = next.digest();
         let proto_diff = PolicyDiff {
@@ -75,13 +78,72 @@ impl Admin for AdminService {
             removed: diff.removed.clone(),
             changed: diff.changed.clone(),
         };
+        // Who gains or loses access, the policy's own tests, and anything
+        // valid but suspicious (ADR-0028). The same engine as enforcement.
+        let access = current.policy.access_diff(&next);
+        let access_changes: Vec<String> = access
+            .changes
+            .iter()
+            .map(|c| {
+                let sign = if c.change == limen_policy::tooling::ChangeKind::Gain {
+                    '+'
+                } else {
+                    '-'
+                };
+                format!("{sign} {}", c.text())
+            })
+            .collect();
+        let report = next.run_tests();
+        let test_results: Vec<PolicyTestResult> = report
+            .results
+            .iter()
+            .map(|r| PolicyTestResult {
+                test: r.test.clone(),
+                case_number: u32::try_from(r.case).unwrap_or(u32::MAX),
+                name: r.name.clone(),
+                passed: r.passed,
+                expected: r.expected.clone(),
+                got: r.got.clone(),
+                detail: r.detail.clone(),
+            })
+            .collect();
+        let warnings = next.warnings();
+        if req.require_tests && !req.dry_run {
+            if report.results.is_empty() {
+                return Err(Status::failed_precondition(
+                    "--require-tests: the policy has no policy_test documents",
+                ));
+            }
+            if !report.ok() {
+                let failed: Vec<String> = report
+                    .results
+                    .iter()
+                    .filter(|r| !r.passed)
+                    .map(|r| {
+                        format!(
+                            "{} #{} {}: expected {}, got {} {}",
+                            r.test, r.case, r.name, r.expected, r.got, r.detail
+                        )
+                    })
+                    .collect();
+                return Err(Status::failed_precondition(format!(
+                    "--require-tests: {} policy test(s) failed:\n{}",
+                    failed.len(),
+                    failed.join("\n")
+                )));
+            }
+        }
+        let response = |version: i64, applied: bool| ApplyPolicyResponse {
+            diff: Some(proto_diff.clone()),
+            version,
+            digest: digest.clone(),
+            applied,
+            access_changes: access_changes.clone(),
+            warnings: warnings.clone(),
+            test_results: test_results.clone(),
+        };
         if req.dry_run || diff.is_empty() {
-            return Ok(Response::new(ApplyPolicyResponse {
-                diff: Some(proto_diff),
-                version: current.version,
-                digest,
-                applied: false,
-            }));
+            return Ok(Response::new(response(current.version, false)));
         }
 
         let documents = serde_json::to_value(next.documents())
@@ -103,6 +165,9 @@ impl Admin for AdminService {
             "digest": digest,
             "source_ref": source_ref,
             "diff": diff,
+            // Who gained or lost access, so a reviewer of the trail sees
+            // what the change meant, not only which documents moved.
+            "access_changes": access_changes.iter().take(200).collect::<Vec<_>>(),
         });
         self.0
             .audit
@@ -129,11 +194,48 @@ impl Admin for AdminService {
             created_at: Some(OffsetDateTime::now_utc()),
         });
         tracing::info!(version, %digest, author = %admin.username, "policy applied");
-        Ok(Response::new(ApplyPolicyResponse {
-            diff: Some(proto_diff),
-            version,
-            digest,
-            applied: true,
+        Ok(Response::new(response(version, true)))
+    }
+
+    async fn list_discovered(
+        &self,
+        request: Request<ListDiscoveredRequest>,
+    ) -> Result<Response<ListDiscoveredResponse>, Status> {
+        caller::resolve(&request, &self.0.cas)?.admin()?;
+        let items = crate::discovery::list(&self.0.db, &request.into_inner().state).await?;
+        Ok(Response::new(ListDiscoveredResponse { items }))
+    }
+
+    async fn review_discovered(
+        &self,
+        request: Request<ReviewDiscoveredRequest>,
+    ) -> Result<Response<DiscoveredInfo>, Status> {
+        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let r = request.into_inner();
+        crate::discovery::review(
+            &self.0,
+            &admin.username,
+            "api",
+            &r.key,
+            r.accept,
+            &r.note,
+            None,
+        )
+        .await
+        .map(Response::new)
+    }
+
+    async fn get_policy_documents(
+        &self,
+        request: Request<GetPolicyDocumentsRequest>,
+    ) -> Result<Response<GetPolicyDocumentsResponse>, Status> {
+        caller::resolve(&request, &self.0.cas)?.admin()?;
+        let loaded = self.0.policy.current();
+        let documents_json = serde_json::to_string(&loaded.policy.documents())
+            .map_err(|e| internal("serializing policy", e))?;
+        Ok(Response::new(GetPolicyDocumentsResponse {
+            version: loaded.version,
+            documents_json,
         }))
     }
 

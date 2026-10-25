@@ -19,6 +19,8 @@ pub enum Purpose {
     AuditManifest,
     /// A browser's identity and host-bound app session (ADR-0022).
     WebAppSession,
+    /// A pack of compliance evidence (ADR-0029).
+    EvidencePack,
 }
 
 impl Purpose {
@@ -28,6 +30,7 @@ impl Purpose {
             Purpose::PolicySnapshot => b"limen/v1/policy-snapshot",
             Purpose::AuditManifest => b"limen/v1/audit-manifest",
             Purpose::WebAppSession => b"limen/v1/web-app-session",
+            Purpose::EvidencePack => b"limen/v1/evidence-pack",
         }
     }
 
@@ -35,9 +38,10 @@ impl Purpose {
     fn signer_kind(self) -> ComponentKind {
         match self {
             Purpose::SessionGrant => ComponentKind::Proxy,
-            Purpose::PolicySnapshot | Purpose::AuditManifest | Purpose::WebAppSession => {
-                ComponentKind::ControlPlane
-            }
+            Purpose::PolicySnapshot
+            | Purpose::AuditManifest
+            | Purpose::WebAppSession
+            | Purpose::EvidencePack => ComponentKind::ControlPlane,
         }
     }
 }

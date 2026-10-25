@@ -234,6 +234,7 @@ async fn console_end_to_end() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_cli)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key, &d.idp.issuer),
             dry_run: false,
             source_ref: String::new(),
@@ -531,7 +532,7 @@ async fn console_end_to_end() {
     let detail = admin_user.get("/console/resources/secret-db").await;
     assert_eq!(detail.status, 200);
     assert!(
-        detail.body.contains("No role grants access"),
+        detail.body.contains("Nobody. No role that selects it"),
         "{}",
         detail.body
     );

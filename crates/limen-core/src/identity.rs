@@ -45,6 +45,17 @@ pub fn actor_type(username: &str) -> &'static str {
 /// built-in roles, and user-defined role names can't contain it.
 pub const ADMIN_ROLE: &str = "limen:admin";
 
+/// Built-in role for people who look at the record without changing
+/// anything (ADR-0026): search audit events, read them, and play recordings.
+/// It cannot lock, kill, revoke, approve, or apply policy.
+pub const AUDITOR_ROLE: &str = "limen:auditor";
+
+/// Whether `role` is built in, rather than defined in policy.
+#[must_use]
+pub fn is_builtin_role(role: &str) -> bool {
+    role == ADMIN_ROLE || role == AUDITOR_ROLE
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentKind {

@@ -74,8 +74,18 @@ impl SshCertificates for SshCertificatesService {
 
         // The control plane's own, current view of policy has the last word.
         let loaded = self.0.policy.current();
+        // Roles from approved access requests count, and the session's
+        // certificate never outlives the grant it depends on (ADR-0025).
+        let effective = crate::access::effective_roles_now(
+            &self.0,
+            &verified.user.username,
+            &verified.user.roles,
+            &grant.resource,
+        )
+        .await
+        .map_err(|e| internal("reading access grants", e))?;
         let decision = loaded.policy.evaluate(&AccessRequest {
-            roles: &verified.user.roles,
+            roles: &effective.roles,
             resource: &grant.resource,
             principal: Principal::SshLogin(grant.principal.clone()),
         });
@@ -117,6 +127,17 @@ impl SshCertificates for SshCertificatesService {
             return Err(Status::permission_denied("grant already used"));
         }
 
+        // A certificate issued under a grant ends no later than the grant.
+        let user_cert_ttl = match effective.earliest_expiry_unix {
+            Some(deadline) => {
+                let left = deadline - now.unix_timestamp();
+                if left <= 0 {
+                    return Err(Status::permission_denied("the access grant has ended"));
+                }
+                USER_CERT_TTL.min(Duration::from_secs(left.unsigned_abs()))
+            }
+            None => USER_CERT_TTL,
+        };
         let user_key = parse_key("user_public_key", &req.user_public_key)?;
         let host_key = parse_key("host_public_key", &req.host_public_key)?;
         let user_cert = self
@@ -127,7 +148,7 @@ impl SshCertificates for SshCertificatesService {
                 public_key: user_key,
                 principal: grant.principal.clone(),
                 key_id: format!("limen:{}:{}", grant.session_id, grant.username),
-                ttl: USER_CERT_TTL,
+                ttl: user_cert_ttl,
                 permit_pty: true,
                 // Phase 2 doesn't forward ports; the worker refuses forwarding too.
                 permit_port_forwarding: false,

@@ -1,0 +1,21 @@
+# Cloud discovery (ADR-0027). Needs a worker started with --discovery and a
+# describe-only IAM role (see docs/guides/discovery.md, "IAM"). Discovered
+# resources are pending until an admin accepts them.
+kind: discovery
+version: v1
+metadata: { name: aws-prod }
+spec:
+  provider: aws
+  accounts:
+    - role_arn: arn:aws:iam::111122223333:role/limen-discovery
+  regions: [eu-west-1]
+  worker_selector: { pool: dev }
+  auto_accept: [team]
+  match:
+    - type: ec2
+      tags: { limen/managed: ["true"] }
+      name_template: "{{ tag.Name }}"
+      labels_from_tags: [env, team]
+      ssh: { port: 22 }
+    - type: rds
+      labels_from_tags: [env]

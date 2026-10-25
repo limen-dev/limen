@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ review.name }}{% endblock %}
+{% block head %}<script defer src="/console/static/review-init.js?v={{ chrome.assets }}"></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ review.name }} {% if review.overdue %}<span class="pill bad v-mid">overdue</span>{% else if review.status == "complete" %}<span class="pill ok v-mid">complete</span>{% endif %}</h1>
+    <p class="sub">Started by {{ review.started_by }} · due {{ review.due }}</p>
+  </div>
+  <a class="button secondary" href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>Reviews</a>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+
+<section class="stats">
+  <a class="card stat drill{% if show == "waiting" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=waiting" title="Show only what is waiting"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#clock"/></svg></span><div><b>{{ review.waiting }}</b><span>Waiting for a decision</span></div></a>
+  <a class="card stat drill{% if show == "kept" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=kept" title="Show only what was kept"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg></span><div><b>{{ review.kept }}</b><span>Kept</span></div></a>
+  <a class="card stat drill{% if review.flagged > 0 %} bad{% endif %}{% if show == "removed" %} active{% endif %}" href="/console/reviews/{{ review.id }}?show=removed" title="Show only what was removed"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></span><div><b>{{ review.flagged }}</b><span>Removed</span></div></a>
+</section>
+{% if !show.is_empty() %}<p class="hint">Showing only what is {{ show }}. <a href="/console/reviews/{{ review.id }}">Show everything</a></p>{% endif %}
+<div class="progress wide" title="{{ review.progress }}"><span style="width:{{ review.percent }}%"></span></div>
+
+{% if mine_only %}<p class="hint">Showing the items assigned to you.</p>{% endif %}
+{% if items.is_empty() %}
+<div class="card empty"><div>{% if show.is_empty() %}Nothing here for you.{% else %}Nothing is {{ show }}.{% endif %}</div></div>
+{% else %}
+{% if to_decide > 0 %}
+<h2>To decide</h2>
+<div class="queue">
+  {% for i in items %}{% if i.pending %}
+  <div class="card decision">
+    <div>
+      <div class="who">{{ i.subject }}{% if i.subject_type == "bot" %} <span class="pill bot">bot</span>{% endif %}</div>
+      <div class="what">holds <span class="chip c{{ i.role.c }}">{{ i.role.text }}</span>{% if i.via != "standing" %}<span class="pill warn">through {{ i.via }}</span>{% endif %}</div>
+      {% if !i.reaches.is_empty() %}<div class="reaches">{% for r in i.reaches %}<span class="chip">{{ r }}</span>{% endfor %}{% if i.reaches_more > 0 %}<span class="muted">and {{ i.reaches_more }} more</span>{% endif %}</div>{% endif %}
+      <div class="meta">{% if i.unused %}<span class="pill warn">{{ i.usage }}</span>{% else %}{{ i.usage }}{% endif %} · reviewer: {{ i.reviewer }}</div>
+    </div>
+    {% if i.can_decide %}
+    <form method="post" action="/console/reviews/items/{{ i.id }}/decide" data-decide>
+      <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+      <input type="hidden" name="review" value="{{ review.id }}">
+      <input type="text" name="comment" placeholder="Comment (optional)" maxlength="500" aria-label="Comment">
+      <div class="buttons">
+        <button type="submit" name="decision" value="certify"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Keep</button>
+        <button type="submit" name="decision" value="flag" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Remove</button>
+      </div>
+      <p class="hint">Removing withholds the role from them at once and ends what they have open on it.</p>
+    </form>
+    {% else if i.own %}<div class="muted">This is your own access, so someone else has to review it. It is waiting for {{ i.reviewer }}.</div>
+    {% else %}<div class="muted">Waiting for {{ i.reviewer }}.</div>{% endif %}
+  </div>
+  {% endif %}{% endfor %}
+</div>
+{% endif %}
+
+{% if decided_n > 0 %}
+<h2>Decided</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Who</th><th>Role</th><th>Decision</th><th>By</th><th>Comment</th></tr></thead>
+  <tbody>
+  {% for i in items %}{% if !i.pending %}
+  <tr>
+    <td>{{ i.subject }}{% if i.subject_type == "bot" %} <span class="pill bot">bot</span>{% endif %}</td>
+    <td><span class="chip c{{ i.role.c }}">{{ i.role.text }}</span></td>
+    <td>{% if i.decision == "flag" %}<span class="pill bad">removed</span>{% else %}<span class="pill ok">kept</span>{% endif %}</td>
+    <td>{{ i.decided_by }}</td>
+    <td class="why">{% if i.comment.is_empty() %}<span class="muted">none</span>{% else %}{{ i.comment }}{% endif %}</td>
+  </tr>
+  {% endif %}{% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endif %}
+{% endblock %}

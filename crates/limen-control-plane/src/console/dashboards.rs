@@ -245,7 +245,7 @@ pub struct RankPanel {
 // ---- views ---------------------------------------------------------------------
 
 /// The pickable panels, in page order: `(id, title, group)`.
-const CATALOG: [(&str, &str, &str); 22] = [
+const CATALOG: [(&str, &str, &str); 27] = [
     ("sessions", "Sessions over time", "Activity"),
     ("signins", "Sign-ins and denials", "Security"),
     ("busiest-resources", "Busiest resources", "Activity"),
@@ -254,6 +254,11 @@ const CATALOG: [(&str, &str, &str); 22] = [
     ("session-length", "Session length", "Activity"),
     ("denial-reasons", "Why access was denied", "Security"),
     ("admin-actions", "Admin actions", "Security"),
+    ("access-requests", "Access requests", "Security"),
+    ("time-to-approve", "Time to approve", "Security"),
+    ("grants-by-role", "Grants by role", "Security"),
+    ("review-items", "Access review items", "Security"),
+    ("discovered", "Discovered resources", "Security"),
     ("kinds", "Sessions by kind", "Activity"),
     ("endings", "How sessions ended", "Reliability"),
     ("traffic", "Data transferred", "Activity"),
@@ -297,6 +302,11 @@ const VIEWS: [(&str, &str, &[&str]); 6] = [
             "logins",
             "sources",
             "unrecorded",
+            "access-requests",
+            "time-to-approve",
+            "grants-by-role",
+            "review-items",
+            "discovered",
             "admin-actions",
         ],
     ),
@@ -653,7 +663,7 @@ struct Spec {
     sql: &'static str,
 }
 
-const RANKINGS: [Spec; 20] = [
+const RANKINGS: [Spec; 25] = [
     Spec {
         id: "busiest-resources",
         title: "Busiest resources",
@@ -715,8 +725,64 @@ const RANKINGS: [Spec; 20] = [
         drill: Drill::Audit { kind: "", by: "kind" },
         windowed: true,
         sql: "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
-              ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change')
+              ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change',
+               'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export')
               GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "access-requests",
+        title: "Access requests",
+        sub: "By outcome",
+        class: "bar-a",
+        drill: Drill::Page("/console/access"),
+        windowed: true,
+        sql: "SELECT status || CASE WHEN break_glass THEN ' (break-glass)' ELSE '' END, count(*) FROM access_requests
+              WHERE created_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "time-to-approve",
+        title: "Time to approve",
+        sub: "Approved requests, from asking to the decision",
+        class: "bar-c",
+        drill: Drill::None,
+        windowed: true,
+        sql: "SELECT CASE WHEN d < interval '5 minutes' THEN 'under 5 min' WHEN d < interval '30 minutes' THEN '5 to 30 min'
+                          WHEN d < interval '4 hours' THEN '30 min to 4 h' ELSE 'over 4 h' END AS b, count(*)
+              FROM (SELECT decided_at - created_at AS d FROM access_requests
+                    WHERE created_at >= $1 AND status IN ('approved', 'revoked') AND NOT break_glass AND decided_at IS NOT NULL) t
+              GROUP BY 1 ORDER BY min(d)",
+    },
+    Spec {
+        id: "grants-by-role",
+        title: "Grants by role",
+        sub: "Access given by request",
+        class: "bar-b",
+        drill: Drill::Page("/console/access"),
+        windowed: true,
+        sql: "SELECT role, count(*) FROM access_grants WHERE granted_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+    },
+    Spec {
+        id: "review-items",
+        title: "Access review items",
+        sub: "Where the reviews stand",
+        class: "bar-d",
+        drill: Drill::Page("/console/reviews"),
+        windowed: true,
+        sql: "SELECT CASE WHEN i.decision IS NULL THEN CASE WHEN r.due_at < now() THEN 'overdue' ELSE 'waiting' END
+                          WHEN i.decision = 'flag' THEN 'flagged'
+                          WHEN i.comment = '' THEN 'certified without a comment' ELSE 'certified with a comment' END, count(*)
+              FROM review_items i JOIN access_reviews r ON r.id = i.review_id
+              WHERE r.started_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+    },
+    Spec {
+        id: "discovered",
+        title: "Discovered resources",
+        sub: "By state, now",
+        class: "bar-bot",
+        drill: Drill::Page("/console/discovered"),
+        windowed: false,
+        sql: "SELECT CASE WHEN change_pending THEN 'accepted, change pending' ELSE state END, count(*)
+              FROM discovered_resources GROUP BY 1 ORDER BY 2 DESC, 1",
     },
     Spec {
         id: "kinds",

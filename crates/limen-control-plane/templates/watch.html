@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Watching {{ resource }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/console/static/asciinema-player.css?v={{ chrome.assets }}"><script defer src="/console/static/asciinema-player.min.js?v={{ chrome.assets }}"></script><script defer src="/console/static/watch-init.js?v={{ chrome.assets }}"></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Watching {{ resource }} <span class="pill live v-mid">live</span></h1>
+    <p class="sub">{{ user }}'s session, read-only. You see what is on their screen, never what they type. This is recorded in the audit trail{% if chrome.is_admin %}, and they may be told{% endif %}.</p>
+  </div>
+  <a class="button secondary" href="/console/sessions/{{ id }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>The session</a>
+</div>
+<div id="watch" data-src="/console/sessions/{{ id }}/watch/stream"></div>
+<p class="hint" id="watch-state">Connecting…</p>
+{% if chrome.is_admin %}
+<form method="post" action="/console/sessions/{{ id }}/kill" class="danger-zone">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360">
+  <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-stop"/></svg>End this session</button>
+</form>
+{% endif %}
+{% endblock %}

@@ -53,6 +53,15 @@ impl PolicySync for PolicySyncService {
                 .map_err(|e| internal("reading revoked components", e))?
                 .into_iter()
                 .collect(),
+            // Grants come from the database on every request, like locks, so
+            // an approval or a revocation reaches every proxy and worker
+            // within one refresh.
+            grants: crate::access::active_for_snapshot(&self.0)
+                .await
+                .map_err(|e| internal("reading access grants", e))?,
+            denies: crate::reviews::active_denies(&self.0.db)
+                .await
+                .map_err(|e| internal("reading access overrides", e))?,
         };
         let signed = limen_session::snapshot::sign(
             &key,

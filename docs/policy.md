@@ -1,6 +1,6 @@
 # Policy reference
 
-Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are four document kinds. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
+Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are seven document kinds: `role`, `role_mapping`, `resource`, `bot`, `discovery`, and `policy_test`, and the built-in roles below. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
 
 The examples are grouped into `shared/` policy and `stacks/<kind>/` files.
 Applying the `examples/policy/` directory still recursively applies the full
@@ -56,6 +56,10 @@ spec:
       web: {}
   deny:
     - resources: { kind: [ssh], labels: { tier: [bastion] } }   # no principals: denies the resource entirely
+  # Optional, see "Requestable roles" below:
+  request: { who: [developers], approvers: [sre-leads], max_duration: 2h }
+  break_glass: false
+  notify_observed: false     # tell people on SSH sessions this role grants that an admin may watch
 ```
 
 `db.roles` names the database roles people may use. **They must start with `limen_`** (followed by lowercase letters, digits, or underscores): the prefix is reserved for roles Limen creates and manages, and policy validation rejects any other. `db.databases` lists the databases (`"*"` for any).
@@ -73,7 +77,7 @@ spec:
   - { idp_group: limen-admins, roles: ["limen:admin"] }
 ```
 
-`limen:admin` is built in. It grants the admin API (policy, join tokens, components) and no resource access. The control plane's `--bootstrap-admin-group` also grants it, so the first admin can log in before any policy exists.
+`limen:admin` is built in. It grants the admin API (policy, join tokens, components) and no resource access. **`limen:auditor`** is built in too ([search and the record](guides/audit-search.md)): it can search the audit trail, read events and sessions, play recordings, and read requests, grants, and reviews; it cannot lock, kill, revoke, approve, or apply anything. Map either like any role. The control plane's `--bootstrap-admin-group` also grants it, so the first admin can log in before any policy exists.
 
 ## `resource`
 
@@ -134,6 +138,67 @@ policy can be reviewed ahead of time. Web apps and raw TCP are served today
 alongside SSH, SQL databases, Redis, Kubernetes, MongoDB, search, RabbitMQ, and
 Kafka. Stack-specific examples are organized under [`examples/policy/stacks/`](../examples/policy/stacks/), including deployment variants that remain unverified against their real cloud services.
 Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. Web and TCP grants are access itself (`web: {}` and `tcp: {}`); neither lets a client choose an upstream identity or destination.
+
+## Requestable roles and break-glass
+
+A role with a `request` block grants nothing until someone asks, gives a reason, and an approver agrees; the access then exists for a limited time on **one resource**. See [the access requests guide](guides/access-requests.md).
+
+| Field | Meaning |
+|---|---|
+| `request.who` | IdP groups that may ask (required) |
+| `request.approvers`, `request.approver_users` | IdP groups and named users who may approve (one of them required, unless `break_glass`) |
+| `request.approvals_required` | different approvers needed, 1 to 5 (default 1) |
+| `request.max_duration` | longest grant (default `2h`, at most `7d`; at most `1h` for break-glass) |
+| `request.require_reason` | default `true`; always on for break-glass |
+| `request.ticket_pattern` | a regular expression (linear-time, up to 256 characters) the reason must match |
+| `break_glass: true` | granted at once, reason required, at most 1 hour, announced and reviewed; takes no approvers |
+| `notify_observed: true` | users on SSH sessions this role grants are told an admin may watch ([guide](guides/watching-sessions.md)) |
+
+`limen apply` warns when a group can both request and approve a role, when a requestable role is already held by a group in `request.who`, and when a role selects on a label copied from a cloud tag.
+
+## `discovery`
+
+Finds resources in cloud accounts and holds them for an admin; it grants nothing. See [the discovery guide](guides/discovery.md).
+
+```yaml
+kind: discovery
+version: v1
+metadata: { name: aws-prod }
+spec:
+  provider: aws
+  accounts: [{ role_arn: arn:aws:iam::111122223333:role/limen-discovery }]
+  regions: [eu-west-1]
+  interval: 5m                  # at least 1m
+  worker_selector: { pool: prod-vpc }
+  auto_accept: [team]           # label keys whose changes apply without an admin
+  stale_after_cycles: 3
+  remove_after: 7d
+  match:
+    - type: ec2                 # ec2 | rds | redshift | elasticache | eks
+      tags: { limen/managed: ["true"] }
+      name_template: "{{ tag.Name }}"      # {{ id }} {{ region }} {{ account }} {{ tag.X }}
+      labels_from_tags: [env, team]        # only these tags become labels
+      labels: { source: aws }
+      ssh: { port: 22, address: private_ip }
+```
+
+## `policy_test`
+
+Cases that run offline through the same decision code as enforcement. The runtime ignores them. See [the policy tooling guide](guides/policy-tooling.md).
+
+```yaml
+kind: policy_test
+version: v1
+metadata: { name: prod-is-locked-down }
+spec:
+  cases:
+    - name: developers cannot ssh to prod as root
+      who: { groups: [developers] }       # or: bot: deploy-staging, or roles: [..]
+      resource: web-prod
+      principal: { login: root }          # login | db_role (+database) | mongo_role (+database) | kube_group | redis_user | search_role | mq_user | kafka_user | web | tcp
+      expect: deny                        # allow | request | deny
+      via_role: sre                       # optional, with expect: allow
+```
 
 ## `bot`
 

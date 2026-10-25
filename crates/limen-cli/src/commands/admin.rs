@@ -28,6 +28,9 @@ pub enum AdminCommand {
         /// Where the policy came from, recorded in the audit trail (for example a Git SHA).
         #[arg(long)]
         source_ref: Option<String>,
+        /// Refuse to apply unless the policy's own `policy_test` cases pass.
+        #[arg(long)]
+        require_tests: bool,
     },
     /// Show the active policy version.
     Policy,
@@ -58,6 +61,57 @@ pub enum AdminCommand {
         #[arg(long)]
         reason: String,
     },
+    /// Access reviews and the roles they withhold (ADR-0029).
+    Review {
+        #[command(subcommand)]
+        command: super::review::ReviewCommand,
+    },
+    /// A signed pack of compliance evidence for a period.
+    Evidence {
+        /// First day, as 2026-01-01.
+        #[arg(long)]
+        from: String,
+        /// The day after the last, as 2026-04-01.
+        #[arg(long)]
+        to: String,
+        #[arg(long, default_value = "limen-evidence.json")]
+        out: PathBuf,
+    },
+    /// Resources workers found in a cloud account, waiting for you (ADR-0027).
+    Discovery {
+        #[command(subcommand)]
+        command: DiscoveryCommand,
+    },
+    /// Active access grants, from approved requests and break-glass.
+    Grants {
+        /// Also grants that ended in the last 30 days.
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// End an access grant, and the sessions it allowed.
+    RevokeGrant {
+        /// The request id, from `limen admin grants`.
+        request_id: String,
+        /// Why. Recorded in the audit trail.
+        #[arg(long)]
+        reason: String,
+    },
+    /// Approve an access request (the same as `limen approve`).
+    #[command(hide = true)]
+    Approve {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Deny an access request (the same as `limen deny`).
+    #[command(hide = true)]
+    Deny {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
     /// End one live session.
     KillSession {
         /// The session ID, from `session.start` in the audit trail.
@@ -65,6 +119,30 @@ pub enum AdminCommand {
         /// Why. Recorded in the audit trail.
         #[arg(long)]
         reason: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DiscoveryCommand {
+    /// List discovered resources. Pending ones and pending changes come first.
+    Status {
+        /// pending, accepted, rejected, stale, or changed.
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Make a discovered resource (or its pending change) real.
+    Accept {
+        key: String,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Turn a discovered resource away.
+    Reject {
+        key: String,
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -93,6 +171,7 @@ pub enum TokenCommand {
     },
 }
 
+#[allow(clippy::too_many_lines)] // one arm per command
 pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<()> {
     let (_, channel) = api::authenticated(proxy)?;
     let mut admin = AdminClient::new(channel);
@@ -101,6 +180,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             paths,
             dry_run,
             source_ref,
+            require_tests,
         } => {
             let sources = collect_sources(&paths)?;
             let resp = admin
@@ -108,6 +188,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     sources,
                     dry_run,
                     source_ref: source_ref.unwrap_or_default(),
+                    require_tests,
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?
@@ -121,6 +202,33 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             }
             for name in &diff.removed {
                 anstream::println!("{}", ui::red(&format!("- {name}")));
+            }
+            if !resp.access_changes.is_empty() {
+                anstream::println!("\n{}", ui::bold("Who gains or loses access"));
+                for line in &resp.access_changes {
+                    match line.strip_prefix("+ ") {
+                        Some(text) => anstream::println!("  {}", ui::yellow(&format!("+ {text}"))),
+                        None => anstream::println!("  {}", ui::green(line)),
+                    }
+                }
+                println!();
+            }
+            for w in &resp.warnings {
+                ui::warn(w);
+            }
+            let failed = resp.test_results.iter().filter(|t| !t.passed).count();
+            if !resp.test_results.is_empty() {
+                if failed == 0 {
+                    ui::success(&format!(
+                        "{} policy test case(s) pass.",
+                        resp.test_results.len()
+                    ));
+                } else {
+                    ui::warn(&format!(
+                        "{failed} of {} policy test case(s) fail; run `limen policy test` for details.",
+                        resp.test_results.len()
+                    ));
+                }
             }
             if diff.added.is_empty() && diff.changed.is_empty() && diff.removed.is_empty() {
                 ui::success(&format!(
@@ -236,11 +344,133 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 &rows,
             );
         }
+        AdminCommand::Review { command } => super::review::run(proxy, command).await?,
+        AdminCommand::Evidence { from, to, out } => {
+            super::review::evidence(proxy, &from, &to, &out).await?;
+        }
+        AdminCommand::Discovery { command } => discovery(&mut admin, command).await?,
+        AdminCommand::Grants { all, json } => super::access::grants(proxy, all, json).await?,
+        AdminCommand::RevokeGrant { request_id, reason } => {
+            super::access::revoke_grant(proxy, &request_id, &reason).await?;
+        }
+        AdminCommand::Approve { id, comment } => {
+            super::access::decide(proxy, &id, true, comment.as_deref()).await?;
+        }
+        AdminCommand::Deny { id, comment } => {
+            super::access::decide(proxy, &id, false, comment.as_deref()).await?;
+        }
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }
         | AdminCommand::Locks
         | AdminCommand::Revoke { .. }
         | AdminCommand::KillSession { .. }) => run_locks(&mut admin, lock_command).await?,
+    }
+    Ok(())
+}
+
+/// Discovered resources (ADR-0027).
+async fn discovery(
+    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
+    command: DiscoveryCommand,
+) -> anyhow::Result<()> {
+    use limen_proto::v1::ListDiscoveredRequest;
+    match command {
+        DiscoveryCommand::Status { state, json } => {
+            let items = admin
+                .list_discovered(ListDiscoveredRequest {
+                    state: state.unwrap_or_default(),
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .items;
+            if json {
+                let v: Vec<_> = items
+                    .iter()
+                    .map(|i| serde_json::json!({
+                        "key": i.key, "name": i.name, "kind": i.kind, "state": i.state, "labels": i.labels,
+                        "target": i.target, "change_pending": i.change_pending, "changes": i.changes,
+                        "blockers": i.blockers, "document": i.document,
+                    }))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&v)?);
+                return Ok(());
+            }
+            if items.is_empty() {
+                ui::info("Nothing discovered yet.");
+                return Ok(());
+            }
+            let rows: Vec<[String; 5]> = items
+                .iter()
+                .map(|i| {
+                    let state = match (i.state.as_str(), i.change_pending) {
+                        ("accepted", true) => ui::yellow("accepted, change pending"),
+                        ("pending", _) => ui::yellow("pending"),
+                        ("accepted", _) => ui::green("accepted"),
+                        ("stale", _) => ui::red("stale"),
+                        (s, _) => ui::dim(s),
+                    };
+                    let mut labels: Vec<_> = i
+                        .labels
+                        .iter()
+                        .filter(|(k, _)| !k.starts_with("limen.io/"))
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect();
+                    labels.sort();
+                    let note = if i.blockers.is_empty() {
+                        labels.join(" ")
+                    } else {
+                        ui::red(&i.blockers.join("; "))
+                    };
+                    [
+                        ui::bold(&i.name),
+                        ui::kind_label(&i.kind),
+                        state,
+                        ui::dim(&i.key),
+                        note,
+                    ]
+                })
+                .collect();
+            ui::print_table(["name", "kind", "state", "key", "labels"], &rows);
+            for i in items.iter().filter(|i| i.change_pending) {
+                for c in &i.changes {
+                    anstream::println!("  {} {}", ui::bold(&i.name), c);
+                }
+            }
+            ui::hint("Accept with `limen admin discovery accept <key>`.");
+        }
+        DiscoveryCommand::Accept { key, note } => {
+            review_discovered(admin, &key, note, true).await?;
+        }
+        DiscoveryCommand::Reject { key, note } => {
+            review_discovered(admin, &key, note, false).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn review_discovered(
+    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
+    key: &str,
+    note: Option<String>,
+    accept: bool,
+) -> anyhow::Result<()> {
+    let info = admin
+        .review_discovered(limen_proto::v1::ReviewDiscoveredRequest {
+            key: key.to_owned(),
+            accept,
+            note: note.unwrap_or_default(),
+        })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner();
+    if accept {
+        ui::success(&format!(
+            "Accepted {}. Roles that select its labels can now reach it.",
+            ui::bold(&info.name)
+        ));
+    } else {
+        ui::success(&format!("Rejected {}.", ui::bold(&info.name)));
     }
     Ok(())
 }
@@ -368,7 +598,7 @@ fn parse_ttl(s: &str) -> anyhow::Result<Duration> {
 }
 
 /// Read YAML files, recursing into directories. Sorted for stable output.
-fn collect_sources(paths: &[PathBuf]) -> anyhow::Result<Vec<PolicySource>> {
+pub(crate) fn collect_sources(paths: &[PathBuf]) -> anyhow::Result<Vec<PolicySource>> {
     let mut files = Vec::new();
     for path in paths {
         collect(path, &mut files)?;

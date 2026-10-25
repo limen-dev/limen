@@ -1,0 +1,52 @@
+# Just-in-time access (ADR-0025): a requestable role, a break-glass role, and
+# tests that say what they are for. Apply together with the shared policy:
+#
+#   limen admin apply examples/policy examples/policy-workflows
+#
+# The groups below are the dev stack's (developers, limen-admins); change them for yours.
+kind: role
+version: v1
+metadata:
+  name: prod-db-readonly
+  description: Read the production databases, for a limited time, when someone approves
+  labels: { owner: sre-lead@example.com }
+spec:
+  allow:
+    - resources: { kind: [postgres, mysql], labels: { env: [prod] } }
+      db: { roles: [limen_read], databases: ["*"] }
+  request:
+    who: [developers]
+    approvers: [limen-admins]
+    approvals_required: 1
+    max_duration: 2h
+    ticket_pattern: '^(INC|OPS)-[0-9]+'
+---
+kind: role
+version: v1
+metadata:
+  name: prod-ssh-emergency
+  description: Break-glass shell on production hosts. Granted at once, reviewed after.
+spec:
+  break_glass: true
+  notify_observed: true
+  allow:
+    - resources: { kind: [ssh], labels: { env: [prod] } }
+      ssh: { logins: [ubuntu] }
+  request:
+    who: [developers]
+---
+kind: policy_test
+version: v1
+metadata: { name: prod-needs-a-request }
+spec:
+  cases:
+    - name: developers have no standing access to production databases
+      who: { groups: [developers] }
+      resource: orders-prod
+      principal: { db_role: limen_read, database: orders }
+      expect: request
+    - name: contractors cannot reach production, even by asking
+      who: { groups: [contractors] }
+      resource: orders-prod
+      principal: { db_role: limen_read, database: orders }
+      expect: deny

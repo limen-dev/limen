@@ -10,15 +10,20 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use limen_ca::ComponentCertRequest;
 use limen_core::identity::ComponentKind;
+use limen_proto::v1::access_server::AccessServer;
 use limen_proto::v1::admin_server::AdminServer;
 use limen_proto::v1::audit_handoff_server::AuditHandoffServer;
 use limen_proto::v1::audit_ingest_server::AuditIngestServer;
+use limen_proto::v1::audit_search_server::AuditSearchServer;
 use limen_proto::v1::auth_server::AuthServer;
+use limen_proto::v1::discovery_server::DiscoveryServer;
 use limen_proto::v1::enrollment_server::EnrollmentServer;
 use limen_proto::v1::policy_sync_server::PolicySyncServer;
 use limen_proto::v1::registry_server::RegistryServer;
 use limen_proto::v1::resources_server::ResourcesServer;
+use limen_proto::v1::reviews_server::ReviewsServer;
 use limen_proto::v1::ssh_certificates_server::SshCertificatesServer;
+use limen_proto::v1::watch_server::WatchServer;
 use limen_tunnel::PeerInfo;
 use limen_tunnel::serve::{H2Settings, serve_h2_until};
 use limen_tunnel::tls::{ClientAuth, Identity, server_config};
@@ -29,15 +34,20 @@ use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tonic::server::NamedService;
 
+use crate::services::access::AccessService;
 use crate::services::admin::AdminService;
+use crate::services::audit_search::AuditSearchService;
 use crate::services::auth::AuthService;
+use crate::services::discovery::DiscoveryService;
 use crate::services::enrollment::EnrollmentService;
 use crate::services::handoff::HandoffService;
 use crate::services::ingest::IngestService;
 use crate::services::policy_sync::PolicySyncService;
 use crate::services::registry::RegistryService;
 use crate::services::resources::ResourcesService;
+use crate::services::reviews::ReviewsService;
 use crate::services::ssh_certs::SshCertificatesService;
+use crate::services::watch::WatchService;
 use crate::state::AppState;
 
 const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -91,8 +101,13 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 }
 
 /// The gRPC services the API serves (the names clients put in the path).
-fn grpc_services() -> [&'static str; 9] {
+fn grpc_services() -> [&'static str; 14] {
     [
+        WatchServer::<WatchService>::NAME,
+        ReviewsServer::<ReviewsService>::NAME,
+        DiscoveryServer::<DiscoveryService>::NAME,
+        AuditSearchServer::<AuditSearchService>::NAME,
+        AccessServer::<AccessService>::NAME,
         AuthServer::<AuthService>::NAME,
         ResourcesServer::<ResourcesService>::NAME,
         AdminServer::<AdminService>::NAME,
@@ -187,6 +202,25 @@ pub async fn serve_api(
     )
     .add_service(
         AdminServer::new(AdminService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AccessServer::new(AccessService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        AuditSearchServer::new(AuditSearchService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        WatchServer::new(WatchService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        ReviewsServer::new(ReviewsService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        DiscoveryServer::new(DiscoveryService(state.clone()))
+            .max_decoding_message_size(8 * 1024 * 1024),
     )
     .add_service(
         EnrollmentServer::new(EnrollmentService(state.clone()))

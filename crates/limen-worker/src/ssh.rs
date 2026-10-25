@@ -40,6 +40,10 @@ pub struct SshSessionConfig {
     pub host_key: PrivateKey,
     pub host_cert: Certificate,
     pub recording_path: std::path::PathBuf,
+    /// Where watchers see this session's output (ADR-0030).
+    pub tap: Option<crate::live::Tap>,
+    /// Tell the user they may be observed (a role says so).
+    pub notify_observed: bool,
 }
 
 /// How a session ended, for the proxy's `session.end` event.
@@ -379,10 +383,17 @@ async fn bridge(
                     Some(ChannelMsg::Eof) => target.eof().await,
                     Some(ChannelMsg::RequestPty { term, col_width, row_height, pix_width, pix_height, terminal_modes, .. }) => {
                         ensure_recorder(col_width, row_height);
+                        if let Some(tap) = &config.tap {
+                            tap.resize(col_width, row_height);
+                        }
                         target.request_pty(false, &term, col_width, row_height, pix_width, pix_height, &terminal_modes).await
                     }
                     Some(ChannelMsg::RequestShell { .. }) => {
                         ensure_recorder(80, 24);
+                        if config.notify_observed {
+                            // Before the shell prints anything: the user knows.
+                            let _ = user.data(&b"\r\n[limen] This session may be observed by an administrator.\r\n"[..]).await;
+                        }
                         target.request_shell(false).await
                     }
                     Some(ChannelMsg::Exec { command, .. }) => {
@@ -408,6 +419,9 @@ async fn bridge(
                     }
                     Some(ChannelMsg::WindowChange { col_width, row_height, pix_width, pix_height }) => {
                         record(&mut |r| r.resize(col_width, row_height));
+                        if let Some(tap) = &config.tap {
+                            tap.resize(col_width, row_height);
+                        }
                         target.window_change(col_width, row_height, pix_width, pix_height).await
                     }
                     Some(ChannelMsg::Signal { signal }) => target.signal(signal).await,
@@ -427,10 +441,16 @@ async fn bridge(
                 let result = match msg {
                     Some(ChannelMsg::Data { data }) => {
                         record(&mut |r| r.output(&data));
+                        if let Some(tap) = &config.tap {
+                            tap.output(&data);
+                        }
                         user.data_bytes(data).await
                     }
                     Some(ChannelMsg::ExtendedData { data, ext }) => {
                         record(&mut |r| r.output(&data));
+                        if let Some(tap) = &config.tap {
+                            tap.output(&data);
+                        }
                         user.extended_data_bytes(ext, data).await
                     }
                     Some(ChannelMsg::Eof) => user.eof().await,

@@ -15,8 +15,19 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 #[command(name = "limen-audit-verify", version = limen_core::VERSION, about)]
 struct Args {
-    #[arg(long, env = "LIMEN_AUDIT_S3_BUCKET")]
-    bucket: String,
+    /// Check a compliance evidence pack instead of the S3 trail: the file
+    /// from `limen admin evidence`. Needs only `--ca-file`.
+    #[arg(long, value_name = "FILE")]
+    evidence: Option<std::path::PathBuf>,
+    /// With `--evidence`: an audit JSONL file; the pack's export event must be in it.
+    #[arg(long, value_name = "FILE", requires = "evidence")]
+    audit_events: Option<std::path::PathBuf>,
+    #[arg(
+        long,
+        env = "LIMEN_AUDIT_S3_BUCKET",
+        required_unless_present = "evidence"
+    )]
+    bucket: Option<String>,
     #[arg(long, env = "LIMEN_AUDIT_S3_PREFIX", default_value = "")]
     prefix: String,
     #[arg(long, env = "LIMEN_AUDIT_S3_ENDPOINT")]
@@ -37,11 +48,14 @@ async fn main() -> anyhow::Result<()> {
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("no certificate in {}", args.ca_file.display()))?;
+    if let Some(path) = &args.evidence {
+        return verify_evidence(path, args.audit_events.as_deref(), &ca);
+    }
+    let bucket = args.bucket.clone().unwrap_or_default();
     let client =
         limen_control_plane::sinks::s3_client(args.endpoint.as_deref(), args.path_style).await;
     let report =
-        limen_control_plane::verify::verify_bucket(&client, &args.bucket, &args.prefix, &ca)
-            .await?;
+        limen_control_plane::verify::verify_bucket(&client, &bucket, &args.prefix, &ca).await?;
     eprintln!(
         "writers: {}, batches: {}, records: {}, distinct events: {}",
         report.writers, report.batches, report.records, report.events
@@ -73,6 +87,54 @@ async fn main() -> anyhow::Result<()> {
     if report.ok() {
         Ok(())
     } else {
+        std::process::exit(2);
+    }
+}
+
+/// Check an evidence pack offline (ADR-0029).
+fn verify_evidence(
+    path: &std::path::Path,
+    audit_events: Option<&std::path::Path>,
+    ca: &rustls_pki_types::CertificateDer<'_>,
+) -> anyhow::Result<()> {
+    let pack = std::fs::read(path)?;
+    let v = limen_control_plane::evidence::verify_pack(&pack, ca);
+    let mut problems = v.problems.clone();
+    if let (Some(events), Some(m)) = (audit_events, &v.manifest) {
+        let text = std::fs::read_to_string(events)?;
+        let anchored = text.lines().any(|l| {
+            serde_json::from_str::<serde_json::Value>(l).is_ok_and(|e| {
+                e["kind"] == "evidence.export" && e["data"]["manifest_sha256"] == v.manifest_sha256
+            })
+        });
+        if anchored {
+            eprintln!("OK: the export is recorded in the audit trail");
+        } else {
+            problems.push(format!(
+                "no evidence.export event with manifest {} is in {}",
+                v.manifest_sha256,
+                events.display()
+            ));
+        }
+        let _ = m;
+    }
+    if let Some(m) = &v.manifest {
+        eprintln!(
+            "pack for {} to {}, {} sections, exported by {} from {}",
+            m.from,
+            m.to,
+            m.files.len(),
+            m.requested_by,
+            m.control_plane
+        );
+    }
+    if problems.is_empty() {
+        eprintln!("OK: the manifest is signed by the control plane and every section matches it");
+        Ok(())
+    } else {
+        for p in &problems {
+            eprintln!("PROBLEM: {p}");
+        }
         std::process::exit(2);
     }
 }

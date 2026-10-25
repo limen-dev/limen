@@ -29,10 +29,71 @@ pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         state.limits.shrink();
+        // Events and recording text age out of the search window (ADR-0026).
+        let days = i32::try_from(state.config.search_retention.as_secs() / 86_400)
+            .unwrap_or(i32::MAX)
+            .max(1);
+        match crate::search::index::trim(&state.db, days).await {
+            Ok(n) if n > 0 => tracing::info!(deleted = n, "trimmed the search index"),
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "trimming the search index failed"),
+        }
         match crate::db::cleanup(&state.db).await {
             Ok(Some(n)) if n > 0 => tracing::info!(deleted = n, "cleaned up expired rows"),
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "cleanup failed"),
+        }
+    }
+}
+
+/// Lapse access requests nobody answered and note grants that ended.
+pub async fn access_expiry(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::access::expire(&state).await {
+            tracing::warn!(error = %e, "expiring access requests failed");
+        }
+    }
+}
+
+/// Keep the accepted discovered resources in the policy in step with the
+/// database (another replica may have accepted one), and sweep the stale
+/// (ADR-0027).
+pub async fn discovery_sweep(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(10));
+    let mut n: u32 = 0;
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::discovery::refresh_overlay(&state).await {
+            tracing::warn!(error = %e, "refreshing discovered resources failed; keeping the last");
+        }
+        n = n.wrapping_add(1);
+        if n.is_multiple_of(6)
+            && let Err(e) = crate::discovery::sweep(&state).await
+        {
+            tracing::warn!(error = %e, "sweeping discovered resources failed");
+        }
+    }
+}
+
+/// Lift confirmed overrides, remind and escalate reviewers, and start the
+/// scheduled access review (ADR-0029).
+pub async fn reviews_tick(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(300));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = shutdown.changed() => return,
+        }
+        if let Err(e) = crate::reviews::tick(&state).await {
+            tracing::warn!(error = %e, "the access review tick failed");
         }
     }
 }

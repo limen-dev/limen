@@ -31,10 +31,36 @@ service Resources {
   rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
 }
 
+// Just-in-time access (ADR-0025) and the questions around it (ADR-0028). Any
+// signed-in user may call these; what each call allows depends on the policy
+// and the caller. Approval only ever happens here, inside an authenticated
+// Limen session.
+service Access {
+  // Ask for a requestable role on one resource. A break-glass role is granted
+  // at once.
+  rpc RequestAccess(RequestAccessRequest) returns (AccessRequestInfo);
+  rpc ListAccessRequests(ListAccessRequestsRequest) returns (ListAccessRequestsResponse);
+  // Approve or deny a pending request. Never your own.
+  rpc DecideAccessRequest(DecideAccessRequestRequest) returns (AccessRequestInfo);
+  // The requester withdraws a pending request.
+  rpc CancelAccessRequest(CancelAccessRequestRequest) returns (AccessRequestInfo);
+  // Admin: active grants, and ending one (which ends the sessions it allowed).
+  rpc ListAccessGrants(ListAccessGrantsRequest) returns (ListAccessGrantsResponse);
+  rpc RevokeAccessGrant(RevokeAccessGrantRequest) returns (RevokeAccessGrantResponse);
+  // Why the caller can or cannot reach a resource. Admins may ask about anyone.
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
+}
+
 // Requires the limen:admin role.
 service Admin {
   rpc ApplyPolicy(ApplyPolicyRequest) returns (ApplyPolicyResponse);
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  // The active policy's documents, for `limen policy who-can|what-can|diff`.
+  rpc GetPolicyDocuments(GetPolicyDocumentsRequest) returns (GetPolicyDocumentsResponse);
+  // Resources workers found in a cloud account (ADR-0027), and the admin's
+  // decision on each.
+  rpc ListDiscovered(ListDiscoveredRequest) returns (ListDiscoveredResponse);
+  rpc ReviewDiscovered(ReviewDiscoveredRequest) returns (DiscoveredInfo);
   rpc CreateJoinToken(CreateJoinTokenRequest) returns (CreateJoinTokenResponse);
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse);
   // Refuse a user's logins and sessions and end their open sessions.
@@ -45,6 +71,12 @@ service Admin {
   rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
   // Stop honouring a proxy's or worker's certificate and refuse its renewal.
   rpc RevokeComponent(RevokeComponentRequest) returns (RevokeComponentResponse);
+}
+
+// Searching recent audit events and recording text (ADR-0026). Needs the
+// limen:admin or limen:auditor role. Every search is audited and rate limited.
+service AuditSearch {
+  rpc Search(SearchRequest) returns (SearchResponse);
 }
 
 service Enrollment {
@@ -168,11 +200,24 @@ message Resource {
   // Browser URL for an authorized web app. Empty for other resources or if
   // browser SSO is not configured.
   string web_url = 6;
+  // When the access ends, if the user reaches this resource only through an
+  // approved access request (ADR-0025). 0 for standing access.
+  int64 grant_expires_at_unix = 7;
 }
 
 message ListResourcesResponse {
   repeated Resource resources = 1;
   int64 policy_version = 2;
+  // Resources the user could get by asking (ADR-0025): a hint with no address.
+  repeated RequestableResource requestable = 3;
+}
+
+message RequestableResource {
+  string name = 1;
+  string kind = 2;
+  map<string, string> labels = 3;
+  // The requestable roles that would grant it.
+  repeated string roles = 4;
 }
 
 message PolicySource {
@@ -185,6 +230,9 @@ message ApplyPolicyRequest {
   bool dry_run = 2;
   // Optional reference to where the policy came from, such as a Git commit SHA.
   string source_ref = 3;
+  // Refuse to apply unless the policy's `policy_test` documents all pass
+  // (and there is at least one).
+  bool require_tests = 4;
 }
 
 message PolicyDiff {
@@ -199,6 +247,30 @@ message ApplyPolicyResponse {
   int64 version = 2;
   string digest = 3;
   bool applied = 4;
+  // Who gains or loses access to what, one line each (ADR-0028).
+  repeated string access_changes = 5;
+  // Valid, but probably not what was meant.
+  repeated string warnings = 6;
+  // Results of the `policy_test` documents in the new policy.
+  repeated PolicyTestResult test_results = 7;
+}
+
+message PolicyTestResult {
+  string test = 1;
+  uint32 case_number = 2;
+  string name = 3;
+  bool passed = 4;
+  string expected = 5;
+  string got = 6;
+  string detail = 7;
+}
+
+message GetPolicyDocumentsRequest {}
+
+message GetPolicyDocumentsResponse {
+  int64 version = 1;
+  // JSON array of policy documents, as in a policy snapshot.
+  string documents_json = 2;
 }
 
 message GetPolicyRequest {}
@@ -377,4 +449,405 @@ message RevokeComponentResponse {
 message KillSessionResponse {
   // False if it was already marked for ending.
   bool killed = 1;
+}
+
+message RequestAccessRequest {
+  string resource = 1;
+  // Which requestable role, when more than one reaches the resource.
+  string role = 2;
+  uint32 duration_seconds = 3;
+  string reason = 4;
+  // Select a break-glass role: granted at once, reviewed after.
+  bool break_glass = 5;
+}
+
+message AccessApproval {
+  string approver = 1;
+  // "approve" or "deny".
+  string decision = 2;
+  string comment = 3;
+  int64 decided_at_unix = 4;
+}
+
+message AccessRequestInfo {
+  string id = 1;
+  string requester = 2;
+  string role = 3;
+  string resource = 4;
+  string reason = 5;
+  uint32 duration_seconds = 6;
+  // pending, approved, denied, expired, cancelled, or revoked.
+  string status = 7;
+  bool break_glass = 8;
+  uint32 approvals_required = 9;
+  repeated AccessApproval approvals = 10;
+  int64 created_at_unix = 11;
+  // A pending request lapses at this time.
+  int64 expires_at_unix = 12;
+  // When the grant ends, once approved. 0 before.
+  int64 grant_expires_at_unix = 13;
+  // True when the caller may approve or deny it now.
+  bool can_decide = 14;
+  // What the requester did on this resource in the past 30 days: the context
+  // an approver needs.
+  uint32 requester_sessions_30d = 15;
+  int64 requester_last_session_unix = 16;
+}
+
+message ListAccessRequestsRequest {
+  // "mine" (default), "approvable" (pending, and the caller may decide), or
+  // "all" (admins and auditors).
+  string scope = 1;
+  // Optional status filter.
+  string status = 2;
+  uint32 limit = 3;
+}
+
+message ListAccessRequestsResponse {
+  repeated AccessRequestInfo requests = 1;
+}
+
+message DecideAccessRequestRequest {
+  string id = 1;
+  bool approve = 2;
+  string comment = 3;
+}
+
+message CancelAccessRequestRequest {
+  string id = 1;
+}
+
+message AccessGrantInfo {
+  string request_id = 1;
+  string username = 2;
+  string role = 3;
+  string resource = 4;
+  string reason = 5;
+  bool break_glass = 6;
+  int64 granted_at_unix = 7;
+  int64 expires_at_unix = 8;
+  repeated string approvers = 9;
+}
+
+message ListAccessGrantsRequest {
+  // Include ended grants from the last 30 days.
+  bool include_ended = 1;
+}
+
+message ListAccessGrantsResponse {
+  repeated AccessGrantInfo grants = 1;
+}
+
+message RevokeAccessGrantRequest {
+  string request_id = 1;
+  string reason = 2;
+}
+
+message RevokeAccessGrantResponse {
+  // False if it had already ended.
+  bool revoked = 1;
+  // Sessions ended with it.
+  uint32 sessions_ended = 2;
+}
+
+message ExplainRequest {
+  string resource = 1;
+  // The principal to check, as `kind=value` (login=ubuntu, db_role=limen_read,
+  // ...). Optional: without one, explains the resource as a whole.
+  string principal = 2;
+  // The database for `db_role` and `mongo_role`.
+  string database = 3;
+  // Admin only: explain for this user instead of the caller, with the full trace.
+  string user = 4;
+}
+
+message ExplainResponse {
+  repeated string lines = 1;
+  // Whether the answer is the full trace (admin) or the user-safe one.
+  bool full_trace = 2;
+}
+
+message SearchRequest {
+  // Words, "quoted phrases", and user: resource: kind: session: after: before:
+  // outcome: filters.
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message SearchHit {
+  int64 at_unix = 1;
+  string kind = 2;
+  string user = 3;
+  string session_id = 4;
+  string resource = 5;
+  // "ok" or "denied".
+  string outcome = 6;
+  // The match with context. The part between is what matched.
+  string before = 7;
+  string matched = 8;
+  string after = 9;
+  // Seconds into the session's recording where this moment plays. -1 if the
+  // session has no recording.
+  int64 recording_offset_secs = 10;
+}
+
+message SearchResponse {
+  repeated SearchHit hits = 1;
+  // More matched than were returned: narrow the search.
+  bool truncated = 2;
+  // The same search in the full-history store, if one is configured.
+  string history_url = 3;
+}
+
+// Cloud discovery (ADR-0027). Workers describe a cloud account with a
+// describe-only role and report facts. The control plane never calls the
+// customer's account, and a report can only add a *pending* resource.
+service Discovery {
+  rpc Report(ReportDiscoveryRequest) returns (ReportDiscoveryResponse);
+}
+
+message ReportDiscoveryRequest {
+  // The `discovery` document the scan ran for.
+  string document = 1;
+  repeated DiscoveredItem items = 2;
+  // The scopes this scan covered to the end. Only for these can a resource
+  // that was not seen count towards going stale; a scan that failed halfway
+  // proves nothing about what is missing.
+  repeated ScanScope complete = 3;
+}
+
+message ScanScope {
+  uint32 matcher = 1;
+  string account = 2;
+  string region = 3;
+}
+
+message DiscoveredItem {
+  uint32 matcher = 1;
+  // ec2, rds, redshift, elasticache, or eks.
+  string source = 2;
+  string account = 3;
+  string region = 4;
+  string provider_id = 5;
+  // host:port to dial, or the cluster name for EKS.
+  string target = 6;
+  // Only the tags the matcher uses.
+  map<string, string> tags = 7;
+  map<string, string> facts = 8;
+}
+
+message ReportDiscoveryResponse {
+  uint32 accepted = 1;
+  // Items the document doesn't ask for (wrong account, region, or tags).
+  uint32 dropped = 2;
+}
+
+message DiscoveredInfo {
+  string key = 1;
+  string document = 2;
+  string source = 3;
+  string kind = 4;
+  string name = 5;
+  map<string, string> labels = 6;
+  string target = 7;
+  string account = 8;
+  string region = 9;
+  string provider_id = 10;
+  // pending, accepted, rejected, or stale.
+  string state = 11;
+  // An accepted resource whose labels, name, or target changed since it was
+  // accepted. The old values stay in force until an admin accepts the new.
+  bool change_pending = 12;
+  repeated string blockers = 13;
+  // What the pending change is, one line each.
+  repeated string changes = 14;
+  int64 first_seen_unix = 15;
+  int64 last_seen_unix = 16;
+  uint32 missed_cycles = 17;
+  string accepted_name = 18;
+  string accepted_by = 19;
+  string reported_by = 20;
+}
+
+message ListDiscoveredRequest {
+  // Empty for all, or one of the states.
+  string state = 1;
+}
+
+message ListDiscoveredResponse {
+  repeated DiscoveredInfo items = 1;
+}
+
+message ReviewDiscoveredRequest {
+  string key = 1;
+  // Accept the resource (or its pending change), or reject it.
+  bool accept = 2;
+  string note = 3;
+}
+
+// Access reviews, deny overrides, and evidence (ADR-0029).
+service Reviews {
+  // Admin: take a snapshot of who holds what and assign it to owners.
+  rpc StartReview(StartReviewRequest) returns (ReviewInfo);
+  // Admin and auditors: every review. Anyone: the ones with items for them.
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc ListReviewItems(ListReviewItemsRequest) returns (ListReviewItemsResponse);
+  // The reviewer certifies or flags an item. Never their own access.
+  rpc DecideReviewItem(DecideReviewItemRequest) returns (ReviewItemInfo);
+  rpc ListDenies(ListDeniesRequest) returns (ListDeniesResponse);
+  rpc LiftDeny(LiftDenyRequest) returns (LiftDenyResponse);
+  // Admin and auditors: a signed pack of the period's evidence.
+  rpc ExportEvidence(ExportEvidenceRequest) returns (ExportEvidenceResponse);
+}
+
+message StartReviewRequest {
+  string name = 1;
+  // Days the reviewers have. Default 14.
+  uint32 due_days = 2;
+  // Days a flagged role stays withheld. Default 30.
+  uint32 override_days = 3;
+}
+
+message ReviewInfo {
+  string id = 1;
+  string name = 2;
+  string started_by = 3;
+  int64 started_at_unix = 4;
+  int64 due_at_unix = 5;
+  string status = 6;
+  uint32 items = 7;
+  uint32 decided = 8;
+  uint32 flagged = 9;
+  // Certified without a comment.
+  uint32 certified_silently = 10;
+  bool overdue = 11;
+}
+
+message ListReviewsRequest {
+  // "mine" (reviews with items for the caller) or "all" (admins, auditors).
+  string scope = 1;
+}
+
+message ListReviewsResponse {
+  repeated ReviewInfo reviews = 1;
+}
+
+message ListReviewItemsRequest {
+  string review_id = 1;
+  // Only the caller's own items (default for non-admins).
+  bool mine = 2;
+  // Only undecided items.
+  bool open_only = 3;
+}
+
+message ReviewReach {
+  string name = 1;
+  string kind = 2;
+  repeated string principals = 3;
+}
+
+message ReviewItemInfo {
+  string id = 1;
+  string review_id = 2;
+  string subject = 3;
+  string subject_type = 4;
+  string role = 5;
+  string via = 6;
+  repeated ReviewReach reaches = 7;
+  uint32 sessions_90d = 8;
+  int64 last_used_unix = 9;
+  string reviewer = 10;
+  string decision = 11;
+  string comment = 12;
+  string decided_by = 13;
+  int64 decided_at_unix = 14;
+  // Nothing used the access in 90 days: worth a closer look.
+  bool unused = 15;
+  bool can_decide = 16;
+}
+
+message ListReviewItemsResponse {
+  repeated ReviewItemInfo items = 1;
+}
+
+message DecideReviewItemRequest {
+  string item_id = 1;
+  // true: certify. false: flag for removal (needs a comment).
+  bool certify = 2;
+  string comment = 3;
+}
+
+message DenyInfo {
+  string id = 1;
+  string username = 2;
+  string role = 3;
+  string reason = 4;
+  string created_by = 5;
+  int64 created_at_unix = 6;
+  int64 expires_at_unix = 7;
+  bool active = 8;
+}
+
+message ListDeniesRequest {
+  bool include_ended = 1;
+}
+
+message ListDeniesResponse {
+  repeated DenyInfo denies = 1;
+}
+
+message LiftDenyRequest {
+  string id = 1;
+  string reason = 2;
+}
+
+message LiftDenyResponse {
+  bool lifted = 1;
+}
+
+message ExportEvidenceRequest {
+  int64 from_unix = 1;
+  int64 to_unix = 2;
+}
+
+message ExportEvidenceResponse {
+  // JSON, signed by the control plane. Verify offline with
+  // `limen-audit-verify --evidence`.
+  bytes pack = 1;
+  string manifest_sha256 = 2;
+}
+
+// Watching a live session (ADR-0030). The worker that records an SSH session
+// already holds its plaintext output; when an authorised person is watching,
+// it publishes the same bytes here and the console streams them. The user's
+// session never waits on any of this.
+service Watch {
+  // Which of these sessions has someone watching right now. Asked every few
+  // seconds by a worker that has live sessions, and only about its own.
+  rpc Poll(WatchPollRequest) returns (WatchPollResponse);
+  // Terminal output for a watched session, as text.
+  rpc Publish(WatchPublishRequest) returns (WatchPublishResponse);
+}
+
+message WatchPollRequest {
+  repeated string session_ids = 1;
+}
+
+message WatchPollResponse {
+  repeated string watched = 1;
+}
+
+message WatchPublishRequest {
+  string session_id = 1;
+  // UTF-8 text of terminal output. Never input.
+  string text = 2;
+  // Milliseconds since the session started.
+  uint64 elapsed_ms = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message WatchPublishResponse {
+  // False when nobody is watching any more: the worker stops sending.
+  bool watched = 1;
 }

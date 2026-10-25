@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Reviews{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Access reviews</h1>
+    <p class="sub">Who holds which role, checked by the people who own it. A flagged role is withheld at once, while the IdP group is fixed.</p>
+  </div>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+
+{% if chrome.is_admin %}
+<details class="start">
+  <summary class="button"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Start a review</summary>
+  <form method="post" action="/console/reviews/start" class="card fields">
+    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+    <label class="grow"><span>Name</span><input type="text" name="name" placeholder="Optional, e.g. Q4 access review" maxlength="200"></label>
+    <label><span>Days to answer</span><input type="number" name="due_days" value="14" min="1" max="90" class="w-80"></label>
+    <label><span>Days a removal holds</span><input type="number" name="override_days" value="30" min="1" max="365" class="w-80"></label>
+    <button type="submit">Start</button>
+  </form>
+</details>
+{% endif %}
+
+<h2>{% if reader %}Reviews{% else %}Reviews with items for you{% endif %}</h2>
+{% if reviews.is_empty() %}
+<div class="card empty"><div>No reviews{% if !reader %} are waiting for you{% endif %}.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Review</th><th>Progress</th><th>Outcome</th><th>Due</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for r in reviews %}
+  <tr>
+    <td><a class="cell-main" href="/console/reviews/{{ r.id }}">{{ r.name }}</a><div class="cell-sub">started by {{ r.started_by }}</div></td>
+    <td><div class="review-progress"><div class="progress" title="{{ r.progress }}"><span style="width:{{ r.percent }}%"></span></div><small>{{ r.progress }}</small></div></td>
+    <td>{% if r.flagged > 0 %}<span class="pill bad">{{ r.flagged }} removed</span> {% endif %}{% if r.kept > 0 %}<span class="pill ok">{{ r.kept }} kept</span> {% endif %}{% if r.silent > 0 %}<span class="pill warn" title="Certified without saying why">{{ r.silent }} no comment</span>{% endif %}{% if r.flagged == 0 && r.kept == 0 %}<span class="muted">nothing yet</span>{% endif %}</td>
+    <td class="nowrap">{{ r.due }}</td>
+    <td>{% if r.overdue %}<span class="pill bad">overdue</span>{% else if r.status == "complete" %}<span class="pill ok">complete</span>{% else %}<span class="pill warn">{{ r.status }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+
+{% if reader %}
+<h2>Roles withheld by a review <span class="count">{{ denies.len() }}</span></h2>
+{% if denies.is_empty() %}
+<div class="card empty"><div>No role is withheld.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Who</th><th>Role</th><th>Why</th><th>Until</th>{% if chrome.is_admin %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for d in denies %}
+  <tr>
+    <td>{{ d.user }}</td>
+    <td><span class="chip c{{ d.role.c }}">{{ d.role.text }}</span></td>
+    <td class="why">{{ d.reason }}</td>
+    <td class="nowrap">{{ d.until }}</td>
+    {% if chrome.is_admin %}
+    <td><form method="post" action="/console/reviews/overrides/{{ d.id }}/lift" class="inline">
+      <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+      <input type="text" name="reason" placeholder="Why (audited)" required maxlength="500">
+      <button type="submit" class="secondary">Give it back</button>
+    </form></td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="hint">An override lifts itself when the IdP change shows up at the person's next login, or when it expires.</p>
+{% endif %}
+
+<h2>Evidence for an auditor</h2>
+<div class="card">
+<form method="get" action="/console/reviews/evidence" class="stack wide">
+  <div class="row">
+    <label><span>From</span> <input type="date" name="from" value="{{ from }}" required></label>
+    <label><span>To (not included)</span> <input type="date" name="to" value="{{ to }}" required></label>
+    <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Download a signed pack</button>
+  </div>
+  <p class="hint">Requests, approvals, grants, reviews, locks, policy changes, and sessions for the period, with a signed manifest of hashes. Check it anywhere with <code>limen-audit-verify --evidence</code>. Exporting is itself recorded in the audit trail.</p>
+</form>
+</div>
+{% endif %}
+{% endblock %}

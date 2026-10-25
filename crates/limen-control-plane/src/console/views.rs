@@ -11,11 +11,17 @@ use super::store::{SessionRow, UserRow};
 use super::{Auth, html};
 
 /// Page chrome: who is signed in, and the navigation state.
+#[allow(clippy::struct_excessive_bools)] // independent flags, not a state machine
 pub struct Chrome {
     pub username: String,
     pub initial: String,
     pub avatar: String,
     pub is_admin: bool,
+    pub is_auditor: bool,
+    /// Admin or auditor: sees the audit record.
+    pub reads_record: bool,
+    pub sees_access: bool,
+    pub sees_reviews: bool,
     pub csrf: String,
     pub active: &'static str,
     pub version: &'static str,
@@ -35,6 +41,10 @@ impl Chrome {
             avatar: avatar_class(&auth.username),
             username: auth.username.clone(),
             is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            reads_record: auth.reads_record(),
+            sees_access: auth.sees_access,
+            sees_reviews: auth.sees_reviews,
             csrf: auth.csrf.clone(),
             active,
             version: limen_core::VERSION,
@@ -637,6 +647,13 @@ pub struct SessionFilterView {
 pub struct SessionPage {
     pub chrome: Chrome,
     pub s: SessionView,
+    /// Seconds into the recording to start at (a search hit's moment).
+    pub start_at: i64,
+    /// The access requests whose grants allowed this session (ADR-0025).
+    pub allowed_by: Vec<String>,
+    /// Who watched it live, and when (ADR-0030).
+    pub watched: Vec<(String, String, String)>,
+    pub can_watch: bool,
     /// Database sessions: the statements sent, oldest first.
     pub statements: Vec<StatementView>,
     /// kubectl sessions: the API requests, oldest first.
@@ -887,6 +904,9 @@ pub struct EventView {
 #[template(path = "audit.html")]
 pub struct AuditPage {
     pub chrome: Chrome,
+    /// The search box, and its results when something was searched for.
+    pub q: String,
+    pub search: Option<SearchView>,
     pub events: Vec<EventView>,
     pub kinds: Vec<String>,
     pub tabs: Vec<CategoryTab>,
@@ -900,6 +920,28 @@ pub struct AuditPage {
     pub problems: Vec<String>,
     pub newer: Option<String>,
     pub older: Option<String>,
+}
+
+/// One hit of an audit search: the match marked, and where to go next.
+pub struct HitView {
+    pub at: String,
+    pub kind: String,
+    pub user: String,
+    pub resource: String,
+    pub denied: bool,
+    pub before: String,
+    pub hit: String,
+    pub after: String,
+    /// The session page, at the moment of the hit when it has a recording.
+    pub href: Option<String>,
+    pub moment: Option<String>,
+}
+
+pub struct SearchView {
+    pub error: Option<String>,
+    pub hits: Vec<HitView>,
+    pub truncated: bool,
+    pub history_url: Option<String>,
 }
 
 /// The values to put back in the audit filter form.
@@ -995,7 +1037,28 @@ pub struct PolicyGroup {
     pub docs: Vec<PolicyDoc>,
 }
 
+pub struct WhoRow {
+    pub role: Chip,
+    pub how: &'static str,
+    pub principals: String,
+    pub who: String,
+    pub approvers: String,
+}
+
+/// What a group or bot can reach, for the access simulator.
+pub struct Simulation {
+    pub who: String,
+    pub error: Option<String>,
+    pub standing: Vec<(String, String, String)>,
+    pub requestable: Vec<(String, String, String)>,
+}
+
 pub struct DryRun {
+    /// Who gains or loses access, one line each (ADR-0028).
+    pub access: Vec<(bool, String)>,
+    pub warnings: Vec<String>,
+    /// `(passed, line)` for each `policy_test` case in the pasted policy.
+    pub tests: Vec<(bool, String)>,
     pub error: Option<String>,
     pub no_changes: bool,
     pub added: Vec<String>,
@@ -1015,11 +1078,11 @@ pub struct PolicyPage {
     pub query: String,
     pub pasted: String,
     pub result: Option<DryRun>,
+    pub simulation: Option<Simulation>,
 }
 
 pub struct RoleAccess {
     pub chip: Chip,
-    pub principals: Vec<String>,
 }
 
 pub struct WorkerMatch {
@@ -1077,6 +1140,10 @@ pub struct ResourcesPage {
 #[template(path = "resource.html")]
 pub struct ResourcePage {
     pub chrome: Chrome,
+    /// The viewer can ask for this resource (ADR-0025).
+    pub can_request: bool,
+    /// Who can reach it, for admins and auditors (ADR-0028).
+    pub who_can: Vec<WhoRow>,
     pub connect: Connect,
     pub name: String,
     pub kind: String,
@@ -1089,7 +1156,6 @@ pub struct ResourcePage {
     pub description: String,
     pub principals: Vec<String>,
     pub workers: Vec<WorkerMatch>,
-    pub roles: Vec<RoleAccess>,
     pub sessions: Vec<SessionView>,
 }
 

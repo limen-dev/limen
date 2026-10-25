@@ -2856,6 +2856,7 @@ dependencies = [
  "clap_complete",
  "http",
  "limen-core",
+ "limen-policy",
  "limen-proto",
  "limen-testkit",
  "limen-tunnel",
@@ -2908,6 +2909,7 @@ dependencies = [
  "anyhow",
  "askama",
  "aws-config",
+ "aws-lc-rs",
  "aws-sdk-kms",
  "aws-sdk-s3",
  "axum",
@@ -2930,6 +2932,7 @@ dependencies = [
  "prost",
  "rand 0.10.3",
  "rcgen",
+ "regex-lite",
  "reqwest",
  "rustls",
  "rustls-pki-types",
@@ -3023,6 +3026,7 @@ name = "limen-policy"
 version = "0.1.0"
 dependencies = [
  "limen-core",
+ "regex-lite",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -3131,6 +3135,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "url",
  "uuid",
 ]
 
@@ -3188,6 +3193,7 @@ dependencies = [
  "limen-policy",
  "limen-proto",
  "limen-session",
+ "limen-testkit",
  "limen-tunnel",
  "md-5",
  "metrics",

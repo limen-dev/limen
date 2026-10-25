@@ -281,14 +281,21 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         )
         .await;
     }
+    // Roles from approved access requests count (ADR-0025).
+    let effective = snapshot.roles_for(
+        &identity.username,
+        &identity.roles,
+        &route.resource,
+        OffsetDateTime::now_utc(),
+    );
     let decision = snapshot.policy.evaluate(&AccessRequest {
-        roles: &identity.roles,
+        roles: &effective.roles,
         resource: &route.resource,
         principal: Principal::WebAccess,
     });
     if !decision.is_allowed()
         || !snapshot.policy.web_request_allowed(
-            &identity.roles,
+            &effective.roles,
             &route.resource,
             req.method().as_str(),
             uri.path(),

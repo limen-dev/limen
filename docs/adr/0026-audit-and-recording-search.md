@@ -1,6 +1,6 @@
 # ADR-0026: Searching audit events and recordings
 
-- Status: Proposed (owner requested 2026-10-14; priority: **must have**)
+- Status: Accepted and built (Phase 13). The owner asked for the whole phase on 2026-10-25.
 - Date: 2026-10-14
 
 ## Context
@@ -27,3 +27,13 @@ Audit lives in S3 and Datadog, recordings in S3, and the console keeps a 30-day 
 ## Consequences
 - Storage grows with text; sizing guidance and the retention setting are part of the work.
 - A second built-in role appears in policy, mappings, and the console.
+
+## As built (Phase 13)
+Accepted by the owner's request to build the phase. Differences:
+
+- **The query is parsed into typed filters and every value is bound.** Words are matched as case-insensitive substrings (with a `tsvector` prefix match narrowing the index for plain words); quoted phrases match as written.
+- **Recording text** is extracted when the recording is stored (`--search-recordings`): output events only, ANSI sequences removed, lines rebuilt (backspace and carriage return applied), secret shapes masked, capped at 256 KiB per session, chunked with the time each chunk began so a hit can open the player at that moment.
+- **`audit.search` events are not indexed**, so a search does not find the searches for it. Closing events (`*.end`, `*.response`, summaries) are not indexed.
+- **Search history link:** `--search-history-url`, a template, instead of a saved Athena query the control plane would have to create.
+- **Auditors** also get the audit trail, sessions, recordings, grants, and requests lists in the console; `limen:auditor` cannot change anything. Watching a live session is a separate power (`--auditors-may-watch`).
+- **Limits:** 30 searches a minute per person, 20 terms, 512 bytes, 200 hits, 10 s statement timeout.

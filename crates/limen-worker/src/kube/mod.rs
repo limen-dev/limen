@@ -102,6 +102,8 @@ pub(crate) struct Admitted {
     pub proxy_id: String,
     pub expires: OffsetDateTime,
     pub ci: Option<std::collections::BTreeMap<String, String>>,
+    /// The access grants this session's roles depend on. When one ends, so does a stream.
+    pub request_ids: Vec<String>,
 }
 
 /// The worker's own checks for a Kubernetes grant, on its own policy
@@ -147,9 +149,16 @@ pub(crate) fn admit(
     ) {
         return Err(Status::permission_denied(why));
     }
+    let effective = snapshot.roles_for(
+        &verified.user.username,
+        &verified.user.roles,
+        &grant.resource,
+        now,
+    );
+    let roles = effective.roles;
     for group in &grant.groups {
         let decision = snapshot.policy.evaluate(&AccessRequest {
-            roles: &verified.user.roles,
+            roles: &roles,
             resource: &grant.resource,
             principal: Principal::KubeGroup(group.clone()),
         });
@@ -190,5 +199,6 @@ pub(crate) fn admit(
         proxy_id: grant.proxy_id.clone(),
         expires: OffsetDateTime::from_unix_timestamp(grant.session_expires_at_unix).unwrap_or(now),
         ci: verified.user.bot.then(|| verified.user.ci.clone()),
+        request_ids: effective.request_ids,
     })
 }
