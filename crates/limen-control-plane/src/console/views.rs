@@ -84,6 +84,98 @@ pub fn kind_icon(kind: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// A group of audit event kinds, shown as a tab and as the icon beside each event.
+pub struct Category {
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    /// Comma-separated kinds and `prefix.*` patterns, as the `kind` filter takes them.
+    pub kinds: &'static str,
+}
+
+pub const CATEGORIES: [Category; 10] = [
+    Category {
+        label: "Sign-ins",
+        icon: "key-round",
+        kclass: "k-auth",
+        kinds: "auth.*",
+    },
+    Category {
+        label: "Sessions",
+        icon: "terminal",
+        kclass: "k-ssh",
+        kinds: "session.*,ssh.*",
+    },
+    Category {
+        label: "SQL",
+        icon: "k-postgres",
+        kclass: "k-postgres",
+        kinds: "db.*",
+    },
+    Category {
+        label: "MongoDB",
+        icon: "k-mongodb",
+        kclass: "k-mongodb",
+        kinds: "mongo.*",
+    },
+    Category {
+        label: "Redis",
+        icon: "k-redis",
+        kclass: "k-redis",
+        kinds: "redis.*",
+    },
+    Category {
+        label: "Search",
+        icon: "k-opensearch",
+        kclass: "k-opensearch",
+        kinds: "search.*",
+    },
+    Category {
+        label: "Messaging",
+        icon: "k-kafka",
+        kclass: "k-kafka",
+        kinds: "kafka.*,mq.*",
+    },
+    Category {
+        label: "Web",
+        icon: "globe",
+        kclass: "k-web",
+        kinds: "web.*",
+    },
+    Category {
+        label: "Kubernetes",
+        icon: "k-kubernetes",
+        kclass: "k-kubernetes",
+        kinds: "kube.*",
+    },
+    Category {
+        label: "Admin",
+        icon: "shield-check",
+        kclass: "k-admin",
+        kinds: "policy.*,component.*,join_token.*,worker.*,user.*",
+    },
+];
+
+/// The category an event kind belongs to.
+#[must_use]
+pub fn category_of(kind: &str) -> Option<&'static Category> {
+    CATEGORIES.iter().find(|c| {
+        c.kinds.split(',').any(|p| match p.strip_suffix('*') {
+            Some(prefix) => kind.starts_with(prefix),
+            None => kind == p,
+        })
+    })
+}
+
+/// One tab of the audit trail's category bar.
+pub struct CategoryTab {
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub href: String,
+    pub active: bool,
+}
+
 /// How to open a resource: the command, and the phase that delivers it while
 /// only the data side exists.
 pub struct Connect {
@@ -733,6 +825,26 @@ pub struct ComponentView {
     pub revoked: bool,
 }
 
+impl ComponentView {
+    /// The day and the clock time of a "2026-10-25 09:27:38 UTC" text, for a two-line cell.
+    pub fn last_seen_day(&self) -> &str {
+        split_when(&self.last_seen).0
+    }
+    pub fn last_seen_clock(&self) -> &str {
+        split_when(&self.last_seen).1
+    }
+    pub fn cert_day(&self) -> &str {
+        split_when(&self.cert_expires).0
+    }
+    pub fn cert_clock(&self) -> &str {
+        split_when(&self.cert_expires).1
+    }
+}
+
+fn split_when(t: &str) -> (&str, &str) {
+    t.split_once(' ').unwrap_or((t, ""))
+}
+
 pub struct PendingTokenView {
     pub kind: String,
     /// The name or pattern it approves, if any.
@@ -755,6 +867,8 @@ pub struct Workers {
 
 pub struct EventView {
     pub at: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
     pub kind: String,
     pub tone: &'static str,
     pub user: Option<String>,
@@ -769,6 +883,8 @@ pub struct AuditPage {
     pub chrome: Chrome,
     pub events: Vec<EventView>,
     pub kinds: Vec<String>,
+    pub tabs: Vec<CategoryTab>,
+    pub groups: &'static [Category],
     pub filter: AuditFilterView,
     pub chips: Vec<FilterChip>,
     pub presets: Vec<Preset>,
@@ -840,6 +956,7 @@ pub struct KubeView {
 #[template(path = "kube_requests.html")]
 pub struct KubePage {
     pub chrome: Chrome,
+    pub tabs: Vec<CategoryTab>,
     pub requests: Vec<KubeView>,
     pub clusters: Vec<String>,
     pub verbs: Vec<String>,
@@ -1068,5 +1185,33 @@ mod bot_tests {
         assert_eq!(gitlab("https://u@evil.example", "acme/r", "7"), None);
         assert_eq!(run_url(Some(&json!({ "provider": "oidc" }))), None);
         assert_eq!(run_url(None), None);
+    }
+}
+
+#[cfg(test)]
+mod category_tests {
+    use super::category_of;
+
+    #[test]
+    fn every_event_kind_has_a_service_category() {
+        for (kind, label) in [
+            ("auth.denied", "Sign-ins"),
+            ("session.start", "Sessions"),
+            ("ssh.exec", "Sessions"),
+            ("db.query.end", "SQL"),
+            ("mongo.command", "MongoDB"),
+            ("redis.command", "Redis"),
+            ("search.request", "Search"),
+            ("kafka.request", "Messaging"),
+            ("mq.operation", "Messaging"),
+            ("web.websocket", "Web"),
+            ("kube.request", "Kubernetes"),
+            ("policy.change", "Admin"),
+            ("user.lock", "Admin"),
+            ("worker.enroll", "Admin"),
+        ] {
+            assert_eq!(category_of(kind).map(|c| c.label), Some(label), "{kind}");
+        }
+        assert!(category_of("nothing.here").is_none());
     }
 }

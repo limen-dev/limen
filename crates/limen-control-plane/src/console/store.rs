@@ -1603,7 +1603,7 @@ pub struct EventRow {
 #[derive(Debug, Clone, Default)]
 pub struct EventFilter {
     pub username: Option<String>,
-    /// An exact kind, or a prefix ending in `.*` (`auth.*`).
+    /// Exact kinds or prefixes ending in `.*` (`auth.*`), separated by commas.
     pub kind: Option<String>,
     /// `user` or `bot`: the kind of identity behind the event.
     pub actor: Option<String>,
@@ -1625,7 +1625,8 @@ pub async fn list_events(
     let rows = sqlx::query(
         "SELECT at, kind, username, session_id, summary FROM audit_events e
          WHERE ($1::text IS NULL OR username = $1)
-           AND ($2::text IS NULL OR kind = $2 OR ($2 LIKE '%.*' AND starts_with(kind, left($2, -1))))
+           AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM unnest(string_to_array($2, ',')) p
+                             WHERE kind = p OR (p LIKE '%.*' AND starts_with(kind, left(p, -1)))))
            AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.username = e.username AND u.actor_type = $3))
            AND ($4::text IS NULL OR position(lower($4) in lower(summary)) > 0)
            AND ($5::uuid IS NULL OR session_id = $5)

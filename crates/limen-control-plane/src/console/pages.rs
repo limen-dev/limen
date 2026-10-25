@@ -36,8 +36,12 @@ fn chrome(state: &AppState, auth: &Auth, active: &'static str) -> Chrome {
 }
 
 fn event_view(e: &store::EventRow) -> EventView {
+    let (icon, kclass) =
+        views::category_of(&e.kind).map_or(("activity", "k-other"), |c| (c.icon, c.kclass));
     EventView {
         at: time_text(Some(e.at)),
+        icon,
+        kclass,
         tone: match e.kind.as_str() {
             "auth.denied" | "user.lock" | "session.kill" | "component.revoke" => "bad",
             "auth.login" | "user.unlock" | "worker.enroll" => "ok",
@@ -49,6 +53,48 @@ fn event_view(e: &store::EventRow) -> EventView {
         session_path: e.session_id.map(|id| id.to_string()),
         summary: e.summary.clone(),
     }
+}
+
+/// The audit trail's category bar. `applied` is kept (period, user, text), the kind is
+/// replaced by the tab's own; Kubernetes has its own page, which keeps none of them.
+fn category_tabs(
+    applied: &[(&str, String)],
+    kind: &str,
+    on_kube_page: bool,
+) -> Vec<views::CategoryTab> {
+    let keep: Vec<(&str, &str)> = applied
+        .iter()
+        .filter(|(k, _)| *k != "kind")
+        .map(|(k, v)| (*k, v.as_str()))
+        .collect();
+    let mut tabs = vec![views::CategoryTab {
+        label: "All events",
+        icon: "activity",
+        kclass: "k-other",
+        href: query::href("/console/audit", &keep),
+        active: kind.is_empty() && !on_kube_page,
+    }];
+    tabs.extend(views::CATEGORIES.iter().map(|c| {
+        let kube = c.kinds == "kube.*";
+        let mut pairs = keep.clone();
+        pairs.push(("kind", c.kinds));
+        views::CategoryTab {
+            label: c.label,
+            icon: c.icon,
+            kclass: c.kclass,
+            href: if kube {
+                "/console/audit/kubernetes".to_owned()
+            } else {
+                query::href("/console/audit", &pairs)
+            },
+            active: if kube {
+                on_kube_page
+            } else {
+                !on_kube_page && kind == c.kinds
+            },
+        }
+    }));
+    tabs
 }
 
 fn actor(auth: &Auth) -> Actor<'_> {
@@ -1597,6 +1643,7 @@ pub async fn kube_requests(
     html(
         KubePage {
             chrome: chrome(&state, &auth, "audit"),
+            tabs: category_tabs(&[], "", true),
             requests: rows.iter().map(kube_view).collect(),
             clusters,
             verbs,
@@ -1673,6 +1720,11 @@ fn chips(base: &str, applied: &[(&str, String)]) -> Vec<views::FilterChip> {
                     .iter()
                     .find(|p| p.0 == value)
                     .map_or(value.as_str(), |p| p.1)
+            } else if *key == "kind" {
+                views::CATEGORIES
+                    .iter()
+                    .find(|c| c.kinds == value)
+                    .map_or(value.as_str(), |c| c.label)
             } else {
                 value.as_str()
             };
@@ -1810,6 +1862,8 @@ pub async fn audit(
         AuditPage {
             chrome: chrome(&state, &auth, "audit"),
             events: rows.iter().map(event_view).collect(),
+            tabs: category_tabs(&applied, &value("kind").unwrap_or_default(), false),
+            groups: &views::CATEGORIES,
             kinds,
             filter: views::AuditFilterView {
                 kind: value("kind").unwrap_or_default(),

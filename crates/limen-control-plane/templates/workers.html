@@ -9,22 +9,22 @@
   </div>
 </div>
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
-<div class="table-wrap"><table>
-  <thead><tr><th>Component</th><th>Labels</th><th>Last seen</th><th class="num">Tunnels</th><th>Certificate expires</th><th>Status</th><th></th></tr></thead>
+<div class="table-wrap"><table class="workers">
+  <thead><tr><th>Component</th><th>Labels</th><th>Last seen</th><th class="num">Tunnels</th><th>Cert expires</th><th>Status</th><th></th></tr></thead>
   <tbody>
   {% for c in components %}
     <tr>
       <td class="nowrap"><div class="kind-cell"><span class="kind {{ c.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ c.icon }}"/></svg></span><div>{% if let Some(name) = c.name %}<div class="mono"><b>{{ name }}</b></div><div class="cell-sub"><span class="mono">{{ c.id }}</span> · {{ c.kind }}</div>{% else %}<div class="mono">{{ c.id }}</div><div class="cell-sub">{{ c.kind }}</div>{% endif %}</div></div></td>
       <td><div class="chips">{% for l in c.label_list %}<span class="chip">{{ l }}</span>{% endfor %}</div></td>
-      <td class="nowrap">{{ c.last_seen }}</td>
+      <td class="nowrap when">{{ c.last_seen_day() }}<div class="cell-sub">{{ c.last_seen_clock() }}</div></td>
       <td class="num">{{ c.tunnels }}{% if !c.tunnel_peers.is_empty() %}<div class="cell-sub">{{ c.tunnel_peers }}</div>{% endif %}</td>
-      <td class="nowrap">{{ c.cert_expires }}</td>
+      <td class="nowrap when">{{ c.cert_day() }}<div class="cell-sub">{{ c.cert_clock() }}</div></td>
       <td>{% if c.revoked %}<span class="pill bad">revoked</span>{% else %}<span class="pill ok">enrolled</span>{% endif %}</td>
       <td class="actions">
         {% if !c.revoked %}
         <form method="post" action="/console/workers/{{ c.path }}/revoke" class="inline">
           <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-          <input type="text" name="reason" placeholder="Reason" required maxlength="500" class="w-120">
+          <input type="text" name="reason" placeholder="Reason" required maxlength="500" class="w-120" aria-label="Reason for revoking {{ c.id }}">
           <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg>Revoke</button>
         </form>
         {% endif %}

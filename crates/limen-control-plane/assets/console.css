@@ -427,3 +427,21 @@ input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3);
 .stat b small { font-size: 13px; font-weight: 550; color: var(--text-3); margin-left: 4px; letter-spacing: 0; }
 .stat > div { min-width: 0; }
 .stat span:not(.stat-icon) { white-space: nowrap; }
+
+/* Audit categories: one tab per service, with the same icons as the resources page. */
+.tabs.cats { flex-wrap: wrap; max-width: 100%; }
+.tabs.cats a { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 8px; }
+.kind-dot.k-auth { --kc: #10b981; } .kind-dot.k-admin { --kc: #f59e0b; } .kind-dot.k-other { --kc: #64748b; } .kind-dot.k-ssh { --kc: #10b981; }
+.kind-dot.k-auth, .kind-dot.k-admin, .kind-dot.k-other { color: var(--kc); background: color-mix(in srgb, var(--kc) 16%, transparent); }
+.kind-cell.tight { gap: 8px; }
+.kind-cell.tight .kind-dot { width: 22px; height: 22px; border-radius: 6px; }
+.kind-cell.tight .kind-dot .i { width: 14px; height: 14px; }
+.kind-cell.tight .pill { flex: none; }
+
+/* Workers: dates on two lines and a compact revoke form, so the table fits the page. */
+table.workers th, table.workers td { padding-left: 12px; padding-right: 12px; }
+table.workers td.when { font-variant-numeric: tabular-nums; }
+table.workers td.when .cell-sub { margin: 0; }
+table.workers .w-120 { width: 128px; }
+table.workers td.actions form.inline { gap: 6px; }
+table.workers td.actions form.inline input[type=text] { width: 150px; }
