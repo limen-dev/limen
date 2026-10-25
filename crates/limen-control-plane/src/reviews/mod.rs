@@ -295,6 +295,14 @@ pub async fn start(
         .map_err(|e| internal("storing a review item", e))?;
         count += 1;
     }
+    if count == 0 {
+        // Nothing to look at is a finished review, not an open one nobody can close.
+        sqlx::query("UPDATE access_reviews SET status = 'complete', completed_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| internal("closing the review", e))?;
+    }
     audit(
         state,
         EventKind::ReviewStart,
@@ -845,7 +853,12 @@ pub async fn tick(state: &AppState) -> Result<(), Status> {
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| internal("checking reviews", e))?;
-        if !recent {
+        // A deployment nobody has signed in to has nothing to review.
+        let anyone: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| internal("checking users", e))?;
+        if !recent && anyone {
             let who = Who {
                 username: "system",
                 is_admin: true,

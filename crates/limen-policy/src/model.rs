@@ -92,6 +92,10 @@ pub struct RoleSpec {
     /// hour, and always reviewed (ADR-0025). Needs `request.who`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub break_glass: bool,
+    /// Tell people on sessions this role grants that an administrator may
+    /// watch them (ADR-0030). Watching is audited whether or not this is set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub notify_observed: bool,
 }
 
 /// Who may ask for a role, who may approve, and the limits (ADR-0025).

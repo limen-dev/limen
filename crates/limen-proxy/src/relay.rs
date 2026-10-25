@@ -22,12 +22,19 @@ use crate::Proxy;
 
 /// API services the proxy relays. `Registry` is deliberately absent: only
 /// proxies call it, directly. `PolicySync` and `SshCertificates` are for
-/// workers; the control plane rejects other callers.
-const RELAYED_PREFIXES: [&str; 7] = [
+/// workers; the control plane rejects other callers. `Access`, `AuditSearch`,
+/// and `Reviews` are for people (each call checks the caller's roles);
+/// `Discovery` and `Watch` are for workers.
+const RELAYED_PREFIXES: [&str; 12] = [
     "/limen.v1.AuditIngest/",
     "/limen.v1.Auth/",
     "/limen.v1.Resources/",
     "/limen.v1.Admin/",
+    "/limen.v1.Access/",
+    "/limen.v1.AuditSearch/",
+    "/limen.v1.Reviews/",
+    "/limen.v1.Discovery/",
+    "/limen.v1.Watch/",
     "/limen.v1.Enrollment/",
     "/limen.v1.PolicySync/",
     "/limen.v1.SshCertificates/",

@@ -343,6 +343,11 @@ pub struct Config {
     #[arg(long, env = "LIMEN_REVIEW_INTERVAL", value_parser = parse_duration_or_zero, default_value = "90d")]
     pub review_interval: Duration,
 
+    /// Let `limen:auditor` watch live sessions too (ADR-0030). Off by
+    /// default: watching is a separate power from reading the record.
+    #[arg(long, env = "LIMEN_AUDITORS_MAY_WATCH")]
+    pub auditors_may_watch: bool,
+
     /// Put the requester, role, resource, and reason in notices. Off by
     /// default so resource names don't leave Limen.
     #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]

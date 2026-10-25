@@ -8,6 +8,7 @@ pub mod db;
 pub mod discovery;
 pub mod kafka;
 mod kube;
+pub mod live;
 pub mod mongo;
 pub mod recording;
 mod recordings;
@@ -280,6 +281,8 @@ pub struct Worker {
     /// The cluster this worker serves, if it is a kube worker (ADR-0038).
     pub(crate) kube: Option<Arc<kube::Upstream>>,
     audit_spool: limen_audit::spool::Spool,
+    /// Output of live SSH sessions, for the people watching them (ADR-0030).
+    pub(crate) live: Arc<live::Hub>,
 }
 
 impl Worker {
@@ -365,6 +368,7 @@ impl Worker {
                 aws: Arc::default(),
                 kube,
                 audit_spool,
+                live: live::Hub::new(),
             },
             tx,
         ))
@@ -947,6 +951,10 @@ pub async fn run(
         deadline,
     ));
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
+    {
+        let w = worker.clone();
+        tokio::spawn(live::run(Arc::clone(&worker.live), move || w.control_plane(), flush.clone()));
+    }
     if worker.config.discovery {
         tokio::spawn(discovery::run(worker.clone(), flush.clone()));
     }

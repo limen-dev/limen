@@ -41,6 +41,9 @@ fn parse<C: clap::Args>(args: &[String]) -> C {
 
 #[derive(Debug)]
 pub struct Deployment {
+    /// The deployment's own database, for tests that look at what the control
+    /// plane stored (or stand in for the console).
+    pub db_url: String,
     pub dir: tempfile::TempDir,
     pub idp: MockIdp,
     pub cp_addr: SocketAddr,
@@ -223,6 +226,7 @@ impl Deployment {
         };
 
         let mut deployment = Self {
+            db_url: db_url.clone(),
             dir,
             idp,
             cp_addr,

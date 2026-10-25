@@ -816,3 +816,38 @@ message ExportEvidenceResponse {
   bytes pack = 1;
   string manifest_sha256 = 2;
 }
+
+// Watching a live session (ADR-0030). The worker that records an SSH session
+// already holds its plaintext output; when an authorised person is watching,
+// it publishes the same bytes here and the console streams them. The user's
+// session never waits on any of this.
+service Watch {
+  // Which of these sessions has someone watching right now. Asked every few
+  // seconds by a worker that has live sessions, and only about its own.
+  rpc Poll(WatchPollRequest) returns (WatchPollResponse);
+  // Terminal output for a watched session, as text.
+  rpc Publish(WatchPublishRequest) returns (WatchPublishResponse);
+}
+
+message WatchPollRequest {
+  repeated string session_ids = 1;
+}
+
+message WatchPollResponse {
+  repeated string watched = 1;
+}
+
+message WatchPublishRequest {
+  string session_id = 1;
+  // UTF-8 text of terminal output. Never input.
+  string text = 2;
+  // Milliseconds since the session started.
+  uint64 elapsed_ms = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message WatchPublishResponse {
+  // False when nobody is watching any more: the worker stops sending.
+  bool watched = 1;
+}

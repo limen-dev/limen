@@ -7,6 +7,8 @@
     fit: 'width',
     idleTimeLimit: 3,
     preload: true,
-    theme: 'asciinema'
+    theme: 'asciinema',
+    // A search hit links to the moment it happened (?t=seconds).
+    startAt: Number(el.dataset.start) || 0
   });
 })();

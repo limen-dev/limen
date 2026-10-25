@@ -1032,7 +1032,21 @@ async fn admit_ssh(
     let host_cert = Certificate::from_openssh(&certs.host_certificate)
         .map_err(|e| Status::internal(e.to_string()))?;
 
+    // A role that granted this session may ask that the user be told they
+    // can be observed (ADR-0030).
+    let notify_observed = match snapshot.policy.evaluate(&AccessRequest {
+        roles: &checked.roles,
+        resource: &grant.resource,
+        principal: Principal::SshLogin(grant.principal.clone()),
+    }) {
+        limen_policy::Decision::Allow { matched_roles } => matched_roles
+            .iter()
+            .any(|r| snapshot.policy.role(r).is_some_and(|r| r.spec.notify_observed)),
+        _ => false,
+    };
     Ok(SshSessionConfig {
+        tap: Some(worker.live.tap(&grant.session_id)),
+        notify_observed,
         recording_path: worker
             .recordings_dir()
             .join(format!("{}.cast", grant.session_id)),

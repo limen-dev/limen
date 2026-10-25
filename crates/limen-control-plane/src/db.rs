@@ -531,6 +531,14 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    deleted += sqlx::query("DELETE FROM watch_chunks WHERE at < now() - interval '2 minutes'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    deleted += sqlx::query("DELETE FROM session_watches WHERE COALESCE(stopped_at, last_seen_at) < now() - interval '2 days'")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
     deleted += sqlx::query("DELETE FROM console_sessions WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?

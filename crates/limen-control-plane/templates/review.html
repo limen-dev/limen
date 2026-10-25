@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ review.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ review.name }} {% if review.overdue %}<span class="pill bad v-mid">overdue</span>{% else if review.status == "complete" %}<span class="pill ok v-mid">complete</span>{% endif %}</h1>
+    <p class="sub">{{ review.progress }} · due {{ review.due }} · started by {{ review.started_by }}</p>
+  </div>
+  <a class="button secondary" href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>Reviews</a>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+{% if mine_only %}<p class="hint">Showing the items assigned to you.</p>{% endif %}
+{% if items.is_empty() %}
+<div class="card empty"><div>Nothing here for you.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Who</th><th>Role</th><th>Reaches</th><th>Use in 90 days</th><th>Reviewer</th><th>Decision</th></tr></thead>
+  <tbody>
+  {% for i in items %}
+  <tr>
+    <td>{{ i.subject }}{% if i.subject_type == "bot" %} <span class="pill">bot</span>{% endif %}</td>
+    <td><span class="chip c{{ i.role.c }}">{{ i.role.text }}</span>{% if i.via != "standing" %} <span class="pill warn">{{ i.via }}</span>{% endif %}</td>
+    <td>{% for r in i.reaches %}<div class="mono">{{ r }}</div>{% endfor %}</td>
+    <td>{% if i.unused %}<span class="pill warn">{{ i.usage }}</span>{% else %}{{ i.usage }}{% endif %}</td>
+    <td>{{ i.reviewer }}</td>
+    <td>
+      {% if i.decision == "certify" %}<span class="pill ok">certified</span> {{ i.decided_by }}{% if !i.comment.is_empty() %}: {{ i.comment }}{% endif %}
+      {% else if i.decision == "flag" %}<span class="pill bad">flagged</span> {{ i.decided_by }}: {{ i.comment }}
+      {% else if i.can_decide %}
+      <form method="post" action="/console/reviews/items/{{ i.id }}/decide" class="stack">
+        <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+        <input type="hidden" name="review" value="{{ review.id }}">
+        <input type="text" name="comment" placeholder="Comment (needed to flag)" maxlength="500">
+        <div class="row">
+          <button type="submit" name="decision" value="certify"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Keep</button>
+          <button type="submit" name="decision" value="flag" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Remove</button>
+        </div>
+      </form>
+      {% else %}<span class="muted">waiting</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

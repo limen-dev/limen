@@ -438,8 +438,53 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
     let actions = counts(
         db,
         "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
-         ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change')
+         ('user.lock', 'user.unlock', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change',
+          'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export')
          GROUP BY 1 ORDER BY 2 DESC, 1",
+        since,
+    )
+    .await?;
+    // Access workflows (ADR-0025, ADR-0029, ADR-0027).
+    let requests = counts(
+        db,
+        "SELECT status || CASE WHEN break_glass THEN ' (break-glass)' ELSE '' END, count(*) FROM access_requests
+         WHERE created_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+        since,
+    )
+    .await?;
+    let grants_by_role = counts(
+        db,
+        "SELECT role, count(*) FROM access_grants WHERE granted_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8",
+        since,
+    )
+    .await?;
+    let time_to_approve = counts(
+        db,
+        "SELECT CASE WHEN d < interval '5 minutes' THEN '0 under 5 min' WHEN d < interval '30 minutes' THEN '1 5 to 30 min'
+                     WHEN d < interval '4 hours' THEN '2 30 min to 4 h' ELSE '3 over 4 h' END AS b, count(*)
+         FROM (SELECT decided_at - created_at AS d FROM access_requests
+               WHERE created_at >= $1 AND status IN ('approved', 'revoked') AND NOT break_glass AND decided_at IS NOT NULL) t
+         GROUP BY 1 ORDER BY 1",
+        since,
+    )
+    .await?
+    .into_iter()
+    .map(|(k, n)| (k.split_once(' ').map_or(k.clone(), |(_, t)| t.to_owned()), n))
+    .collect::<Vec<_>>();
+    let review_items = counts(
+        db,
+        "SELECT CASE WHEN i.decision IS NULL THEN CASE WHEN r.due_at < now() THEN 'overdue' ELSE 'waiting' END
+                     WHEN i.decision = 'flag' THEN 'flagged'
+                     WHEN i.comment = '' THEN 'certified without a comment' ELSE 'certified with a comment' END, count(*)
+         FROM review_items i JOIN access_reviews r ON r.id = i.review_id
+         WHERE r.started_at >= $1 GROUP BY 1 ORDER BY 2 DESC, 1",
+        since,
+    )
+    .await?;
+    let discovered = counts(
+        db,
+        "SELECT CASE WHEN change_pending THEN 'accepted, change pending' ELSE state END, count(*)
+         FROM discovered_resources WHERE $1::timestamptz IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1",
         since,
     )
     .await?;
@@ -490,6 +535,36 @@ async fn rankings(db: &Db, since: OffsetDateTime) -> Result<Vec<RankPanel>, sqlx
             sub: "Denied attempts",
             rows: rank(denials, |_| None),
             class: "bar-bad",
+        },
+        RankPanel {
+            title: "Access requests",
+            sub: "By outcome",
+            rows: rank(requests, |_| None),
+            class: "bar-a",
+        },
+        RankPanel {
+            title: "Time to approve",
+            sub: "Approved requests, from asking to the decision",
+            rows: rank(time_to_approve, |_| None),
+            class: "bar-c",
+        },
+        RankPanel {
+            title: "Grants by role",
+            sub: "Access given by request",
+            rows: rank(grants_by_role, |_| None),
+            class: "bar-b",
+        },
+        RankPanel {
+            title: "Access review items",
+            sub: "Where the reviews stand",
+            rows: rank(review_items, |_| None),
+            class: "bar-d",
+        },
+        RankPanel {
+            title: "Discovered resources",
+            sub: "By state, now",
+            rows: rank(discovered, |_| None),
+            class: "bar-bot",
         },
         RankPanel {
             title: "Admin actions",

@@ -10,6 +10,7 @@ pub mod ingest;
 pub mod ops;
 pub mod policy_sync;
 pub mod registry;
+pub mod watch;
 pub mod resources;
 pub mod reviews;
 pub mod ssh_certs;

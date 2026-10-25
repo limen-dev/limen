@@ -348,7 +348,33 @@ fn print_requestable(requestable: &[limen_proto::v1::RequestableResource]) {
 
 /// `limen show <resource>`: everything the control plane tells this user about one resource.
 pub async fn show(proxy: Option<&str>, name: &str, json: bool) -> anyhow::Result<()> {
-    let resources = fetch_resources(proxy).await?;
+    let all = fetch_all(proxy).await?;
+    let resources = all.resources;
+    // Something the user can ask for but can't reach yet (ADR-0025).
+    if !resources.iter().any(|r| r.name == name)
+        && let Some(ask) = all.requestable.iter().find(|r| r.name == name)
+    {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "name": ask.name, "kind": ask.kind, "requestable_through": ask.roles,
+                }))?
+            );
+        } else {
+            anstream::println!(
+                "{}",
+                ui::key_values(&[
+                    ("Name", ui::bold(&ask.name)),
+                    ("Kind", ui::kind_label(&ask.kind)),
+                    ("Access", ui::yellow("not yet: you can ask for it")),
+                    ("Through", ask.roles.join(", ")),
+                    ("Ask", format!("`limen request {} --for 30m --reason \"...\"`", ask.name)),
+                ])
+            );
+        }
+        return Ok(());
+    }
     let Some(r) = resources.iter().find(|r| r.name == name) else {
         let near: Vec<_> = resources
             .iter()

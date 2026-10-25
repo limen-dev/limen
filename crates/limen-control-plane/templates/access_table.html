@@ -1,0 +1,17 @@
+<div class="table-wrap"><table>
+  <thead><tr><th>Request</th><th>Who</th><th>Resource</th><th>For</th><th>Why</th><th>State</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="nowrap"><a href="/console/access/{{ r.id }}">{{ r.created }}</a></td>
+    <td>{{ r.requester }}</td>
+    <td><a class="mono" href="/console/resources/{{ r.resource_path }}">{{ r.resource }}</a> <span class="chip c{{ r.role.c }}">{{ r.role.text }}</span></td>
+    <td class="nowrap">{{ r.duration }}</td>
+    <td>{{ r.reason }}{% if r.break_glass %} <span class="pill bad">break-glass</span>{% endif %}</td>
+    <td class="nowrap"><span class="pill {{ r.tone }}">{{ r.status }}</span>
+      {% if r.status == "pending" %} {{ r.approvals }} · lapses {{ r.lapses }}{% else if !r.ends.is_empty() %} ends {{ r.ends }}{% endif %}
+      {% if r.can_decide %} <a class="button secondary" href="/console/access/{{ r.id }}">Decide</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>

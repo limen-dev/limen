@@ -12,6 +12,15 @@
 
 
 
+{% if can_watch && s.active && s.kind == "ssh" %}
+<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#eye"/></svg><span>This session is live. <a href="/console/sessions/{{ s.id }}/watch">Watch it</a>, read-only. Your watching is recorded in the audit trail.</span></div>
+{% endif %}
+{% if !allowed_by.is_empty() %}
+<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg><span>Allowed by an approved access request:{% for id in allowed_by %} <a class="mono" href="/console/access/{{ id }}">{{ id }}</a>{% endfor %}. The reason and the approvers are on the request.</span></div>
+{% endif %}
+{% if !watched.is_empty() %}
+<div class="notice warn"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#eye"/></svg><span>Watched live:{% for (who, what, at) in watched %} {{ who }} {{ what }} at {{ at }};{% endfor %}</span></div>
+{% endif %}
 {% if chrome.is_admin && s.active && !s.is_kubectl %}
 <form method="post" action="/console/sessions/{{ s.id }}/kill" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
@@ -134,7 +143,7 @@
 {% else %}
 <h2>Recording</h2>
 {% if s.has_recording %}
-<div class="card player-card"><div id="player" data-src="/console/sessions/{{ s.id }}/recording"></div></div>
+<div class="card player-card"><div id="player" data-src="/console/sessions/{{ s.id }}/recording" data-start="{{ start_at }}"></div></div>
 <p class="hint">SHA-256 <span class="mono">{{ s.recording_sha256 }}</span>. The control plane checks this hash before it serves the recording.</p>
 <script src="/console/static/asciinema-player.min.js?v={{ chrome.assets }}"></script>
 <script src="/console/static/player-init.js?v={{ chrome.assets }}"></script>

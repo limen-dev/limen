@@ -9,6 +9,29 @@
   </div>
 </div>
 <nav class="tabs" aria-label="Audit views"><a href="/console/audit" aria-current="true">All events</a><a href="/console/audit/kubernetes">Kubernetes</a></nav>
+<form method="get" action="/console/audit" class="search wide-search">
+  <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
+  <input type="text" name="q" value="{{ q }}" placeholder="Find a statement or command: DROP TABLE user:alice@example.com resource:orders-prod after:7d" aria-label="Search the audit trail" maxlength="512">
+</form>
+<p class="hint">Search covers recent events, command and statement text, and (if your operator turned it on) what was on screen in recordings. Every search is recorded here too.</p>
+{% if let Some(s) = search %}
+<h2>Results</h2>
+{% if let Some(e) = s.error %}<pre class="error">{{ e }}</pre>{% else if s.hits.is_empty() %}
+<div class="card empty"><div>Nothing matches.</div></div>
+{% else %}
+<div class="hits">
+  {% for h in s.hits %}
+  <div class="hit">
+    <div class="meta"><span>{{ h.at }}</span><span class="pill">{{ h.kind }}</span>{% if h.denied %}<span class="pill bad">denied</span>{% endif %}<span>{{ h.user }}{% if !h.resource.is_empty() %} on {{ h.resource }}{% endif %}</span>
+      {% if let Some(href) = h.href %}<a href="{{ href }}">{% if let Some(m) = h.moment %}Open the recording at {{ m }}{% else %}Open the session{% endif %}</a>{% endif %}</div>
+    <div class="snippet">{{ h.before }}<mark>{{ h.hit }}</mark>{{ h.after }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% if s.truncated %}<p class="hint">More matched than shown. Narrow it with <code>user:</code>, <code>resource:</code>, <code>kind:</code>, or <code>after:</code>.</p>{% endif %}
+{% endif %}
+{% if let Some(u) = s.history_url %}<p class="hint"><a href="{{ u }}" rel="noopener noreferrer">Run the same search over the full history</a></p>{% endif %}
+{% else %}
 <form method="get" action="/console/audit" class="filters">
   <label><span>Event</span>
     <select name="kind"><option value="">All events</option>{% for k in kinds %}<option value="{{ k }}"{% if kind_filter.as_deref() == Some(k.as_str()) %} selected{% endif %}>{{ k }}</option>{% endfor %}</select>
@@ -23,4 +46,5 @@
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}
   {% if let Some(o) = older %}<a href="{{ o }}">Older →</a>{% endif %}
 </p>
+{% endif %}
 {% endblock %}

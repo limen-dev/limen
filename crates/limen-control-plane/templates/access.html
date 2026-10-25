@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Access{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Access</h1>
+    <p class="sub">Ask for access that exists only while you need it, for a stated reason. An approver decides here, signed in; no message carries an approval.</p>
+  </div>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+{% if breakglass_active > 0 %}<div class="notice warn"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-alert"/></svg>{{ breakglass_active }} break-glass grant{% if breakglass_active != 1 %}s are{% else %} is{% endif %} active. They are reviewed afterwards.</div>{% endif %}
+
+<nav class="tabs" aria-label="Access views">
+  <a href="/console/access"{% if tab == "mine" %} aria-current="true"{% endif %}>My requests <span class="count">{{ mine.len() }}</span></a>
+  <a href="/console/access?tab=approvals"{% if tab == "approvals" %} aria-current="true"{% endif %}>Waiting for me <span class="count">{{ approvals.len() }}</span></a>
+  {% if reader %}
+  <a href="/console/access?tab=grants"{% if tab == "grants" %} aria-current="true"{% endif %}>Active grants <span class="count">{{ grants.len() }}</span></a>
+  <a href="/console/access?tab=all"{% if tab == "all" %} aria-current="true"{% endif %}>Everyone's requests</a>
+  {% endif %}
+</nav>
+
+{% if tab == "mine" %}
+<h2>Ask for access</h2>
+{% if requestable.is_empty() %}
+<div class="card empty"><div>There is nothing you can ask for. Roles can be made requestable in policy.</div></div>
+{% else %}
+<div class="card">
+<form method="post" action="/console/access/request" class="stack wide">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <label><span>Resource</span>
+    <select name="resource" required>
+      {% for r in requestable %}<option value="{{ r.name }}"{% if r.name == prefill %} selected{% endif %}>{{ r.name }} ({{ r.kind }}), through {{ r.roles.join(", ") }}</option>{% endfor %}
+    </select>
+  </label>
+  <label><span>How long</span> <input type="text" name="duration" placeholder="30m (the role sets the limit)" maxlength="10" class="w-360"></label>
+  <label><span>Why</span> <input type="text" name="reason" placeholder="INC-123: orders table is locked" maxlength="500" class="w-360"></label>
+  <label class="check"><input type="checkbox" name="break_glass" value="1"> <span><b>Break-glass</b>: for an emergency. Granted at once, limited to an hour, announced, and reviewed afterwards.</span></label>
+  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg>Ask</button></div>
+</form>
+</div>
+{% endif %}
+<h2>My requests</h2>
+{% if mine.is_empty() %}
+<div class="card empty"><div>You haven't asked for anything yet.</div></div>
+{% else %}
+{% let rows = mine %}
+{% include "access_table.html" %}
+{% endif %}
+{% else if tab == "approvals" %}
+<h2>Waiting for you to decide</h2>
+{% if approvals.is_empty() %}
+<div class="card empty"><div>Nothing is waiting for you.</div></div>
+{% else %}
+{% let rows = approvals %}
+{% include "access_table.html" %}
+{% endif %}
+{% else if tab == "grants" %}
+<h2>Active grants</h2>
+{% if grants.is_empty() %}
+<div class="card empty"><div>No access is granted by request right now.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Who</th><th>Resource</th><th>Role</th><th>Why</th><th>Approved by</th><th>Ends</th>{% if chrome.is_admin %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for g in grants %}
+  <tr>
+    <td>{{ g.user }}{% if g.break_glass %} <span class="pill bad">break-glass</span>{% endif %}</td>
+    <td class="mono">{{ g.resource }}</td>
+    <td><span class="chip c{{ g.role.c }}">{{ g.role.text }}</span></td>
+    <td>{{ g.reason }}</td>
+    <td>{{ g.approvers }}</td>
+    <td class="nowrap">{{ g.ends }}</td>
+    {% if chrome.is_admin %}
+    <td><form method="post" action="/console/access/grants/{{ g.id }}/revoke" class="inline">
+      <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+      <input type="text" name="reason" placeholder="Why (audited)" required maxlength="500">
+      <button type="submit" class="danger">Revoke</button>
+    </form></td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="hint">Revoking ends the grant and the sessions it allowed, within about 10 seconds.</p>
+{% endif %}
+{% else %}
+<h2>Everyone's requests</h2>
+{% if all.is_empty() %}
+<div class="card empty"><div>No requests.</div></div>
+{% else %}
+{% let rows = all %}
+{% include "access_table.html" %}
+{% endif %}
+{% endif %}
+{% endblock %}
