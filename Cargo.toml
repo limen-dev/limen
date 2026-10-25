@@ -92,6 +92,9 @@ signature = { version = "3", default-features = false, features = ["alloc"] }
 # Rate limiting
 governor = "0.10.4"
 
+# Ticket patterns in access requests (ADR-0025). Linear-time matching, no backtracking.
+regex-lite = "0.1.9"
+
 # CLI and observability
 anstream = "1.0"
 anstyle = "1.0"

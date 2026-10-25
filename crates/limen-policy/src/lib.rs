@@ -2,8 +2,12 @@
 //! evaluator (ADR-0008).
 
 pub mod bot;
+pub mod discovery;
 pub mod duration;
 pub mod model;
+pub mod testing;
+pub mod tooling;
+pub mod trace;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -65,10 +69,14 @@ pub enum Decision {
     Deny {
         reason: DenyReason,
     },
-    /// Reserved for just-in-time and approval workflows. Not produced in v1.
-    /// Enforcement points must treat it as a denial.
+    /// Nothing the user holds grants it, but a role they may request would
+    /// (ADR-0025). Enforcement points must treat it as a denial: a request
+    /// is a row, not a session.
     RequiresApproval {
         reason: String,
+        /// The requestable roles that would grant it.
+        #[serde(default)]
+        roles: Vec<String>,
     },
 }
 
@@ -123,8 +131,19 @@ pub struct AccessibleResource {
     pub principals: Vec<String>,
 }
 
+/// A resource a user could reach by asking for a role (ADR-0025).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestableResource {
+    pub name: String,
+    pub kind: ResourceKind,
+    pub labels: BTreeMap<String, String>,
+    /// The requestable roles that grant it.
+    pub roles: Vec<String>,
+}
+
 /// A compiled, validated policy.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::struct_field_names)]
 pub struct Policy {
     roles: BTreeMap<String, RoleDoc>,
     /// IdP group → roles, merged across all `role_mapping` documents.
@@ -133,6 +152,10 @@ pub struct Policy {
     resources: BTreeMap<String, ResourceDoc>,
     #[serde(default)]
     bots: BTreeMap<String, bot::BotDoc>,
+    #[serde(default)]
+    discovery: BTreeMap<String, discovery::DiscoveryDoc>,
+    #[serde(default)]
+    policy_tests: BTreeMap<String, testing::PolicyTestDoc>,
 }
 
 /// Changes between two policies, by `kind/name`.
@@ -194,6 +217,26 @@ impl Policy {
                     let name = bot.metadata.name.clone();
                     if policy.bots.insert(name.clone(), bot).is_some() {
                         return Err(PolicyError::Duplicate { kind: "bot", name });
+                    }
+                }
+                Document::Discovery(doc) => {
+                    discovery::validate_discovery(&doc)?;
+                    let name = doc.metadata.name.clone();
+                    if policy.discovery.insert(name.clone(), doc).is_some() {
+                        return Err(PolicyError::Duplicate {
+                            kind: "discovery",
+                            name,
+                        });
+                    }
+                }
+                Document::PolicyTest(doc) => {
+                    testing::validate_test(&doc)?;
+                    let name = doc.metadata.name.clone();
+                    if policy.policy_tests.insert(name.clone(), doc).is_some() {
+                        return Err(PolicyError::Duplicate {
+                            kind: "policy_test",
+                            name,
+                        });
                     }
                 }
                 Document::Resource(resource) => {
@@ -283,6 +326,13 @@ impl Policy {
         );
         out.extend(self.resources.values().cloned().map(Document::Resource));
         out.extend(self.bots.values().cloned().map(Document::Bot));
+        out.extend(self.discovery.values().cloned().map(Document::Discovery));
+        out.extend(
+            self.policy_tests
+                .values()
+                .cloned()
+                .map(Document::PolicyTest),
+        );
         out
     }
 
@@ -482,6 +532,191 @@ impl Policy {
         } else {
             Decision::Allow { matched_roles }
         }
+    }
+
+    /// [`Policy::evaluate`], plus: when nothing the user holds reaches the
+    /// resource but a role in `eligible` (roles they may ask for) would, the
+    /// answer is [`Decision::RequiresApproval`] naming those roles. A deny rule
+    /// in a requestable role stops it being offered. Enforcement points call
+    /// [`Policy::evaluate`]: this is for telling people what to do next.
+    #[must_use]
+    pub fn evaluate_eligible(&self, req: &AccessRequest<'_>, eligible: &[String]) -> Decision {
+        let base = self.evaluate(req);
+        if !matches!(
+            base,
+            Decision::Deny {
+                reason: DenyReason::NoMatchingRole
+            }
+        ) || eligible.is_empty()
+        {
+            return base;
+        }
+        let mut union: Vec<String> = req.roles.to_vec();
+        union.extend(eligible.iter().filter(|r| !req.roles.contains(r)).cloned());
+        match self.evaluate(&AccessRequest {
+            roles: &union,
+            resource: req.resource,
+            principal: req.principal.clone(),
+        }) {
+            Decision::Allow { matched_roles } => {
+                let roles: Vec<String> = matched_roles
+                    .into_iter()
+                    .filter(|r| eligible.contains(r))
+                    .collect();
+                if roles.is_empty() {
+                    base
+                } else {
+                    Decision::RequiresApproval {
+                        reason: format!("request one of: {}", roles.join(", ")),
+                        roles,
+                    }
+                }
+            }
+            _ => base,
+        }
+    }
+
+    #[must_use]
+    pub fn role(&self, name: &str) -> Option<&RoleDoc> {
+        self.roles.get(name)
+    }
+
+    /// Every role, in name order.
+    pub fn roles(&self) -> impl Iterator<Item = &RoleDoc> {
+        self.roles.values()
+    }
+
+    /// Roles that people can ask for, in name order.
+    pub fn requestable_roles(&self) -> impl Iterator<Item = &RoleDoc> {
+        self.roles.values().filter(|r| r.spec.request.is_some())
+    }
+
+    /// The requestable roles a member of any of `groups` may ask for.
+    #[must_use]
+    pub fn requestable_roles_for_groups<'a>(
+        &self,
+        groups: impl IntoIterator<Item = &'a str>,
+    ) -> BTreeSet<String> {
+        let groups: BTreeSet<&str> = groups.into_iter().collect();
+        self.requestable_roles()
+            .filter(|r| {
+                r.spec
+                    .request
+                    .as_ref()
+                    .is_some_and(|q| q.who.iter().any(|g| groups.contains(g.as_str())))
+            })
+            .map(|r| r.metadata.name.clone())
+            .collect()
+    }
+
+    /// Whether `username`, a member of `groups`, may approve requests for
+    /// `role`. Checked again at approval time, never cached from the request.
+    /// A break-glass role has no approvers, so nobody can.
+    #[must_use]
+    pub fn may_approve<'a>(
+        &self,
+        role: &str,
+        username: &str,
+        groups: impl IntoIterator<Item = &'a str>,
+    ) -> bool {
+        let Some(request) = self.roles.get(role).and_then(|r| r.spec.request.as_ref()) else {
+            return false;
+        };
+        request.approver_users.iter().any(|u| u == username)
+            || groups
+                .into_iter()
+                .any(|g| request.approvers.iter().any(|a| a == g))
+    }
+
+    /// The resources a user could get by asking, with the roles that would
+    /// give them. A hint for `limen ls`: names and kinds, never an address.
+    /// Resources the user already reaches are left out.
+    #[must_use]
+    pub fn requestable_resources(
+        &self,
+        held: &[String],
+        eligible: &[String],
+    ) -> Vec<RequestableResource> {
+        let already: BTreeSet<String> = self.accessible(held).into_iter().map(|r| r.name).collect();
+        let mut out: BTreeMap<String, RequestableResource> = BTreeMap::new();
+        for role in eligible.iter().filter(|r| !held.contains(r)) {
+            for res in self.accessible(std::slice::from_ref(role)) {
+                if already.contains(&res.name) {
+                    continue;
+                }
+                let entry = out
+                    .entry(res.name.clone())
+                    .or_insert_with(|| RequestableResource {
+                        name: res.name.clone(),
+                        kind: res.kind,
+                        labels: res.labels.clone(),
+                        roles: Vec::new(),
+                    });
+                entry.roles.push(role.clone());
+            }
+        }
+        out.into_values().collect()
+    }
+
+    /// Every discovery document, in name order.
+    pub fn discovery(&self) -> impl Iterator<Item = &discovery::DiscoveryDoc> {
+        self.discovery.values()
+    }
+
+    /// Every `policy_test` document, in name order.
+    pub fn policy_tests(&self) -> impl Iterator<Item = &testing::PolicyTestDoc> {
+        self.policy_tests.values()
+    }
+
+    /// Things that are valid but probably not what was meant. `apply` shows
+    /// them and the console lists them; they never block a policy.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for role in self.roles.values() {
+            let name = &role.metadata.name;
+            if let Some(request) = &role.spec.request {
+                if let Some(g) = request.who.iter().find(|g| request.approvers.contains(g)) {
+                    out.push(format!(
+                        "role {name}: group {g:?} may both request and approve; the requester can never approve their own request, but a group that can do both approves its own members' requests"
+                    ));
+                }
+                let standing = self
+                    .group_roles
+                    .iter()
+                    .any(|(g, roles)| roles.contains(name) && request.who.contains(g));
+                if standing {
+                    out.push(format!(
+                        "role {name}: a group in request.who already holds it through a role mapping, so there is nothing to request"
+                    ));
+                }
+            }
+        }
+        // A tag anyone with write access to the account can set must not be
+        // what lets a resource into a role (ADR-0027).
+        let tag_labels: BTreeSet<String> = self
+            .discovery
+            .values()
+            .flat_map(|d| &d.spec.matchers)
+            .flat_map(|m| m.labels_from_tags.iter().map(|t| t.to_lowercase()))
+            .collect();
+        if !tag_labels.is_empty() {
+            for role in self.roles.values() {
+                for rule in role.spec.allow.iter().chain(&role.spec.deny) {
+                    for key in rule.resources.labels.keys() {
+                        if tag_labels.contains(key) {
+                            out.push(format!(
+                                "role {}: selects on label {key:?}, which discovery copies from a cloud tag; anyone who can write that tag can steer a resource into this role (new resources and changed labels wait for an admin to accept them)",
+                                role.metadata.name
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Whether a web request is allowed after the resource-level grant. Path
@@ -935,6 +1170,17 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
             ));
         }
     }
+    match (&role.spec.request, role.spec.break_glass) {
+        (Some(request), break_glass) => validate_request(name, request, break_glass)?,
+        (None, true) => {
+            return Err(invalid(
+                "role",
+                name,
+                "break_glass needs request.who: the groups that may use it",
+            ));
+        }
+        (None, false) => {}
+    }
     for rule in &role.spec.allow {
         if rule_has_no_principals(rule) {
             return Err(invalid(
@@ -945,6 +1191,113 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
         }
     }
     Ok(())
+}
+
+fn validate_request(
+    role: &str,
+    request: &model::RequestSpec,
+    break_glass: bool,
+) -> Result<(), PolicyError> {
+    let bad_name = |v: &String| v.is_empty() || v.len() > 256 || v.chars().any(char::is_control);
+    if request.who.is_empty() {
+        return Err(invalid("role", role, "request.who must not be empty"));
+    }
+    for (field, values) in [
+        ("request.who", &request.who),
+        ("request.approvers", &request.approvers),
+        ("request.approver_users", &request.approver_users),
+    ] {
+        if let Some(v) = values.iter().find(|v| bad_name(v)) {
+            return Err(invalid(
+                "role",
+                role,
+                format!("invalid value {v:?} in {field}"),
+            ));
+        }
+    }
+    if !(1..=5).contains(&request.approvals_required) {
+        return Err(invalid(
+            "role",
+            role,
+            "request.approvals_required must be 1 to 5",
+        ));
+    }
+    if let Some(d) = request.max_duration
+        && d.0 > model::MAX_REQUEST_DURATION
+    {
+        return Err(invalid("role", role, "request.max_duration is at most 7d"));
+    }
+    if break_glass {
+        if !request.approvers.is_empty() || !request.approver_users.is_empty() {
+            return Err(invalid(
+                "role",
+                role,
+                "a break_glass role is granted at once: remove request.approvers",
+            ));
+        }
+        if request.approvals_required != 1 {
+            return Err(invalid(
+                "role",
+                role,
+                "a break_glass role takes no approvals: remove request.approvals_required",
+            ));
+        }
+        if !request.require_reason {
+            return Err(invalid(
+                "role",
+                role,
+                "break_glass always needs a reason: remove request.require_reason: false",
+            ));
+        }
+        if let Some(d) = request.max_duration
+            && d.0 > model::MAX_BREAK_GLASS_DURATION
+        {
+            return Err(invalid(
+                "role",
+                role,
+                "request.max_duration is at most 1h for break_glass",
+            ));
+        }
+    } else if request.approvers.is_empty() && request.approver_users.is_empty() {
+        return Err(invalid(
+            "role",
+            role,
+            "a requestable role needs request.approvers or request.approver_users",
+        ));
+    }
+    if let Some(pattern) = &request.ticket_pattern {
+        if !request.require_reason {
+            return Err(invalid(
+                "role",
+                role,
+                "request.ticket_pattern needs request.require_reason",
+            ));
+        }
+        if pattern.len() > 256 {
+            return Err(invalid(
+                "role",
+                role,
+                "request.ticket_pattern is at most 256 chars",
+            ));
+        }
+        compile_ticket_pattern(pattern).map_err(|e| {
+            invalid(
+                "role",
+                role,
+                format!("request.ticket_pattern is not a valid expression: {e}"),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// The ticket expression, compiled with a bounded size. `regex-lite` matches
+/// in linear time, so a hostile reason can't make it spin.
+pub fn compile_ticket_pattern(pattern: &str) -> Result<regex_lite::Regex, regex_lite::Error> {
+    regex_lite::RegexBuilder::new(pattern)
+        .size_limit(100_000)
+        .nest_limit(20)
+        .build()
 }
 
 fn role_has_rules(role: &RoleDoc) -> bool {
@@ -1325,3 +1678,5 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workflow_tests;

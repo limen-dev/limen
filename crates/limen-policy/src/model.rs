@@ -18,6 +18,8 @@ pub enum Document {
     RoleMapping(RoleMappingDoc),
     Resource(ResourceDoc),
     Bot(crate::bot::BotDoc),
+    Discovery(crate::discovery::DiscoveryDoc),
+    PolicyTest(crate::testing::PolicyTestDoc),
 }
 
 impl Document {
@@ -28,6 +30,8 @@ impl Document {
             Document::RoleMapping(_) => "role_mapping",
             Document::Resource(_) => "resource",
             Document::Bot(_) => "bot",
+            Document::Discovery(_) => "discovery",
+            Document::PolicyTest(_) => "policy_test",
         }
     }
 
@@ -38,6 +42,8 @@ impl Document {
             Document::RoleMapping(d) => &d.metadata.name,
             Document::Resource(d) => &d.metadata.name,
             Document::Bot(d) => &d.metadata.name,
+            Document::Discovery(d) => &d.metadata.name,
+            Document::PolicyTest(d) => &d.metadata.name,
         }
     }
 }
@@ -78,6 +84,73 @@ pub struct RoleSpec {
     pub allow: Vec<Rule>,
     #[serde(default)]
     pub deny: Vec<Rule>,
+    /// Makes the role *requestable*: people in `request.who` can ask for it
+    /// for a limited time (ADR-0025).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<RequestSpec>,
+    /// A break-glass role is granted at once, with a reason, for at most an
+    /// hour, and always reviewed (ADR-0025). Needs `request.who`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub break_glass: bool,
+}
+
+/// Who may ask for a role, who may approve, and the limits (ADR-0025).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestSpec {
+    /// IdP groups whose members may ask for the role.
+    pub who: Vec<String>,
+    /// IdP groups whose members may approve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approvers: Vec<String>,
+    /// Individual approvers, by user name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approver_users: Vec<String>,
+    /// Different approvers needed. Default 1.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub approvals_required: u32,
+    /// The longest grant. Default 2h (1h for break-glass).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration: Option<DurationStr>,
+    /// The request must carry a reason. Always on for break-glass.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub require_reason: bool,
+    /// The reason must match this regular expression (a ticket id, say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_pattern: Option<String>,
+}
+
+fn one() -> u32 {
+    1
+}
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` takes a reference
+fn is_one(n: &u32) -> bool {
+    *n == 1
+}
+
+/// The longest a request may run when the role doesn't say.
+pub const DEFAULT_REQUEST_DURATION: std::time::Duration = std::time::Duration::from_hours(2);
+/// The longest a break-glass grant may run.
+pub const MAX_BREAK_GLASS_DURATION: std::time::Duration = std::time::Duration::from_hours(1);
+/// No grant outlasts this, whatever the role says.
+pub const MAX_REQUEST_DURATION: std::time::Duration = std::time::Duration::from_hours(24 * 7);
+
+impl RequestSpec {
+    /// The longest grant for a role with this spec.
+    #[must_use]
+    pub fn duration_limit(&self, break_glass: bool) -> std::time::Duration {
+        let default = if break_glass {
+            MAX_BREAK_GLASS_DURATION
+        } else {
+            DEFAULT_REQUEST_DURATION
+        };
+        let limit = self.max_duration.map_or(default, |d| d.0);
+        if break_glass {
+            limit.min(MAX_BREAK_GLASS_DURATION)
+        } else {
+            limit
+        }
+    }
 }
 
 /// Selects resources and, optionally, the principals that may be used on them.
@@ -594,6 +667,10 @@ impl RedisAudit {
 fn is_true(b: &bool) -> bool {
     *b
 }
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` takes a reference
+fn is_false(b: &bool) -> bool {
+    !*b
+}
 
 /// What a `redis.command` event may contain (ADR-0034). Values are never
 /// logged unless `log_values` is set, and credential commands never are.
@@ -702,7 +779,7 @@ pub struct SearchTarget {
     #[serde(default)]
     pub aws: bool,
     /// `OpenSearch` Serverless: `SigV4` service `aoss` instead of `es`. Unverified.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub serverless: bool,
     /// TLS toward the target. On by default; `false` is for local servers only.
     #[serde(default = "yes", skip_serializing_if = "is_true")]

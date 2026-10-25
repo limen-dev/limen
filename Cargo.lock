@@ -3016,6 +3016,7 @@ name = "limen-policy"
 version = "0.1.0"
 dependencies = [
  "limen-core",
+ "regex-lite",
  "serde",
  "serde-saphyr",
  "serde_json",
