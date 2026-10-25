@@ -196,6 +196,31 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | D: login and connection limits multiplied by replicas, or too low behind one egress IP | The control plane's login limit and the proxy's pre-authentication accept limit are per client IP and per replica (abuse guards, not authorization); rates and bursts are settings (defaults 30 a minute, burst 10; 50 a second, burst 200). A site behind one address should raise them |
 | T: test-only settings reach a release build | The long report interval and similar overrides sit behind the `test-hooks` Cargo feature, enabled only by `limen-e2e`; release images are built with `--bin` for named binaries that do not depend on it |
 
+### TB11: Access workflows (ADR-0025 to ADR-0030)
+| Threat | Mitigation |
+|---|---|
+| E: approving your own request, through a second account or a shared group | The code refuses an approver equal to the requester (case-insensitive) and so does a database trigger; two approvals need two different people (one row per approver); the validator warns when `who` and `approvers` overlap. *Limit:* one human with two IdP accounts cannot be told apart from two people |
+| E: a stale approver (left the group mid-flight) or a requester no longer eligible | Both are checked at approval time against today's policy and the groups the IdP reported at each person's latest login; the grant is clamped to today's `max_duration`. *Limit:* groups update when the person logs in |
+| E: a grant outlives its purpose | The signed snapshot carries only unexpired grants; the proxy and worker compare the deadline with the clock on every decision; a session started under a grant is capped to its remaining time and ended when it leaves the snapshot; revoke also writes session kills; the per-session SSH certificate is capped to the grant. A lock and a deny override beat a grant |
+| E: a grant opens more than was approved | A grant is scoped to the requested resource and role; the effective role is added only for that resource |
+| T: a requestable role opens resources it shouldn't | `RequiresApproval` is a denial at every enforcement point (tests); only `evaluate_eligible`, used for telling people what to do, returns it |
+| I: resource names leak in a notification | Default message: request id and console link only; details are opt-in; URLs must be https (or loopback); no redirects; webhook signed over timestamp and body; the URL is a secret and never logged |
+| I: a notification carries the approval | It cannot: approval is only a signed-in console or API call |
+| S/E: injection through the reason text | Plain text, length-limited, control characters refused, escaped when shown, never used in a shell or query; Slack markup is escaped; the ticket pattern is a linear-time regex with size limits |
+| D: request flooding | One open request per person/role/resource; 20 open and 100 a day per person; pending requests lapse after 24 hours |
+| I: search is a way to read everything | Only `limen:admin` and `limen:auditor`; every search is audited (`audit.search`, with the query, before it runs) and rate limited (30/min); statement text is masked for common secret shapes (best effort); recording text is off unless `--search-recordings` and is output only; retention 30 days |
+| T/D: query injection or an expensive query | The query is parsed into typed filters, every value bound; at most 20 terms, 512 bytes, 200 hits; 10 s statement timeout |
+| I: secrets reach the search index | Masked before indexing (passwords, tokens, keys, URLs with credentials); the index is a copy, the originals stay under the sinks' controls. *Residual:* masking is best effort |
+| E: a tag steers a discovered resource into a role (ADR-0027) | Only `labels_from_tags` become labels; a new resource and any change to name, labels, or target wait for an admin (`auto_accept` only for named label keys, never name or target); `limen.io/*` labels are set from checked facts and win; the validator warns on roles selecting tag-derived labels |
+| S/T: a compromised worker reports fake resources | The control plane makes names and labels; a report outside the document's accounts, regions, tag filter, and matchers is dropped; only workers named by `worker_selector` may report; everything lands pending |
+| E: over-broad discovery IAM | The Terraform module grants only `Describe*`/`List*` for chosen sources and `ec2:GetConsoleOutput`; no `iam:PassRole`, no data plane |
+| T: a hostile AWS answer exhausts the worker | The XML reader is bounded in size, depth, and nodes; paging is bounded |
+| D/E: stale or vanished targets | Not seen for several *complete* scans, a resource is stale and refused; removed later, never from under an open session |
+| E: an owner certifies their own access (ADR-0029) | Self-review is refused and routed to the admin pool; an admin cannot decide an item about themselves; overdue items escalate |
+| T: evidence edited after export | The manifest of section hashes is signed by the control plane; the export is an audit event carrying the manifest hash; `limen-audit-verify --evidence` checks both offline; spreadsheet cells that would run as formulas are defused |
+| I/E: silent surveillance of a live session (ADR-0030) | Every watch is audited and fails closed; the session page lists watchers; `notify_observed` tells the user; watching is a separate power from reading the record (`--auditors-may-watch`); you cannot watch yourself; output only |
+| D: a watcher slows the user's session | Bounded rings and buffers that drop; nothing is sent unless watched; five watchers per session; the stream re-checks authorization every few seconds |
+
 ### TB6: Audit sinks and dashboards
 | Threat | Mitigation |
 |---|---|
@@ -250,6 +275,7 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
 | 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |

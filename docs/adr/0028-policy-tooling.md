@@ -1,6 +1,6 @@
 # ADR-0028: Policy tooling: test, simulate, diff, explain
 
-- Status: Proposed (owner requested 2026-10-14; priority: **must have**)
+- Status: Accepted and built (Phase 13). The owner asked for the whole phase on 2026-10-25.
 - Date: 2026-10-14
 
 ## Context
@@ -41,3 +41,13 @@ Policy is deny-by-default YAML kept in Git, with a console dry run that shows a 
 ## Consequences
 - A new document kind (`policy_test`) the validator accepts and the engine ignores at runtime.
 - `limen-policy` needs a trace-producing decision function; enforcement keeps using the allocation-light one, and a test asserts both agree.
+
+## As built (Phase 13)
+Accepted by the owner's request to build the phase. Differences:
+
+- **`expect` has three values**: `allow` (standing access), `request` (requestable), `deny` (no way in, not even by asking), so a "must deny" is not satisfied by something a person could simply ask for.
+- **`limen policy diff old --new new`** takes `active` for the running policy, `--format text|json|markdown`, and `--fail-on-widening` (standing access only). It compares groups, bots, and roles, and shows access by request separately; access that merely became standing is not reported as a loss of request access.
+- **`explain` for users** describes only the roles they hold or can request; a hidden resource reads exactly like a missing one (a test pins this). Admins get the full trace, including locks and grants.
+- **`apply --require-tests`** is enforced by the control plane, and `apply` prints the effective-access changes, warnings, and test results.
+- **Agreement with enforcement** is tested with 5,000 random requests against `evaluate_eligible` and `trace`.
+- **CI:** `examples/ci/policy-check.yml` and `scripts/policy-pr-comment.sh`.

@@ -17,6 +17,8 @@ limen show orders-staging    # type, labels, who you may act as, and the command
 limen connect orders-staging # open any resource by name; picks db/redis/ssh/... from its type
 limen redis connect cache-staging --detach   # run in the background; limen conns ls / stop
 limen status --json          # identity and expiry for scripts (local only, no admin needed)
+limen request orders-prod --for 30m --reason "INC-123" --wait   # ask for access that expires; see access-requests.md
+limen explain orders-prod    # why you can or can't reach it
 limen completions zsh        # shell completions (bash, zsh, fish, elvish, powershell)
 limen logout                 # end this login and delete local credentials
 ```
@@ -59,6 +61,19 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen admin token create [--kind worker\|proxy] [--label k=v] [--ttl 15m]` | Create a single-use join token |
 | `limen admin lock <user> --reason …` / `unlock <user>` / `locks` | Lock or unlock a user; list locks |
 | `limen admin kill-session <id> --reason …` | End one live session |
+| `limen request <resource> [--role R] [--for 30m] [--reason …] [--break-glass] [--wait]` | Ask for a requestable role on one resource, for a limited time. See [access requests](access-requests.md) |
+| `limen requests [--approvals \| --all] [--status S]` | Your requests; the ones waiting for you to decide; everyone's (admins, auditors) |
+| `limen approve <id> [-m …]` / `limen deny <id> [-m …]` / `limen cancel <id>` | Decide a request (never your own), or withdraw yours |
+| `limen explain <resource> [--as login=NAME] [--user U]` | Why you can't reach it, in terms of your own roles; admins get the full trace |
+| `limen admin grants [--all]` / `limen admin revoke-grant <id> --reason …` | Active access grants; end one and the sessions it allowed |
+| `limen audit search '<query>' [--limit N] [--json]` | Search recent events and, if enabled, recording text (admin or auditor). See [audit search](audit-search.md) |
+| `limen policy test <paths> [--coverage]` | Run the `policy_test` cases; non-zero on any failure |
+| `limen policy who-can <resource>` / `what-can --group G \| --bot B` | Who reaches a resource; what a group or bot reaches and could ask for |
+| `limen policy diff <old\|active> --new <paths> [--format markdown] [--fail-on-widening]` | What changes in effective access |
+| `limen admin apply <paths> --require-tests` | Apply only if the policy's own tests pass |
+| `limen admin discovery status\|accept\|reject` | Resources workers found in the cloud, waiting for you. See [discovery](discovery.md) |
+| `limen review ls\|items\|certify\|flag` / `limen admin review start\|overrides\|lift` | Access reviews. See [access reviews](access-reviews.md) |
+| `limen admin evidence --from D --to D [--out FILE]` | A signed pack of compliance evidence |
 | `limen admin revoke <component> --reason …` | Stop honouring a proxy's or worker's certificate |
 | `limen kube login <cluster> [--kubeconfig FILE \| --print]` | Write a kubeconfig for a cluster you may reach. `kubectl` then runs `limen kube credentials`, the exec plugin that prints your short-lived certificate. See [the Kubernetes guide](kubernetes.md) |
 | `limen db connect <resource> [--db-role R] [--database D] [--listen ADDR \| --socket PATH]` | Open a local address for `psql`, `mysql`, or a driver, with no password: PostgreSQL, MySQL, Aurora, Redshift. Every connection is a session and every statement is audited. See [the databases guide](databases.md) |

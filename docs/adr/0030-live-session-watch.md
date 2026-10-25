@@ -1,6 +1,6 @@
 # ADR-0030: Watching a live session
 
-- Status: Proposed (owner requested 2026-10-14; priority: **nice to have**)
+- Status: Accepted and built (Phase 13). The owner asked for the whole phase on 2026-10-25.
 - Date: 2026-10-14
 
 ## Context
@@ -23,3 +23,13 @@ Recordings answer questions after the fact, and session kill stops one. Sometime
 ## Consequences
 - The proxy gains a fan-out buffer per session (small and bounded).
 - Database and other protocol sessions (later phases) can reuse it once they have a text-renderable stream; they are not in scope here.
+
+## As built (Phase 13)
+Accepted by the owner's request to build the phase. The spike's answer changed the design:
+
+- **The worker publishes, not the proxy.** An SSH session is encrypted between the user's client and the worker, so a proxy sees only ciphertext. The worker, which holds the plaintext it records, keeps a small ring per session, asks the control plane every two seconds which of its sessions are watched, and while one is, ships output in chunks.
+- **The console finds it through the shared database.** Chunks go in a short-lived table; the replica serving the browser streams them as server-sent events in asciicast form to the vendored player, so the CSP is unchanged and no proxy-to-proxy hop exists.
+- **The session always wins.** Bounded rings and buffers drop when nobody keeps up; nothing is sent unless someone watches. Output only, never input.
+- **Caps and re-checks:** five watchers per session and five sessions per watcher; every few seconds the stream re-checks the console sign-in, the lock, and that the session still runs.
+- **Audited and visible:** `session.watch.start`/`stop` (a watch that cannot be audited does not start); the session page lists who watched; `notify_observed: true` on a role prints a notice in the user's terminal.
+- **`--auditors-may-watch`** is off by default. Only SSH sessions can be watched.
