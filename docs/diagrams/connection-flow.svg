@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1600 1390" width="1600" height="1390" role="img" aria-labelledby="t d" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Limen connection sequence</title><desc id="d">Sequence of a Limen session: login and certificate, authorization and session grant, routing over the worker tunnel, per-session credentials, and audit.</desc>
+<defs><marker id="ah14B8A6" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#14B8A6"/></marker><marker id="ah1F2A44" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#1F2A44"/></marker><marker id="ah5B6B7F" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#5B6B7F"/></marker><marker id="ahCBD5E1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0 0L10 5L0 10z" fill="#CBD5E1"/></marker><filter id="sh" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity=".12"/></filter></defs>
+<rect width="1600" height="1390" fill="#ffffff"/>
+<image x="36" y="18" width="168" height="60" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1NjAgMjAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEwIDEwKSBzY2FsZSgwLjcpIj4KICAgIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxsaW5lIHgxPSIzNiIgeTE9IjIyMCIgeDI9IjIyMCIgeTI9IjIyMCIgc3Ryb2tlPSIjMTRCOEE2IiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICAgIDxjaXJjbGUgY3g9IjEyOCIgY3k9IjE0MCIgcj0iMTUiIGZpbGw9IiMxNEI4QTYiLz4KICA8L2c+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjMyIDUwKSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjEyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPHBhdGggZD0iTTEwIDAgVjEwMCIvPgogICAgPHBhdGggZD0iTTQyIDQwIFYxMDAiLz4KICAgIDxjaXJjbGUgY3g9IjQyIiBjeT0iMTIiIHI9IjciIGZpbGw9IiMxNEI4QTYiIHN0cm9rZT0ibm9uZSIvPgogICAgPHBhdGggZD0iTTc0IDQwIFYxMDAgTTc0IDYyIGEyMiAyMiAwIDAgMSA0NCAwIFYxMDAgTTExOCA2MiBhMjIgMjIgMCAwIDEgNDQgMCBWMTAwIi8+CiAgICA8cGF0aCBkPSJNMTgyIDcwIEgyNDIgQTMwIDMwIDAgMSAwIDIzMyA5MSIvPgogICAgPHBhdGggZD0iTTI2MiA0MCBWMTAwIE0yNjIgNjIgYTIyIDIyIDAgMCAxIDQ0IDAgVjEwMCIvPgogIDwvZz4KPC9zdmc+Cg==" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1NjAgMjAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEwIDEwKSBzY2FsZSgwLjcpIj4KICAgIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxsaW5lIHgxPSIzNiIgeTE9IjIyMCIgeDI9IjIyMCIgeTI9IjIyMCIgc3Ryb2tlPSIjMTRCOEE2IiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICAgIDxjaXJjbGUgY3g9IjEyOCIgY3k9IjE0MCIgcj0iMTUiIGZpbGw9IiMxNEI4QTYiLz4KICA8L2c+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjMyIDUwKSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjEyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPHBhdGggZD0iTTEwIDAgVjEwMCIvPgogICAgPHBhdGggZD0iTTQyIDQwIFYxMDAiLz4KICAgIDxjaXJjbGUgY3g9IjQyIiBjeT0iMTIiIHI9IjciIGZpbGw9IiMxNEI4QTYiIHN0cm9rZT0ibm9uZSIvPgogICAgPHBhdGggZD0iTTc0IDQwIFYxMDAgTTc0IDYyIGEyMiAyMiAwIDAgMSA0NCAwIFYxMDAgTTExOCA2MiBhMjIgMjIgMCAwIDEgNDQgMCBWMTAwIi8+CiAgICA8cGF0aCBkPSJNMTgyIDcwIEgyNDIgQTMwIDMwIDAgMSAwIDIzMyA5MSIvPgogICAgPHBhdGggZD0iTTI2MiA0MCBWMTAwIE0yNjIgNjIgYTIyIDIyIDAgMCAxIDQ0IDAgVjEwMCIvPgogIDwvZz4KPC9zdmc+Cg=="/>
+<rect x="222" y="28" width="2" height="42" rx="0" fill="#CBD5E1" stroke="none" stroke-width="0"/>
+<text x="242" y="50" font-size="22" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="242" dy="0">What happens when you run  limen ssh prod-db</tspan>
+</text>
+<text x="242" y="72" font-size="13" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="242" dy="0">One login, one connection, one audit trail. Every credential in the path is short-lived and every step is checked twice</tspan>
+</text>
+<rect x="30" y="245" width="1540" height="327" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
+<text x="46" y="267" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">A. Once per login</tspan>
+</text>
+<text x="46" y="285" font-size="11" font-weight="normal" fill="#5B6B7F" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">You prove who you are and get a certificate that expires in 10 minutes</tspan>
+</text>
+<rect x="30" y="587" width="1540" height="430" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
+<text x="46" y="609" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">B. Every connection</tspan>
+</text>
+<text x="46" y="627" font-size="11" font-weight="normal" fill="#5B6B7F" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">Policy is checked at the proxy and again at the worker; the worker connects to the target</tspan>
+</text>
+<rect x="30" y="1032" width="1540" height="180" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
+<text x="46" y="1054" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">C. During and after</tspan>
+</text>
+<text x="46" y="1072" font-size="11" font-weight="normal" fill="#5B6B7F" text-anchor="start" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="46" dy="0">Everything that happened becomes an audit event before the session is allowed to continue</tspan>
+</text>
+<polyline points="150,232 150,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<polyline points="420,232 420,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<polyline points="710,232 710,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<polyline points="1000,232 1000,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<polyline points="1270,232 1270,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<polyline points="1500,232 1500,1212" fill="none" stroke="#CBD5E1" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 5"/>
+<rect x="45" y="118" width="210" height="104" rx="8" fill="#fff" stroke="#B45309" stroke-width="1.8"/>
+<rect x="60" y="130" width="40" height="40" rx="9" fill="#FEF3C7" stroke="#B45309" stroke-width="1.5"/>
+<text x="80" y="157" font-size="15" font-weight="bold" fill="#B45309" text-anchor="middle">
+<tspan x="80" dy="0">ID</tspan>
+</text>
+<text x="110" y="146" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="110" dy="0">Your IdP</tspan>
+</text>
+<text x="110" y="163" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="110" dy="0">Okta, Entra ID, Dex</tspan>
+</text>
+<text x="60" y="193" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="60" dy="0">Signs you in and</tspan>
+</text>
+<text x="60" y="207" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="60" dy="0">issues the ID token</tspan>
+</text>
+<rect x="315" y="118" width="210" height="104" rx="8" fill="#fff" stroke="#1F2A44" stroke-width="1.8"/>
+<image x="330" y="130" width="40" height="40" href="data:image/png;base64,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" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAEZ0FNQQAAsY58+1GTAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAAOxAAADsQBlSsOGwAADKRJREFUeNrtWwt0VMUZnpm9m6chj82DEMiGZCVizCaYKkKSZQVaaQXqseKjHMTWtlofxyqCWm2px1KpQjme2lbAVkEttuDRyPF4UIjJhqcY8yIIyW7IhmhemgQkkLD33uk/u3N3ryGb7JPgqXPOZu/cnbn/zDf//P/3/3OD0Hfl/7vgYB+QmV+SGIGFXIRoCiL4ayKJbU0Ne1vCMdjsopJMIgnZSKZxlNCvohyOY42NB3rHAwCSU2hahii6Gx5QzOrf/Jna4dE7KBWfs9Xv7w5mgFdcO08nnhdXIEpvYxgM+5nC5wDF+NUpCfiViooKMewAXH61aTqS0ZuUIqMPzc8gildZ6yv/EcjkLy8svYtSvAEuE3xofowQ+fammr11YQPAUGg2IyqXweUEfus8pmi3jNBHoAM9hNJoGeFCeOgi+G2SquvfrHWWB/ySVWB6Fr4eV93qQhjvBPA/BfU/iynWgVaYYAY3wG9RvM0AlfESW0Pl+yEHILugZBpB5CBcJvKe7wqIPHSstqJ1eNu8vLyIISHpfmjEJhHJbz8OIPzZN6BN94Nyv8irDpjoavG0ZkNra8XgBW2N5skIy+vh8lZF6ySJFp84UlXviyyNrwAkT9S/AxPKdW48jF6w1Vp+9mVna/9IbXt6eqTerraDien6ckD4DrilhY9Zl6Hf0dth/3LUPV9ozpIp3QmXAnyG4PpHtvqqrf39rSPu796u1tO9XfYdujS9FhbFBLciCMHXwb1NPhkzn/ZiQclCinCJc/KU7obJP8IN0KgF2u2HQf2KVwVZQn8cq4+I5KcVrcGI/qalvmqPL2Nsrrc8BSMq49UZOcbS20IGACjKUsXqglFik5d91RxrreUN0ILDfL8tzC6aH++tbVaWOQomcTPfnY3NdVWb/LKasrAC/krO3pgsDRkAFNEb+GVdS4OlwV9rDobxNX4ZgUXHXG/ttAm0FL4u40L/7Q/QTrCPlNtALffzUc9HS5ZoggbAMHPmBI/hw58ExjZotfsSy3qvQMs0U9Xnk8BEIUVW1LSmryYGDYAsahM8LoP2BzQorOon4/hRGsZ7BhaYLCjuflQjTggagMw44QunbXIZgLRARkRlkqZyvCdHadnuxomSgGQh4hkjGZDagwaA00vXoCmeE6AGePph4jVOkInqNyybAwLAM8ae48f3fR0aL6C4F4wygZ7e6M94XJad3sWr3ZGOnv3e2rYYUmpAVhtHYGlenvkyv6hzvonxgCs56mUh8wJYQJsUvw9u8C+jubLhRYiXV8MT9LzvlsbGxvNeG2/fLsHA/8lraUOC/KyvciYVFcUArfurx/Og0BGh5k8tn8HoX+bVaUQceoeFwWOuiNH0EHw9xsO2DqyRnx/blWtfgLYKvX4Aos4nx+qTm1scFyPGvKUEaBTTbS21lYdDSoWjJqfs0UoRN8M2SIEVzdJgfGviRH1nn+naY+joUTo8YtSl6jcBZX6YxxuyhpCfNNdYjowlp6+jZSgpXX8YOi1nCwTfc6E+Mz45s6G/u63rgrC8YM5NVMD/BTEz+b0TVIhcxJ4T8mhwelFpusOB34Ve31PTcVjeKojJ+7CTv9Or3ftQidAQXmarq3zbH1k5RvMC4AwwMRTnMUX4OKa0GmSdBzcZD6gzep6i6tYgC/LCluq9bb7K0fgzqC872s4kpGW2YFh9HqywEg2AXAGTL4Rr47ABMe6wMV4YeLGjo8MvVjcpObZNItGwzfAs1Wolw598Lms6fGJVXRyUkp+31Fqqw5IPyMkvKQJ+vR56BOAKqR0ErW2eNnGz09CNYZcMhXPuBZvzBFxPDiDDs0fGdLWttmpfSAAwm83CyT76e1jJJ1SrzkoTfN4G7nkAy7RTQwTn/jwvSzmEoHyw+PPh4T/gobAizQLOfqm1vmJEgjKtYG4GReIWUO15qttsL1uAS3xIkeYwwlK3QDVnReqIBaqXA3bmGjAUi4dlqCCKxusTtGeerK6udgQMwORZs6KjzkbAPqQL1QgDGL9tqqv6eMw4YkZpCqLkYVhN5g1ixsoOGQpMzI0pvw2A3I1aAa37rLqqw4cM0gwA7hkYn5qnlEeK5MeNjRVn/AaAERghQd4FlsfEb52C1V5ura0q81ctp86Yq9dI4jZwuo5Ix1ff98YFnJkkje4DGFU0koSfsujO7zyiM3dBGJdI5ZbzwGCsY177gQPn/ALAUGjaAp3vVBKOMqgZGJjmQLO7bCu1nzsXYz106PRY0efk6OizgWR4v5E+F8kulmDit/4DWne7zwDkFM75JbgbhUl9TiU0y3bEchKFqLCVPkd0uRoNnkghUiKEdspfxx2zWt8fCpWMqVfNSyMax0GYYJaLHOF7bLWVm8YEwJmHH3Qch190UB0Eyz+rubaiNhSDMhhLr4bnraSI3qj27+49j/H7EC6vByN5MBTysvNN+WCQP+ZZ435J0l5x4sierlF5QHzylLUYo+u5+/oTqM6bwQ6EGdNUXfZGmCA7H8hXZYrVJcJJoDD9RWJ6Zu4kXfaunp7W88HI7eu2dydN1DO3O5+BQIhEervaPvAKAIu+JEJfdw2Q2gdjxDtOt7eLwQyCxQyRDqEcNOpGj8ZhdnixBVzYy3DnHXBxR0FHGaGa5FJLnA/jWJSYlvFWX9fJgWDkJ8VdeRhpHXfCQyGAw/mXpU556VR32+CIAEzI0C+HEd7CredzrdX7PgpGODN8ZwZpGTDHEoUQwZ/bQatW9nbZd/d12uvYp7ezrRzqm5PSp1ZCm9nQhm2/NNguxTCBN3p7rVKgY2B9IWbRcE4SATFME8iqGTEaxB5/LxGs3Rqs6n/eS++Dyc93heeoHqRdY62r2uU9gwymHxMW1CgcYzaKObsi2HFgQrcq2WLgCjd7C4dh/mg2t4yfNtWVfx6MUBafQ1j6O149I2JhsbWmqmesfq21Ff0ikBdnkOXKcj7mS+g9arbYJbeaz232iADkGk3MXSRzl1EXLOqxYuwC9/MQ3nCiptzua9/WxopOsAtrlZ2pxWRR0FqA6CF+mchOn9wJG08GRU5140HphJxC03L/BBA7U2F3+EPpAqb3PEHxmt+5TSy/IVHNWuciEcrA3OohaWYzRd7T615yhSnKYZYs0ymIJ10ElcRk1WHXrZi6Dxt9LPJ2lkNVZUKVAZ4KhEEer9n3BfB7FgNkYIr1w9LM9wG0S/yav2pyFEvxF2wBULl25OdJzBiF5+QDzu+zUfG+OD6E45Ix8aTm3RrAXiyYelXpDCLgGYHtMWIflgtvh33ALlK5/6f+P1XJ8csnh5n1v8MWeC+g2Yu0xlq3t/4CAJzJNNeZen0oYAaO34JdvCfaYDTP9JfeGgqK8xQjCjrbMtxdhkodCApXUeXlMZLv9f8BmntV6lUWrmGGDQDnuwEIHXEtIFrmfL3G15jeWMLI0D282gLM8cNvHQC8rOCGlYDv2QFb4TqfMjuYlCmpNOAQjwZmP8KQFfabh3fZbbp0fZyT0mIUA6xumS5NH5WePKm2p6f93PBEiC45exXo+78QP46HWb9kq7OsC+cYMQp/IYaC0udB1COqew6YHBhFbOM2IounvyM9fhttnJJIHggmM+RLES4CALIoap4XtHQOuIYifk8LyJfCNEu9rMNRSSR/CPfkw64BWYXmBEGW14CUu70kQUYrg8DfN4tSxJrhWZxvBQD8aIsdqGaokzQg8j2IDXYz4sTeKyYagIhKqRLG0wlEozxcTVb16QE3cre1vnLntwYAg3HOr8Hgvej2MuzMH6OnJyeSrWOpdVFRkfa0FLsESCR7Xc7gia3QKlt96A0iDv3Kmx6FIFB1DI43oIGYJ/zN+DIgTomxz8DlSgVI4BNPAb9Yc8m6QYPRtBizPJ8L2CG4Xg4kZl0gKS12mMrSZrq0zEZglYuZwYaHXp8E9d6utqOXHADs9AfYDmNsUa4UAL6zuc6yLXgu0fZZUnomMEq8xKkJGP8wMUX/el+3/fQlxQQ1VFqnhMBgvVc311duC9Wz2XEcqP9qXo3DgvtF6ksDgOwCcwmYqVt4tSEjUfNsqG2L7fK0tcort2BUF/tCqy8aAKD6D3oq9MGwEJjt2yVK6EpPsCmvuiQAyDHOZgmPm3i1xlpTVRkubsGffYhT5YV5ebOSxh0AjDXOAwceub0SfupKX1Xo9KBWu2jcAYBJFyM3wcc7ww2ASLTuf4fBMi0efw2g7jfG+kf695lQF36+0OnSPlx4KUSDqQrP9/csIQi9G2C0UA7gJarQA4DdgctU0IZXLw4AWPmbOO5bAEobGr/SOv4aQKiJSmgeIjjyok5dpkNYg/ag78p3JajyP4b6zWgeQmO2AAAAAElFTkSuQmCC"/>
+<text x="380" y="146" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="380" dy="0">You</tspan>
+</text>
+<text x="380" y="163" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="380" dy="0">limen CLI</tspan>
+</text>
+<text x="330" y="193" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="330" dy="0">Holds your keys and</tspan>
+</text>
+<text x="330" y="207" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="330" dy="0">certificate (0600)</tspan>
+</text>
+<rect x="605" y="118" width="210" height="104" rx="8" fill="#fff" stroke="#1F2A44" stroke-width="1.8"/>
+<image x="622" y="132" width="36" height="36" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="670" y="146" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="670" dy="0">Proxy</tspan>
+</text>
+<text x="670" y="163" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="670" dy="0">public, behind the NLB</tspan>
+</text>
+<text x="620" y="193" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="620" dy="0">Checks certificate and</tspan>
+</text>
+<text x="620" y="207" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="620" dy="0">policy, signs the grant</tspan>
+</text>
+<rect x="895" y="118" width="210" height="104" rx="8" fill="#fff" stroke="#1F2A44" stroke-width="1.8"/>
+<image x="912" y="132" width="36" height="36" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="960" y="146" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="960" dy="0">Control plane</tspan>
+</text>
+<text x="960" y="163" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="960" dy="0">private, in the Limen VPC</tspan>
+</text>
+<text x="910" y="193" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="910" dy="0">Issues certificates,</tspan>
+</text>
+<text x="910" y="207" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="910" dy="0">holds policy and audit</tspan>
+</text>
+<rect x="1165" y="118" width="210" height="104" rx="8" fill="#fff" stroke="#1F2A44" stroke-width="1.8"/>
+<image x="1182" y="132" width="36" height="36" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K" xlink:href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkxpbWVuIj4KICA8dGl0bGU+TGltZW48L3RpdGxlPgogIDxwYXRoIGQ9Ik02NCAxOTIgVjExMiBhNjQgNjQgMCAwIDEgMTI4IDAgVjE5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMUYyQTQ0IiBzdHJva2Utd2lkdGg9IjIwIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8bGluZSB4MT0iMzYiIHkxPSIyMjAiIHgyPSIyMjAiIHkyPSIyMjAiIHN0cm9rZT0iIzE0QjhBNiIgc3Ryb2tlLXdpZHRoPSIxNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTQwIiByPSIxNSIgZmlsbD0iIzE0QjhBNiIvPgo8L3N2Zz4K"/>
+<text x="1230" y="146" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1230" dy="0">Worker</tspan>
+</text>
+<text x="1230" y="163" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="start">
+<tspan x="1230" dy="0">next to the target</tspan>
+</text>
+<text x="1180" y="193" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1180" dy="0">Terminates the protocol,</tspan>
+</text>
+<text x="1180" y="207" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1180" dy="0">records the session</tspan>
+</text>
+<rect x="1445" y="118" width="110" height="104" rx="8" fill="#fff" stroke="#5B6B7F" stroke-width="1.8"/>
+<image x="1480" y="126" width="40" height="40" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAQKADAAQAAAABAAAAQAAAAABGUUKwAAACH0lEQVRoBe1ZvU7DMBBOECqULPy8CSsDM2ysPAIDUlkrJsQKUgcegZUNZgZW3qTAEgpdwkknnSKQz8l9dkoUVx3SOvf5+zm7cprPJ1mvX2u9Zk/kk4BVJ5gSSAmADqQWAg2Ey3ufwDpsgRNgtH9anMzyYs95h2+gKuflw/ny9V65MWICIHsiTeIJRGFPQxETYO/fLnKdgTK6e1N5A4yYgMIs4FASENBME1TENYB0f3MtqYWyjPYKeotn9Y9NrqXQdpESsPkWripHDvWbh5Px0VU+Kmx8qmW5eLr8er51lXNn6psB1EIIeyJNygnBxb7h98ZttL5qdYcUHgRCGgTKhgMloJDrbMiYALsl5iF0bcbLjENNIIj37KJA2aIYagL/Zw14FvHfc60taFlzwS88AlznWmlcnJBA2azxCMDPtW0Vih4upAcTOoJHgKu4mzXAj1VcHPh7owAdFBlt20hD3UZ/dSpiuUC19Z4nHWoC3SziJsEONQFp3CYm6fcIlG0NBNhGhYFONNKoUQC7tXFwtnV8nY+3beSqxcfn4/T75c5WzlVGAVxMc9ObE5AGqH/Ur9+nOwh1ru39Iu69AM+DrXoP4HHHQOh9AtEFUIYcYwz7CTO6gEi8BTYJECtWdOH5IaNDHR2LwSb2nmsR7Z4Won/6wembnGsRAZ7fAQS6m1pPAt2QQGZJAhD3QtSmBEK4iGCkBBD3QtSmBEK4iGD8AFyRp1CC4bwgAAAAAElFTkSuQmCC" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAQKADAAQAAAABAAAAQAAAAABGUUKwAAACH0lEQVRoBe1ZvU7DMBBOECqULPy8CSsDM2ysPAIDUlkrJsQKUgcegZUNZgZW3qTAEgpdwkknnSKQz8l9dkoUVx3SOvf5+zm7cprPJ1mvX2u9Zk/kk4BVJ5gSSAmADqQWAg2Ey3ufwDpsgRNgtH9anMzyYs95h2+gKuflw/ny9V65MWICIHsiTeIJRGFPQxETYO/fLnKdgTK6e1N5A4yYgMIs4FASENBME1TENYB0f3MtqYWyjPYKeotn9Y9NrqXQdpESsPkWripHDvWbh5Px0VU+Kmx8qmW5eLr8er51lXNn6psB1EIIeyJNygnBxb7h98ZttL5qdYcUHgRCGgTKhgMloJDrbMiYALsl5iF0bcbLjENNIIj37KJA2aIYagL/Zw14FvHfc60taFlzwS88AlznWmlcnJBA2azxCMDPtW0Vih4upAcTOoJHgKu4mzXAj1VcHPh7owAdFBlt20hD3UZ/dSpiuUC19Z4nHWoC3SziJsEONQFp3CYm6fcIlG0NBNhGhYFONNKoUQC7tXFwtnV8nY+3beSqxcfn4/T75c5WzlVGAVxMc9ObE5AGqH/Ur9+nOwh1ru39Iu69AM+DrXoP4HHHQOh9AtEFUIYcYwz7CTO6gEi8BTYJECtWdOH5IaNDHR2LwSb2nmsR7Z4Won/6wembnGsRAZ7fAQS6m1pPAt2QQGZJAhD3QtSmBEK4iGCkBBD3QtSmBEK4iGD8AFyRp1CC4bwgAAAAAElFTkSuQmCC"/>
+<text x="1500" y="184" font-size="14" font-weight="bold" fill="#1F2A44" text-anchor="middle">
+<tspan x="1500" dy="0">Target</tspan>
+</text>
+<text x="1500" y="200" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle">
+<tspan x="1500" dy="0">sshd, database,</tspan>
+</text>
+<text x="1500" y="213" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle">
+<tspan x="1500" dy="0">kube API, web app</tspan>
+</text>
+<polyline points="420,322 150,322" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="170" cy="305" r="11" fill="#1F2A44"/><text x="170" y="309.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
+<text x="293.0" y="310" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="293.0" dy="0">limen login opens your browser</tspan>
+</text>
+<text x="293.0" y="337" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="293.0" dy="0">OIDC authorization code with PKCE (or device code)</tspan>
+</text>
+<polyline points="150,377 420,377" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="170" cy="360" r="11" fill="#1F2A44"/><text x="170" y="364.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
+<text x="293.0" y="365" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="293.0" dy="0">ID token</tspan>
+</text>
+<text x="293.0" y="392" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="293.0" dy="0">its nonce is bound to the public keys your CLI just generated</tspan>
+</text>
+<polyline points="420,432 1000,432" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="440" cy="415" r="11" fill="#1F2A44"/><text x="440" y="419.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
+<text x="718.0" y="420" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="718.0" dy="0">ID token + public keys</tspan>
+</text>
+<text x="718.0" y="447" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="718.0" dy="0">the proxy relays it, and cannot swap in its own keys</tspan>
+</text>
+<rect x="850.0" y="456" width="300" height="62" rx="6" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.4"/>
+<text x="1000" y="474" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="1000" dy="0">Verify token, map IdP groups to roles,</tspan>
+<tspan x="1000" dy="14">sign with the CA key in KMS</tspan>
+<tspan x="1000" dy="14">audit: auth.login</tspan>
+</text>
+<polyline points="1000,548 420,548" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="440" cy="531" r="11" fill="#1F2A44"/><text x="440" y="535.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">4</text>
+<text x="718.0" y="536" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="718.0" dy="0">10-minute X.509 certificate</tspan>
+</text>
+<polyline points="420,672 710,672" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="440" cy="655" r="11" fill="#1F2A44"/><text x="440" y="659.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">5</text>
+<text x="573.0" y="660" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="573.0" dy="0">mTLS with your certificate</tspan>
+</text>
+<text x="573.0" y="687" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="573.0" dy="0">SessionRequest: resource, login or DB role</tspan>
+</text>
+<rect x="540.0" y="697" width="340" height="62" rx="6" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.4"/>
+<text x="710" y="715" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="710" dy="0">Valid certificate? Policy allows? (signed snapshot)</tspan>
+<tspan x="710" dy="14">No: audit auth.denied, close</tspan>
+<tspan x="710" dy="14">Yes: sign a 60-second session grant, audit session.start</tspan>
+</text>
+<polyline points="710,802 1270,802" fill="none" stroke="#14B8A6" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="8 5" marker-end="url(#ah14B8A6)"/>
+<circle cx="730" cy="785" r="11" fill="#14B8A6"/><text x="730" y="789.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">6</text>
+<text x="998.0" y="790" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="998.0" dy="0">Stream over the worker's outbound tunnel</tspan>
+</text>
+<text x="998.0" y="817" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="998.0" dy="0">with the signed grant (via a peer proxy if needed)</tspan>
+</text>
+<rect x="1125.0" y="824" width="290" height="76" rx="6" fill="#F0FDFA" stroke="#14B8A6" stroke-width="1.4"/>
+<text x="1270" y="842" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="1270" dy="0">Grant signature and expiry OK?</tspan>
+<tspan x="1270" dy="14">Own policy copy allows too? (both must)</tspan>
+<tspan x="1270" dy="14">Labels match the resource?</tspan>
+<tspan x="1270" dy="14">Then get the upstream credential</tspan>
+</text>
+<polyline points="1270,938 1500,938" fill="none" stroke="#1F2A44" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah1F2A44)"/>
+<circle cx="1290" cy="921" r="11" fill="#1F2A44"/><text x="1290" y="925.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">7</text>
+<text x="1256" y="935" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="end" stroke="#fff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="1256" dy="0">Connects with a credential made for this session</tspan>
+</text>
+<text x="1256" y="951" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="end" stroke="#fff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="1256" dy="0">SSH certificate (1 min) · IAM token · kube impersonation</tspan>
+</text>
+<polyline points="420,992 1500,992" fill="none" stroke="#14B8A6" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah14B8A6)" marker-start="url(#ah14B8A6)"/>
+<circle cx="440" cy="975" r="11" fill="#14B8A6"/><text x="440" y="979.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">8</text>
+<text x="968.0" y="980" font-size="11.5" font-weight="bold" fill="#0F766E" text-anchor="middle" stroke="#F8FAFC" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="968.0" dy="0">Your session: end-to-end through the proxy and worker, which the worker records</tspan>
+</text>
+<polyline points="1270,1112 1000,1112" fill="none" stroke="#5B6B7F" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#ah5B6B7F)"/>
+<circle cx="1020" cy="1095" r="11" fill="#5B6B7F"/><text x="1020" y="1099.5" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">9</text>
+<text x="986" y="1109" font-size="11.5" font-weight="bold" fill="#232F3E" text-anchor="end" stroke="#fff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="986" dy="0">Commands, queries and the recording, as audit events</tspan>
+</text>
+<text x="986" y="1125" font-size="10.5" font-weight="normal" fill="#5B6B7F" text-anchor="end" stroke="#fff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
+<tspan x="986" dy="0">spooled to disk first, then relayed through the proxy</tspan>
+</text>
+<rect x="845.0" y="1136" width="310" height="62" rx="6" fill="#FFF7ED" stroke="#ED7100" stroke-width="1.4"/>
+<text x="1000" y="1154" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="1000" dy="0">Append to the hash chain, write batches to S3</tspan>
+<tspan x="1000" dy="14">(signed manifests), optionally to Datadog</tspan>
+<tspan x="1000" dy="14">If audit cannot be written: no new sessions</tspan>
+</text>
+<rect x="585.0" y="1136" width="250" height="48" rx="6" fill="#FFF7ED" stroke="#ED7100" stroke-width="1.4"/>
+<text x="710" y="1154" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="710" dy="0">Session ends: audit session.end</tspan>
+<tspan x="710" dy="14">duration, bytes, reason</tspan>
+</text>
+<rect x="295.0" y="1136" width="250" height="48" rx="6" fill="#FEF2F2" stroke="#DD344C" stroke-width="1.4"/>
+<text x="420" y="1154" font-size="10.5" font-weight="normal" fill="#232F3E" text-anchor="middle">
+<tspan x="420" dy="0">limen admin lock / kill-session</tspan>
+<tspan x="420" dy="14">ends access at once</tspan>
+</text>
+<text x="30" y="1252" font-size="15" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="30" dy="0">Three things to remember</tspan>
+</text>
+<rect x="30" y="1267" width="500" height="95" rx="8" fill="#fff" stroke="#CBD5E1" stroke-width="1.2"/>
+<rect x="30" y="1267" width="6" height="95" rx="3" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="52" y="1290" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="52" dy="0">Nothing is long-lived</tspan>
+</text>
+<text x="52" y="1310" font-size="11" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="52" dy="0">Certificate 10 min, session grant 60 s, SSH certificate 1 min,</tspan>
+<tspan x="52" dy="15">IAM token for the connect only. A stolen credential is</tspan>
+<tspan x="52" dy="15">worthless within minutes.</tspan>
+</text>
+<rect x="550" y="1267" width="500" height="95" rx="8" fill="#fff" stroke="#CBD5E1" stroke-width="1.2"/>
+<rect x="550" y="1267" width="6" height="95" rx="3" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="572" y="1290" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="572" dy="0">Two independent checks</tspan>
+</text>
+<text x="572" y="1310" font-size="11" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="572" dy="0">The proxy and the worker each evaluate policy from signed</tspan>
+<tspan x="572" dy="15">snapshots. A compromised proxy cannot reach a target</tspan>
+<tspan x="572" dy="15">the worker's policy does not allow.</tspan>
+</text>
+<rect x="1070" y="1267" width="500" height="95" rx="8" fill="#fff" stroke="#CBD5E1" stroke-width="1.2"/>
+<rect x="1070" y="1267" width="6" height="95" rx="3" fill="#14B8A6" stroke="none" stroke-width="0"/>
+<text x="1092" y="1290" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
+<tspan x="1092" dy="0">Fail closed</tspan>
+</text>
+<text x="1092" y="1310" font-size="11" font-weight="normal" fill="#232F3E" text-anchor="start">
+<tspan x="1092" dy="0">No audit, no session. If the control plane or KMS is down,</tspan>
+<tspan x="1092" dy="15">new SSH and logins stop, and database or Kubernetes access</tspan>
+<tspan x="1092" dy="15">continues only within a 5-minute policy grace period.</tspan>
+</text>
+</svg>

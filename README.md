@@ -60,6 +60,12 @@ Where a managed AWS service exists, each target works with it and compatible sel
   </tr>
 </table>
 
+## How it works
+
+[![How Limen works: people and bots log in through your IdP, connect through one public load balancer to proxies, and reach targets through outbound-only workers; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+
+[Two more diagrams](docs/diagrams/README.md) walk through one connection step by step and show how credentials, audit, and failures behave.
+
 ## Where it runs
 
 <table>
