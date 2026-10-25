@@ -4,10 +4,13 @@
 |---|---|
 | `audit` | S3 audit store, KMS, Glue and Athena |
 | `datadog` | Datadog sink monitors |
+| `foundation` | Everything Limen depends on: PostgreSQL (RDS), four KMS signing keys, the audit store, join tokens, secrets, control plane IAM and optional EKS IRSA role. Wraps `terraform-aws-modules` `rds`, `kms`, `secrets-manager`, `iam` |
 | `ecs` | Limen services on Fargate, built on `terraform-aws-modules/ecs` (cluster and service submodules) |
 | `ec2` | Limen Auto Scaling groups of Amazon Linux 2023 instances running the container under systemd, built on `terraform-aws-modules/autoscaling` and `security-group` |
 
 Layout of `ecs` and `ec2`: `versions.tf`, `variables.tf`, `locals.tf`, `main.tf`, `outputs.tf` (and `data.tf`, `user-data.sh.tftpl` in `ec2`). Provider and module versions are pinned.
+
+See [docs/guides/deploy.md](../../../docs/guides/deploy.md) for the full deployment (ECS/EC2 and Kubernetes). `examples/complete` applies `foundation`, a VPC, load balancers, `ecs` and `ec2`; `examples/kubernetes` applies `foundation` only, for the Helm chart.
 
 ## Running more than one of each
 
@@ -27,7 +30,7 @@ module "ecs" {
 
 Scale an existing service by changing `desired_count` (ECS; with `min_count`/`max_count` a CPU target-tracking policy is added) or `desired_capacity` (EC2; Terraform then ignores the live count so your scaling policies win). Peers reach each other through security group rules; both modules output each service's `security_group_id` and role name. `examples/complete` builds all three components from maps, with workers in separate VPCs; `terraform.tfvars.example` shows the shape.
 
-Secrets are ARNs (`secrets = { LIMEN_JOIN_TOKEN = arn }`), read at start with the task or instance role, so values stay out of state and user data. Attach KMS and S3 policies with `task_role_policy_arns` (ECS) or `role_policy_arns` (EC2).
+Services get the internal CA through `internal_ca = { secret_arn }` (a publisher sidecar on control planes, a writer on proxies and workers; see the guide). Secrets are ARNs (`secrets = { LIMEN_JOIN_TOKEN = arn }`), read at start with the task or instance role, so values stay out of state and user data. Attach KMS and S3 policies with `task_role_policy_arns` (ECS) or `role_policy_arns` (EC2).
 
 ## Limits
 

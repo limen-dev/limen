@@ -78,6 +78,9 @@ spec:
             - { name: LIMEN_DNS_NAMES, value: "{{ $name }},$(LIMEN_ID).{{ $name }}" }
             - { name: LIMEN_ADVERTISE_URL, value: "https://$(LIMEN_ID).{{ $name }}:3080" }
             - { name: LIMEN_DRAIN_TIMEOUT, value: {{ $c.drainTimeout | quote }} }
+            # The public CA certificates are written here; copy internal-ca.pem
+            # out once for the proxies and workers (see README.md).
+            - { name: LIMEN_CA_EXPORT_DIR, value: /var/lib/limen/ca-public }
             - { name: LIMEN_CA_BACKEND, value: kms }
             - { name: LIMEN_KMS_INTERNAL_CA_KEY, value: {{ required "controlPlanes.<key>.kms.internalCaKey is required" $kms.internalCaKey | quote }} }
             - { name: LIMEN_KMS_USER_CA_KEY, value: {{ required "controlPlanes.<key>.kms.userCaKey is required" $kms.userCaKey | quote }} }
@@ -93,6 +96,7 @@ spec:
             {{- end }}
           volumeMounts:
             - { name: spool, mountPath: /var/lib/limen/spool }
+            - { name: ca-public, mountPath: /var/lib/limen/ca-public }
           readinessProbe:
             httpGet: { path: /readyz, port: admin }
             periodSeconds: 3
@@ -100,6 +104,9 @@ spec:
             httpGet: { path: /healthz, port: admin }
             periodSeconds: 10
           resources: {{ toYaml $c.resources | nindent 12 }}
+      volumes:
+        - name: ca-public
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata: { name: spool }
       spec:

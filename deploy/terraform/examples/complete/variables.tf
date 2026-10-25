@@ -18,69 +18,61 @@ variable "image_tag" {
   type = string
 }
 
-variable "oidc_issuer" {
-  type = string
-}
-
-variable "oidc_client_id" {
-  type = string
-}
-
-variable "ca_key_arns" {
-  description = "KMS keys behind LIMEN_KMS_*_KEY."
+variable "oidc" {
+  description = "Your identity provider's issuer URL and the client id registered for Limen."
   type = object({
-    internal_ca = string
-    user_ca     = string
-    ssh_user_ca = string
-    ssh_host_ca = string
+    issuer    = string
+    client_id = string
   })
 }
 
-variable "database_url_secret_arn" {
-  description = "Secrets Manager secret holding the PostgreSQL URL."
-  type        = string
+variable "core_vpc" {
+  description = "The VPC created for the database, control planes and proxies."
+  type = object({
+    cidr               = optional(string, "10.40.0.0/16")
+    azs                = optional(list(string), ["eu-west-1a", "eu-west-1b", "eu-west-1c"])
+    private_subnets    = optional(list(string), ["10.40.0.0/20", "10.40.16.0/20", "10.40.32.0/20"])
+    public_subnets     = optional(list(string), ["10.40.100.0/24", "10.40.101.0/24", "10.40.102.0/24"])
+    single_nat_gateway = optional(bool, true)
+  })
+  default = {}
 }
 
-variable "control_plane_addr" {
-  description = "host:port the proxies dial, e.g. an internal NLB or Cloud Map name for the control plane's port 3080."
-  type        = string
+variable "database" {
+  description = "PostgreSQL settings (see modules/foundation)."
+  type        = any
+  default     = {}
 }
 
 variable "control_planes" {
-  description = "Control plane services on ECS. Add entries to run more replicas groups, each in its own VPC."
+  description = "Control plane services on ECS, all in the core VPC. Raise desired_count to scale, or add entries."
   type = map(object({
-    vpc_id        = string
-    subnet_ids    = list(string)
     desired_count = optional(number, 3)
   }))
+  default = { core = {} }
 }
 
 variable "proxies" {
-  description = "Proxy services on ECS, each behind its own load balancer target group and public name."
+  description = "Proxy services on ECS in the core VPC, each behind its own public Network Load Balancer. dns_name is the public name you will point at the load balancer."
   type = map(object({
-    vpc_id                = string
-    subnet_ids            = list(string)
-    desired_count         = optional(number, 3)
-    dns_name              = string
-    target_group_arn      = string
-    join_token_secret_arn = string
-    client_cidrs          = optional(list(string), ["0.0.0.0/0"])
+    desired_count = optional(number, 3)
+    dns_name      = string
+    client_cidrs  = optional(list(string), ["0.0.0.0/0"])
   }))
 }
 
 variable "workers" {
-  description = "Worker groups on EC2. Each dials the proxy named by \"proxy\" (a key of var.proxies); put each group in the VPC of the hosts and databases it reaches."
+  description = "Worker groups on EC2, one per network they reach. Each lives in an existing VPC (the one of the hosts and databases it connects to) and dials the proxy named by \"proxy\" (a key of var.proxies)."
   type = map(object({
-    vpc_id                = string
-    subnet_ids            = list(string)
-    proxy                 = string
-    desired_capacity      = optional(number, 3)
-    max_sessions          = optional(number, 200)
-    join_token_secret_arn = string
+    vpc_id           = string
+    subnet_ids       = list(string)
+    proxy            = string
+    desired_capacity = optional(number, 3)
+    max_sessions     = optional(number, 200)
   }))
 
   validation {
-    condition     = length(var.workers) > 0
-    error_message = "Define at least one worker group."
+    condition     = alltrue([for w in var.workers : contains(keys(var.proxies), w.proxy)])
+    error_message = "Each worker's proxy must be a key of var.proxies."
   }
 }

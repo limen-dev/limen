@@ -9,9 +9,13 @@ locals {
 
   groups = {
     for key, g in var.groups : key => merge(g, {
-      port = local.ports[g.component]
+      port      = local.ports[g.component]
+      publishes = g.component == "control-plane" && var.internal_ca != null
+      consumes  = g.component != "control-plane" && var.internal_ca != null
       environment = merge(
         { LIMEN_DATA_DIR = "/var/lib/limen/${g.component}" },
+        g.component == "control-plane" ? { LIMEN_CA_EXPORT_DIR = "/var/lib/limen/ca-public" } : {},
+        g.component != "control-plane" && var.internal_ca != null ? { LIMEN_CA_FILE = "/etc/limen/internal-ca.pem" } : {},
         g.environment,
       )
     })

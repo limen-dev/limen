@@ -414,7 +414,7 @@ jobs:
         run: terraform fmt -check -recursive deploy/terraform
       - name: terraform validate
         run: |
-          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/modules/ecs deploy/terraform/modules/ec2 deploy/terraform/examples/audit deploy/terraform/examples/complete; do
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/modules/foundation deploy/terraform/modules/ecs deploy/terraform/modules/ec2 deploy/terraform/examples/audit deploy/terraform/examples/complete deploy/terraform/examples/kubernetes; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done

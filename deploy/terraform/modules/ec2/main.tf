@@ -94,6 +94,9 @@ module "asg" {
     publish      = local.publish[each.key]
     environment  = each.value.environment
     secrets      = each.value.secrets
+    ca_secret    = var.internal_ca.secret_arn
+    publishes    = each.value.publishes
+    consumes     = each.value.consumes
   }))
 
   instance_refresh = {
@@ -106,13 +109,22 @@ module "asg" {
   tags = var.tags
 }
 
-# Secrets Manager read access for the secrets the group lists.
+# Secrets Manager access: the secrets a group lists, the CA secret (read by
+# proxies and workers, written by control planes).
 data "aws_iam_policy_document" "read_secrets" {
-  for_each = { for k, g in local.groups : k => g if length(g.secrets) > 0 }
+  for_each = { for k, g in local.groups : k => g if length(g.secrets) > 0 || g.publishes || g.consumes }
 
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = values(each.value.secrets)
+    resources = concat(values(each.value.secrets), each.value.consumes ? [var.internal_ca.secret_arn] : [])
+  }
+
+  dynamic "statement" {
+    for_each = each.value.publishes ? [1] : []
+    content {
+      actions   = ["secretsmanager:PutSecretValue"]
+      resources = [var.internal_ca.secret_arn]
+    }
   }
 }
 

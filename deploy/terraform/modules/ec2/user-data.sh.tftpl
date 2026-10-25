@@ -3,7 +3,9 @@ set -euo pipefail
 dnf install -y docker jq
 systemctl enable --now docker
 
-install -d -m 0700 /etc/limen /var/lib/limen/${component}
+# The image runs as the distroless nonroot user (uid 65532).
+install -d -m 0700 /etc/limen
+install -d -m 0700 -o 65532 -g 65532 /var/lib/limen/${component}
 
 # Plain settings.
 cat > /etc/limen/env <<'ENV'
@@ -17,6 +19,47 @@ ENV
 echo "${k}=$(aws secretsmanager get-secret-value --region ${region} --secret-id '${arn}' --query SecretString --output text)" >> /etc/limen/env
 %{ endfor ~}
 chmod 0600 /etc/limen/env
+
+%{ if consumes ~}
+# Wait for the control plane to publish the internal CA certificate.
+until aws secretsmanager get-secret-value --region ${region} --secret-id '${ca_secret}' --query SecretString --output text > /etc/limen/internal-ca.pem 2>/dev/null \
+  && grep -q '^-----BEGIN' /etc/limen/internal-ca.pem; do
+  echo "internal CA not published yet"; sleep 15
+done
+chmod 0644 /etc/limen/internal-ca.pem
+%{ endif ~}
+%{ if publishes ~}
+# The control plane exports its CA certificates here; a second unit publishes
+# internal-ca.pem to Secrets Manager whenever it changes.
+install -d -m 0755 -o 65532 -g 65532 /var/lib/limen/ca-public
+cat > /usr/local/bin/limen-ca-publish <<'SCRIPT'
+#!/bin/bash
+last=""
+while true; do
+  f=/var/lib/limen/ca-public/internal-ca.pem
+  if [ -s "$f" ]; then
+    sum=$(cksum < "$f")
+    if [ "$sum" != "$last" ]; then
+      aws secretsmanager put-secret-value --region ${region} --secret-id '${ca_secret}' --secret-string "file://$f" > /dev/null && last="$sum"
+    fi
+  fi
+  sleep 30
+done
+SCRIPT
+chmod 0755 /usr/local/bin/limen-ca-publish
+cat > /etc/systemd/system/limen-ca-publish.service <<'UNIT'
+[Unit]
+Description=Publish the Limen internal CA certificate
+After=limen.service
+
+[Service]
+Restart=always
+ExecStart=/usr/local/bin/limen-ca-publish
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+%{ endif ~}
 
 # SIGTERM on shutdown starts Limen's drain; systemd waits for it.
 cat > /etc/systemd/system/limen.service <<'UNIT'
@@ -32,6 +75,12 @@ ExecStartPre=-/usr/bin/docker rm -f limen
 ExecStart=/usr/bin/docker run --rm --name limen --stop-timeout ${stop_timeout} \
   --env-file /etc/limen/env ${publish} \
   -v /var/lib/limen/${component}:/var/lib/limen/${component} \
+%{ if publishes ~}
+  -v /var/lib/limen/ca-public:/var/lib/limen/ca-public \
+%{ endif ~}
+%{ if consumes ~}
+  -v /etc/limen/internal-ca.pem:/etc/limen/internal-ca.pem:ro \
+%{ endif ~}
   --log-driver awslogs --log-opt awslogs-region=${region} --log-opt awslogs-group=${log_group} \
   ${image}
 ExecStop=/usr/bin/docker stop --time ${stop_timeout} limen
@@ -41,3 +90,6 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now limen
+%{ if publishes ~}
+systemctl enable --now limen-ca-publish
+%{ endif ~}

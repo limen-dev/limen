@@ -51,6 +51,29 @@ variable "services" {
   }
 }
 
+variable "internal_ca" {
+  description = <<-EOT
+    Pass { secret_arn = ... }: the Secrets Manager secret for the Limen internal CA certificate (the
+    foundation module creates it). Control plane tasks run a publisher sidecar
+    that writes the certificate they export into it; proxy and worker tasks
+    wait for it and write it to the file LIMEN_CA_FILE points at. Needed when
+    any service is a proxy or worker.
+  EOT
+  type = object({
+    secret_arn = string
+  })
+  default = null
+}
+
+variable "helper_images" {
+  description = "Images of the two helper containers: the CA publisher (needs a shell and the AWS CLI) and the CA writer (needs a shell)."
+  type = object({
+    aws_cli = optional(string, "public.ecr.aws/aws-cli/aws-cli:2.38.0")
+    shell   = optional(string, "public.ecr.aws/docker/library/busybox:1.37.0")
+  })
+  default = {}
+}
+
 variable "log_retention_days" {
   description = "Retention of each service's CloudWatch log group."
   type        = number
