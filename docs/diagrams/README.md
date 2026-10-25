@@ -30,4 +30,4 @@ Source: [`trust-and-audit.drawio`](trust-and-audit.drawio). Related text: [desig
 
 Open the `.drawio` file in diagrams.net (or the VS Code extension), edit, then export as SVG over the matching `.svg` and commit both. Keep the diagrams in step with `design.md`: when a flow, TTL, or failure behavior changes there, change it here in the same pull request.
 
-AWS service icons are from the [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/) set, used here to depict AWS services. They are not an AWS endorsement. A managed-service variant waits until a managed offering is decided.
+AWS service icons are from the [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/) set. Other logos (Datadog, Grafana, Okta, OpenID, GitHub, GitLab, PostgreSQL, MySQL, Redis, MongoDB, Kubernetes, OpenSearch, Elasticsearch, RabbitMQ, Kafka) are from [Simple Icons](https://simpleicons.org). All are trademarks of their owners, shown only to name the product, and imply no endorsement. A managed-service variant waits until a managed offering is decided.
