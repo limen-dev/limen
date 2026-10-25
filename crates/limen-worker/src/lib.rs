@@ -953,7 +953,11 @@ pub async fn run(
     let uploads = tokio::spawn(recordings::upload_loop(worker.clone(), flush.clone()));
     {
         let w = worker.clone();
-        tokio::spawn(live::run(Arc::clone(&worker.live), move || w.control_plane(), flush.clone()));
+        tokio::spawn(live::run(
+            Arc::clone(&worker.live),
+            move || w.control_plane(),
+            flush.clone(),
+        ));
     }
     if worker.config.discovery {
         tokio::spawn(discovery::run(worker.clone(), flush.clone()));

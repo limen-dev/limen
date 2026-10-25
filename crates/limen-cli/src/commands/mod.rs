@@ -369,7 +369,10 @@ pub async fn show(proxy: Option<&str>, name: &str, json: bool) -> anyhow::Result
                     ("Kind", ui::kind_label(&ask.kind)),
                     ("Access", ui::yellow("not yet: you can ask for it")),
                     ("Through", ask.roles.join(", ")),
-                    ("Ask", format!("`limen request {} --for 30m --reason \"...\"`", ask.name)),
+                    (
+                        "Ask",
+                        format!("`limen request {} --for 30m --reason \"...\"`", ask.name)
+                    ),
                 ])
             );
         }

@@ -297,11 +297,13 @@ pub async fn start(
     }
     if count == 0 {
         // Nothing to look at is a finished review, not an open one nobody can close.
-        sqlx::query("UPDATE access_reviews SET status = 'complete', completed_at = now() WHERE id = $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| internal("closing the review", e))?;
+        sqlx::query(
+            "UPDATE access_reviews SET status = 'complete', completed_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("closing the review", e))?;
     }
     audit(
         state,

@@ -14,6 +14,7 @@ pub mod evidence;
 pub mod handoff_client;
 pub mod http_client;
 pub mod jobs;
+pub mod live;
 pub mod oidc;
 pub mod pipeline;
 pub mod replicas;
@@ -24,7 +25,6 @@ pub mod services;
 pub mod sinks;
 pub mod state;
 pub mod verify;
-pub mod live;
 
 use std::sync::Arc;
 

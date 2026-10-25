@@ -10,8 +10,8 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::caller;
-use crate::state::{AppState, internal};
 use crate::live;
+use crate::state::{AppState, internal};
 
 /// Most sessions one poll may ask about.
 const MAX_IDS: usize = 1_000;
@@ -30,7 +30,10 @@ fn worker(request: &Request<impl Sized>, state: &AppState) -> Result<String, Sta
 
 #[tonic::async_trait]
 impl Watch for WatchService {
-    async fn poll(&self, request: Request<WatchPollRequest>) -> Result<Response<WatchPollResponse>, Status> {
+    async fn poll(
+        &self,
+        request: Request<WatchPollRequest>,
+    ) -> Result<Response<WatchPollResponse>, Status> {
         let worker_id = worker(&request, &self.0)?;
         let ids: Vec<Uuid> = request
             .into_inner()
@@ -47,11 +50,24 @@ impl Watch for WatchService {
         }))
     }
 
-    async fn publish(&self, request: Request<WatchPublishRequest>) -> Result<Response<WatchPublishResponse>, Status> {
+    async fn publish(
+        &self,
+        request: Request<WatchPublishRequest>,
+    ) -> Result<Response<WatchPublishResponse>, Status> {
         let worker_id = worker(&request, &self.0)?;
         let r = request.into_inner();
-        let id = Uuid::parse_str(&r.session_id).map_err(|_| Status::invalid_argument("bad session id"))?;
-        let watched = live::publish(&self.0.db, &worker_id, id, &r.text, r.elapsed_ms, r.cols, r.rows).await?;
+        let id = Uuid::parse_str(&r.session_id)
+            .map_err(|_| Status::invalid_argument("bad session id"))?;
+        let watched = live::publish(
+            &self.0.db,
+            &worker_id,
+            id,
+            &r.text,
+            r.elapsed_ms,
+            r.cols,
+            r.rows,
+        )
+        .await?;
         Ok(Response::new(WatchPublishResponse { watched }))
     }
 }

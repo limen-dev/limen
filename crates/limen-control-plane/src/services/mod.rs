@@ -10,10 +10,10 @@ pub mod ingest;
 pub mod ops;
 pub mod policy_sync;
 pub mod registry;
-pub mod watch;
 pub mod resources;
 pub mod reviews;
 pub mod ssh_certs;
+pub mod watch;
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};

@@ -141,23 +141,33 @@ pub async fn begin(
     session_id: Uuid,
     via: &'static str,
 ) -> Result<Watcher, Status> {
-    let row = sqlx::query("SELECT username, resource, ended_at FROM sessions WHERE session_id = $1")
-        .bind(session_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| internal("reading the session", e))?
-        .ok_or_else(|| Status::not_found("no such session"))?;
+    let row =
+        sqlx::query("SELECT username, resource, ended_at FROM sessions WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| internal("reading the session", e))?
+            .ok_or_else(|| Status::not_found("no such session"))?;
     if row
         .try_get::<Option<time::OffsetDateTime>, _>("ended_at")
         .map_err(|e| internal("reading the session", e))?
         .is_some()
     {
-        return Err(Status::failed_precondition("the session has ended; play its recording instead"));
+        return Err(Status::failed_precondition(
+            "the session has ended; play its recording instead",
+        ));
     }
-    let subject: Option<String> = row.try_get("username").map_err(|e| internal("reading the session", e))?;
-    let resource: Option<String> = row.try_get("resource").map_err(|e| internal("reading the session", e))?;
+    let subject: Option<String> = row
+        .try_get("username")
+        .map_err(|e| internal("reading the session", e))?;
+    let resource: Option<String> = row
+        .try_get("resource")
+        .map_err(|e| internal("reading the session", e))?;
     // Nobody watches themselves through the console; they have the session.
-    if subject.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(observer)) {
+    if subject
+        .as_deref()
+        .is_some_and(|s| s.eq_ignore_ascii_case(observer))
+    {
         return Err(Status::failed_precondition("this is your own session"));
     }
     let (per_session, per_observer): (i64, i64) = {
@@ -174,7 +184,9 @@ pub async fn begin(
         (r.try_get("s").unwrap_or(0), r.try_get("o").unwrap_or(0))
     };
     if per_session >= MAX_PER_SESSION || per_observer >= MAX_PER_OBSERVER {
-        return Err(Status::resource_exhausted("too many people are watching this, or you are watching too many"));
+        return Err(Status::resource_exhausted(
+            "too many people are watching this, or you are watching too many",
+        ));
     }
     let id = Uuid::now_v7();
     state
@@ -197,16 +209,22 @@ pub async fn begin(
         .await
         .map_err(|e| internal("recording the watcher", e))?;
     metrics::gauge!("limen_session_watchers").increment(1.0);
-    Ok(Watcher { id, session_id, observer: observer.to_owned() })
+    Ok(Watcher {
+        id,
+        session_id,
+        observer: observer.to_owned(),
+    })
 }
 
 /// The watcher is still here. False if it was ended.
 pub async fn heartbeat(db: &Db, w: &Watcher) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query("UPDATE session_watches SET last_seen_at = now() WHERE id = $1 AND stopped_at IS NULL")
-        .bind(w.id)
-        .execute(db)
-        .await?
-        .rows_affected()
+    Ok(sqlx::query(
+        "UPDATE session_watches SET last_seen_at = now() WHERE id = $1 AND stopped_at IS NULL",
+    )
+    .bind(w.id)
+    .execute(db)
+    .await?
+    .rows_affected()
         == 1)
 }
 
@@ -221,7 +239,10 @@ pub async fn end(state: &AppState, w: &Watcher, via: &'static str, why: &str) {
         .audit
         .emit(
             EventKind::SessionWatchStop,
-            Context { user: Some(w.observer.clone()), session_id: Some(w.session_id) },
+            Context {
+                user: Some(w.observer.clone()),
+                session_id: Some(w.session_id),
+            },
             json!({ "watch_id": w.id, "observer": w.observer, "reason": why, "via": via }),
         )
         .await
@@ -242,7 +263,11 @@ pub struct Chunk {
 
 /// Output after `after`. With `None`, the most recent output up to
 /// [`REPLAY_BYTES`], so a late watcher sees the screen's recent past.
-pub async fn chunks(db: &Db, session_id: Uuid, after: Option<i64>) -> Result<Vec<Chunk>, sqlx::Error> {
+pub async fn chunks(
+    db: &Db,
+    session_id: Uuid,
+    after: Option<i64>,
+) -> Result<Vec<Chunk>, sqlx::Error> {
     let rows = match after {
         Some(after) => {
             sqlx::query("SELECT seq, elapsed_ms, cols, rows, text FROM watch_chunks WHERE session_id = $1 AND seq > $2 ORDER BY seq LIMIT 200")
@@ -277,10 +302,12 @@ pub async fn chunks(db: &Db, session_id: Uuid, after: Option<i64>) -> Result<Vec
 
 /// Whether the session is still running.
 pub async fn is_live(db: &Db, session_id: Uuid) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM sessions WHERE session_id = $1 AND ended_at IS NULL)")
-        .bind(session_id)
-        .fetch_one(db)
-        .await
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM sessions WHERE session_id = $1 AND ended_at IS NULL)",
+    )
+    .bind(session_id)
+    .fetch_one(db)
+    .await
 }
 
 /// How often the stream looks for new output.

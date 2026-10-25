@@ -1039,9 +1039,12 @@ async fn admit_ssh(
         resource: &grant.resource,
         principal: Principal::SshLogin(grant.principal.clone()),
     }) {
-        limen_policy::Decision::Allow { matched_roles } => matched_roles
-            .iter()
-            .any(|r| snapshot.policy.role(r).is_some_and(|r| r.spec.notify_observed)),
+        limen_policy::Decision::Allow { matched_roles } => matched_roles.iter().any(|r| {
+            snapshot
+                .policy
+                .role(r)
+                .is_some_and(|r| r.spec.notify_observed)
+        }),
         _ => false,
     };
     Ok(SshSessionConfig {
