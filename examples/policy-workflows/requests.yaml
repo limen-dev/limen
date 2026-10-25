@@ -3,7 +3,7 @@
 #
 #   limen admin apply examples/policy examples/policy-workflows
 #
-# The groups below are the dev stack's; change them for yours.
+# The groups below are the dev stack's (developers, limen-admins); change them for yours.
 kind: role
 version: v1
 metadata:
@@ -45,3 +45,8 @@ spec:
       resource: orders-prod
       principal: { db_role: limen_read, database: orders }
       expect: request
+    - name: contractors cannot reach production, even by asking
+      who: { groups: [contractors] }
+      resource: orders-prod
+      principal: { db_role: limen_read, database: orders }
+      expect: deny
