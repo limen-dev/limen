@@ -145,7 +145,8 @@ impl Profile {
     }
 }
 
-fn write_file(path: &Path, contents: &str, private: bool) -> anyhow::Result<()> {
+/// Write `contents` atomically, mode 0600 if `private` else 0644, in a 0700 directory.
+pub fn write_file(path: &Path, contents: &str, private: bool) -> anyhow::Result<()> {
     use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

@@ -6,6 +6,7 @@ pub mod audit;
 pub mod bot;
 pub mod conns;
 pub mod db;
+pub mod doctor;
 pub mod kafka;
 pub mod kube;
 pub mod login;
@@ -17,6 +18,7 @@ pub mod review;
 pub mod search;
 pub mod ssh;
 pub mod tcp;
+pub mod tools;
 pub mod web;
 
 use limen_proto::v1::resources_client::ResourcesClient;
@@ -196,7 +198,7 @@ pub async fn kind_of(proxy: Option<&str>, name: &str) -> anyhow::Result<String> 
         .with_context(|| format!("no resource named `{name}` is available to you; see `limen ls`"))
 }
 
-async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
+pub(crate) async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
     Ok(fetch_all(proxy).await?.resources)
 }
 

@@ -70,9 +70,6 @@ pub async fn login(
 }
 
 /// The kubeconfig, as JSON (kubectl reads JSON as readily as YAML).
-///
-/// `home` is `$LIMEN_HOME` when it is set. kubectl runs the plugin in its own
-/// environment, which need not have it, so it is written into the plugin's.
 fn kubeconfig_json(
     proxy: &str,
     cluster: &str,
@@ -80,12 +77,35 @@ fn kubeconfig_json(
     exe: &Path,
     home: Option<&Path>,
 ) -> serde_json::Value {
-    let mut cluster_entry = json!({ "server": format!("https://{proxy}/k8s/{cluster}") });
+    let name = format!("limen-{cluster}");
+    json!({
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [{ "name": name, "cluster": cluster_entry(proxy, cluster, ca_pem) }],
+        "users": [{
+            "name": "limen",
+            "user": { "exec": exec_entry(proxy, exe, home) },
+        }],
+        "contexts": [{ "name": name, "context": { "cluster": name, "user": "limen" } }],
+        "current-context": name,
+    })
+}
+
+/// A kubeconfig `cluster` for `cluster` behind `proxy`.
+pub(crate) fn cluster_entry(proxy: &str, cluster: &str, ca_pem: Option<&str>) -> serde_json::Value {
+    let mut entry = json!({ "server": format!("https://{proxy}/k8s/{cluster}") });
     if let Some(ca) = ca_pem {
-        cluster_entry["certificate-authority-data"] =
+        entry["certificate-authority-data"] =
             json!(base64::engine::general_purpose::STANDARD.encode(ca));
     }
-    let name = format!("limen-{cluster}");
+    entry
+}
+
+/// The kubeconfig `exec` credential plugin: `limen kube credentials`.
+///
+/// `home` is `$LIMEN_HOME` when it is set. kubectl runs the plugin in its own
+/// environment, which need not have it, so it is written into the plugin's.
+pub(crate) fn exec_entry(proxy: &str, exe: &Path, home: Option<&Path>) -> serde_json::Value {
     let mut exec = json!({
         "apiVersion": "client.authentication.k8s.io/v1",
         "command": exe.display().to_string(),
@@ -96,17 +116,7 @@ fn kubeconfig_json(
     if let Some(home) = home {
         exec["env"] = json!([{ "name": "LIMEN_HOME", "value": home.display().to_string() }]);
     }
-    json!({
-        "apiVersion": "v1",
-        "kind": "Config",
-        "clusters": [{ "name": name, "cluster": cluster_entry }],
-        "users": [{
-            "name": "limen",
-            "user": { "exec": exec },
-        }],
-        "contexts": [{ "name": name, "context": { "cluster": name, "user": "limen" } }],
-        "current-context": name,
-    })
+    exec
 }
 
 /// `limen kube credentials`: the exec plugin. Writes an `ExecCredential` to

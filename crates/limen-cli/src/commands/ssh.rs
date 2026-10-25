@@ -70,10 +70,11 @@ async fn default_login(proxy: Option<&str>, resource: &str) -> anyhow::Result<St
 }
 
 /// The OpenSSH options `limen ssh` and `limen config ssh` use.
-fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<String> {
+pub(crate) fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<String> {
     let proxy_command = format!(
-        "{} --proxy {proxy} ssh-proxy %r %h",
-        shell_quote(&exe.display().to_string())
+        "{} --proxy {} ssh-proxy %r %h",
+        shell_quote(&exe.display().to_string()),
+        shell_quote(proxy)
     );
     vec![
         format!("ProxyCommand={proxy_command}"),
@@ -100,7 +101,7 @@ fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<String> {
 
 fn shell_quote(s: &str) -> String {
     if s.bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+        .all(|b| b.is_ascii_alphanumeric() || b"/._-:".contains(&b))
     {
         s.to_owned()
     } else {
@@ -241,15 +242,17 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
 }
 
 /// `limen config ssh`: an `ssh_config` block so plain `ssh <resource>.limen` works.
+/// `--install` (in `tools`) keeps one up to date in `~/.ssh/config` instead.
 pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
     let proxy_addr = api::resolve_proxy(proxy)?;
     let exe = std::env::current_exe().context("locating the limen executable")?;
     println!("# Limen: add this to ~/.ssh/config, then `ssh <login>@<resource>.limen`.");
+    println!("# Or run `limen config ssh --install` to keep it there and `ssh <resource>` work.");
     println!("Host *.limen");
-    for option in ssh_options(&exe, &proxy_addr, &known_hosts_path(&proxy_addr)?) {
-        let (k, v) = option.split_once('=').unwrap_or((option.as_str(), ""));
-        println!("    {k} {v}");
-    }
+    print!(
+        "{}",
+        super::tools::ssh_option_lines(&exe, &proxy_addr, &known_hosts_path(&proxy_addr)?)
+    );
     Ok(())
 }
 
