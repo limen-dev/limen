@@ -470,7 +470,7 @@ impl Worker {
 
     /// A channel to the control plane through the proxy, presenting this
     /// worker's certificate (which the proxy forwards).
-    pub(crate) fn control_plane(&self) -> anyhow::Result<tonic::transport::Channel> {
+    pub(crate) fn control_plane(&self) -> anyhow::Result<limen_tunnel::connect::TracedChannel> {
         let creds = self.credentials();
         let tls = client_config(
             &[creds.internal_ca()?],

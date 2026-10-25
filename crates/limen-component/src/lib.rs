@@ -12,6 +12,7 @@ use limen_core::backoff::Backoff;
 use limen_core::secret::Secret;
 use limen_proto::v1::enrollment_client::EnrollmentClient;
 use limen_proto::v1::{EnrollRequest, RenewCertificateRequest};
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::retry_if_went_away;
 use limen_tunnel::tls::{self, Identity};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
@@ -19,7 +20,6 @@ use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::watch;
-use tonic::transport::Channel;
 
 /// A component's credentials, as stored in its data directory.
 #[derive(Debug, Clone)]

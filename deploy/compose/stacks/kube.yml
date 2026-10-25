@@ -37,6 +37,8 @@ services:
       args:
         RUST_IMAGE: ${RUST_IMAGE:?set in deploy/compose/.env}
         DISTROLESS_IMAGE: ${DISTROLESS_IMAGE:?set in deploy/compose/.env}
+        # A checkout that builds next to others sets its own cache (see the Dockerfile).
+        LIMEN_BUILD_CACHE: ${LIMEN_BUILD_CACHE:-limen-target}
       target: worker
     image: limen-worker:dev
     restart: unless-stopped

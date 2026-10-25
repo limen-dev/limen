@@ -17,8 +17,8 @@ use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, CreateJoinTokenRequest, PolicySource};
 use limen_testkit::kube_api::KubeApi;
 use limen_testkit::users::ADMIN;
+use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::tls::{Identity, client_config};
-use tonic::transport::Channel;
 
 pub const TOKEN: &str = "sa-token-123";
 

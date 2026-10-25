@@ -18,7 +18,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     limen_core::metrics::install();
-    args.log.init();
+    let _telemetry = args.log.init("limen-worker");
     tracing::info!(version = limen_core::VERSION, "worker starting");
     let (tx, rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
