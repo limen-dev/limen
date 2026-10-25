@@ -10,6 +10,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig as _};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
@@ -17,6 +18,46 @@ use tracing_subscriber::{EnvFilter, Layer as _, fmt};
 
 /// `tracing` target of every span that is exported over OTLP.
 pub const TRACE_TARGET: &str = "limen::trace";
+
+/// The W3C `traceparent` of the current span, when it is being exported.
+///
+/// Carries only trace and span ids and the sampled flag, never `tracestate`
+/// or baggage, so nothing else crosses a component boundary with it.
+#[must_use]
+pub fn current_traceparent() -> Option<String> {
+    use opentelemetry::propagation::TextMapPropagator as _;
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let cx = tracing::Span::current().context();
+    if !cx.span().span_context().is_valid() {
+        return None;
+    }
+    let mut carrier = std::collections::HashMap::new();
+    TraceContextPropagator::new().inject_context(&cx, &mut carrier);
+    carrier.remove("traceparent")
+}
+
+/// Make `span` a child of the remote span named by `traceparent`.
+///
+/// Ignores an empty, oversized or malformed value: a peer can only choose
+/// which trace this span is filed under, nothing else.
+pub fn set_parent_from_traceparent(span: &tracing::Span, traceparent: &str) {
+    use opentelemetry::propagation::TextMapPropagator as _;
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    // A version 00 traceparent is exactly 55 bytes.
+    if traceparent.len() != 55 {
+        return;
+    }
+    let carrier =
+        std::collections::HashMap::from([("traceparent".to_owned(), traceparent.to_owned())]);
+    let cx = TraceContextPropagator::new().extract(&carrier);
+    if cx.span().span_context().is_valid() {
+        let _ = span.set_parent(cx);
+    }
+}
 
 /// Open a span that is exported over OTLP when tracing is on.
 ///

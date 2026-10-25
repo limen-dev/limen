@@ -1,6 +1,6 @@
 # ADR-0040: Trace export over OTLP
 
-- Status: Accepted and built (first step of issue #60). The owner asked to start with OpenTelemetry export; propagation across components is a follow-up.
+- Status: Accepted and built (issue #60). Export first, then propagation over the tunnel, as the owner asked. Propagation to the control plane's gRPC API is not built.
 - Date: 2026-10-25
 
 ## Context
@@ -18,10 +18,13 @@ The OTLP layer is filtered to spans whose target is `limen::trace`. Log events, 
 Identifiers and outcomes only: session id, resource kind, a fixed service label, status code. **Never** a user name, resource name, claim, token, certificate, statement, query text, request path, header, or payload. The same rule as metric labels (docs/guides/metrics.md). Review any new `trace_span!` field against it.
 
 ### 4. First spans
-`api.request` (control plane, one per call: `service`, `status`), `session` on the proxy (`session`, `kind`) and `session` on the worker (`session`). The proxy and worker spans share the session id, so a backend can join them by that attribute.
+`api.request` (control plane, one per call: `service`, `status`), `session` on the proxy (`session`, `kind`; from the handshake to the end of the session) and `session` on the worker (`session`).
 
-## Not decided here: propagation
-Linking the proxy's and worker's spans into one trace needs a W3C `traceparent` carried over gRPC metadata and in the tunnel's open frame. That changes the wire protocol and goes in a follow-up ADR. Until then, traces are per component and joined by session id.
+### 5. Propagation over the tunnel
+The proxy puts the W3C `traceparent` of its `session` span in the tunnel's `SessionOpen` frame (new field `traceparent`, empty when tracing is off, so old and new components interoperate). The worker opens its `session` span as a child, so the two form one trace. Only `traceparent` crosses: no `tracestate`, no baggage. The worker accepts only a well-formed 55-byte version 00 value and ignores anything else; the value decides which trace a span is filed under and nothing else (no authorization, no sampling beyond the parent's flag). The web path uses the same `session` span, so each proxied web request is one trace.
+
+### Not built: propagation to the control plane
+The proxy's and worker's gRPC calls to the control plane (grants, SSH certificates, audit handoff) are not linked to the session trace. The 39 client construction sites would each need a layer over the channel, and the control plane would have to decide whether to honour a header on a port that also accepts unauthenticated browsers. That is a separate change; `api.request` spans stay roots until then.
 
 ## Consequences
 - Outbound data flow added: spans to the configured collector (threat model, cross-cutting).

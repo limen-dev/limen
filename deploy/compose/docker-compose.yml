@@ -132,6 +132,8 @@ services:
     image: limen-proxy:${LIMEN_IMAGE_TAG:-dev}
     restart: unless-stopped
     depends_on: [control-plane]
+    env_file:
+      - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh: tracing endpoint
     environment:
       RUST_LOG: info
       LIMEN_CONTROL_PLANE_ADDR: control-plane:3080

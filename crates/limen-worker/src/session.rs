@@ -61,6 +61,7 @@ pub(crate) async fn open(
             "the first frame must open the session",
         ));
     };
+    let traceparent = open.traceparent;
     let signed = open
         .grant
         .ok_or_else(|| Status::invalid_argument("missing grant"))?;
@@ -102,6 +103,8 @@ pub(crate) async fn open(
     let kube_worker = worker.clone();
     // Exported as a trace span (ADR-0040): the session id only.
     let span = limen_core::trace_span!("session", session = %session_id);
+    // File it under the proxy's trace (a malformed value is ignored).
+    limen_core::telemetry::set_parent_from_traceparent(&span, &traceparent);
     tokio::spawn(async move {
         let _guard = guard;
         let pump_tx = tx.clone();

@@ -74,6 +74,8 @@ x-proxy: &proxy
   build: { <<: *limen-build, target: proxy }
   image: limen-proxy:scale
   restart: unless-stopped
+  env_file:
+    - { path: "${LIMEN_STACK_ENV:-.state/stack.env}", required: false }   # written by setup.sh (tracing endpoint)
   depends_on: [control-plane-0, control-plane-1, control-plane-2]
 
 x-proxy-env: &proxy-env

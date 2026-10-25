@@ -99,7 +99,7 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 Limen scaled: 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  bots.yml  kube.yml  tcp.yml  web.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  tracing.yml  bots.yml  kube.yml  tcp.yml  web.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists), test-policy-selection.sh
@@ -124,6 +124,7 @@ Limen is one stack and everything it connects to or reports to is another, each 
 | `messaging` | `stacks/messaging.yml` | `rabbitmq-target` (RabbitMQ 4) and `kafka-1`..`kafka-3` (a real three-broker Kafka 3.9 cluster, KRaft, SASL and the authorizer on); `provision.sh` creates the topics, ACLs and SCRAM users, and the worker holds the broker logins |
 | `mongo` | `stacks/mongo.yml` | `mongo-target` (MongoDB 8 with TLS, SCRAM and X.509, seeded `orders` and `billing`) and the credentials the worker holds |
 | `observability` | `stacks/observability.yml` | `fake-datadog` (the control plane sends audit events to it), `trino`, `grafana` (http://localhost:3000) over the S3 audit batches |
+| `tracing` | `stacks/tracing.yml` | `jaeger` (http://localhost:16686); the control plane, proxy and worker export traces to it (`LIMEN_OTLP_ENDPOINT`) |
 | `bots` | `stacks/bots.yml` | `fake-ci-issuer`, and the control plane trusts its plain-http issuer |
 | `kube` | `stacks/kube.yml` | `kubernetes` (a k3s cluster in one privileged container, so it belongs to the project and `down -v` removes it) and `kube-worker`, which serves it as `eks-staging`; works with the single and the scaled Limen |
 | `tcp` | `stacks/tcp.yml` | `tcp-target`, a raw TCP echo fixture for `limen tcp` |
@@ -162,6 +163,7 @@ What `docker ps` (or the OrbStack Containers tab) shows, by stack. Images marked
 | `web-target-dev` | `PYTHON_IMAGE` | `web` | An HTTP fixture for browser SSO and request policy |
 | `trino-dev`, `trino-init-dev` | `TRINO_IMAGE` | `observability` | Queries the audit batches in S3 as SQL (what Athena does in AWS); `trino-init-dev` keeps the table in step with the new batches |
 | `grafana-dev` | `GRAFANA_IMAGE` | `observability` | The audit dashboards at http://localhost:3000 |
+| `jaeger-dev` | `JAEGER_IMAGE` | `tracing` | Traces from every component at http://localhost:16686 (memory storage) |
 | `datadog-fake-dev` | `limen-fake-datadog` | `observability` | Receives the audit events the Datadog sink sends, so the sink can be tested |
 | `ci-issuer-fake-dev` | `limen-fake-ci-issuer` | `bots` | Issues CI identity tokens for the bot login demo |
 
