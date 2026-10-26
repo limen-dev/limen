@@ -25,7 +25,7 @@ Each ADR's status line gives its approval date.
 | [0018](0018-data-store-protocols.md) | Search, document, and messaging protocols (OpenSearch/Elasticsearch, MongoDB/Atlas/DocumentDB, Redshift, RabbitMQ, Kafka) | Proposed |
 | [0019](0019-machine-identities.md) | Machine identities (bots) for CI and automation | Accepted |
 | [0020](0020-scale-out.md) | Scale-out: many control planes, proxies, and workers | Accepted |
-| [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Proposed |
+| [0021](0021-docs-site-and-homepage.md) | Documentation site and project homepage | Accepted |
 | [0022](0022-web-apps-and-tcp-services.md) | Identity-aware access to internal web apps and TCP services | Accepted |
 | [0023](0023-roadmap-in-github.md) | The roadmap lives in GitHub milestones and labels | Accepted |
 | [0024](0024-release-strategy.md) | Releases and distribution: one version, signed binaries and images, Terraform by tag | Accepted |
