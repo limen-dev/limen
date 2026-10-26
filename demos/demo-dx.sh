@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# First-five-minutes demo (epic #121, ADR-0041): `limen doctor`, plain ssh
-# through `limen config ssh --install`, and `limen kube config`.
+# First-five-minutes demo (epic #121, ADR-0041): `limen doctor`, plain ssh,
+# scp, rsync, and git through `limen config ssh --install`, denial hints,
+# and `limen kube config`.
 #
 #   demos/demo-dx.sh          # starts its own stack (project limen-dxdemo) and removes it after
 #   demos/demo-dx.sh --keep   # leaves that stack running, and reuses it next time
@@ -32,8 +33,10 @@ limen() { "$LIMEN_BIN" "$@"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
-login() { "$here/scripts/dev-login.sh" "$1" >/dev/null; }
-for tool in ssh curl python3 cargo; do command -v "$tool" >/dev/null || fail "$tool is required"; done
+login() { local out; out="$("$here/scripts/dev-login.sh" "$1" 2>&1)" || { echo "$out"; fail "login as $1"; }; }
+# Fail instead of waiting forever (macOS has no `timeout`).
+within() { local secs="$1"; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
+for tool in ssh scp rsync git curl python3 perl cargo docker; do command -v "$tool" >/dev/null || fail "$tool is required"; done
 cleanup() { $keep || "$here/setup.sh" down >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -42,7 +45,7 @@ step "Build the CLI and start the stack (ssh and kube)"
 if $keep && curl -sf "http://localhost:$LIMEN_PORT_HEALTH/readyz" >/dev/null; then
   echo "Reusing the running $LIMEN_PROJECT stack."
 else
-  "$here/setup.sh" --yes --stacks ssh,kube >"$state.setup.log" 2>&1 || { tail -30 "$state.setup.log"; fail "setup.sh"; }
+  "$here/setup.sh" --yes --stacks ssh,kube || fail "setup.sh"
 fi
 rm -rf "$LIMEN_HOME"
 pass "stack up on $LIMEN_PROXY"
@@ -67,10 +70,24 @@ limen doctor || fail "doctor after login"
 pass "all checks pass"
 
 step "doctor with a resource: one you have, one you don't"
-limen doctor web-staging-1 >/dev/null || fail "web-staging-1 should be reachable"
+limen doctor web-staging-1 | grep -E "access|worker|client"
 out="$(limen doctor bastion-staging 2>&1)" && fail "the bastion is denied by policy"
-grep -A1 "✖ access" <<<"$out"
-pass "access is checked against policy"
+grep -A6 "✖ access" <<<"$out"
+grep -q "Your role \`dev-readonly\` allows" <<<"$out" || fail "doctor should give explain's reason: $out"
+pass "access is checked against policy, with the server's reason"
+
+step "doctor notices when no worker serves the resource"
+# Wait with `explain` (authenticated): doctor's clock check uses the
+# unauthenticated API, which is rate limited per address.
+worker_down() { limen explain web-staging-1 | grep -q "No worker that can reach"; }
+docker stop limen-worker-dxdemo >/dev/null
+for _ in $(seq 1 30); do worker_down && break; sleep 1; done
+out="$(limen doctor web-staging-1 2>&1)" && fail "doctor passed with the worker stopped"
+grep "✖ worker" <<<"$out" || fail "a stopped worker should fail the worker check: $out"
+docker start limen-worker-dxdemo >/dev/null
+for _ in $(seq 1 60); do worker_down || break; sleep 1; done
+limen doctor web-staging-1 >/dev/null || fail "the worker didn't come back"
+pass "worker down: doctor says so; back up: it passes"
 
 step "doctor --json holds no secret"
 limen doctor --json >"$state/doctor.json" || fail "doctor --json"
@@ -98,13 +115,43 @@ grep -q "^Host example-not-limen" "$sshcfg" || fail "existing entries must be ke
 out="$(ssh -F "$sshcfg" web-staging-1 'echo "plain ssh as $(whoami)"')"
 echo "$out"
 [ "$out" = "plain ssh as ubuntu" ] || fail "plain ssh: $out"
-# The stand-in target has no scp, sftp-server, rsync or git, so this checks
-# the transport they all ride on: bytes through stdin and stdout, both ways.
+pass "ssh web-staging-1 runs commands, with no wrapper"
+
+step "scp, rsync, and git use the same names"
 head -c 65536 /dev/urandom >"$state/payload.bin"
-ssh -F "$sshcfg" web-staging-1 'cat > /tmp/limen-payload.bin' <"$state/payload.bin"
-ssh -F "$sshcfg" web-staging-1 'cat /tmp/limen-payload.bin' >"$state/payload-back.bin"
-cmp -s "$state/payload.bin" "$state/payload-back.bin" || fail "binary round trip"
-pass "ssh web-staging-1 runs commands and carries 64 KiB of binary both ways, with no wrapper"
+rm -f "$state/payload-back.bin"
+# scp speaks SFTP (OpenSSH 9 and later), so this exercises the subsystem path.
+within 60 scp -F "$sshcfg" -q "$state/payload.bin" web-staging-1:/tmp/limen-payload.bin || fail "scp up"
+within 60 scp -F "$sshcfg" -q web-staging-1:/tmp/limen-payload.bin "$state/payload-back.bin" || fail "scp down"
+cmp -s "$state/payload.bin" "$state/payload-back.bin" || fail "scp round trip"
+pass "scp carries 64 KiB both ways"
+rm -rf "$state/rsync-src" "$state/rsync-back"; mkdir -p "$state/rsync-src/sub"
+echo one >"$state/rsync-src/a.txt"; echo two >"$state/rsync-src/sub/b.txt"
+within 60 rsync -a -e "ssh -F $sshcfg" "$state/rsync-src/" web-staging-1:/tmp/limen-rsync/ || fail "rsync up"
+within 60 rsync -a -e "ssh -F $sshcfg" web-staging-1:/tmp/limen-rsync/ "$state/rsync-back/" || fail "rsync down"
+diff -r "$state/rsync-src" "$state/rsync-back" || fail "rsync round trip"
+pass "rsync copies a tree both ways"
+rm -rf "$state/git-src" "$state/git-back"
+ssh -F "$sshcfg" web-staging-1 'rm -rf /tmp/limen-demo.git && git init -q --bare /tmp/limen-demo.git'
+git init -q "$state/git-src"
+git -C "$state/git-src" -c user.name=demo -c user.email=demo@example.com commit -q --allow-empty -m "through limen"
+export GIT_SSH_COMMAND="ssh -F $sshcfg"
+within 60 git -C "$state/git-src" push -q web-staging-1:/tmp/limen-demo.git HEAD:refs/heads/main || fail "git push"
+within 60 git clone -q -b main web-staging-1:/tmp/limen-demo.git "$state/git-back" || fail "git clone"
+unset GIT_SSH_COMMAND
+[ "$(git -C "$state/git-back" log -1 --format=%s)" = "through limen" ] || fail "git round trip"
+pass "git push and clone over SSH"
+# A subsystem the target doesn't have fails at once (it used to hang).
+out="$(within 20 ssh -F "$sshcfg" -s web-staging-1 no-such-subsystem 2>&1 </dev/null)" && fail "an unknown subsystem was accepted"
+grep -qi "subsystem request failed" <<<"$out" || fail "unknown subsystem: $out"
+pass "an unknown subsystem is refused, not left hanging"
+
+step "Denied: the error says why and how to get access"
+out="$(ssh -F "$sshcfg" ubuntu@bastion-staging.limen true 2>&1)" && fail "the bastion is denied by policy"
+echo "$out" | head -8
+grep -q "access denied" <<<"$out" || fail "no refusal: $out"
+grep -q "No role you hold grants access to \`bastion-staging\`" <<<"$out" || fail "no explanation under the refusal: $out"
+pass "plain ssh shows explain's answer under the refusal"
 
 step "Installing twice keeps one block"
 limen config ssh --install --file "$sshcfg" >/dev/null
