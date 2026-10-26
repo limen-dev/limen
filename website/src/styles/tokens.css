@@ -1,0 +1,55 @@
+/* One palette for the landing page and the docs. Dark is the design's home; light is a full citizen. */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --lm-bg: #05080f;
+  --lm-bg-raised: #0a101c;
+  --lm-surface: #0d1524;
+  --lm-surface-2: #121c30;
+  --lm-line: rgb(148 170 210 / 0.14);
+  --lm-line-strong: rgb(148 170 210 / 0.26);
+  --lm-text: #e8eefb;
+  --lm-text-dim: #b3c0d9;
+  --lm-muted: #7f8ea9;
+  --lm-accent: #2dd4bf;
+  --lm-accent-strong: #5eead4;
+  --lm-accent-ink: #04201c;
+  --lm-accent-2: #7aa2ff;
+  --lm-warn: #fbbf24;
+  --lm-danger: #fb7185;
+  --lm-ok: #34d399;
+  --lm-glow: rgb(45 212 191 / 0.35);
+  --lm-glass: rgb(8 13 24 / 0.72);
+  --lm-grid: rgb(148 170 210 / 0.07);
+  --lm-shadow: 0 30px 80px -30px rgb(0 0 0 / 0.8);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --lm-bg: #f6f8fc;
+  --lm-bg-raised: #ffffff;
+  --lm-surface: #ffffff;
+  --lm-surface-2: #eef2f9;
+  --lm-line: rgb(31 42 68 / 0.12);
+  --lm-line-strong: rgb(31 42 68 / 0.24);
+  --lm-text: #121a2e;
+  --lm-text-dim: #35415c;
+  --lm-muted: #5d6b86;
+  --lm-accent: #0d9488;
+  --lm-accent-strong: #0f766e;
+  --lm-accent-ink: #ffffff;
+  --lm-accent-2: #3b5bdb;
+  --lm-warn: #b45309;
+  --lm-danger: #be123c;
+  --lm-ok: #047857;
+  --lm-glow: rgb(13 148 136 / 0.28);
+  --lm-glass: rgb(246 248 252 / 0.78);
+  --lm-grid: rgb(31 42 68 / 0.06);
+  --lm-shadow: 0 30px 70px -35px rgb(31 42 68 / 0.35);
+}
+
+:root {
+  --lm-font: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --lm-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --lm-radius: 14px;
+}

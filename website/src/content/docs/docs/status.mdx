@@ -1,0 +1,54 @@
+---
+title: What is built and what is verified
+description: The honest state of every capability, including what has not been tried against real cloud services.
+---
+Limen is tested thoroughly against **local stand-ins**: Dex for the identity provider, containers for databases and brokers, a local S3 and KMS, a fake Datadog intake. **Nothing has been verified against real AWS, Okta, or Datadog yet.** Each gap below has a "Verify" issue in the [Real-environment verification milestone](https://github.com/jfcmartins/limen/milestone/21).
+
+<span class="chip ok">built</span> means it works and is tested locally. <span class="chip warn">unverified</span> means a cloud or vendor-specific path is written but has not met the real service. <span class="chip plan">planned</span> means not built.
+
+## Connect
+
+| Capability | Status | Unverified or missing |
+|---|---|---|
+| SSH with recording and replay | <span class="chip ok">built</span> | |
+| PostgreSQL, MySQL | <span class="chip ok">built</span> | RDS and Aurora IAM tokens; Redshift credential APIs |
+| Redis and Valkey | <span class="chip ok">built</span> | ElastiCache IAM; cluster mode and Serverless are not built |
+| Kubernetes (impersonation, recorded exec) | <span class="chip ok">built</span> on kind | <span class="chip warn">unverified</span> on EKS |
+| MongoDB | <span class="chip ok">built</span> | Atlas, DocumentDB, `MONGODB-AWS` |
+| OpenSearch, Elasticsearch | <span class="chip ok">built</span> | Amazon OpenSearch Service, Elastic Cloud |
+| RabbitMQ, Kafka | <span class="chip ok">built</span> | Amazon MQ, MSK; AMQP 1.0 not built |
+| Internal web apps, raw TCP | <span class="chip ok">built</span> | |
+
+## Identity and workflows
+
+| Capability | Status | Unverified or missing |
+|---|---|---|
+| OIDC login, groups to roles | <span class="chip ok">built</span> with Dex | <span class="chip warn">unverified</span> with Okta |
+| Bots: GitHub Actions, GitLab CI, any OIDC | <span class="chip ok">built</span> with a stand-in issuer | real CI tokens |
+| AWS IAM join for components and bots | <span class="chip plan">planned</span> | Phase 14 |
+| Access requests, approvals, break-glass | <span class="chip ok">built</span> | Slack and webhook notifiers against real endpoints |
+| Search across audit and recordings | <span class="chip ok">built</span> | link to Athena history |
+| Resource discovery | <span class="chip ok">built</span> | against real AWS (EC2, RDS, Redshift, ElastiCache, EKS) |
+| Policy tests, who-can, diff, explain | <span class="chip ok">built</span> | |
+| Access reviews, signed evidence packs | <span class="chip ok">built</span> | PDF evidence pack not built |
+| Live session watch | <span class="chip ok">built</span> for SSH | other protocols |
+
+## Audit, deploy and operate
+
+| Capability | Status | Unverified or missing |
+|---|---|---|
+| Signed, hash-chained audit to S3, `limen-audit-verify` | <span class="chip ok">built</span> | on real S3 |
+| Datadog logs and monitors, Grafana dashboards | <span class="chip ok">built</span> with a fake intake and Trino | real Datadog, real Athena |
+| Metrics, OpenTelemetry traces, example alerts | <span class="chip ok">built</span> | |
+| Scale-out: several control planes, proxies, workers | <span class="chip ok">built</span> | Kubernetes example on a real cluster |
+| Docker Compose stack | <span class="chip ok">built</span> | |
+| Terraform for the audit store | <span class="chip ok">built</span> | |
+| ECS, EC2 and Kubernetes deploy examples | <span class="chip plan">planned</span> | Phase 14 |
+
+## Not claimed
+
+- Anything compared with another product. Limen claims properties you can test.
+- Compliance outcomes. Evidence packs help an audit; they are not a certification.
+- Anything on the roadmap. The roadmap says what is planned, and so does every page that mentions it.
+
+The source of truth is [design §14](../architecture/design/#14-assumptions-and-open-items) and the [roadmap milestones](https://github.com/jfcmartins/limen/milestones).

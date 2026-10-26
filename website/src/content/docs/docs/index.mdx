@@ -1,0 +1,32 @@
+---
+title: Introduction
+description: What Limen is, who it is for, and where to start.
+tableOfContents: false
+---
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Limen is a self-hosted, open-source platform for **identity-aware access to infrastructure**. Engineers, and the CI jobs that act for them, sign in through the identity provider you already run and get **short-lived, audited access** to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps.
+
+There are no static SSH keys, no shared database passwords, and no hand-made users. Credentials are certificates that last minutes. Every session is recorded or audited, and the audit trail is signed and hash-chained, so you can check it yourself instead of trusting a vendor.
+
+## What you get
+
+- **Short-lived credentials.** A login is an X.509 certificate valid for 10 minutes by default. Nothing long-lived sits on a laptop or in a CI secret.
+- **Policy as YAML, deny by default.** Resources are selected by label; roles come from IdP groups. You can [test it in CI](guides/policy-tooling/), diff its *effective* access, and ask [why a request was denied](guides/policy-tooling/#who-can-reach-this-and-what-can-they-reach).
+- **Access you ask for.** [Requests with a reason, approvals, and break-glass](guides/access-requests/): grants expire on their own and end the sessions they allowed.
+- **An audit trail you can verify.** Events go to S3 as a signed hash chain (and to Datadog); `limen-audit-verify` [checks it](runbooks/audit-verify/).
+- **No inbound ports.** Workers dial out to the proxy, so targets in private networks never need to be reachable from the internet.
+- **Plain to run.** Static Rust binaries, PostgreSQL as the only required store, Apache-2.0, and no paid tier for any of the above.
+
+:::caution[Read this before you rely on it]
+Everything is tested against local stand-ins (Dex, local databases, a fake Datadog intake). **Nothing has been verified against real AWS, Okta, or Datadog yet.** The [status page](status/) lists what is built and what is unverified, item by item.
+:::
+
+## Where to go
+
+<CardGrid>
+  <LinkCard title="Quickstart" description="Run the whole stack on your machine and open a recorded SSH session." href="quickstart/" />
+  <LinkCard title="Concepts" description="Certificates, the three programs, policy, and the audit chain in a few minutes." href="concepts/" />
+  <LinkCard title="Connect to things" description="One guide per protocol: databases, Redis, MongoDB, search, brokers, Kubernetes, web apps, TCP." href="guides/cli/" />
+  <LinkCard title="Architecture" description="The design, the decision records, and the threat model." href="architecture/design/" />
+</CardGrid>
