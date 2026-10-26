@@ -107,6 +107,9 @@ message SessionResponse {
   bool ok = 1;
   string error = 2;
   string session_id = 3;
+  // The refusal is a policy decision (not an outage), so `Explain` has more
+  // to say about it.
+  bool denied = 4;
 }
 
 // Served by the control plane. Proxies call it directly, workers through a proxy.
