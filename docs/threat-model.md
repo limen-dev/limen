@@ -206,6 +206,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | E: a grant outlives its purpose | The signed snapshot carries only unexpired grants; the proxy and worker compare the deadline with the clock on every decision; a session started under a grant is capped to its remaining time and ended when it leaves the snapshot; revoke also writes session kills; the per-session SSH certificate is capped to the grant. A lock and a deny override beat a grant |
 | E: a grant opens more than was approved | A grant is scoped to the requested resource and role; the effective role is added only for that resource |
 | T: a requestable role opens resources it shouldn't | `RequiresApproval` is a denial at every enforcement point (tests); only `evaluate_eligible`, used for telling people what to do, returns it |
+| I: `explain` and denial hints map what exists (ADR-0041 §9) | A hidden resource still reads like a missing one; approver names are shown only for roles the caller may request; a grant is named only to its holder; worker connectivity only for resources the caller can reach. Hints are the caller's own `Explain` call, under its rate limit |
 | I: resource names leak in a notification | Default message: request id and console link only; details are opt-in; URLs must be https (or loopback); no redirects; webhook signed over timestamp and body; the URL is a secret and never logged |
 | I: a notification carries the approval | It cannot: approval is only a signed-in console or API call |
 | S/E: injection through the reason text | Plain text, length-limited, control characters refused, escaped when shown, never used in a shell or query; Slack markup is escaped; the ticket pattern is a linear-time regex with size limits |
@@ -298,5 +299,6 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |
 | 2026-10-25 | 14 | OTLP trace export: opt-in outbound flow to a collector; allow-listed spans (ADR-0040) |
 | 2026-10-25 | DX | Generated `ssh_config` and kubeconfig: name injection, no credentials, marked edits; `limen doctor` output holds no secret (ADR-0041) |
+| 2026-10-26 | DX | `explain` adds approvers, the caller's ended grants, and worker connectivity; sessions mark policy refusals for denial hints (ADR-0041 §9, TB11) |
 | 2026-10-24 | 14 | Observability: `/metrics` on the admin port is unauthenticated and label-restricted; CA signing metrics |
 | 2026-10-17 | 8 | Kubernetes: the `/k8s/` entry point and upgrade proxy, identity-header stripping at two hops, recordability of streams, the worker's impersonation token, ALPN-less HTTP/1.1 |

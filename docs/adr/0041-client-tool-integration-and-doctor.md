@@ -54,14 +54,24 @@ Runs, in order, and stops depending checks when one fails (they show as skipped)
 | clock | more than 2 minutes from the proxy's clock (warns at 30 s); read from the `Date` header of the unauthenticated `GetAuthConfig` call. Also warns when client and server versions differ in major or minor |
 | login | no local login, the certificate doesn't match the key, or it expired (warns under 5 minutes); warns if the key is readable by others |
 | session | the proxy refuses the certificate (`WhoAmI`): login ended, revoked, or user locked |
-| access, client | (with a resource) policy doesn't list it for you; for SSH, no host CA or no `ssh`; for Kubernetes, no `kubectl` (warning) |
+| access | (with a resource) policy doesn't list it for you. The fix is `explain`'s answer (ADR-0028): your roles, or the role you can request, who approves it, and the `limen request` command; a grant of yours that just ended is named |
+| grant | (when access comes from an approved request) it ends within 10 minutes (warning) |
+| worker | no worker that may serve the resource holds a live tunnel (from `explain`; skipped on older control planes) |
+| client | for SSH, no host CA or no `ssh`; for Kubernetes, no `kubectl` (warning) |
 | ssh-config, kubeconfig | installed, but not included by `~/.ssh/config` or not in `KUBECONFIG` (warnings) |
 
 Each failure says how to fix it. The exit code is 1 if anything failed. `--json` is for support tickets and holds no key, certificate or token: names, statuses, user name, roles and times only.
 
-Not yet, because they need server support: whether a worker is connected for the resource, the policy reason for a denial (`explain`, ADR-0028), and whether an access grant expired (ADR-0025). They belong in a follow-up once Phase 13 lands; the check list is built to take them.
+### 9. Denial hints (#120)
+A refusal says why and how to get access, where the user meets it, not only in `limen explain`. The proxy marks a policy refusal in `SessionResponse.denied` (capacity and outages are not marked); the CLI then calls `Explain` for the resource (5-second limit; without an answer the refusal stands alone) and prints its lines under the error. Every session command goes through this, plain `ssh` included: `limen ssh-proxy` writes to stderr, which OpenSSH shows. An unknown resource name gets the same lines.
+
+`Explain` grew three things for this, all within ADR-0028's visibility rule (a hidden resource reads like a missing one):
+- For a role the caller may request: who approves it (groups and named users, and how many approvals), or that it is break-glass, and the exact command.
+- The caller's own grant on the resource that expired or was revoked in the last day. It is their own, so nothing new is revealed.
+- For a resource the caller can reach, whether a worker that may serve it holds a live tunnel (also as the field `worker_connected`). The control plane already knows this from the proxies' tunnel reports. It is not said for resources the caller can't reach.
 
 ## Consequences
 - `~/.ssh/config` is now a file Limen edits, inside a marked block, only on `--install` and `--uninstall`.
 - New files under `$LIMEN_HOME`: `ssh_config`, `kubeconfig`, and per-proxy fragments. They list resource names, which `limen ls` shows anyway, and no credential (threat model, TB1).
 - `limen login` makes one more `ListResources` call when an integration is installed.
+- A refused session costs one more `Explain` call.

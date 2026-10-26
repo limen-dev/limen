@@ -58,7 +58,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `mongosh` or any MongoDB driver; each connection is an audited session (see [the MongoDB guide](mongodb.md)) |
 | `limen search connect <resource> [--role R] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `curl` or any Elasticsearch or OpenSearch client; each connection is an audited session (see [the search guide](search.md)) |
-| `limen doctor [resource] [--json]` | Check, in order, what access depends on: proxy address, pinned CA, network, TLS, clock skew against the proxy, client and server versions, the local login, whether the proxy accepts it, and with a resource name whether policy gives it to you and the client tool is installed. Each failure says how to fix it; the exit code is 1 if one failed. `--json` is for support tickets and holds no secret. See [Troubleshooting](#troubleshooting) |
+| `limen doctor [resource] [--json]` | Check, in order, what access depends on: proxy address, pinned CA, network, TLS, clock skew against the proxy, client and server versions, the local login, whether the proxy accepts it, and with a resource name whether policy gives it to you (and if not, why and how to get it), whether your grant is about to end, whether a worker serves it, and whether the client tool is installed. Each failure says how to fix it; the exit code is 1 if one failed. `--json` is for support tickets and holds no secret. See [Troubleshooting](#troubleshooting) |
 | `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
 | `limen config ssh --install [--file F]`, `--uninstall` | Keep one `Include` at the top of `~/.ssh/config` (or `F`) pointing at a generated `~/.limen/ssh_config`, so plain `ssh web-staging-1`, `scp`, `rsync`, and `git` over SSH work. Refreshed on every `limen login`. See [Plain ssh, scp, rsync, git](#plain-ssh-scp-rsync-git) |
 | `limen kube config [--print]`, `--uninstall` | Write `~/.limen/kubeconfig` with a `limen-<cluster>` context for every cluster you can reach, refreshed on every `limen login`. Add it to `KUBECONFIG` once. See [the Kubernetes guide](kubernetes.md) |
@@ -129,7 +129,7 @@ The included file is generated from `limen ls`, one `Host` entry per SSH resourc
 Good to know:
 - Because the `Include` comes first, a Limen resource with the same name as one of your own `Host` entries takes its place. `limen config ssh --uninstall` takes everything out again.
 - IDE remotes that tunnel over SSH port forwarding (VS Code Remote-SSH, JetBrains Gateway) don't work yet: Limen refuses SSH port forwarding.
-- `scp` uses SFTP unless you pass `-O`, so the target needs its `sftp-server` subsystem (most distributions ship it). On a target without it, use `scp -O`.
+- `scp` uses SFTP unless you pass `-O`, so the target needs an SFTP subsystem (most distributions configure one). Without it, `scp` stops with `subsystem request failed`; use `scp -O`. `rsync` and `git` need those programs on the target.
 - Names that OpenSSH can't take as host aliases (spaces, wildcards, quotes) are skipped with a warning; `limen ssh <name>` still works for them.
 - Prefer not to touch `~/.ssh/config`? `limen config ssh` prints a `Host *.limen` block to paste instead, for `ssh <login>@<resource>.limen`.
 - Database GUIs (DBeaver, DataGrip) want a fixed port: `limen db connect orders-staging --listen 127.0.0.1:5433 --detach`, then point the GUI at `127.0.0.1:5433`.
@@ -149,6 +149,15 @@ Good to know:
 – session  skipped: no valid login
 ```
 
-Add a resource name (`limen doctor orders-staging`) to check that policy gives it to you and that the client it needs (`ssh`, `kubectl`) is installed. `limen doctor --json` prints the same as JSON for a support ticket; it never includes your key, certificate or a token.
+Add a resource name (`limen doctor orders-staging`) to check that policy gives it to you, that a worker that can reach it is connected, that a grant you hold isn't about to end, and that the client it needs (`ssh`, `kubectl`) is installed. When policy doesn't give it to you, the fix is [`limen explain`](access-requests.md)'s answer: your roles, or the role you can ask for, who approves it, and the command. `limen doctor --json` prints the same as JSON for a support ticket; it never includes your key, certificate or a token.
 
-It can't yet tell whether a worker is connected for a resource, why policy denies it, or whether an access grant expired; those need server support and will follow ([ADR-0041](../adr/0041-client-tool-integration-and-doctor.md)).
+A refused connection says the same under the error, plain `ssh` included:
+
+```text
+$ ssh ubuntu@orders-prod.limen
+✖ access denied to ubuntu@orders-prod
+  You can't reach `orders-prod` yet, but you can ask for it.
+  Request one of: prod-ssh.
+    - `prod-ssh`: approved by members of sre-leads
+  Run: limen request orders-prod --for 30m --reason "..."
+```
