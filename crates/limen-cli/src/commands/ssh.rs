@@ -209,7 +209,12 @@ pub(crate) async fn open_session_in(
         .await
         .context("reading the proxy's answer")?;
     if !response.ok {
-        bail!("{}", response.error);
+        let hint = if response.denied {
+            super::access::denial_hint(Some(&proxy_addr), resource).await
+        } else {
+            String::new()
+        };
+        bail!("{}{hint}", response.error);
     }
     Ok(tls)
 }

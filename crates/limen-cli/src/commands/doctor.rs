@@ -600,9 +600,11 @@ async fn check_session(report: &mut Report, proxy: &str, profile: &Profile) -> b
     }
 }
 
-/// Whether policy gives you `name`, and what you need locally to open it.
+/// Whether policy gives you `name` (and if not, why and how to get it),
+/// whether a grant is about to end, whether a worker serves it, and what you
+/// need locally to open it.
 async fn check_resource(report: &mut Report, proxy: &str, name: &str) {
-    let resources = match super::fetch_resources(Some(proxy)).await {
+    let listed = match super::fetch_all(Some(proxy)).await {
         Ok(r) => r,
         Err(e) => {
             report.fail(
@@ -613,29 +615,30 @@ async fn check_resource(report: &mut Report, proxy: &str, name: &str) {
             return;
         }
     };
-    let Some(r) = resources.iter().find(|r| r.name == name) else {
-        let near: Vec<_> = resources
-            .iter()
-            .filter(|r| r.name.contains(name) || name.contains(r.name.as_str()))
-            .map(|r| r.name.as_str())
-            .collect();
-        let fix = if near.is_empty() {
-            "check the name with `limen ls`; if it's right, ask an admin for a role that grants it"
-                .to_owned()
-        } else {
-            format!("did you mean {}?", near.join(", "))
-        };
-        report.fail(
-            "access",
-            format!("policy gives you no access to {name:?} (or there is no such resource)"),
-            fix,
-        );
+    // The server's own words (ADR-0028); older control planes have none.
+    let explained =
+        tokio::time::timeout(STEP_TIMEOUT, super::access::explain_for(Some(proxy), name))
+            .await
+            .ok()
+            .and_then(Result::ok);
+    let Some(r) = listed.resources.iter().find(|r| r.name == name) else {
+        access_denied(report, &listed, explained.as_ref(), name);
         return;
     };
     report.pass(
         "access",
         format!("{} ({}), as {}", r.name, r.kind, r.principals.join(", ")),
     );
+    check_grant(report, r.grant_expires_at_unix);
+    match explained.as_ref().and_then(|e| e.worker_connected) {
+        Some(true) => report.pass("worker", "a worker that can reach it is connected"),
+        Some(false) => report.fail(
+            "worker",
+            format!("no worker that can reach {name} is connected"),
+            "sessions fail until one is; tell an admin (the worker is down, or no worker's labels match the resource's worker_selector)",
+        ),
+        None => report.skip("worker", "the control plane doesn't report it"),
+    }
     match r.kind.as_str() {
         "ssh" => {
             let known_hosts = profile::dir_for(proxy).map(|d| d.join(super::ssh::KNOWN_HOSTS));
@@ -661,6 +664,60 @@ async fn check_resource(report: &mut Report, proxy: &str, name: &str) {
             "install kubectl, or use any Kubernetes client with `limen kube login`",
         ),
         _ => {}
+    }
+}
+
+/// `name` isn't yours: say why, in the server's words when it has them, and
+/// how to get it (#120).
+fn access_denied(
+    report: &mut Report,
+    listed: &limen_proto::v1::ListResourcesResponse,
+    explained: Option<&limen_proto::v1::ExplainResponse>,
+    name: &str,
+) {
+    let requestable = listed.requestable.iter().any(|r| r.name == name);
+    let summary = if requestable {
+        format!("you don't have {name} yet, but you can request it")
+    } else {
+        format!("policy gives you no access to {name:?} (or there is no such resource)")
+    };
+    let near: Vec<_> = listed
+        .resources
+        .iter()
+        .filter(|r| r.name.contains(name) || name.contains(r.name.as_str()))
+        .map(|r| r.name.as_str())
+        .collect();
+    let mut fix = match explained {
+        Some(e) if !e.lines.is_empty() => e.lines.join("\n"),
+        _ if requestable => format!("`limen request {name} --for 30m --reason \"...\"`"),
+        _ => {
+            "check the name with `limen ls`; if it's right, ask an admin for a role that grants it"
+                .to_owned()
+        }
+    };
+    if !near.is_empty() && !requestable {
+        fix = format!("did you mean {}?\n{fix}", near.join(", "));
+    }
+    report.fail("access", summary, fix);
+}
+
+/// Access through an approved request ends; warn before it does.
+fn check_grant(report: &mut Report, expires_at_unix: i64) {
+    if expires_at_unix == 0 {
+        return;
+    }
+    let left = expires_at_unix - OffsetDateTime::now_utc().unix_timestamp();
+    if left <= 2 * EXPIRY_WARN {
+        report.warn(
+            "grant",
+            format!("your access request's grant ends in {}", human(left.max(0))),
+            "ask again (`limen request`) if you need longer",
+        );
+    } else {
+        report.pass(
+            "grant",
+            format!("through an approved request, ends in {}", human(left)),
+        );
     }
 }
 
@@ -736,11 +793,14 @@ fn render(report: &Report) -> String {
             ui::dim(&format!("{:<width$}", c.name))
         ));
         if let Some(fix) = &c.fix {
-            out.push(format!(
-                "  {}  {}",
-                " ".repeat(width),
-                ui::dim(&format!("→ {fix}"))
-            ));
+            for (i, line) in fix.lines().enumerate() {
+                let arrow = if i == 0 { "→" } else { " " };
+                out.push(format!(
+                    "  {}  {}",
+                    " ".repeat(width),
+                    ui::dim(&format!("{arrow} {line}"))
+                ));
+            }
         }
     }
     out.join("\n")
@@ -859,5 +919,91 @@ mod tests {
         let text = ui::plain(&render(&r));
         assert!(text.contains("✖ login    not logged in"), "{text}");
         assert!(text.contains("→ `limen login`"));
+    }
+
+    fn listed(mine: &[&str], requestable: &[&str]) -> limen_proto::v1::ListResourcesResponse {
+        limen_proto::v1::ListResourcesResponse {
+            resources: mine
+                .iter()
+                .map(|n| limen_proto::v1::Resource {
+                    name: (*n).to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+            requestable: requestable
+                .iter()
+                .map(|n| limen_proto::v1::RequestableResource {
+                    name: (*n).to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_denial_says_why_and_how_to_get_access() {
+        // The server's explanation is the fix, line by line.
+        let explained = limen_proto::v1::ExplainResponse {
+            lines: vec![
+                "You can't reach `orders-prod` yet, but you can ask for it.".into(),
+                "Run: limen request orders-prod --for 30m --reason \"...\"".into(),
+            ],
+            ..Default::default()
+        };
+        let mut r = Report::default();
+        access_denied(
+            &mut r,
+            &listed(&[], &["orders-prod"]),
+            Some(&explained),
+            "orders-prod",
+        );
+        assert_eq!(
+            r.checks[0].summary,
+            "you don't have orders-prod yet, but you can request it"
+        );
+        let text = ui::plain(&render(&r));
+        assert!(text.contains("→ You can't reach"), "{text}");
+        assert!(text.contains("  Run: limen request orders-prod"), "{text}");
+
+        // An older control plane: still the command.
+        let mut r = Report::default();
+        access_denied(&mut r, &listed(&[], &["orders-prod"]), None, "orders-prod");
+        assert!(
+            r.checks[0]
+                .fix
+                .as_deref()
+                .unwrap_or_default()
+                .contains("limen request orders-prod")
+        );
+
+        // A near miss is suggested first.
+        let mut r = Report::default();
+        access_denied(
+            &mut r,
+            &listed(&["web-staging-1"], &[]),
+            None,
+            "web-staging",
+        );
+        assert!(
+            r.checks[0]
+                .fix
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("did you mean web-staging-1?")
+        );
+    }
+
+    #[test]
+    fn grants_warn_before_they_end() {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let mut r = Report::default();
+        check_grant(&mut r, 0);
+        assert!(r.checks.is_empty(), "standing access has no grant");
+        check_grant(&mut r, now + 3600);
+        check_grant(&mut r, now + 120);
+        assert_eq!(r.checks[0].status, Status::Pass);
+        assert_eq!(r.checks[1].status, Status::Warn);
+        assert!(r.checks[1].summary.contains("ends in"));
     }
 }
