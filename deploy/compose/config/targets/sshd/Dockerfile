@@ -3,7 +3,8 @@
 # Set from SSHD_BASE_IMAGE in deploy/compose/.env (see stacks/ssh.yml); no default here.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-RUN apk add --no-cache openssh-server bash \
+# rsync and git: so plain rsync and git over SSH can be tried through Limen.
+RUN apk add --no-cache openssh-server bash rsync git \
  && adduser -D -s /bin/bash ubuntu \
  && adduser -D -s /bin/bash ec2-user \
  # Unlock the accounts (no password is set; only certificates can log in).
