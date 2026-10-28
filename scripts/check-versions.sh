@@ -66,7 +66,7 @@ while IFS= read -r file; do
 done < <(git grep -lF 'deploy/docker/Dockerfile' -- . ':!docs' ':!*.md' ':!scripts/check-versions.sh' ':!deploy/compose/.env' 2>/dev/null)
 grep -q 'SSHD_BASE_IMAGE' deploy/compose/stacks/ssh.yml || fail "deploy/compose/stacks/ssh.yml: the sshd build does not pass SSHD_BASE_IMAGE"
 # CI service containers cannot read a file: their image strings must equal the ones here.
-for var in POSTGRES_IMAGE KMS_IMAGE; do
+for var in POSTGRES_IMAGE KMS_IMAGE JAEGER_IMAGE; do
   grep -qE "^[[:space:]]+image: ${!var}$" .github/workflows/ci-rust.yml || fail ".github/workflows/ci-rust.yml: the service image for $var is not ${!var}"
 done
 
