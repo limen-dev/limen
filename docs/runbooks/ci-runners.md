@@ -6,15 +6,21 @@ CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted min
 
 **Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review (and again on every push after that). Pushes to `main`, releases and manual runs are unaffected.
 
-The `what changed` job reads the diff against the merge base and decides which jobs run. Skipped jobs count as passing in the `ci` summary.
+The `What changed` job reads the diff against the merge base and decides which jobs run. Skipped jobs count as passing in the `ci` summary.
 
 | Change touches | Jobs |
 |---|---|
-| Only docs (`docs/`, `*.md`) | None. `ci` passes |
-| Rust code, `Cargo.*`, `proto/`, `deploy/docker/`, `.github/`, `mise.toml`, toolchain or lint config | fmt + clippy, tests (Linux x86_64 and arm64, macOS), cargo-deny and cargo-audit, images |
-| `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` | terraform validate, dashboards and dev-users check |
-| `.github/` | actionlint (and everything under "Rust code" above) |
+| Only docs (`docs/`, `*.md`), `website/`, `dependabot.yml`, issue templates | None. `ci` passes |
+| Rust code, `Cargo.*`, `proto/`, toolchain or lint config, `mise.toml`, `deploy/docker/`, `deploy/compose/.env`, the database and S3 test targets (`deploy/compose/config/targets/`, `config/s3/`, `scripts/ci-db-targets.sh`) | Lint, then tests (Linux x86_64 and arm64, macOS) |
+| The same, minus test-only files (`mise.toml`, toolchain and lint config, the test targets) | Container images (after lint) |
+| `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml` | Dependency audit (cargo-deny, cargo-audit) |
+| `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` | Terraform, dashboards, dev-users check |
+| `.github/workflows/`, `.github/actions/` | Workflow lint (actionlint) |
+| `.github/workflows/ci.yml`, `.github/actions/` | Everything |
 | Manual runs (`workflow_dispatch`) and releases | Everything |
+| Weekdays 05:17 UTC (schedule) | Dependency audit only, because advisories appear without a commit |
+
+The slow test jobs start only after lint passes, so a formatting or clippy failure does not spend 15 minutes of the single ARM64 runner on tests. Pull requests read the Rust build cache from `main` but do not write one (`save-if`), which saves over a minute at the end of each test job.
 
 ## Where the jobs run
 
