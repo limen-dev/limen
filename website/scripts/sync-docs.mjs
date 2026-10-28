@@ -108,8 +108,9 @@ function transform(srcPath, page) {
     }
     kept.push(
       line
-        // A diagram wrapped in a link to itself: the bundled image needs no link.
-        .replace(/\[(!\[[^\]]*\]\([^)]*\.svg\))\]\([^)]*\.svg\)/g, '$1')
+        // A diagram wrapped in a link to itself: the image is bundled beside the page, the
+        // link opens the full-size copy in public/diagrams (it is unreadable at column width).
+        .replace(/\[(!\[[^\]]*\]\([^)]*\.svg\))\]\(([^)]*\.svg)\)/g, (_, img, t) => `[${img}](${'../'.repeat(fromRoute.split('/').length)}diagrams/${posix.basename(t)})`)
         .replace(/(\]\()([^)\s]+)(\s+"[^"]*")?(\))/g, (_, a, t, ttl = '', z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${ttl}${z}`)
         .replace(/(href=")([^"]+)(")/g, (_, a, t, z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${z}`),
     );
@@ -135,9 +136,14 @@ function transform(srcPath, page) {
 for (const dir of generated) rmSync(join(out, dir), { recursive: true, force: true });
 for (const [src, page] of pages) transform(src, page);
 
-// The diagrams page shows the SVGs, so they sit beside it and Astro bundles them.
+// The diagrams page shows the SVGs, so they sit beside it and Astro bundles them. A second
+// copy in public/ is the full-size one the images link to.
+const full = resolve(root, 'website', 'public', 'diagrams');
+rmSync(full, { recursive: true, force: true });
+mkdirSync(full, { recursive: true });
 for (const f of readdirSync(join(root, 'docs/diagrams')).filter((f) => f.endsWith('.svg'))) {
   cpSync(join(root, 'docs/diagrams', f), join(out, 'architecture', f));
+  cpSync(join(root, 'docs/diagrams', f), join(full, f));
 }
 
 console.log(`synced ${pages.size} documents into ${relative(root, out)}`);

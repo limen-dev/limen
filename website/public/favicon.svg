@@ -1,6 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Limen">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <title>Limen</title>
-  <path d="M64 192 V112 a64 64 0 0 1 128 0 V192" fill="none" stroke="#E5E7EB" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
-  <line x1="36" y1="220" x2="220" y2="220" stroke="#2DD4BF" stroke-width="14" stroke-linecap="round"/>
-  <circle cx="128" cy="140" r="15" fill="#2DD4BF"/>
+  <style>
+    .arch { stroke: #1F2A44; }
+    @media (prefers-color-scheme: dark) { .arch { stroke: #E5E7EB; } }
+  </style>
+  <path class="arch" d="M64 192 V112 a64 64 0 0 1 128 0 V192" fill="none" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="36" y1="220" x2="220" y2="220" stroke="#14B8A6" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="128" cy="140" r="15" fill="#14B8A6"/>
 </svg>

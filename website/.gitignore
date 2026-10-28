@@ -3,6 +3,7 @@
 /src/content/docs/docs/runbooks/
 /src/content/docs/docs/architecture/
 /src/content/docs/docs/reference/
+/public/diagrams/
 /node_modules/
 /dist/
 /.astro/

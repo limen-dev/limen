@@ -115,6 +115,13 @@ header.header {
 
 .sl-markdown-content td:has(.chip) { white-space: nowrap; }
 
+/* Diagrams: a white sheet that opens full size, since their text is small at column width. */
+.sl-markdown-content a:has(> img[src$='.svg']) { display: block; position: relative; background: #fff; border: 1px solid var(--lm-line); border-radius: 14px; padding: 0.75rem; box-shadow: var(--lm-shadow); cursor: zoom-in; text-decoration: none; transition: border-color 0.15s, box-shadow 0.15s; }
+.sl-markdown-content a:has(> img[src$='.svg']):hover { border-color: var(--lm-accent); }
+.sl-markdown-content a:has(> img[src$='.svg'])::after { content: 'Open full size ↗'; position: absolute; right: 0.9rem; bottom: 0.8rem; font: 600 0.72rem/1 var(--lm-mono); padding: 0.4rem 0.6rem; border-radius: 8px; background: rgb(15 23 42 / 0.88); color: #fff; opacity: 0; transition: opacity 0.15s; }
+.sl-markdown-content a:has(> img[src$='.svg']):hover::after, .sl-markdown-content a:has(> img[src$='.svg']):focus-visible::after { opacity: 1; }
+.sl-markdown-content a > img[src$='.svg'] { display: block; width: 100%; height: auto; margin: 0; }
+
 /* Diagram frames */
 .diagram { background: #fff; border: 1px solid var(--lm-line); border-radius: 14px; padding: 1rem; box-shadow: var(--lm-shadow); }
 .diagram img { width: 100%; height: auto; display: block; }

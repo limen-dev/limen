@@ -43,7 +43,7 @@ for (const banned of [/access receipts?/i, /more secure than/i, /\bSOC ?2 compli
 }
 
 // 4. The status page and search index exist.
-for (const p of ['docs/status/index.html', 'pagefind/pagefind.js', 'sitemap-index.xml', 'favicon.svg']) {
+for (const p of ['docs/status/index.html', 'pagefind/pagefind.js', 'sitemap-index.xml', 'favicon.svg', 'og.png']) {
   if (!existsSync(join(dist, p))) fail(`missing ${p}`);
 }
 

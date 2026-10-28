@@ -24,6 +24,10 @@ export default defineConfig({
         './src/styles/tokens.css',
         './src/styles/docs.css',
       ],
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: new URL(`${base}og.png`, site).href } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+      ],
       components: { Footer: './src/components/DocsFooter.astro' },
       lastUpdated: false,
       pagination: true,
