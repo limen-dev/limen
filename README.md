@@ -26,7 +26,7 @@
 
 Limen decides who can reach your servers, databases and clusters, and keeps a record of what they did there.
 
-Engineers sign in through your company's identity provider. Limen checks a policy you keep in Git, then gives them a certificate that **expires in 10 minutes**. They connect with the tools they already use (`ssh`, `psql`, `kubectl`, `redis-cli`), and every session is recorded or audited into a **signed trail you can verify yourself**. CI jobs sign in the same way, with their own short-lived token, so your pipelines hold no long-lived secret either.
+Engineers sign in through your company's identity provider. Limen checks a policy you keep in Git, then gives them a certificate that **expires in an hour** (or sooner: you choose per role). They connect with the tools they already use (`ssh`, `psql`, `kubectl`, `redis-cli`), and every session is recorded or audited into a **signed trail you can verify yourself**. CI jobs sign in the same way, with their own short-lived token, so your pipelines hold no long-lived secret either.
 
 It is open source (Apache-2.0), written in Rust, and you run it on your own infrastructure. It is not production-ready yet: there is no release, and nothing has been tried against real cloud services. [What is not verified yet](#what-is-not-verified-yet) has the details.
 
@@ -36,7 +36,7 @@ Keys, passwords and tokens tend to outlive the reason they were handed out. Lime
 
 | | Without it | With Limen |
 |---|---|---|
-| **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in 10 minutes |
+| **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in an hour, or sooner if you choose |
 | **Getting into a database** | A password that people copy and share | `limen db connect orders-prod`. Only Limen's worker holds the database credential; no person sees it |
 | **Someone leaves the team** | Find and remove every key and password they had | Disable them in your identity provider and they can't start new sessions. `limen admin lock` also ends their open ones within seconds |
 | **A CI job deploys** | A long-lived secret stored in the CI settings | The job's own OIDC token becomes a short, scoped login |
@@ -143,7 +143,7 @@ Each target works with ordinary self-hosted servers and with the managed service
   </tr>
 </table>
 
-A bot is matched on exact claims of its token (for example the repository and the branch), gets the same 10-minute certificate as a person, and is bound by the same policy. The CI run that made each request is written into every audit event.
+A bot is matched on exact claims of its token (for example the repository and the branch), gets a short-lived certificate (15 minutes by default, at most an hour), and is bound by the same policy. The CI run that made each request is written into every audit event.
 
 ## Audit and monitoring
 

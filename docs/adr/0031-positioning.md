@@ -25,7 +25,7 @@ The one-sentence version: *Limen makes access short-lived, justified, and provab
 |---|---|---|---|
 | Provable | Signed hash-chained audit, `limen-audit-verify`, recording hashes checked before playback | ADR-0029 evidence packs | **Access receipts** per session; offline verification of a receipt; policy digest recorded on every session event |
 | Explainable | Dry run with a diff; denials audited with a reason | ADR-0028 | Decision traces, `explain`, effective-access diff, `policy test` |
-| Justified | 10-minute certificates, locks, kills, revokes | ADR-0025 | Requests, approvals, break-glass; context sources for approvers; statement-level second approval (needs the Phase 6 protocol work) |
+| Justified | Short-lived certificates (1 hour by default), locks, kills, revokes | ADR-0025 | Requests, approvals, break-glass; context sources for approvers; statement-level second approval (needs the Phase 6 protocol work) |
 | Machines and agents | None yet | ADR-0019 (bots) | **Agent principals**: a bot kind for AI agents, per-action approval, transcript recording; an ADR when Phase 4 starts |
 | Open and plain | Apache-2.0, Terraform audit module, compose stack | ADR-0024 | Honest "what is not built yet" page |
 

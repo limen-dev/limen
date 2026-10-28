@@ -23,5 +23,5 @@
 
 ## Consequences
 - \+ CA private keys never exist outside KMS in production.
-- − Signing costs one KMS call per cert. At the target scale (500 users × a few certs every 10 min) that's far below the quotas. *Check the current KMS quota for asymmetric `Sign` in Phase 1.*
+- − Signing costs one KMS call per cert. At the target scale (500 users × a few certs an hour, plus one SSH certificate per session) that's far below the quotas. *Check the current KMS quota for asymmetric `Sign` in Phase 1.*
 - − KMS being down blocks logins and new SSH sessions (see ADR-0011).
