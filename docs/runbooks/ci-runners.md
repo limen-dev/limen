@@ -16,7 +16,7 @@ Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the 
 | `ci-workflows.yml` | `.github/workflows/` | actionlint |
 | `ci-website.yml` | `website/`, `docs/` and `deploy/compose/README.md` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
 
-`ci-rust` ignores docs, `website/`, issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls all four with `hosted: true` before it builds anything.
+Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls the first four (not the website) with `hosted: true` before it builds anything.
 
 In `ci-rust.yml` the slow test and image jobs start only after lint passes, so a formatting or clippy failure does not spend 15 minutes of the single ARM64 runner on tests. Pull requests read the Rust build cache from `main` but do not write one (`save-if`), which saves over a minute at the end of each test job.
 
