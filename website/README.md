@@ -44,7 +44,7 @@ SITE_URL=http://localhost:4341 node <repo>/website/scripts/browser-matrix.mjs   
 THEME=light SITE_URL=http://localhost:4341 node <repo>/website/scripts/browser-matrix.mjs
 ```
 
-`BROWSERS=chromium,webkit` limits the engines. An engine that cannot start is reported as `SKIPPED`, never as passed. This is not real devices, a screen reader, or an older browser than the engines above.
+`BROWSERS=chromium,webkit` limits the engines. An engine that cannot start is reported as `NOT RUN` with its full launch error, and the script exits 2, never 0. This is not real devices, a screen reader, or an older browser than the engines above.
 
 **Supported browsers:** the current and previous major release of Chrome, Edge, Safari (macOS, iOS, iPadOS), Firefox and Firefox ESR, and Chrome on Android. The docs' mobile menu is Starlight's popover button, so the oldest versions that have everything the site uses (`popover`, `color-mix()`, `:has()`; from browser compatibility data) are Chrome and Edge 114, Safari 17 and Firefox 125. What the menu does below that was not tried. What was run: Chromium and WebKit. **Firefox has not been run (unverified):** a static check (`doiuse`) found nothing in the built CSS that current Firefox lacks except print-only rules, but that is not a test. Run the matrix with `BROWSERS=firefox` on a normal machine before relying on it.
 

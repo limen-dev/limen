@@ -14,7 +14,8 @@
 //   BROWSERS=chromium,webkit,firefox   (default: all installed)   THEME=dark|light (default dark)
 //   CHROMIUM_EXECUTABLE=<path>         use a headless shell instead of the full Chromium
 //
-// Exits non-zero when anything is reported.
+// Exits 1 when anything is reported, and 2 when an engine could not start (nothing was tested
+// in it, so that is never a pass).
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 
@@ -55,13 +56,16 @@ const profiles = [
 ].filter((p) => wanted.includes(p.engine));
 
 const launched = {};
+const notRun = [];
 for (const e of wanted) {
   try {
     launched[e] = await engines[e].launch(
       e === 'chromium' && process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {},
     );
   } catch (err) {
-    console.log(`SKIPPED ${e}: ${String(err.message).split('\n')[0]}`);
+    // The whole launch error (it includes the browser's own log), not just its first line.
+    notRun.push(e);
+    console.log(`NOT RUN ${e}:\n${String(err.message).split('\n').slice(0, 14).map((l) => `    ${l}`).join('\n')}`);
   }
 }
 
@@ -184,5 +188,7 @@ for (const profile of profiles) {
 }
 
 for (const b of Object.values(launched)) await b.close();
-console.log(problems ? `\n${problems} problem(s)` : '\nclean');
-process.exit(problems ? 1 : 0);
+// An engine that did not start tested nothing, so it can never end in "clean".
+console.log(problems ? `\n${problems} problem(s)` : '\nno problems in what ran');
+if (notRun.length) console.log(`NOT RUN, so not verified: ${notRun.join(', ')}`);
+process.exit(problems ? 1 : notRun.length ? 2 : 0);

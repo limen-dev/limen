@@ -50,7 +50,7 @@ for (const [engine, type, opts, name] of profiles) {
   try {
     browser = await type.launch(engine === 'chromium' && process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {});
   } catch (e) {
-    skipped.push(`${engine}-${name}: ${String(e.message).split('\n')[0]}`);
+    skipped.push(`${engine}-${name}:\n${String(e.message).split('\n').slice(0, 14).map((l) => `    ${l}`).join('\n')}`);
     continue;
   }
   const ctx = await browser.newContext({ ...opts, ignoreHTTPSErrors: true, colorScheme: THEME });
@@ -111,5 +111,6 @@ console.log(`${results.length} page loads in ${THEME}; ${bad.length} with a prob
 for (const r of bad) console.log(` ${r.profile.padEnd(20)} ${r.path.padEnd(30)} ${[...r.problems, ...r.axe.map((a) => `axe: ${a}`)].join(' | ')}`);
 const smalls = results.filter((r) => r.small > 0 && /Pixel|small|iPhone|phone/.test(r.profile));
 if (smalls.length) console.log(`touch targets under 32px on phones (informational): ${smalls.slice(0, 8).map((r) => `${r.path}:${r.small}`).join(' ')}`);
-for (const s of skipped) console.log(`skipped (engine not available here): ${s}`);
-process.exitCode = bad.length ? 1 : 0;
+for (const s of skipped) console.log(`NOT RUN (engine did not start), so not verified: ${s}`);
+// An engine that did not start tested nothing, so that is never a pass.
+process.exitCode = bad.length ? 1 : skipped.length ? 2 : 0;
