@@ -46,17 +46,17 @@ Most teams reach production with credentials that outlive their reason to exist.
 ## What using it looks like
 
 ```sh
-$ limen login                       # a browser opens on your identity provider
-$ limen ls                          # what am I allowed to reach?
-NAME             KIND        ACCESS AS                 LABELS
-bastion-staging  ● ssh       ec2-user, ubuntu          env=staging tier=bastion
-orders-staging   ● postgres  limen_read, limen_write   env=staging team=payments
-web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
-  3 resources · connect with `limen ssh <name>`
+$ limen login --proxy limen.example.com:443   # a browser opens on your identity provider
+$ limen ls                                    # what am I allowed to reach?
+NAME             KIND        ACCESS AS                LABELS
+bastion-staging  ● ssh       ec2-user, ubuntu         env=staging tier=bastion
+orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
+web-staging-1    ● ssh       ec2-user, ubuntu         env=staging
+  3 resources · `limen show <name>` tells you how to connect to one
 
-$ limen ssh web-staging-1           # a recorded SSH session
-$ limen db connect orders-staging   # a local address for psql, no password needed
-$ limen explain orders-prod         # why can't I reach this one?
+$ limen ssh web-staging-1                     # a recorded SSH session
+$ limen db connect orders-staging             # a local address for psql, no password needed
+$ limen explain orders-prod                   # why can't I reach this one?
 $ limen request orders-prod --for 30m --reason "INC-123: orders table is locked"
 ```
 
@@ -183,13 +183,14 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
     <td width="50%" valign="top">
       <h3>Command line</h3>
       <ul>
-        <li><b><code>limen login</code></b> through your identity provider, in a browser or with a device code</li>
-        <li><b><code>limen ls</code></b> shows what you can reach, as a table or as JSON</li>
-        <li><b><code>limen connect &lt;name&gt;</code></b> opens anything by name: SSH, a database, Redis, a cluster...</li>
-        <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
-        <li><b><code>limen request</code></b> asks for time-limited access, with a reason</li>
+        <li><b><code>limen login</code></b> through your identity provider, in a browser or with <code>--device</code>; <b><code>limen status</code></b> shows who you are and the time left</li>
+        <li><b><code>limen ls</code></b> shows what you can reach, as a table or as JSON; <b><code>limen show &lt;name&gt;</code></b> says how to connect to one</li>
+        <li><b><code>limen ssh</code></b>, <b><code>limen db connect</code></b>, <b><code>limen kube login</code></b> and the rest, one per protocol, or <b><code>limen connect &lt;name&gt;</code></b> to pick for you</li>
         <li><b><code>limen config ssh</code></b> lets plain <code>ssh</code> work through Limen</li>
-        <li><b><code>limen policy test</code></b> runs policy tests in CI, before a change ships</li>
+        <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
+        <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen approve</code></b> and <b><code>deny</code></b> answer one</li>
+        <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>
+        <li><b><code>limen admin</code></b> applies policy, locks users, ends sessions and manages workers</li>
       </ul>
     </td>
   </tr>

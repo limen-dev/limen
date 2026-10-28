@@ -40,11 +40,11 @@ limen ls          # what you can reach
 ```
 
 ```text
-NAME             KIND        ACCESS AS                 LABELS
-bastion-staging  ● ssh       ec2-user, ubuntu          env=staging tier=bastion
+NAME             KIND        ACCESS AS                LABELS
+bastion-staging  ● ssh       ec2-user, ubuntu         env=staging tier=bastion
 orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
-web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
-  3 resources · connect with `limen ssh <name>`
+web-staging-1    ● ssh       ec2-user, ubuntu         env=staging
+  3 resources · `limen show <name>` tells you how to connect to one
 ```
 
 ## 3. Use it
