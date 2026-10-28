@@ -1,0 +1,135 @@
+/* Starlight, restyled with the Limen palette. */
+:root,
+:root[data-theme='dark'],
+:root[data-theme='light'] {
+  --sl-font: var(--lm-font);
+  --sl-font-mono: var(--lm-mono);
+  --sl-color-accent: var(--lm-accent);
+  --sl-color-accent-high: var(--lm-accent-strong);
+  --sl-color-text-accent: var(--lm-accent-strong);
+  --sl-color-bg: var(--lm-bg);
+  --sl-color-bg-nav: var(--lm-glass);
+  --sl-color-bg-sidebar: var(--lm-bg);
+  --sl-color-bg-inline-code: var(--lm-surface-2);
+  --sl-color-hairline: var(--lm-line);
+  --sl-color-hairline-light: var(--lm-line);
+  --sl-color-hairline-shade: var(--lm-line);
+  --sl-color-text: var(--lm-text-dim);
+  --sl-color-white: var(--lm-text);
+  --sl-color-gray-3: var(--lm-muted);
+  --sl-color-gray-5: var(--lm-line-strong);
+  --sl-color-gray-6: var(--lm-surface);
+  --sl-content-width: 46rem;
+}
+:root[data-theme='dark'], :root:not([data-theme]) {
+  --sl-color-accent-low: rgb(45 212 191 / 0.14);
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: rgb(13 148 136 / 0.12);
+  --sl-color-black: #fff;
+}
+
+/* Starlight's "note" callouts use its blue; make them the brand's teal. */
+:root, :root[data-theme='dark'], :root[data-theme='light'] {
+  --sl-color-blue-low: var(--sl-color-accent-low);
+  --sl-color-blue: var(--lm-accent);
+  --sl-color-blue-high: var(--lm-accent-strong);
+}
+
+/* ...and the "caution" callouts the brand's amber, not Starlight's orange. */
+:root, :root[data-theme='dark'], :root[data-theme='light'] {
+  --sl-color-orange-low: color-mix(in srgb, var(--lm-warn) 14%, var(--lm-bg));
+  --sl-color-orange: var(--lm-warn);
+  --sl-color-orange-high: var(--lm-warn);
+}
+
+body {
+  background: var(--lm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+/* An aurora and a faint grid behind every docs page, like the homepage. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 28rem at 70% -10%, var(--lm-glow), transparent 70%),
+    linear-gradient(var(--lm-grid) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(90deg, var(--lm-grid) 1px, transparent 1px) 0 0 / 56px 56px;
+  mask-image: linear-gradient(#000 0, transparent 70%);
+  -webkit-mask-image: linear-gradient(#000 0, transparent 70%);
+}
+
+header.header {
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom-color: var(--lm-line);
+}
+.site-title { font-weight: 650; letter-spacing: -0.01em; }
+.site-title img { height: 1.6rem; width: auto; }
+
+.sl-markdown-content h1, h1#_top {
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  background: linear-gradient(180deg, var(--lm-text), var(--lm-text-dim));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.sl-markdown-content h2 { letter-spacing: -0.02em; font-weight: 650; }
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration-color: color-mix(in srgb, var(--lm-accent) 45%, transparent);
+  text-underline-offset: 3px;
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover { text-decoration-color: var(--lm-accent); }
+
+/* Sidebar: quiet, with a lit rail on the current page. */
+.sidebar-content details > summary .large { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--lm-muted); font-weight: 600; }
+.sidebar-content a { border-radius: 8px; }
+.sidebar-content a[aria-current='page'] {
+  background: var(--sl-color-accent-low);
+  color: var(--lm-accent-strong);
+  box-shadow: inset 2px 0 0 var(--lm-accent);
+  font-weight: 600;
+}
+
+/* Code and tables */
+.expressive-code .frame { border-radius: 12px; box-shadow: var(--lm-shadow); }
+.expressive-code .frame pre { background: var(--lm-bg-raised); }
+:not(pre) > code { border: 1px solid var(--lm-line); border-radius: 6px; padding: 0.1em 0.35em; }
+.sl-markdown-content table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--lm-line); border-radius: 12px; overflow: hidden; display: table; width: 100%; }
+.sl-markdown-content th { background: var(--lm-surface-2); font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--lm-muted); }
+.sl-markdown-content :is(th, td) { border-color: var(--lm-line); padding: 0.6rem 0.85rem; }
+.sl-markdown-content blockquote { border-inline-start: 3px solid var(--lm-accent); background: var(--sl-color-accent-low); border-radius: 0 10px 10px 0; padding: 0.6rem 1rem; }
+.sl-markdown-content details { border: 1px solid var(--lm-line); border-radius: 12px; padding: 0.75rem 1rem; background: var(--lm-surface); }
+.sl-markdown-content details > summary { cursor: pointer; }
+
+/* Honest status chips, used in hand-written pages. */
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 0.72rem/1 var(--lm-mono); padding: 0.28rem 0.55rem; border-radius: 999px; border: 1px solid var(--lm-line-strong); color: var(--lm-text-dim); background: var(--lm-surface); white-space: nowrap; }
+.chip::before { content: ''; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--lm-ok); }
+.chip.warn { color: var(--lm-warn); }
+.chip.plan { color: var(--lm-muted); }
+
+.sl-markdown-content td:has(.chip) { white-space: nowrap; }
+
+/* Diagrams: a white sheet that opens full size, since their text is small at column width. */
+.sl-markdown-content a:has(> img[src$='.svg']) { display: block; position: relative; background: #fff; border: 1px solid var(--lm-line); border-radius: 14px; padding: 0.75rem; box-shadow: var(--lm-shadow); cursor: zoom-in; text-decoration: none; transition: border-color 0.15s, box-shadow 0.15s; }
+.sl-markdown-content a:has(> img[src$='.svg']):hover { border-color: var(--lm-accent); }
+.sl-markdown-content a:has(> img[src$='.svg'])::after { content: 'Open full size ↗'; position: absolute; right: 0.9rem; bottom: 0.8rem; font: 600 0.72rem/1 var(--lm-mono); padding: 0.4rem 0.6rem; border-radius: 8px; background: rgb(15 23 42 / 0.88); color: #fff; opacity: 0; transition: opacity 0.15s; }
+.sl-markdown-content a:has(> img[src$='.svg']):hover::after, .sl-markdown-content a:has(> img[src$='.svg']):focus-visible::after { opacity: 1; }
+.sl-markdown-content a > img[src$='.svg'] { display: block; width: 100%; height: auto; margin: 0; }
+
+/* Diagram frames */
+.diagram { background: #fff; border: 1px solid var(--lm-line); border-radius: 14px; padding: 1rem; box-shadow: var(--lm-shadow); }
+.diagram img { width: 100%; height: auto; display: block; }
+
+.footer-links { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--lm-muted); padding-block: 2rem 0; }
+.footer-links a { color: var(--lm-muted); text-decoration: none; }
+.footer-links a:hover { color: var(--lm-accent-strong); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar-content a, .sl-markdown-content a { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s; }
+}
