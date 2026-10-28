@@ -1,73 +1,52 @@
 name: audit
 
-# Dependency audit (cargo-deny, cargo-audit).
-# Runs when dependencies or the policy change, and on weekdays: new advisories
-# are published without any commit here.
-#
-# Where the jobs run is one repository variable, so switching needs no commit:
-#   gh variable set CI_RUNNERS --body github-hosted --repo jfcmartins/limen   # GitHub-hosted (uses hosted minutes)
-#   gh variable delete CI_RUNNERS --repo jfcmartins/limen                     # back to the self-hosted runners
-# Releases always use hosted runners (release.yml passes hosted: true).
+# cargo-deny and cargo-audit. Also runs on weekdays: advisories appear without a commit.
+# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
 
 on:
   push:
     branches: [main]
-    paths:
+    paths: &paths
       - "Cargo.toml"
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "deny.toml"
       - "mise.toml"
       - ".github/workflows/audit.yml"
-  # Pull requests are opened as drafts and run nothing until they are marked
-  # ready for review (the ready_for_review type starts the run then).
+  # A draft pull request runs nothing; marking it ready for review starts the run.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "**/Cargo.toml"
-      - "deny.toml"
-      - "mise.toml"
-      - ".github/workflows/audit.yml"
+    paths: *paths
   schedule:
     - cron: "17 5 * * 1-5"
-  # The release workflow runs this before it builds anything, and dispatches
-  # it for the release pull request (whose commits are pushed with the workflow
-  # token, which doesn't start workflows by itself).
+  # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
     inputs:
       hosted:
         description: Run on GitHub-hosted runners instead of the self-hosted ones
         type: boolean
         default: false
-  # A manual run ignores the path filter and runs every job.
+  # A manual run ignores the path filter.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # github.workflow is the caller's name when release.yml calls this workflow,
-  # so the prefix keeps the callees' groups apart.
+  # (github.workflow is release.yml's name when it calls this, hence the prefix.)
   group: audit-${{ github.workflow }}-${{ github.ref }}
-  # Only supersede pull request runs. A push to main always runs to the end, so a
-  # quick follow-up commit can't hide the result of the one before it.
-  # (Do not add concurrency groups to single jobs: they cancelled queued jobs.)
+  # A new push cancels the older pull request run; a push to main always runs to the end.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   audit:
     name: Dependency audit (cargo-deny, cargo-audit)
-    # A draft pull request runs nothing.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
     timeout-minutes: 20
     steps:
-      # GitHub rate limits the actions/checkout download (HTTP 429) when several
-      # self-hosted runners fetch it at once, so this fetches with git instead.
-      # The token reaches git through the environment and is never written to
-      # disk. Every job below repeats this step with `*checkout`.
+      # Fetched with git, not actions/checkout, whose download is rate limited (HTTP 429)
+      # when several self-hosted runners start at once. The token never touches disk.
       - name: Check out the commit
         env:
           CI_TOKEN: ${{ github.token }}
@@ -84,11 +63,14 @@ jobs:
           git checkout -q -f FETCH_HEAD
           git clean -ffdx
           git log -1 --oneline
+
       - name: Install cargo-deny and cargo-audit
         uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
         with:
           install_args: rust cargo-deny cargo:cargo-audit
+
       - name: Licenses, bans and sources (cargo deny)
         run: cargo deny --locked check
+
       - name: Known vulnerabilities (cargo audit)
         run: cargo audit
