@@ -6,6 +6,7 @@ name: ci-infra
 on:
   push:
     branches: [main]
+    # Only these start it: add a path here when a check reads a new file (files the checks read).
     paths: &paths
       - "deploy/terraform/**"
       - "deploy/grafana/**"

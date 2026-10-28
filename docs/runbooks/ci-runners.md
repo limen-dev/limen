@@ -6,11 +6,11 @@ CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted min
 
 **Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review (and again on every push after that). Pushes to `main`, releases and manual runs are unaffected.
 
-Each workflow has a `paths:` filter, so it starts only when files it checks change. A workflow that does not start reports nothing (there is no combined `ci` check, and branch protection does not require any).
+Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the others list the files they check, so add a path there when a check starts reading a new file. A workflow that does not start reports nothing (there is no combined `ci` check, and branch protection does not require any).
 
 | Workflow | Starts when these change | Jobs |
 |---|---|---|
-| `ci-rust.yml` | `crates/`, `proto/`, `Cargo.*`, toolchain, lint and `mise.toml` config, `deploy/docker/`, `deploy/compose/.env`, the database and S3 test targets (`deploy/compose/config/targets/`, `config/s3/`, `scripts/ci-db-targets.sh`), `scripts/check-versions.sh`, the workflow itself | Lint (fmt, clippy, image versions), then tests (Linux x86_64 and arm64, macOS) and container images |
+| `ci-rust.yml` | Anything except docs, `website/`, `demos/`, `assets/`, Terraform, dashboards, `*.md` and the other workflows (a new directory is tested by default; `examples/` counts because the policy tests read it) | Lint (fmt, clippy, image versions), then tests (Linux x86_64 and arm64, macOS) and container images |
 | `audit.yml` | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml`, the workflow itself; and weekdays 05:17 UTC, because advisories appear without a commit | cargo-deny and cargo-audit |
 | `ci-infra.yml` | `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, dashboards, dev-users check |
 | `ci-workflows.yml` | `.github/workflows/` | actionlint |
