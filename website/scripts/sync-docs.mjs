@@ -36,6 +36,7 @@ add('docs/components.md', 'architecture/components');
 add('docs/threat-model.md', 'architecture/threat-model');
 add('docs/pentest-plan.md', 'architecture/pentest-plan');
 add('docs/policy.md', 'reference/policy');
+add('docs/cli-reference.md', 'reference/cli', 'CLI reference');
 add('docs/diagrams/README.md', 'architecture/diagrams', 'Diagrams');
 add('deploy/compose/README.md', 'reference/compose-stack', 'Local stack (Compose)');
 

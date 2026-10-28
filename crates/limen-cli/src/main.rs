@@ -12,6 +12,7 @@ mod api;
 mod commands;
 mod oidc;
 mod profile;
+mod reference;
 mod ui;
 
 use std::path::PathBuf;
@@ -235,6 +236,9 @@ enum Command {
     },
     /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
     Completions { shell: clap_complete::Shell },
+    /// Print the CLI reference as Markdown, generated from the command tree.
+    #[command(hide = true)]
+    MarkdownHelp,
     /// Show one resource: type, labels, how you may access it, and the command to connect.
     Show {
         resource: String,
@@ -650,6 +654,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 &mut script,
             );
             let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
+            Ok(())
+        }
+        Command::MarkdownHelp => {
+            let text = reference::render(&<Cli as clap::CommandFactory>::command());
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), text.as_bytes());
             Ok(())
         }
         Command::Show { resource, json } => commands::show(proxy, &resource, json).await,

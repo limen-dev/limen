@@ -1,4 +1,4 @@
-The `limen` command is for signing in and connecting. For browsing and admin actions in a browser, see [the console guide](console.md).
+The `limen` command is for signing in and connecting. For browsing and admin actions in a browser, see [the console guide](console.md). Every command and option is in the [CLI reference](../cli-reference.md).
 
 # Using the CLI
 
