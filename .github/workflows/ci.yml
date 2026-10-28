@@ -177,6 +177,10 @@ jobs:
       kms:
         image: nsmithuk/local-kms@sha256:e070866476b20973a9e23a9b636204b7a222e4169a6e03198d27b80d47ed28e3
         ports: ["8099:8080"]
+      # Receives the span the otlp_collector test sends (OTLP over HTTP on 4318).
+      jaeger:
+        image: jaegertracing/jaeger:2.22.0
+        ports: ["4318:4318"]
     env:
       # Each integration test links the whole workspace plus the AWS SDK. With
       # debug info the x86 runner's disk filled up ("No space left on device").
@@ -192,6 +196,7 @@ jobs:
       LIMEN_TEST_DATABASE_URL: postgres://limen:limen-ci@localhost:5432/limen
       LIMEN_TEST_KMS_ENDPOINT: http://localhost:8099
       LIMEN_TEST_S3_ENDPOINT: http://localhost:8333
+      LIMEN_TEST_OTLP_ENDPOINT: http://localhost:4318
       # The test identity in deploy/compose/config/s3/s3.json.
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
