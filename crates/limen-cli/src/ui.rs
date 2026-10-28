@@ -63,15 +63,16 @@ fn visible_width(text: &str) -> usize {
 /// Set to anything to turn the banner off.
 const BANNER_OPT_OUT: &str = "LIMEN_NO_BANNER";
 
-/// The doorway mark and the product name, three plain-ASCII lines.
+/// The doorway mark (an arch, a dot, a threshold) and the product name, then a
+/// blank line so it stands apart from what follows.
 fn banner_text() -> String {
     format!(
-        "{}\n{}   {} {}\n{}   {}\n",
-        accent("  ,--."),
-        accent("  | o|"),
+        "{}\n{}   {} {}\n{}  {}\n\n",
+        accent("  ╭───╮"),
+        accent("  │ ● │"),
         bold("limen"),
         dim(limen_core::VERSION),
-        accent(" ====="),
+        accent(" ━━━━━━━"),
         dim("identity-aware access"),
     )
 }
@@ -345,12 +346,17 @@ mod tests {
     }
 
     #[test]
-    fn banner_is_three_short_plain_lines() {
+    fn banner_is_three_short_lines_with_the_text_aligned() {
         let out = plain(&banner_text());
         let lines: Vec<_> = out.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert!(lines.iter().all(|l| l.is_ascii() && l.len() <= 40));
-        assert!(lines[1].contains("limen"));
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[3], "");
+        assert!(lines.iter().all(|l| l.chars().count() <= 40));
+        let column = |line: &str, text: &str| {
+            let at = line.find(text).expect("banner text is present");
+            line[..at].chars().count()
+        };
+        assert_eq!(column(lines[1], "limen"), column(lines[2], "identity"));
     }
 
     #[test]

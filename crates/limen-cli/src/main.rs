@@ -556,9 +556,8 @@ async fn main() {
         use clap::error::ErrorKind;
         let shows_overview = matches!(
             e.kind(),
-            ErrorKind::DisplayHelp
-                | ErrorKind::DisplayVersion
-                | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            // Not on --version: the banner would repeat the version line.
+            ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
         );
         let args: Vec<String> = std::env::args().skip(1).collect();
         if shows_overview && is_top_level(args.iter().cloned()) {
@@ -592,7 +591,7 @@ async fn main() {
     }
 }
 
-/// Whether the arguments ask about `limen` itself (`--help`, `--version`, `help`, none)
+/// Whether the arguments ask about `limen` itself (`--help`, `help`, none)
 /// rather than about a subcommand, where a banner would only be noise.
 fn is_top_level(args: impl IntoIterator<Item = String>) -> bool {
     let args: Vec<String> = args.into_iter().collect();
@@ -1153,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn banner_only_for_top_level_help_and_version() {
+    fn banner_only_for_top_level_help() {
         let args = |a: &[&str]| a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
         assert!(is_top_level(args(&[])));
         assert!(is_top_level(args(&["--help"])));
