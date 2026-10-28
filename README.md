@@ -248,6 +248,10 @@ Every phase is a [GitHub milestone](https://github.com/jfcmartins/limen/mileston
 
 It's also short enough to type all day (`limen login`, `limen ssh`). Say it "LIE-men" or "LEE-men"; both are common.
 
+## Security
+
+Found a vulnerability? Please report it privately through GitHub, not in a public issue. [SECURITY.md](SECURITY.md) explains how, and what is in scope.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the repository layout, how to build and test, and the conventions. Coding agents should read [AGENTS.md](AGENTS.md).
