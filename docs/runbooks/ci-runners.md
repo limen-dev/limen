@@ -14,6 +14,7 @@ Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the 
 | `audit.yml` | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml`, the workflow itself; and weekdays 05:17 UTC, because advisories appear without a commit | cargo-deny and cargo-audit |
 | `ci-infra.yml` | `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, dashboards, dev-users check |
 | `ci-workflows.yml` | `.github/workflows/` | actionlint |
+| `website-browsers.yml` | Never on a push or pull request: Mondays 04:30 UTC, or `gh workflow run website-browsers.yml` | The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes, dark and light (`website/scripts/browser-matrix.mjs`). Self-hosted, so it costs no hosted minutes |
 | `ci-website.yml` | `website/`, `docs/` and `deploy/compose/README.md` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
 
 Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls the first four (not the website) with `hosted: true` before it builds anything.
