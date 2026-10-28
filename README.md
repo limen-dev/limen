@@ -172,7 +172,7 @@ The name is short enough to type as a command (`limen login`, `limen ssh`). Both
 - [Threat model](docs/threat-model.md) and the [pentest plan](docs/pentest-plan.md)
 - [Policy reference](docs/policy.md)
 - [Runbooks](docs/runbooks/README.md)
-- A documentation site and homepage are built from these files (`website/`, [ADR-0021](docs/adr/0021-docs-site-and-homepage.md)) and publish to GitHub Pages once the repository is public
+- A documentation site and homepage are built from these files (`website/`, [ADR-0021](docs/adr/0021-docs-site-and-homepage.md)) and are not published anywhere until the repository is public (#138)
 
 ## Contributing and development
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the repository layout, how to build and test, and the conventions. Coding agents: [AGENTS.md](AGENTS.md).

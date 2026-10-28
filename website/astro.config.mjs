@@ -1,8 +1,8 @@
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
-// GitHub Pages serves a project site under /<repo>/. A custom domain serves from /.
-// Both come from the environment so moving hosts is a settings change (issue #136).
+// A project site on GitHub Pages is served under /<repo>/; a custom domain from /.
+// Both come from the environment so moving hosts is a settings change (issues #136, #138).
 const site = process.env.SITE_URL ?? 'https://jfcmartins.github.io';
 const base = (process.env.SITE_BASE ?? '/').replace(/\/?$/, '/');
 

@@ -6,7 +6,8 @@
 #   demos/demo-website.sh          # build, check, serve on a free port, fetch, stop
 #   demos/demo-website.sh --keep   # leave the server running until Ctrl-C
 #
-# Verified with a local server only. Not on GitHub Pages: the repository is private.
+# Verified with a local server only. Nothing is published until the repository is
+# public (#138), and there is no CI for the site yet: this demo is the check.
 set -euo pipefail
 keep=false
 for arg in "$@"; do

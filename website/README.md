@@ -32,4 +32,4 @@ npm run preview              # serve dist/ (SITE_BASE=/limen/ npm run build to t
 
 ## Publishing
 
-`.github/workflows/website.yml` builds on every relevant pull request and deploys `main` to GitHub Pages when the repository variable `PAGES_ENABLED` is `true`. `SITE_URL` and `SITE_BASE` set the address (defaults: `https://jfcmartins.github.io` and `/limen/`). For a custom domain set `SITE_BASE=/`.
+Nothing is published until the repository is public, so there is **no workflow yet** (#138). Run `npm run build` before you push a change to the site or to a document in `docs/`: it is the whole check. When publishing arrives, `SITE_URL` and `SITE_BASE` set the address (for GitHub Pages `/limen/`; for a custom domain `/`).

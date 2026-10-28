@@ -246,10 +246,10 @@ Pull request code runs on the owner's machines: a macOS runner and two OrbStack 
 Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
 
 ### TB12: Public website (ADR-0021)
-A static site on GitHub Pages. It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
+A static site, built by hand and not yet published or built in CI (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
 | Threat | Mitigation |
 |---|---|
-| T: a compromised npm package changes the site, or runs in CI | Exact versions and a lockfile, `npm ci`, `npm audit` in CI, Dependabot, actions pinned by SHA. The deploy job has only `pages: write` and `id-token: write`, and runs only from `main` |
+| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand until #138 adds CI). The site holds no secrets and is never deployed from a laptop |
 | I: the site tracks or leaks visitors to a third party | Fonts and scripts are self-hosted and `check-site.mjs` fails the build on any request to another origin. No analytics or cookies |
 | S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
