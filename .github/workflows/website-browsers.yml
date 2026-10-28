@@ -1,0 +1,86 @@
+name: website-browsers
+
+# The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes:
+# overflow, JS errors, third-party requests, axe WCAG A/AA, touch targets.
+# Slow, so it never runs on a push or pull request: only weekly, or by hand
+# (gh workflow run website-browsers.yml). Self-hosted, so it costs no hosted minutes.
+
+on:
+  schedule:
+    - cron: "30 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-browsers
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    name: Browser matrix (${{ matrix.theme }} theme)
+    runs-on: ${{ vars.CI_RUNNERS == 'github-hosted' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [dark, light]
+    steps:
+      # Fetched with git, not actions/checkout, whose download is rate limited (HTTP 429)
+      # when several self-hosted runners start at once. The token never touches disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
+
+      - name: Install Node
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          install_args: node
+
+      - name: Build the site
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+
+      # The script resolves Playwright and axe from the directory it runs in, so they
+      # are installed in a scratch directory instead of becoming site dependencies.
+      - name: Install the browsers
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/browsers" && cd "$RUNNER_TEMP/browsers"
+          npm init -y >/dev/null
+          npm i playwright-core axe-core
+          npx playwright-core install chromium webkit firefox
+
+      - name: Serve the site
+        working-directory: website
+        run: |
+          nohup npx astro preview --port 4341 > "$RUNNER_TEMP/preview.log" 2>&1 &
+          curl --silent --fail --retry 30 --retry-delay 1 --retry-connrefused http://localhost:4341/ >/dev/null
+
+      # Exit 1: a finding. Exit 2: an engine did not start, so it tested nothing.
+      - name: Run the matrix
+        working-directory: ${{ runner.temp }}/browsers
+        env:
+          SITE_URL: http://localhost:4341
+          THEME: ${{ matrix.theme }}
+        run: node "$GITHUB_WORKSPACE/website/scripts/browser-matrix.mjs"
+
+      - name: Stop the site server
+        if: always()
+        run: pkill -f "astro preview" || true
