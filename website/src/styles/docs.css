@@ -99,7 +99,8 @@ header.header {
 .expressive-code .frame { border-radius: 12px; box-shadow: var(--lm-shadow); }
 .expressive-code .frame pre { background: var(--lm-bg-raised); }
 :not(pre) > code { border: 1px solid var(--lm-line); border-radius: 6px; padding: 0.1em 0.35em; }
-.sl-markdown-content table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--lm-line); border-radius: 12px; overflow: hidden; display: table; width: 100%; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--lm-line); border-radius: 12px; margin-block: 1rem; -webkit-overflow-scrolling: touch; }
+.sl-markdown-content .table-scroll table { display: table; width: 100%; margin: 0; border: 0; }
 .sl-markdown-content th { background: var(--lm-surface-2); font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--lm-muted); }
 .sl-markdown-content :is(th, td) { border-color: var(--lm-line); padding: 0.6rem 0.85rem; }
 .sl-markdown-content blockquote { border-inline-start: 3px solid var(--lm-accent); background: var(--sl-color-accent-low); border-radius: 0 10px 10px 0; padding: 0.6rem 1rem; }

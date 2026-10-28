@@ -64,6 +64,7 @@ A dependency is adopted only if all of these hold:
 | Site (build time only, `website/`) | Node 24.22.1 LTS (pinned in `mise.toml`) | 24.22.1 | 2026-10 | Adopt. Astro 7 needs Node 22.23.4 or newer. Nothing from the site runs in a Limen component |
 | Site | astro 7.4.2 (MIT), @astrojs/starlight 0.42.7 (MIT) | | 2026-10-21 / 2026-10-23 | Adopt. Static output, search without a server, 0 advisories under `npm audit`. Versions are exact in `website/package.json` and locked in `package-lock.json` |
 | Site | @fontsource-variable/geist and geist-mono 5.3.0 (OFL-1.1) | | 2026-07-19 | Adopt. Fonts are served from the site itself, so a visitor makes no request to a font service |
+| Site | @astrojs/markdown-satteri 0.4.5 (MIT) | | 2026-10-21 | Adopt. Astro's own Markdown engine, already in the tree through Starlight. Declared so `astro.config.mjs` can wrap every table in a scroll container. 0 advisories under `npm audit` |
 
 ## Accepted advisories
 

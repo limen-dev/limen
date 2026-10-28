@@ -1,3 +1,4 @@
+import { satteri } from '@astrojs/markdown-satteri';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
@@ -6,7 +7,21 @@ import { defineConfig } from 'astro/config';
 const site = process.env.SITE_URL ?? 'https://jfcmartins.github.io';
 const base = (process.env.SITE_BASE ?? '/').replace(/\/?$/, '/');
 
+// Wraps every table in a scroll container, so a wide one scrolls on its own instead of
+// stretching the page on a phone. (Starlight's own table scroll is lost once a table is styled
+// with rounded corners, so the border lives on the wrapper.)
+const scrollableTables = {
+  name: 'limen-scrollable-tables',
+  element: {
+    filter: ['table'],
+    visit(node, ctx) {
+      ctx.wrapNode(node, { type: 'element', tagName: 'div', properties: { className: ['table-scroll'] }, children: [] });
+    },
+  },
+};
+
 export default defineConfig({
+  markdown: { processor: satteri({ hastPlugins: [scrollableTables] }) },
   site,
   base,
   // 'ignore' so /docs and /docs/ both load in dev and preview; built pages keep the slash.
