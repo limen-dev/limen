@@ -58,6 +58,37 @@ fn visible_width(text: &str) -> usize {
     plain(text).chars().count()
 }
 
+// ---- banner ---------------------------------------------------------------------
+
+/// Set to anything to turn the banner off.
+const BANNER_OPT_OUT: &str = "LIMEN_NO_BANNER";
+
+/// The doorway mark and the product name, three plain-ASCII lines.
+fn banner_text() -> String {
+    format!(
+        "{}\n{}   {} {}\n{}   {}\n",
+        accent("  ,--."),
+        accent("  | o|"),
+        bold("limen"),
+        dim(limen_core::VERSION),
+        accent(" ====="),
+        dim("identity-aware access"),
+    )
+}
+
+fn banner_enabled(stderr_is_terminal: bool, opted_out: bool) -> bool {
+    stderr_is_terminal && !opted_out
+}
+
+/// Print the logo to stderr, so it never mixes into output that is parsed or
+/// piped. Skipped when stderr isn't a terminal or `LIMEN_NO_BANNER` is set.
+pub fn banner() {
+    let opted_out = std::env::var_os(BANNER_OPT_OUT).is_some();
+    if banner_enabled(std::io::stderr().is_terminal(), opted_out) {
+        anstream::eprint!("{}", banner_text());
+    }
+}
+
 // ---- messages -------------------------------------------------------------------
 
 pub fn success(message: &str) {
@@ -311,6 +342,22 @@ mod tests {
         assert_eq!(lines[0], col("ROLE", "N"));
         assert_eq!(lines[1], col("admin", "a"));
         assert_eq!(lines[2], col("developer-readonly", "bb"));
+    }
+
+    #[test]
+    fn banner_is_three_short_plain_lines() {
+        let out = plain(&banner_text());
+        let lines: Vec<_> = out.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|l| l.is_ascii() && l.len() <= 40));
+        assert!(lines[1].contains("limen"));
+    }
+
+    #[test]
+    fn banner_only_on_a_terminal_and_unless_opted_out() {
+        assert!(banner_enabled(true, false));
+        assert!(!banner_enabled(false, false));
+        assert!(!banner_enabled(true, true));
     }
 
     #[test]

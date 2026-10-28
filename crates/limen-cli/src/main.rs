@@ -552,7 +552,19 @@ async fn connect_argv(
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        use clap::error::ErrorKind;
+        let shows_overview = matches!(
+            e.kind(),
+            ErrorKind::DisplayHelp
+                | ErrorKind::DisplayVersion
+                | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        if shows_overview && is_top_level(std::env::args().skip(1)) {
+            ui::banner();
+        }
+        e.exit()
+    });
     anstream::ColorChoice::write_global(match cli.color {
         ColorWhen::Auto => anstream::ColorChoice::Auto,
         ColorWhen::Always => anstream::ColorChoice::Always,
@@ -571,6 +583,13 @@ async fn main() {
         ui::error(&e);
         std::process::exit(1);
     }
+}
+
+/// Whether the arguments ask about `limen` itself (`--help`, `--version`, `help`, none)
+/// rather than about a subcommand, where a banner would only be noise.
+fn is_top_level(args: impl IntoIterator<Item = String>) -> bool {
+    let args: Vec<String> = args.into_iter().collect();
+    args.iter().all(|a| a.starts_with('-')) || args == ["help"]
 }
 
 /// Commands that open a local listener, the only ones `--detach` applies to.
@@ -630,7 +649,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             no_browser,
             ca_file,
             ..
-        } => commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await,
+        } => {
+            ui::banner();
+            commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await
+        }
         Command::Logout => commands::logout(proxy).await,
         Command::Status { json } => commands::status(proxy, json),
         Command::Ls { args, kind } => {
@@ -908,7 +930,7 @@ fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, DbCommand};
+    use super::{Cli, Command, DbCommand, is_top_level};
 
     /// Resource commands have a stable, parseable CLI shape.
     #[test]
@@ -1121,6 +1143,17 @@ mod tests {
             .expect_err("not available")
             .to_string();
         assert!(message.contains("limen search connect") && message.contains("Phase 10"));
+    }
+
+    #[test]
+    fn banner_only_for_top_level_help_and_version() {
+        let args = |a: &[&str]| a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        assert!(is_top_level(args(&[])));
+        assert!(is_top_level(args(&["--help"])));
+        assert!(is_top_level(args(&["-V"])));
+        assert!(is_top_level(args(&["help"])));
+        assert!(!is_top_level(args(&["ls", "--help"])));
+        assert!(!is_top_level(args(&["help", "ls"])));
     }
 
     #[test]
