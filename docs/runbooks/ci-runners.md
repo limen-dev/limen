@@ -1,6 +1,6 @@
 # CI on self-hosted runners
 
-CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflows are `.github/workflows/ci-rust.yml`, `audit.yml`, `ci-infra.yml` and `ci-workflows.yml`. The machines are set up with [gha-local-ci](https://github.com/jfcmartins/gha-local-ci) (`~/projects/gha-local-ci`).
+CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflows are `.github/workflows/ci-rust.yml`, `audit.yml`, `ci-infra.yml`, `ci-workflows.yml` and `ci-website.yml`. The machines are set up with [gha-local-ci](https://github.com/jfcmartins/gha-local-ci) (`~/projects/gha-local-ci`).
 
 ## What runs for a change
 
@@ -14,8 +14,9 @@ Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the 
 | `audit.yml` | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml`, the workflow itself; and weekdays 05:17 UTC, because advisories appear without a commit | cargo-deny and cargo-audit |
 | `ci-infra.yml` | `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, dashboards, dev-users check |
 | `ci-workflows.yml` | `.github/workflows/` | actionlint |
+| `ci-website.yml` | `website/`, `docs/` and `deploy/compose/README.md` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
 
-Docs, `website/`, issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls all four with `hosted: true` before it builds anything.
+Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls the first four (not the website) with `hosted: true` before it builds anything.
 
 In `ci-rust.yml` the slow test and image jobs start only after lint passes, so a formatting or clippy failure does not spend 15 minutes of the single ARM64 runner on tests. Pull requests read the Rust build cache from `main` but do not write one (`save-if`), which saves over a minute at the end of each test job.
 
