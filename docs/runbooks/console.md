@@ -33,5 +33,18 @@ What each page does is in the [console guide](../guides/console.md). For operato
 
 Browser sessions end after `LIMEN_CONSOLE_SESSION_TTL` (8 hours by default), when they sign out, or when an admin locks them.
 
+## Checking it on phones and in other browsers
+Do this after a change to `crates/limen-control-plane/assets/` or `templates/`. `deploy/compose/scripts/console-matrix.mjs` signs in through the identity provider, opens every page (and the first detail page of each list) in each engine and size, and reports sideways scrolling, JavaScript errors, axe-core violations (WCAG 2.1 AA) and touch targets under 32px. Run it in both themes.
+
+```sh
+mkdir /tmp/matrix && cd /tmp/matrix && npm init -y && npm i playwright-core axe-core
+npx playwright-core install chromium webkit firefox             # once
+deploy/compose/setup.sh --yes --stacks tcp,web                   # data for the pages to show
+CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-matrix.mjs
+THEME=light CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-matrix.mjs
+```
+
+It exits non-zero when any page has a problem. Add `shots` as the second argument to save a screenshot of every page. What it cannot tell you: how a page *feels* (look at the screenshots on a phone profile), anything behind a login you do not have, or a real device. A dev stack running beside another copy needs its own project name, ports and image tag (see the header of `deploy/compose/scripts/lib.sh`).
+
 ## Resources
 The Resources page is the quickest way to see what Limen can reach and whether it is reachable: a red "none" in the Workers column means no enrolled worker has the labels the resource asks for (`worker_selector`), so sessions to it fail. Check the worker's labels on the Workers page and the selector on the resource's page.
