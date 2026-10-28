@@ -24,5 +24,15 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(ci)"
+  # Terraform providers; each directory has its own required_providers block.
+  - package-ecosystem: terraform
+    directories:
+      - /deploy/terraform/modules/audit
+      - /deploy/terraform/modules/datadog
+      - /deploy/terraform/examples/audit
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deploy)"
   # Container images are pinned in deploy/compose/.env and checked by
   # scripts/check-versions.sh, so Dependabot does not manage docker (see #94).
