@@ -70,6 +70,7 @@ for (const e of wanted) {
 }
 
 let problems = 0;
+let loads = 0;
 const report = (profile, path, msg) => {
   problems += 1;
   console.log(`  ✗ ${profile} ${path}: ${msg}`);
@@ -139,6 +140,7 @@ for (const profile of profiles) {
       if (/^https?:$/.test(u.protocol) && u.origin !== base) errors.push(`third-party request: ${r.url()}`);
     });
     const res = await page.goto(base + path, { waitUntil: 'networkidle' });
+    loads += 1;
     const want = path === '/this-page-does-not-exist' ? 404 : 200;
     if (res.status() !== want) report(profile.name, path, `HTTP ${res.status()}, expected ${want}`);
     if (path === '/') {
@@ -189,6 +191,7 @@ for (const profile of profiles) {
 
 for (const b of Object.values(launched)) await b.close();
 // An engine that did not start tested nothing, so it can never end in "clean".
-console.log(problems ? `\n${problems} problem(s)` : '\nno problems in what ran');
+if (problems) console.log(`\n${problems} problem(s) in ${loads} page loads`);
+else if (loads) console.log(`\nno problems in ${loads} page loads`);
 if (notRun.length) console.log(`NOT RUN, so not verified: ${notRun.join(', ')}`);
 process.exit(problems ? 1 : notRun.length ? 2 : 0);
