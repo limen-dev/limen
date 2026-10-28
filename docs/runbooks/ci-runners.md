@@ -59,7 +59,7 @@ Everything self-hosted is in the commits on `ci/self-hosted-runners` (PR 20). Ea
 |---|---|
 | `a9787bd` | Decides which jobs run from the diff |
 | `aaab18d` | `CI_RUNNERS` variable chooses the runners |
-| `2f7450a` | Fetches the commit with `git`, not `actions/checkout` (fixes the HTTP 429s) |
+| `2f7450a` | Fetched the commit with `git` instead of `actions/checkout` to avoid HTTP 429s when many runs started at once. Reverted once runs became rare (drafts, path filters). If the 429s come back, bring that step back from the git history of `.github/workflows/` |
 | `36bedba` | Removes a concurrency group that cancelled queued jobs (don't add it back) |
 | `6bcdcbc` | `CARGO_BUILD_JOBS=2` on the integration job (fixes the ARM64 out-of-memory kills) |
 | the TB9 and runbook commit | Threat model entry and this runbook |
