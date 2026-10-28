@@ -352,7 +352,10 @@ async fn a_review_closes_when_its_last_item_is_decided_and_counts_silent_certifi
         .expect("list")
         .into_inner()
         .reviews
-        .remove(0);
+        .into_iter()
+        // The harness's own schedule may have started a review too, so pick ours.
+        .find(|r| r.id == id)
+        .expect("the review this test started");
     assert_eq!(review.status, "complete");
     assert_eq!(review.items, review.decided);
     assert!(
