@@ -31,7 +31,7 @@ GitHub Pages is a reasonable place to **start**: free, deploys from the Actions 
 - **Checks in the build.** `check-links.mjs` fails on a broken page or anchor. `check-site.mjs` fails when a guide is missing, a page loads anything from another origin, or the homepage stops saying what is unverified or claims something ADR-0031 forbids (access receipts, AI agents, comparisons).
 - **Tolerant URLs and a Limen 404.** `trailingSlash` is `ignore`, so `/docs` and `/docs/` both load in dev and preview (built pages keep the slash). `404.html` is the site's own page, which sends a missing-slash address to the right page and suggests the closest pages otherwise (#143).
 - **Fonts and scripts are self-hosted.** No analytics, no third-party requests.
-- **Still open:** CI and publishing (#138), run the quickstart in CI (#134), generate the CLI reference from `clap` (#133), deploy guides after Phase 14 (#135), domain and redirects (#136).
+- **Still open:** CI and publishing (#138), run the quickstart in CI (#135), generate the CLI reference from `clap` (#133), deploy guides after Phase 14 (#134), domain and redirects (#136).
 
 ## Consequences
 - A new milestone ("Docs site and homepage") and a `website/` workspace outside the Rust build; CI builds it and checks links.
