@@ -8,7 +8,7 @@
 <p align="center"><b>Identity-aware access to your infrastructure. Short-lived, audited, self-hosted.</b></p>
 
 <p align="center">
-  <a href="https://github.com/jfcmartins/limen/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jfcmartins/limen/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml"><img alt="CI" src="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-14B8A6"></a>
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-DEA584?logo=rust&logoColor=white">
   <a href="https://github.com/jfcmartins/limen/milestones"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-milestones-5319e7"></a>

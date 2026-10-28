@@ -72,15 +72,48 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.please.outputs.pr_branch }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+        run: |
+          for workflow in ci-rust audit ci-infra ci-workflows; do
+            gh workflow run "${workflow}.yml" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          done
 
   # The whole suite must pass on the exact commit before anything is built.
-  verify:
-    name: verify
+  # (Releases use GitHub-hosted runners only, never the self-hosted machines.)
+  verify-rust:
+    name: verify (rust)
     needs: please
     if: needs.please.outputs.release_created == 'true'
-    uses: ./.github/workflows/ci.yml
-    # Releases use GitHub-hosted runners only, never the self-hosted machines.
+    uses: ./.github/workflows/ci-rust.yml
+    with:
+      hosted: true
+    permissions:
+      contents: read
+
+  verify-audit:
+    name: verify (audit)
+    needs: please
+    if: needs.please.outputs.release_created == 'true'
+    uses: ./.github/workflows/audit.yml
+    with:
+      hosted: true
+    permissions:
+      contents: read
+
+  verify-infra:
+    name: verify (infra)
+    needs: please
+    if: needs.please.outputs.release_created == 'true'
+    uses: ./.github/workflows/ci-infra.yml
+    with:
+      hosted: true
+    permissions:
+      contents: read
+
+  verify-workflows:
+    name: verify (workflows)
+    needs: please
+    if: needs.please.outputs.release_created == 'true'
+    uses: ./.github/workflows/ci-workflows.yml
     with:
       hosted: true
     permissions:
@@ -88,7 +121,7 @@ jobs:
 
   binaries:
     name: binaries (${{ matrix.target }})
-    needs: [please, verify]
+    needs: [please, verify-rust, verify-audit, verify-infra, verify-workflows]
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +173,7 @@ jobs:
   # the builder stage, so it compiles once per architecture.
   images:
     name: images (${{ matrix.arch }})
-    needs: [please, verify]
+    needs: [please, verify-rust, verify-audit, verify-infra, verify-workflows]
     strategy:
       fail-fast: false
       matrix:
@@ -242,7 +275,7 @@ jobs:
 
   sbom:
     name: SBOM and deploy bundle
-    needs: [please, verify]
+    needs: [please, verify-rust, verify-audit, verify-infra, verify-workflows]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
