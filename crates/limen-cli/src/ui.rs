@@ -64,12 +64,15 @@ fn visible_width(text: &str) -> usize {
 const BANNER_OPT_OUT: &str = "LIMEN_NO_BANNER";
 
 /// The doorway mark (an arch, a dot, a threshold) and the product name, then a
-/// blank line so it stands apart from what follows.
+/// blank line so it stands apart from what follows. As in the logo, the arch
+/// takes the text colour and the dot and threshold are teal.
 fn banner_text() -> String {
     format!(
-        "{}\n{}   {} {}\n{}  {}\n\n",
-        accent("  ╭───╮"),
-        accent("  │ ● │"),
+        "{}\n{}{}{}   {} {}\n{}  {}\n\n",
+        bold("  ╭───╮"),
+        bold("  │ "),
+        accent("●"),
+        bold(" │"),
         bold("limen"),
         dim(limen_core::VERSION),
         accent(" ━━━━━━━"),
