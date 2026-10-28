@@ -241,17 +241,26 @@ fn group_mapping_and_bootstrap_admins() {
 #[test]
 fn cert_ttl_takes_shortest_and_caps() {
     let p = example();
-    let max = Duration::from_hours(1);
+    let max = Duration::from_hours(2);
+    let default = DEFAULT_CERT_TTL;
     assert_eq!(
-        p.cert_ttl(&roles(&["dev-readonly", "sre"]), max),
+        p.cert_ttl(&roles(&["dev-readonly", "sre"]), default, max),
         Duration::from_mins(10)
     );
-    assert_eq!(p.cert_ttl(&roles(&["sre"]), max), Duration::from_mins(30));
     assert_eq!(
-        p.cert_ttl(&roles(&["sre"]), Duration::from_mins(5)),
+        p.cert_ttl(&roles(&["sre"]), default, max),
+        Duration::from_mins(30)
+    );
+    assert_eq!(
+        p.cert_ttl(&roles(&["sre"]), default, Duration::from_mins(5)),
         Duration::from_mins(5)
     );
-    assert_eq!(p.cert_ttl(&[], max), DEFAULT_CERT_TTL);
+    // No role sets one: the deployment's default, still capped.
+    assert_eq!(p.cert_ttl(&[], default, max), Duration::from_hours(1));
+    assert_eq!(
+        p.cert_ttl(&[], Duration::from_hours(4), max),
+        Duration::from_hours(2)
+    );
 }
 
 #[test]

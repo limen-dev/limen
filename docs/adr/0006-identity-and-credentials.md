@@ -1,4 +1,4 @@
-# ADR-0006: OIDC login with a key-bound nonce, and 10-minute X.509 and SSH certificates
+# ADR-0006: OIDC login with a key-bound nonce, and short-lived X.509 and SSH certificates
 
 - Status: Accepted (owner approved 2026-10-13)
 - Date: 2026-10-13
@@ -17,6 +17,7 @@ Engineers log in with Okta (Dex or Keycloak locally). Every downstream credentia
 - **Issued credentials:**
   - an X.509 client cert (an OpenSSH user cert was planned here too; see the Phase 2 amendment)
   - both with a 10-minute TTL by default, configurable per role, capped by a cluster `max_cert_ttl`
+  - *Amended 2026-10-28:* the default is now **1 hour**, and a deployment sets its own with `--default-cert-ttl` (`LIMEN_DEFAULT_CERT_TTL`), which may not exceed `max_cert_ttl`. A role's `cert_ttl` still overrides it (the shortest across a user's roles wins). Without a stored refresh token, 10 minutes sent people back to the browser for nearly every new connection (each `kubectl` call, each database GUI reconnect), while revocation (logout, locks, kills) already ends access within one policy refresh and a stolen certificate is useless without its private key. An hour also bounds how long a role removed in the IdP survives, since roles are fixed at login. Bots are unchanged (ADR-0019: 15 minutes, at most an hour).
   - roles and the login session ID carried as URI SANs in the X.509 cert (`limen://user/…`, `limen://role/…`, `limen://login/…`, with percent-encoded segments; see `limen_core::identity`), and in the SSH cert's key ID and extensions. *Amended in Phase 1:* URI SANs replace the custom extension planned here. They need no private OID arc, they're understood by every X.509 parser, and they verify offline.
 - **Groups → roles** come from `role_mapping` documents (ADR-0008). Groups are read from a configurable claim (default `groups`). For Okta, the custom authorization server needs a groups claim configured; this goes in the Okta setup guide.
 - **No refresh token is stored by default.** Users run `limen login` again, which is silent if the IdP session is alive.

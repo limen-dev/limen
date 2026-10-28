@@ -403,7 +403,7 @@
 <rect x="289.0" y="978" width="245.0" height="128" rx="8" fill="#fff" stroke="#CBD5E1" stroke-width="1.2"/>
 <circle cx="313.0" cy="1004" r="13" fill="#1F2A44"/><text x="313.0" y="1008.5" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
 <text x="335.0" y="1009" font-size="13.5" font-weight="bold" fill="#1F2A44" text-anchor="start">
-<tspan x="335.0" dy="0">Get a 10-minute certificate</tspan>
+<tspan x="335.0" dy="0">Get a 1-hour certificate</tspan>
 </text>
 <text x="305.0" y="1036" font-size="11.5" font-weight="normal" fill="#232F3E" text-anchor="start">
 <tspan x="305.0" dy="0">The control plane checks the token,</tspan>

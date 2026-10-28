@@ -65,8 +65,8 @@ async fn pkce_login_issues_verified_short_lived_cert() {
     assert_eq!(id.username, ADMIN);
     let ttl = resp.expires_at_unix - time::OffsetDateTime::now_utc().unix_timestamp();
     assert!(
-        (540..=600).contains(&ttl),
-        "default TTL is 10 minutes, got {ttl}s"
+        (3540..=3600).contains(&ttl),
+        "default TTL is 1 hour, got {ttl}s"
     );
     let login = h
         .audit_events()

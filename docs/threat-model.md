@@ -58,7 +58,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 ### TB1: Laptop ↔ proxy (public)
 | Threat | Mitigation |
 |---|---|
-| S: stolen user cert and key | 10-minute TTL. Keys stored with 0600. Optional OS keychain (Phase 14) |
+| S: stolen user cert and key | Short TTL (1 hour by default, shorter per role); locks and logout end it sooner. Keys stored with 0600. Optional OS keychain (Phase 14) |
 | S: another local process or user connects to the CLI's loopback DB, Redis, MongoDB, search, RabbitMQ, or Kafka listener and rides the session | **Known risk.** Mitigations: bind to 127.0.0.1 only. `--socket` puts a unix socket in a 0700 directory. Each listener serves one target and closes after an hour with no connection. A unix socket (`--socket`) has mode 0600. A non-loopback `--listen` prints a warning. Sessions are audited under the user. Documented in the user guide |
 | T/I: downgrade or MITM | TLS 1.3 only (rustls). Public cert pinned through system roots plus an optional pin of the Limen CA |
 | D: connection floods, handshake CPU exhaustion | NLB plus a per-IP pre-auth rate limit and a concurrent handshake cap. Max sessions per user |
@@ -89,7 +89,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | T: rolled-back or stale policy on proxies and workers | Snapshots are signed by a control plane and versioned. Rollbacks are refused. Age counts from issue time, including across restarts. Past the grace period, decisions fail closed |
 | S: a compromised worker claims resources it doesn't serve | The worker's cert carries its pool and labels. The control plane only routes resources whose `worker_selector` matches the cert attributes |
 | S: a compromised proxy forges identities toward the control plane | The control plane re-verifies the forwarded user cert against the user CA. The proxy can't mint certs (no `kms:Sign`) |
-| T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (10 min). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
+| T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (1 hour by default, shorter per role, capped by `--max-cert-ttl`). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
 | T: grant replay | Grant TTL ≤ 60 s to establish. Nonce LRU on the worker. The grant is bound to the session ID |
 | R: proxy denies having routed a session | Both the proxy and the worker emit events that share the `session_id` |
 | D: tunnel exhaustion | Max concurrent streams per tunnel. Per-user session caps |
