@@ -523,19 +523,14 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "bytes",
- "crypto-bigint 0.7.10",
- "ecdsa 0.17.0",
  "form_urlencoded",
  "hex",
  "hmac 0.13.0",
  "http",
- "p256 0.14.0",
  "percent-encoding",
  "sha2 0.11.1",
- "subtle",
  "time",
  "tracing",
- "zeroize",
 ]
 
 [[package]]
