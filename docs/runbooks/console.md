@@ -44,7 +44,9 @@ CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-ma
 THEME=light CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-matrix.mjs
 ```
 
-It exits non-zero when any page has a problem. Add `shots` as the second argument to save a screenshot of every page. What it cannot tell you: how a page *feels* (look at the screenshots on a phone profile), anything behind a login you do not have, or a real device. A dev stack running beside another copy needs its own project name, ports and image tag (see the header of `deploy/compose/scripts/lib.sh`).
+It exits 1 when any page has a problem and 2 when an engine could not start (never 0, since nothing was tested in it). Add `shots` as the second argument to save a screenshot of every page. What it cannot tell you: how a page *feels* (look at the screenshots on a phone profile), anything behind a login you do not have, or a real device. A dev stack running beside another copy needs its own project name, ports and image tag (see the header of `deploy/compose/scripts/lib.sh`).
+
+**Firefox.** Playwright's own Firefox build does not start on every macOS version (it did not on 27.0.1, #151). `deploy/compose/scripts/console-matrix-firefox.mjs` runs the same pages and checks in a regular installed Firefox through Puppeteer (WebDriver BiDi): `npm i puppeteer-core axe-core` in the same directory, then `CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-matrix-firefox.mjs` (and `THEME=light`). It has no touch emulation and no screenshots, and it fails a run whose page is not in the requested theme.
 
 ## Resources
 The Resources page is the quickest way to see what Limen can reach and whether it is reachable: a red "none" in the Workers column means no enrolled worker has the labels the resource asks for (`worker_selector`), so sessions to it fail. Check the worker's labels on the Workers page and the selector on the resource's page.
