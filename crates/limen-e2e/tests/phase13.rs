@@ -311,14 +311,16 @@ async fn asked_for_approved_used_found_and_ended() {
     assert_eq!(status, Some(0));
     assert!(out.contains("systemctl status nginx"), "{out}");
 
-    // The session is recorded with *why it was allowed*.
+    // The session is recorded with *why it was allowed*. The command's own
+    // event reaches the trail asynchronously, so wait for it as well.
     eventually(
         Duration::from_secs(15),
-        "session.start with request_ids",
+        "session.start with request_ids and ssh.exec",
         || async {
-            read_jsonl(&r.d, AUDIT).iter().any(|e| {
+            let events = read_jsonl(&r.d, AUDIT);
+            events.iter().any(|e| {
                 e["kind"] == "session.start" && e["data"]["request_ids"][0] == asked.id.as_str()
-            })
+            }) && events.iter().any(|e| e["kind"] == "ssh.exec")
         },
     )
     .await;
