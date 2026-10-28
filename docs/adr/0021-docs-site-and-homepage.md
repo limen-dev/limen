@@ -29,6 +29,7 @@ GitHub Pages is a reasonable place to **start**: free, deploys from the Actions 
 - **The homepage is not a Starlight splash page.** It is its own Astro page with plain CSS and one small script (a terminal replay, a hash-chain demo, a command palette). The docs are Starlight with the same design tokens, so the two read as one site.
 - **One source.** `website/scripts/sync-docs.mjs` publishes `docs/guides`, `docs/runbooks`, `docs/adr`, the design, threat model and policy reference, and `deploy/compose/README.md` into the site at build time. The generated pages are git-ignored. Hand-written pages (introduction, quickstart, concepts, status) live in `website/src/content/docs/docs/`.
 - **Checks in the build.** `check-links.mjs` fails on a broken page or anchor. `check-site.mjs` fails when a guide is missing, a page loads anything from another origin, or the homepage stops saying what is unverified or claims something ADR-0031 forbids (access receipts, AI agents, comparisons).
+- **Tolerant URLs and a Limen 404.** `trailingSlash` is `ignore`, so `/docs` and `/docs/` both load in dev and preview (built pages keep the slash). `404.html` is the site's own page, which sends a missing-slash address to the right page and suggests the closest pages otherwise (#143).
 - **Fonts and scripts are self-hosted.** No analytics, no third-party requests.
 - **Still open:** CI and publishing (#138), run the quickstart in CI (#134), generate the CLI reference from `clap` (#133), deploy guides after Phase 14 (#135), domain and redirects (#136).
 

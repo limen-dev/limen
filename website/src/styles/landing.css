@@ -325,3 +325,22 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
   .reveal { opacity: 1; transform: none; }
   .arch { stroke-dashoffset: 0; }
 }
+
+/* 404 */
+.nf { position: relative; min-height: 100svh; display: grid; align-items: center; padding: 7rem 0 4rem; overflow: hidden; isolation: isolate; }
+.nf::before { content: ''; position: absolute; inset: -20% -10% auto -10%; height: 90%; z-index: -2; background: radial-gradient(38rem 24rem at 24% 42%, color-mix(in srgb, var(--lm-warn) 20%, transparent), transparent 70%), radial-gradient(34rem 22rem at 85% 10%, color-mix(in srgb, var(--lm-accent-2) 20%, transparent), transparent 70%); }
+.nf-grid { position: absolute; inset: auto 0 0 0; height: 50%; z-index: -1; pointer-events: none; background: linear-gradient(var(--lm-grid) 1.5px, transparent 1.5px) 0 0 / 64px 64px, linear-gradient(90deg, var(--lm-grid) 1.5px, transparent 1.5px) 0 0 / 64px 64px; transform: perspective(520px) rotateX(58deg); transform-origin: 50% 100%; mask-image: linear-gradient(to top, #000 10%, transparent 90%); -webkit-mask-image: linear-gradient(to top, #000 10%, transparent 90%); }
+.nf-inner { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: clamp(1.5rem, 5vw, 4rem); align-items: center; }
+.nf-door svg { width: min(100%, 360px); height: auto; display: block; margin-inline: auto; overflow: visible; }
+.nf-ttl { fill: var(--lm-warn); }
+.nf h1 { font-size: clamp(2.3rem, 5vw, 4rem); margin: 0.2rem 0 1.1rem; letter-spacing: -0.04em; line-height: 1; }
+.nf .lede code, .nf-path { font-family: var(--lm-mono); font-size: 0.82em; padding: 0.15em 0.5em; border-radius: 8px; background: var(--lm-surface-2); border: 1px solid var(--lm-line); color: var(--lm-text); overflow-wrap: anywhere; }
+.nf-guess { margin-top: 1.1rem; padding: 0.8rem 1rem; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--lm-accent) 50%, var(--lm-line)); background: var(--sl-color-accent-low, rgb(45 212 191 / 0.14)); color: var(--lm-text); font-size: 1rem; }
+.nf-guess a, .nf-suggest a { color: var(--lm-accent-strong); font-weight: 600; text-underline-offset: 3px; }
+.nf-suggest { margin-top: 1.6rem; }
+.nf-suggest h2 { font: 600 0.78rem/1 var(--lm-mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--lm-muted); max-width: none; margin-bottom: 0.7rem; }
+.nf-suggest ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.nf-suggest li a { display: inline-block; padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px solid var(--lm-line-strong); background: var(--lm-surface); text-decoration: none; transition: border-color 0.15s; }
+.nf-suggest li a:hover { border-color: var(--lm-accent); }
+.nf [hidden] { display: none; }
+@media (max-width: 980px) { .nf-inner { grid-template-columns: 1fr; } .nf-door svg { width: min(55%, 220px); } .nf { padding-top: 6rem; } }
