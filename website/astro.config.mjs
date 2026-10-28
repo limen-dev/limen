@@ -84,6 +84,7 @@ export default defineConfig({
             { slug: 'docs/guides/discovery' },
             { slug: 'docs/guides/policy-tooling' },
             { slug: 'docs/reference/policy' },
+            { slug: 'docs/reference/cli' },
           ],
         },
         {
