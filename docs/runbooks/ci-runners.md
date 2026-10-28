@@ -1,20 +1,23 @@
 # CI on self-hosted runners
 
-CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflow is `.github/workflows/ci.yml`. The machines are set up with [gha-local-ci](https://github.com/jfcmartins/gha-local-ci) (`~/projects/gha-local-ci`).
+CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflows are `.github/workflows/ci-rust.yml`, `audit.yml`, `ci-infra.yml` and `ci-workflows.yml`. The machines are set up with [gha-local-ci](https://github.com/jfcmartins/gha-local-ci) (`~/projects/gha-local-ci`).
 
 ## What runs for a change
 
 **Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review (and again on every push after that). Pushes to `main`, releases and manual runs are unaffected.
 
-The `what changed` job reads the diff against the merge base and decides which jobs run. Skipped jobs count as passing in the `ci` summary.
+Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the others list the files they check, so add a path there when a check starts reading a new file. A workflow that does not start reports nothing (there is no combined `ci` check, and branch protection does not require any).
 
-| Change touches | Jobs |
-|---|---|
-| Only docs (`docs/`, `*.md`) | None. `ci` passes |
-| Rust code, `Cargo.*`, `proto/`, `deploy/docker/`, `.github/`, `mise.toml`, toolchain or lint config | fmt + clippy, tests (Linux x86_64 and arm64, macOS), cargo-deny and cargo-audit, images |
-| `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` | terraform validate, dashboards and dev-users check |
-| `.github/` | actionlint (and everything under "Rust code" above) |
-| Manual runs (`workflow_dispatch`) and releases | Everything |
+| Workflow | Starts when these change | Jobs |
+|---|---|---|
+| `ci-rust.yml` | Anything except docs, `website/`, `demos/`, `assets/`, Terraform, dashboards, `*.md` and the other workflows (a new directory is tested by default; `examples/` counts because the policy tests read it) | Lint (fmt, clippy, image versions), then tests (Linux x86_64 and arm64, macOS) and container images |
+| `audit.yml` | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml`, the workflow itself; and weekdays 05:17 UTC, because advisories appear without a commit | cargo-deny and cargo-audit |
+| `ci-infra.yml` | `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, dashboards, dev-users check |
+| `ci-workflows.yml` | `.github/workflows/` | actionlint |
+
+Docs, `website/`, issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. A release (`release.yml`) calls all four with `hosted: true` before it builds anything.
+
+In `ci-rust.yml` the slow test and image jobs start only after lint passes, so a formatting or clippy failure does not spend 15 minutes of the single ARM64 runner on tests. Pull requests read the Rust build cache from `main` but do not write one (`save-if`), which saves over a minute at the end of each test job.
 
 ## Where the jobs run
 
@@ -59,11 +62,6 @@ Everything self-hosted is in the commits on `ci/self-hosted-runners` (PR 20). Ea
 | `6bcdcbc` | `CARGO_BUILD_JOBS=2` on the integration job (fixes the ARM64 out-of-memory kills) |
 | the TB9 and runbook commit | Threat model entry and this runbook |
 
-To go back to the workflow `main` had before this work, restore both workflow files and commit:
-
-```sh
-git checkout main -- .github/workflows/ci.yml .github/workflows/release.yml
-git commit -m "revert: back to the workflows on main"
-```
+The single `ci.yml` of that time was later split into the four workflows above (PR 157). To go back to the older layout, `git revert` that pull request's squashed commit.
 
 If PR 20 is squash-merged, the commit hashes above change. Use the squashed commit instead, or `git revert` the relevant part.

@@ -1,0 +1,87 @@
+name: ci-infra
+
+# Terraform, generated dashboards, dev users. crates/ counts: dashboards come from metric names.
+# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+
+on:
+  push:
+    branches: [main]
+    # Only these start it: add a path here when a check reads a new file (files the checks read).
+    paths: &paths
+      - "deploy/terraform/**"
+      - "deploy/grafana/**"
+      - "deploy/compose/config/dev-users.toml"
+      - "deploy/compose/scripts/gen-dev-users.py"
+      - "crates/**"
+      - ".github/workflows/ci-infra.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
+  # Called by release.yml, which tests the exact commit before building anything.
+  workflow_call:
+    inputs:
+      hosted:
+        description: Run on GitHub-hosted runners instead of the self-hosted ones
+        type: boolean
+        default: false
+  # A manual run ignores the path filter.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # (github.workflow is release.yml's name when it calls this, hence the prefix.)
+  group: ci-infra-${{ github.workflow }}-${{ github.ref }}
+  # A new push cancels the older pull request run; a push to main always runs to the end.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  infra:
+    name: Terraform, dashboards, dev users
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    timeout-minutes: 15
+    steps:
+      # Fetched with git, not actions/checkout, whose download is rate limited (HTTP 429)
+      # when several self-hosted runners start at once. The token never touches disk.
+      - name: Check out the commit
+        env:
+          CI_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="$(printf 'x-access-token:%s' "$CI_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --no-tags --depth=1 origin "$GITHUB_REF"
+          git checkout -q -f FETCH_HEAD
+          git clean -ffdx
+          git log -1 --oneline
+
+      - name: Install Terraform
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          install_args: terraform
+
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive deploy/terraform
+
+      - name: Terraform validate
+        run: |
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/examples/audit; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+      - name: Generated dashboards are up to date
+        run: |
+          python3 deploy/grafana/generate.py
+          git diff --exit-code -- deploy/grafana
+
+      - name: Dev users file and what is generated from it agree
+        run: python3 deploy/compose/scripts/gen-dev-users.py --check
