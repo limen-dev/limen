@@ -44,9 +44,17 @@ SITE_URL=http://localhost:4341 node <repo>/website/scripts/browser-matrix.mjs   
 THEME=light SITE_URL=http://localhost:4341 node <repo>/website/scripts/browser-matrix.mjs
 ```
 
-`BROWSERS=chromium,webkit` limits the engines. An engine that cannot start is reported as `SKIPPED`, never as passed. This is not real devices, a screen reader, or an older browser than the engines above.
+`BROWSERS=chromium,webkit` limits the engines. An engine that cannot start is reported as `NOT RUN` with its full launch error, and the script exits 2, never 0. This is not real devices, a screen reader, or an older browser than the engines above.
 
-**Supported browsers:** the current and previous major release of Chrome, Edge, Safari (macOS, iOS, iPadOS), Firefox and Firefox ESR, and Chrome on Android. The docs' mobile menu is Starlight's popover button, so the oldest versions that have everything the site uses (`popover`, `color-mix()`, `:has()`; from browser compatibility data) are Chrome and Edge 114, Safari 17 and Firefox 125. What the menu does below that was not tried. What was run: Chromium and WebKit. **Firefox has not been run (unverified):** a static check (`doiuse`) found nothing in the built CSS that current Firefox lacks except print-only rules, but that is not a test. Run the matrix with `BROWSERS=firefox` on a normal machine before relying on it.
+**Firefox.** Playwright can only drive its own patched Firefox build, which does not start on every macOS version (it did not on 27.0.1, #151). `scripts/firefox-matrix.mjs` runs the same checks in a regular, installed Firefox through Puppeteer (WebDriver BiDi), at four sizes. It has no touch emulation, so it skips the touch-target check.
+
+```sh
+cd /tmp/limen-browsers && npm i puppeteer-core axe-core
+SITE_URL=http://localhost:4341 node <repo>/website/scripts/firefox-matrix.mjs            # dark
+THEME=light SITE_URL=http://localhost:4341 node <repo>/website/scripts/firefox-matrix.mjs
+```
+
+**Supported browsers:** the current and previous major release of Chrome, Edge, Safari (macOS, iOS, iPadOS), Firefox and Firefox ESR, and Chrome on Android. The docs' mobile menu is Starlight's popover button, so the oldest versions that have everything the site uses (`popover`, `color-mix()`, `:has()`; from browser compatibility data) are Chrome and Edge 114, Safari 17 and Firefox 125. What the menu does below that was not tried. What was run: Chromium and WebKit (Playwright), and Firefox 159 on macOS (Puppeteer), all clean on 2026-10-28 in light and dark. Not run: Firefox ESR, Firefox below 159, real devices, a screen reader, touch emulation in Firefox.
 
 ## Publishing
 
