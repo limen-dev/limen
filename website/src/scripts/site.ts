@@ -126,6 +126,11 @@ addEventListener('keydown', (e) => {
 if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
   document.querySelectorAll('.kbd-btn kbd').forEach((k) => (k.textContent = 'Ctrl K'));
 }
+// Name the button from the text that is shown (WCAG 2.5.3); the phone layout shows only the icon.
+const nameSearch = () =>
+  $('#open-palette')?.setAttribute('aria-label', $('#open-palette')!.innerText.replace(/\s+/g, ' ').trim() || 'Search');
+nameSearch();
+addEventListener('resize', nameSearch);
 
 /* ---------- which section is on screen ---------- */
 {

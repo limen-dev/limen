@@ -42,6 +42,11 @@
   --sl-color-orange: var(--lm-warn);
   --sl-color-orange-high: var(--lm-warn);
 }
+/* On the light callout tint the brand amber is only 3.9:1; this is 5.1:1. */
+:root[data-theme='light'] {
+  --sl-color-orange: #9a4306;
+  --sl-color-orange-high: #9a4306;
+}
 
 body {
   background: var(--lm-bg);
