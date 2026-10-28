@@ -516,7 +516,14 @@ async fn overdue_items_escalate_to_the_admins_and_the_schedule_starts_one_review
         .expect("list")
         .into_inner()
         .reviews;
-    assert!(listed[0].overdue);
+    // The harness's own schedule may have started a review too, so pick ours.
+    assert!(
+        listed
+            .iter()
+            .find(|r| r.id == id)
+            .expect("the review this test started")
+            .overdue
+    );
 
     // The default schedule has started one already (this harness's first tick),
     // and further ticks don't start another.
