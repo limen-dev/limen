@@ -363,6 +363,7 @@ const scenarios: Record<string, Step[]> = {
   const blocksEl = $('#blocks')!;
   const status = $('#chain-status')!;
   const statusText = $('#chain-text')!;
+  const msg = $('#ledger-msg')!;
   const tamperBtn = $<HTMLButtonElement>('#tamper')!;
   const restoreBtn = $<HTMLButtonElement>('#restore')!;
   const tabs = document.querySelectorAll<HTMLButtonElement>('[data-scn]');
@@ -373,6 +374,7 @@ const scenarios: Record<string, Step[]> = {
   let current = 'ssh';
   let editing = false;
   let tampered = -1;
+  let finished = false;
   const GENESIS = '0'.repeat(64);
 
   const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
@@ -382,7 +384,7 @@ const scenarios: Record<string, Step[]> = {
     return out;
   };
 
-  function paintLedger() {
+  function paintLedger(added = false) {
     const live = events.map((e, i) => (i === tampered ? { ...e, who: 'svc-cleanup@example.com' } : e));
     const now = chain(live);
     let firstBad = -1;
@@ -391,8 +393,13 @@ const scenarios: Record<string, Step[]> = {
       const bad = now[i] !== stored[i];
       if (bad && firstBad < 0) firstBad = i;
       const li = document.createElement('li');
-      li.className = `blk${bad ? ' broken' : ''}${i === tampered ? ' tampered' : ''}${editing ? ' edit' : ''}`;
+      li.className = `blk${added && i === live.length - 1 ? ' fresh' : ''}${bad ? ' broken' : ''}${i === tampered ? ' tampered' : ''}${editing ? ' edit' : ''}`;
       li.dataset.i = String(i);
+      if (editing) {
+        li.tabIndex = 0;
+        li.setAttribute('role', 'button');
+        li.setAttribute('aria-label', `Rewrite event ${i + 1}, ${e.ty}`);
+      }
       li.innerHTML =
         `<span class="n">#${String(i + 1).padStart(2, '0')}</span>` +
         `<span class="ty">${esc(e.ty)}</span>` +
@@ -400,19 +407,27 @@ const scenarios: Record<string, Step[]> = {
         `<span class="who" title="${esc(e.detail)}">${esc(e.who)} · ${esc(e.detail)}</span>`;
       blocksEl.append(li);
     });
-    blocksEl.scrollTop = blocksEl.scrollHeight;
+    if (tampered >= 0) blocksEl.children[tampered]?.scrollIntoView({ block: 'nearest' });
+    else blocksEl.scrollTop = blocksEl.scrollHeight;
     const broken = firstBad >= 0;
     status.classList.toggle('bad', broken);
     status.classList.toggle('ok', !broken);
     statusText.textContent = broken ? `chain broken at #${String(firstBad + 1).padStart(2, '0')}` : events.length ? 'chain intact' : 'waiting';
     tamperBtn.disabled = !events.length || tampered >= 0;
+    tamperBtn.classList.toggle('ready', finished && tampered < 0 && !editing);
     restoreBtn.disabled = tampered < 0 && !editing;
+    const n = String(firstBad + 1).padStart(2, '0');
+    if (editing) msg.innerHTML = 'Pick any event to rewrite it.';
+    else if (broken) {
+      msg.innerHTML = `<b>Event #${n} was rewritten.</b> It now blames <code>${esc(live[firstBad].who)}</code>. Its hash changed, so every hash after it stopped matching. A verifier finds exactly this.`;
+    } else if (finished) msg.textContent = 'Every hash matches. Now try to rewrite history.';
+    else msg.textContent = '';
   }
 
   function emit(e: Ev) {
     events.push(e);
     stored = chain(events);
-    paintLedger();
+    paintLedger(true);
   }
 
   const pre = (prompt: string) => `<span class="p">${esc(prompt)}</span> `;
@@ -424,6 +439,7 @@ const scenarios: Record<string, Step[]> = {
     stored = [];
     tampered = -1;
     editing = false;
+    finished = false;
     term.innerHTML = '';
     paintLedger();
     tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.scn === name)));
@@ -459,6 +475,8 @@ const scenarios: Record<string, Step[]> = {
       term.scrollTop = term.scrollHeight;
     }
     caret.remove();
+    finished = true;
+    paintLedger();
   }
 
   tabs.forEach((t) => t.addEventListener('click', () => play(t.dataset.scn!)));
@@ -466,16 +484,22 @@ const scenarios: Record<string, Step[]> = {
 
   tamperBtn.addEventListener('click', () => {
     editing = true;
-    statusText.textContent = 'pick an event to rewrite';
     paintLedger();
-    blocksEl.querySelector<HTMLElement>('.blk')?.focus?.();
+    blocksEl.querySelector<HTMLElement>('.blk')?.focus();
   });
-  blocksEl.addEventListener('click', (e) => {
-    const li = (e.target as HTMLElement).closest<HTMLElement>('.blk');
+  const rewrite = (li: HTMLElement | null) => {
     if (!editing || !li) return;
     tampered = Number(li.dataset.i);
     editing = false;
     paintLedger();
+    restoreBtn.focus();
+  };
+  blocksEl.addEventListener('click', (e) => rewrite((e.target as HTMLElement).closest<HTMLElement>('.blk')));
+  blocksEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      rewrite((e.target as HTMLElement).closest<HTMLElement>('.blk'));
+    }
   });
   restoreBtn.addEventListener('click', () => {
     tampered = -1;
@@ -500,4 +524,24 @@ const scenarios: Record<string, Step[]> = {
       }
     }, { threshold: 0.3 }).observe(theater);
   } else start();
+}
+
+/* ---------- which section is on screen ---------- */
+{
+  const links = [...document.querySelectorAll<HTMLAnchorElement>('.nav-links a[href^="#"]')];
+  const byId = new Map(links.map((a) => [a.getAttribute('href')!.slice(1), a]));
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(
+      (es) => {
+        for (const e of es) {
+          if (!e.isIntersecting) continue;
+          links.forEach((a) => a.removeAttribute('aria-current'));
+          byId.get(e.target.id)?.setAttribute('aria-current', 'true');
+        }
+      },
+      { rootMargin: '-45% 0px -50% 0px' },
+    );
+    // Every section, so the highlight clears in one that has no link of its own.
+    document.querySelectorAll('main section[id]').forEach((el) => io.observe(el));
+  }
 }
