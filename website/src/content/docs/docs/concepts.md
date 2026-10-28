@@ -42,6 +42,6 @@ limen-audit-verify --bucket <bucket> --ca-file internal-ca.pem
 
 SSH sessions are recorded and replayable. Databases, Redis, MongoDB, search, and brokers are audited as commands or requests, and values that are secret by nature (Redis values, message bodies, record values) are redacted or never logged. See [verifying the audit chain](../runbooks/audit-verify/) and [access reviews and evidence](../guides/access-reviews/).
 
-## Where it is honest
+## What is and isn't verified
 
-Limen only claims what you can demonstrate. The [status page](../status/) is the list of what is built, and what is tested only against a local stand-in.
+Limen only claims what it can demonstrate. The [status page](../status/) lists what is built, and what has only been tested against a local stand-in.

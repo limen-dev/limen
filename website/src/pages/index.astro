@@ -6,10 +6,10 @@ const base = import.meta.env.BASE_URL;
 const docs = (p: string) => docsUrl(base, p);
 
 const steps = [
-  { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. The login is bound to a key that never leaves your machine.', c: 'limen login' },
-  { n: '02', t: 'Policy decides', d: 'Roles come from IdP groups. Resources are chosen by label. Anything not allowed is denied.', c: 'limen explain orders-prod' },
-  { n: '03', t: 'Connect', d: 'A 10-minute certificate. A worker inside your network dials out, so nothing opens inbound.', c: 'limen db connect orders-staging' },
-  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail anyone can check.', c: 'limen-audit-verify --bucket …' },
+  { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. Your login is tied to a key that never leaves your machine.', c: 'limen login' },
+  { n: '02', t: 'Policy decides', d: 'Your IdP groups become roles, and roles reach resources by label. Anything no rule allows is denied, and you can ask why.', c: 'limen explain orders-prod' },
+  { n: '03', t: 'Connect', d: 'You get a certificate that lasts 10 minutes. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
+  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Anyone who can read the bucket can check it.', c: 'limen-audit-verify --bucket …' },
 ];
 
 type Proto = { g: string; name: string; sub: string; warn?: string; href: string };
@@ -46,17 +46,17 @@ const protos: Proto[] = [
             </a>
             <h1>Access you can <span class="grad">prove</span>.</h1>
             <p class="lede">
-              Limen gives engineers, and the CI jobs that act for them, <b><span class="nb">short-lived</span>, audited access</b> to SSH, databases, Kubernetes and internal apps, and leaves a trail <b>you can verify yourself</b>, without taking anyone's word for it.
+              Limen replaces SSH keys, shared database passwords and CI secrets with a sign-in through your identity provider. Engineers and CI jobs get <b><span class="nb">short-lived</span>, audited access</b> to SSH, databases, Kubernetes and internal apps, and every session leaves a trail <b>you can verify yourself</b>.
             </p>
             <div class="cta">
-              <a class="btn primary" href={docs('quickstart/')}>Run it in 5 minutes
+              <a class="btn primary" href={docs('quickstart/')}>Try it on your laptop
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
               <a class="btn" href={docs('')}>Read the docs</a>
             </div>
             <ul class="facts">
               <li><b>10 min</b> certificates, no static keys</li>
               <li><b>0</b> inbound ports</li>
-              <li><b>1</b> store: PostgreSQL</li>
+              <li><b>1</b> required store: PostgreSQL</li>
             </ul>
           </div>
 
@@ -96,7 +96,7 @@ const protos: Proto[] = [
         <div class="wrap">
           <div class="eyebrow">See it work</div>
           <h2>A session, and the proof it leaves.</h2>
-          <p class="sub">Every command below emits an audit event. Each event is hashed together with the one before it. Change anything in the past and the chain stops verifying. Try it.</p>
+          <p class="sub">Every command below writes an audit event, and each event's hash includes the one before it. Edit anything in the past and the chain stops verifying. Press the tamper button and see.</p>
 
           <div class="theater" id="theater">
             <div class="term" role="group" aria-label="Terminal demo">
@@ -140,7 +140,7 @@ const protos: Proto[] = [
       <section class="section" id="how">
         <div class="wrap">
           <div class="eyebrow">How it works</div>
-          <h2>Four steps. No standing credentials.</h2>
+          <h2>What happens when you connect.</h2>
           <ol class="steps" id="steps">
             {steps.map((s) => (
               <li class="step reveal">
@@ -166,13 +166,13 @@ const protos: Proto[] = [
             <article class="person reveal">
               <div class="who-tag">Developers</div>
               <h3>Get in, get on with it.</h3>
-              <p>Sign in once. <code>limen ls</code> shows what you can reach. Use the tools you already have, with no passwords or keys to manage. When you need more, ask, with a reason.</p>
+              <p>Sign in once. <code>limen ls</code> shows what you can reach. Keep using <code>ssh</code>, <code>psql</code> and <code>kubectl</code>, with no passwords or keys to look after. When you need more, ask for it, with a reason.</p>
               <a class="more" href={docs('guides/cli/')}>The CLI →</a>
             </article>
             <article class="person reveal">
               <div class="who-tag">Platform and SRE</div>
               <h3>Run it like the rest of your stack.</h3>
-              <p>Policy in Git, tested in CI. Workers dial out, so no inbound holes. Several copies behind load balancers. Metrics, traces and alerts you already know how to read.</p>
+              <p>Policy in Git, tested in CI. Workers dial out, so you open no inbound holes. Run several copies of each part behind a load balancer. Prometheus metrics, OpenTelemetry traces and ready-made alerts.</p>
               <a class="more" href={docs('guides/scale-out/')}>Running at scale →</a>
             </article>
             <article class="person reveal">
@@ -189,8 +189,8 @@ const protos: Proto[] = [
       <section class="section" id="why">
         <div class="wrap">
           <div class="eyebrow">Why Limen</div>
-          <h2>Not another door. A door that can show its work.</h2>
-          <p class="sub">Most tools can say who connected. Limen is built so that every grant, decision and session can be shown to be what it claims to be.</p>
+          <h2>A door that keeps a record you can check.</h2>
+          <p class="sub">Knowing who connected is the start. Limen is built so that every grant, every decision and every session can be checked by someone who doesn't have to trust Limen.</p>
           <div class="bento">
             <article class="card w4 reveal">
               <h3><span class="ico">▣</span> Provable</h3>
@@ -212,21 +212,21 @@ const protos: Proto[] = [
             </article>
             <article class="card half reveal">
               <h3><span class="ico">⏱</span> Short-lived and justified</h3>
-              <p>Access you ask for, with a reason. An approver sees what you did last month. The grant ends the sessions it allowed when it expires.</p>
+              <p>Access you ask for, with a reason. The approver sees what you did on that resource in the past 30 days. When the grant expires, so do the sessions it allowed.</p>
               <pre class="snip"><span class="p">$</span> limen request orders-prod --for 30m \
     --reason "INC-123: orders is locked" --wait</pre>
               <a class="more" href={docs('guides/access-requests/')}>Requests and break-glass →</a>
             </article>
             <article class="card half reveal">
               <h3><span class="ico">⚙</span> CI jobs are principals too</h3>
-              <p>A GitHub Actions or GitLab CI token becomes a scoped, short-lived bot login. The run is in every audit event. No secret in the repo.</p>
+              <p>A GitHub Actions or GitLab CI job signs in with its own token and gets a scoped, short-lived bot login. The run is named in every audit event. No secret lives in the repository.</p>
               <pre class="snip"><span class="p">$</span> limen login --bot github_actions
 <span class="p">$</span> limen ssh web-staging-1 -- ./deploy.sh</pre>
               <a class="more" href={docs('guides/bots/')}>Bots →</a>
             </article>
             <article class="card full reveal plain">
               <h3><span class="ico">◇</span> Open and plain to run</h3>
-              <p>Apache-2.0, and everything above ships in it. Static binaries, PostgreSQL as the only required store, workers that dial out. No paid tier for approvals, auditing or discovery.</p>
+              <p>Everything on this page is in the Apache-2.0 build. Static binaries, PostgreSQL as the only required store, workers that dial out. No paid tier for approvals, auditing or discovery.</p>
               <ul class="chips">
                 <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose, Terraform for audit</li><li>Prometheus and OpenTelemetry</li>
               </ul>
@@ -239,8 +239,8 @@ const protos: Proto[] = [
       <section class="section" id="protocols">
         <div class="wrap">
           <div class="eyebrow">What it connects to</div>
-          <h2>One policy. One audit trail. Every protocol.</h2>
-          <p class="sub">Each tile says exactly where it stands. <span class="chip ok">built</span> works and is tested locally. <span class="chip warn">unverified</span> is a cloud-specific path we have written but not yet run against the real service.</p>
+          <h2>One policy and one audit trail for all of it.</h2>
+          <p class="sub">Each tile says where it stands. <span class="chip ok">built</span> means it works and is tested against a local copy of the software. <span class="chip warn">unverified</span> marks a cloud-specific path that is written but has not yet run against the real service.</p>
           <div class="protos">
             {protos.map((p) => (
               <a class="proto reveal" href={docs(p.href)}>
@@ -264,7 +264,7 @@ const protos: Proto[] = [
             <div class="honest-text">
               <div class="honest-mark" aria-hidden="true">!</div>
               <h2>We tell you what isn't proven.</h2>
-              <p>Limen is tested thoroughly against local stand-ins. <b>It has not yet been verified against real AWS, Okta or Datadog.</b> Those checks are on the roadmap, one issue per service, and every page that mentions a capability says whether it has met the real thing.</p>
+              <p>Limen is tested thoroughly against local stand-ins. <b>It has not yet been verified against real AWS, Okta or Datadog.</b> Those checks are on the roadmap, one issue per service, and every page that describes a capability says whether it has met the real thing.</p>
               <div class="cta left">
                 <a class="btn" href={docs('status/')}>The status page</a>
                 <a class="btn ghost" href={`${GH}/milestone/21`}>Verification roadmap</a>
@@ -284,7 +284,7 @@ const protos: Proto[] = [
       <section class="section start" id="start">
         <div class="wrap narrow">
           <div class="eyebrow">Try it</div>
-          <h2>From clone to a recorded session in five minutes.</h2>
+          <h2>From clone to a recorded session, on your laptop.</h2>
           <div class="install">
             <div class="install-bar"><span>terminal</span><button class="copy" id="copy" type="button">Copy</button></div>
 <pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/jfcmartins/limen &amp;&amp; cd limen
@@ -293,7 +293,7 @@ const protos: Proto[] = [
 <span class="p">$</span> limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 <span class="p">$</span> limen ssh web-staging-1</pre>
           </div>
-          <p class="fineprint">Needs Docker and the tools in <code>mise.toml</code>. A local dev stack with static test users, not for production.</p>
+          <p class="fineprint">Needs Docker and the tools in <code>mise.toml</code>. The first build takes several minutes. This is a local stack with test users and passwords, not for production.</p>
           <div class="cta"><a class="btn primary" href={docs('quickstart/')}>Read the quickstart</a><a class="btn" href={`${GH}`}>Star on GitHub</a></div>
         </div>
       </section>
