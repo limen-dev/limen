@@ -142,6 +142,7 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .tabs button[aria-selected='true'] { background: var(--sl-color-accent-low, rgb(45 212 191 / 0.14)); color: var(--lm-accent-strong); }
 .replay { margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--lm-muted); font-family: var(--lm-mono); font-size: 0.8rem; white-space: nowrap; }
 .replay:hover { color: var(--lm-accent-strong); }
+@media (pointer: coarse) { .replay { min-height: 32px; padding-inline: 0.5rem; } }
 .term-body { margin: 0; padding: 1.1rem 1.2rem; font-size: 0.86rem; line-height: 1.7; min-height: 0; overflow: auto; color: var(--lm-text-dim); white-space: pre-wrap; word-break: break-word; flex: 1; }
 .term-body .p { color: var(--lm-accent-strong); user-select: none; }
 .term-body .cmd { color: var(--lm-text); }

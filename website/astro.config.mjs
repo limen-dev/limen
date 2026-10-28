@@ -43,6 +43,7 @@ export default defineConfig({
       head: [
         { tag: 'meta', attrs: { property: 'og:image', content: new URL(`${base}og.png`, site).href } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        { tag: 'script', attrs: { src: `${base}docs-a11y.js`, defer: true } },
       ],
       components: { Footer: './src/components/DocsFooter.astro' },
       // Our own 404 page (src/pages/404.astro) replaces Starlight's.
