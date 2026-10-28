@@ -179,3 +179,23 @@ document.addEventListener('submit', function (e) {
   });
   setTimeout(function () { off.forEach(function (el) { el.disabled = false; }); }, 0);
 });
+
+// Keyboard and small screens. A table that scrolls sideways is reachable from the keyboard, and
+// the strip menu on a phone starts with the current page in view.
+document.addEventListener('DOMContentLoaded', function () {
+  function markScrollable() {
+    Array.prototype.forEach.call(document.querySelectorAll('.table-wrap'), function (w) {
+      if (w.scrollWidth > w.clientWidth + 1) {
+        w.tabIndex = 0;
+        if (!w.getAttribute('role')) { w.setAttribute('role', 'region'); w.setAttribute('aria-label', 'Table, scrolls sideways'); w.setAttribute('data-sc', ''); }
+      } else if (w.hasAttribute('data-sc')) {
+        w.removeAttribute('tabindex'); w.removeAttribute('role'); w.removeAttribute('aria-label'); w.removeAttribute('data-sc');
+      }
+    });
+  }
+  markScrollable();
+  window.addEventListener('resize', markScrollable);
+  var cur = document.querySelector('.nav a[aria-current="page"]');
+  var nav = cur && cur.parentElement;
+  if (nav && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, cur.offsetLeft - (nav.clientWidth - cur.offsetWidth) / 2);
+});

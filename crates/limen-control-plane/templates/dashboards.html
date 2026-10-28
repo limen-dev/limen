@@ -42,12 +42,12 @@
     <div class="panel-head"><h2>{{ p.title }}</h2><span class="hint">{{ p.sub }}</span>
       {% if !p.legend.is_empty() %}<span class="legend">{% for l in p.legend %}<span><i class="swatch {{ l.0 }}"></i>{{ l.1 }}</span>{% endfor %}</span>{% endif %}
     </div>
-    <svg class="chart" viewBox="0 0 640 200" role="img" aria-label="{{ p.title }}">
+    <svg class="chart" viewBox="0 0 640 200" role="group" aria-label="{{ p.title }}">
       {% for t in p.chart.ticks %}
       <line class="grid" x1="{{ p.chart.left }}" x2="{{ p.chart.right }}" y1="{{ t.y }}" y2="{{ t.y }}"/>
       <text class="axis" x="{{ p.chart.left - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.label }}</text>
       {% endfor %}
-      {% for b in p.chart.bars %}{% if b.h > 0 %}{% if let Some(h) = b.href %}<a href="{{ h }}" class="bar-link">{% endif %}<rect class="{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.tip }}</title></rect>{% if b.href.is_some() %}</a>{% endif %}{% endif %}{% endfor %}
+      {% for b in p.chart.bars %}{% if b.h > 0 %}{% if let Some(h) = b.href %}<a href="{{ h }}" class="bar-link" aria-label="{{ b.tip }}">{% endif %}<rect class="{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.tip }}</title></rect>{% if b.href.is_some() %}</a>{% endif %}{% endif %}{% endfor %}
       {% for x in p.chart.xlabels %}<text class="axis" x="{{ x.x }}" y="{{ p.chart.base + 16 }}" text-anchor="middle">{{ x.text }}</text>{% endfor %}
     </svg>
     {% if p.chart.empty %}<p class="chart-empty">No activity in this period.</p>{% endif %}
