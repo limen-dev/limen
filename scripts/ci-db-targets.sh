@@ -18,7 +18,9 @@ pg=limen-ci-pg-target
 my=limen-ci-mysql-target
 mongo=limen-ci-mongo-target
 
-stop() { docker rm -f "$pg" "$my" "$mongo" >/dev/null 2>&1 || true; }
+# -v removes the containers' anonymous volumes too. Without it every job left one behind
+# on the self-hosted runners, and their disks filled up.
+stop() { docker rm -fv "$pg" "$my" "$mongo" >/dev/null 2>&1 || true; }
 
 case "${1:-}" in
   stop) stop; exit 0 ;;

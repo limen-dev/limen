@@ -150,7 +150,7 @@ jobs:
       - name: Start SeaweedFS (S3)
         run: >-
           . deploy/compose/.env;
-          docker rm -f s3 >/dev/null 2>&1 || true;
+          docker rm -fv s3 >/dev/null 2>&1 || true;
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/config/s3/s3.json:/etc/seaweedfs/s3.json:ro"
           "$SEAWEEDFS_IMAGE" server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
@@ -175,9 +175,12 @@ jobs:
           cargo test --workspace --all-features --locked -- --nocapture 2>&1 | tee test.log
           if grep -q '^SKIPPED:' test.log; then grep '^SKIPPED:' test.log; exit 1; fi
 
-      - name: Stop the database targets
+      - name: Stop the database targets and SeaweedFS
         if: always()
-        run: scripts/ci-db-targets.sh stop
+        run: |
+          scripts/ci-db-targets.sh stop
+          # -v: SeaweedFS keeps its data in an anonymous volume that would otherwise pile up.
+          docker rm -fv s3 >/dev/null 2>&1 || true
 
   # No containers on macOS, so integration tests skip (they print SKIPPED) and only unit tests run.
   test-macos:
