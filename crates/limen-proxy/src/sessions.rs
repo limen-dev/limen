@@ -114,7 +114,7 @@ pub(crate) async fn handle(
     let user = match identify(proxy, &peer) {
         Ok(user) => user,
         Err(reason) => {
-            let _ = respond(&mut tls, Err(reason)).await;
+            let _ = respond(&mut tls, Err((reason, false))).await;
             return;
         }
     };
@@ -179,7 +179,9 @@ pub(crate) async fn handle(
                 }
             }
             tracing::info!(user = %user.username, resource = %request.resource, login = %request.principal, reason = %denial.reason, "session refused");
-            let _ = respond(&mut tls, Err(denial.reason)).await;
+            // A policy refusal, not capacity or an outage: `explain` can say why.
+            let denied = denial.audit && denial.code.is_none();
+            let _ = respond(&mut tls, Err((denial.reason, denied))).await;
         }
     }
 }
@@ -194,18 +196,20 @@ fn identify(proxy: &Proxy, peer: &PeerInfo) -> Result<UserIdentity, String> {
 
 async fn respond(
     tls: &mut TlsStream<TcpStream>,
-    result: Result<String, String>,
+    result: Result<String, (String, bool)>,
 ) -> std::io::Result<()> {
     let response = match result {
         Ok(session_id) => SessionResponse {
             ok: true,
             error: String::new(),
             session_id,
+            denied: false,
         },
-        Err(error) => SessionResponse {
+        Err((error, denied)) => SessionResponse {
             ok: false,
             error,
             session_id: String::new(),
+            denied,
         },
     };
     write_message(tls, &response).await

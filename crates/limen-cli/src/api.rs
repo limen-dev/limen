@@ -50,7 +50,9 @@ pub fn authenticated(flag: Option<&str>) -> anyhow::Result<(Profile, Channel)> {
 
 /// If `message` is a TLS trust failure, explain the usual cause and the fix.
 pub fn tls_hint(message: &str) -> Option<&'static str> {
-    (message.contains("invalid peer certificate") || message.contains("UnknownIssuer")).then_some(
+    // Only an unknown or wrong issuer: a name mismatch or an expired
+    // certificate has another cause, and re-pinning the CA wouldn't fix it.
+    (message.contains("UnknownIssuer") || message.contains("BadSignature")).then_some(
         "the proxy's certificate isn't signed by the CA pinned for it. If the proxy's CA changed \
          (for example, the dev stack was reset), log in again with `--ca-file <new ca.pem>`",
     )
@@ -83,6 +85,8 @@ mod tests {
                 .contains("--ca-file")
         );
         assert!(super::tls_hint("connection refused").is_none());
+        assert!(super::tls_hint("invalid peer certificate: NotValidForName").is_none());
+        assert!(super::tls_hint("invalid peer certificate: Expired").is_none());
     }
 
     #[test]

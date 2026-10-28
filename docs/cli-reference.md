@@ -45,6 +45,22 @@ Delete local credentials
 Usage: limen logout [OPTIONS]
 ```
 
+### `limen doctor`
+
+Find out why access doesn't work: proxy, CA, network, clock, login, and (with a name) one resource
+
+```text
+Usage: limen doctor [OPTIONS] [RESOURCE]
+```
+
+Arguments:
+
+- `<RESOURCE>`: Also check access to this resource.
+
+Options:
+
+- `--json`: Output JSON, for a support ticket. It holds no secrets.
+
 ### `limen status`
 
 Show the current identity, roles, and when the credentials expire
@@ -495,11 +511,17 @@ Usage: limen config [OPTIONS] <COMMAND>
 
 #### `limen config ssh`
 
-An ~/.ssh/config block so `ssh <login>@<resource>.limen` works directly
+Print an ~/.ssh/config block for `ssh <login>@<resource>.limen`, or `--install` one that makes plain `ssh <resource>`, scp, rsync and git work
 
 ```text
 Usage: limen config ssh [OPTIONS]
 ```
+
+Options:
+
+- `--install`: Include Limen's generated ssh_config from ~/.ssh/config, kept up to date on every login.
+- `--uninstall`: Remove the Include from ~/.ssh/config and delete the generated ssh_config.
+- `--file <FILE>`: The OpenSSH config to change, instead of ~/.ssh/config.
 
 ### `limen db`
 
@@ -636,6 +658,19 @@ Options:
 
 - `--kubeconfig <FILE>`: Write the kubeconfig here instead of in the profile directory.
 - `--print`: Print the kubeconfig instead of writing it.
+
+#### `limen kube config`
+
+Write one kubeconfig with a context for every cluster you can reach, refreshed on every login
+
+```text
+Usage: limen kube config [OPTIONS]
+```
+
+Options:
+
+- `--print`: Print it instead of writing it.
+- `--uninstall`: Delete the generated kubeconfig.
 
 #### `limen kube credentials`
 

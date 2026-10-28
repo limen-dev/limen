@@ -141,7 +141,7 @@ impl Access for AccessService {
             (user.username.clone(), user.roles.clone())
         };
         let resource = r.resource.trim();
-        let lines = explain(
+        let (lines, worker_connected) = explain(
             &self.0,
             &subject,
             &roles,
@@ -154,12 +154,14 @@ impl Access for AccessService {
         Ok(Response::new(ExplainResponse {
             lines,
             full_trace: admin_view,
+            worker_connected,
         }))
     }
 }
 
 /// Why `subject` can or cannot reach `resource`. Users get an answer that
 /// names nothing about resources they can't see; admins get the full trace.
+/// Also whether a worker for it is connected, when `subject` can reach it.
 pub async fn explain(
     state: &AppState,
     subject: &str,
@@ -167,7 +169,7 @@ pub async fn explain(
     resource: &str,
     principal: Option<&Principal>,
     full_trace: bool,
-) -> Result<Vec<String>, sqlx::Error> {
+) -> Result<(Vec<String>, Option<bool>), sqlx::Error> {
     let loaded = state.policy.current();
     let policy = &loaded.policy;
     let now = OffsetDateTime::now_utc();
@@ -234,7 +236,42 @@ pub async fn explain(
             left.whole_minutes().max(0)
         ));
     }
-    Ok(lines)
+    let reachable = policy.accessible(&held).iter().any(|r| r.name == resource);
+    if !reachable
+        && grants.is_empty()
+        && let Some(g) = store::recently_ended_grant(&state.db, subject, resource).await?
+    {
+        // Their own grant: nothing they didn't know is revealed.
+        let ended = g.revoked_at.unwrap_or(g.expires_at);
+        let how = if g.revoked_at.is_some() {
+            "was revoked"
+        } else {
+            "expired"
+        };
+        lines.push(format!(
+            "Your grant ({}) of {} on `{resource}` {how} {} minutes ago. Ask again to get it back.",
+            g.request_id,
+            g.role,
+            (now - ended).whole_minutes().max(0)
+        ));
+    }
+    // Only for a resource they can reach: whether it is served says nothing
+    // about resources they can't see.
+    let worker_connected = if reachable {
+        let connected = db::live_worker_labels(&state.db)
+            .await?
+            .iter()
+            .any(|labels| policy.worker_may_serve(resource, labels));
+        if !connected {
+            lines.push(format!(
+                "No worker that can reach `{resource}` is connected right now, so sessions to it fail until one is. Tell an admin."
+            ));
+        }
+        Some(connected)
+    } else {
+        None
+    };
+    Ok((lines, worker_connected))
 }
 
 fn join_or_none(v: &[String]) -> String {

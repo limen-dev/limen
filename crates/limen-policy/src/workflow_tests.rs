@@ -494,7 +494,22 @@ fn explaining_to_a_user_does_not_reveal_hidden_resources() {
     assert!(ok.join("\n").contains("But not as login root"));
     // And what they could ask for.
     let ask = policy.explain_for_user(&held, &strings(&["prod-db-readonly"]), "orders-prod", None);
-    assert!(ask.join("\n").contains("limen request orders-prod"));
+    let ask = ask.join("\n");
+    assert!(ask.contains("limen request orders-prod --for 30m"), "{ask}");
+    // ... and who approves (#120).
+    assert!(
+        ask.contains("`prod-db-readonly`: approved by members of sre-leads"),
+        "{ask}"
+    );
+    // Break-glass alone: the break-glass command, and no approver to wait for.
+    let glass = policy
+        .explain_for_user(&held, &strings(&["prod-ssh-emergency"]), "web-prod", None)
+        .join("\n");
+    assert!(glass.contains("break-glass: granted at once"), "{glass}");
+    assert!(
+        glass.contains("limen request web-prod --break-glass"),
+        "{glass}"
+    );
 }
 
 // ---------------------------------------------------------------------------

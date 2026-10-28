@@ -187,7 +187,8 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
         <li><b><code>limen login</code></b> through your identity provider, in a browser or with <code>--device</code>; <b><code>limen status</code></b> shows who you are and the time left</li>
         <li><b><code>limen ls</code></b> shows what you can reach, as a table or as JSON; <b><code>limen show &lt;name&gt;</code></b> says how to connect to one</li>
         <li><b><code>limen ssh</code></b>, <b><code>limen db connect</code></b>, <b><code>limen kube login</code></b> and the rest, one per protocol, or <b><code>limen connect &lt;name&gt;</code></b> to pick for you</li>
-        <li><b><code>limen config ssh</code></b> lets plain <code>ssh</code> work through Limen</li>
+        <li><b><code>limen config ssh --install</code></b> lets plain <code>ssh</code>, <code>scp</code>, <code>rsync</code> and <code>git</code> work through Limen</li>
+        <li><b><code>limen doctor</code></b> says why access doesn't work, and how to fix it</li>
         <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
         <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen approve</code></b> and <b><code>deny</code></b> answer one</li>
         <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>
