@@ -560,7 +560,14 @@ async fn main() {
                 | ErrorKind::DisplayVersion
                 | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
         );
-        if shows_overview && is_top_level(std::env::args().skip(1)) {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if shows_overview && is_top_level(args.iter().cloned()) {
+            // Parsing stopped before `--color` was applied; honour it here.
+            if args.iter().any(|a| a == "--color=never") {
+                anstream::ColorChoice::Never.write_global();
+            } else if args.iter().any(|a| a == "--color=always") {
+                anstream::ColorChoice::Always.write_global();
+            }
             ui::banner();
         }
         e.exit()
