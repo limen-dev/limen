@@ -15,8 +15,11 @@ npm run preview              # serve dist/ (SITE_BASE=/limen/ npm run build to t
 
 | Path | What |
 |---|---|
+| `src/layouts/Site.astro`, `src/scripts/site.ts` | What every non-docs page shares: head, header, footer, the ⌘K palette, theme |
 | `src/pages/index.astro` | The homepage. Markup and copy |
-| `src/styles/landing.css`, `src/scripts/landing.ts` | Homepage styles and interactions (hero, terminal replay, hash-chain demo, ⌘K palette) |
+| `src/pages/404.astro`, `src/scripts/notfound.ts` | The 404 page: goes to the page with the trailing slash when it exists, otherwise suggests the closest pages. Starlight's own 404 is turned off |
+| `src/data/site.ts` | Links and the page list shared by the homepage, the palette and the 404 page |
+| `src/styles/landing.css`, `src/scripts/landing.ts` | Styles for these pages, and the homepage-only interactions (hero, terminal replay, hash-chain demo, ⌘K palette) |
 | `src/styles/tokens.css` | The palette shared by the homepage and the docs |
 | `src/styles/docs.css` | Starlight restyled with those tokens |
 | `src/content/docs/docs/*.md(x)` | Pages written by hand: introduction, quickstart, concepts, status |

@@ -9,7 +9,8 @@ const base = (process.env.SITE_BASE ?? '/').replace(/\/?$/, '/');
 export default defineConfig({
   site,
   base,
-  trailingSlash: 'always',
+  // 'ignore' so /docs and /docs/ both load in dev and preview; built pages keep the slash.
+  trailingSlash: 'ignore',
   build: { format: 'directory' },
   integrations: [
     starlight({
@@ -29,6 +30,8 @@ export default defineConfig({
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
       ],
       components: { Footer: './src/components/DocsFooter.astro' },
+      // Our own 404 page (src/pages/404.astro) replaces Starlight's.
+      disable404Route: true,
       lastUpdated: false,
       pagination: true,
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
