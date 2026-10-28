@@ -153,11 +153,11 @@ open https://localhost:3443/console/              # macOS; elsewhere just paste 
 
 The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/milestones): one per phase, with the checklist in its epic issue and the exit criteria in its description. [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria) holds the technical definition of "done" ([ADR-0023](docs/adr/0023-roadmap-in-github.md)).
 
-Phases 0 to 12 are done: foundations, login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, databases, Redis, Kubernetes, MongoDB, search, messaging, and internal web apps with TCP. Which parts are still unverified against real services is shown in the tables above. Next:
+Phases 0 to 13 are done: foundations, login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, databases, Redis, Kubernetes, MongoDB, search, messaging, internal web apps with TCP, and access workflows (requests with approval and break-glass, audit and recording search, resource discovery, policy tooling, reviews with evidence packs, read-only live watch). Which parts are still unverified against real services is shown in the tables above. Next:
 
-- **Phase 13:** access requests and approvals, audit and recording search, resource discovery, policy tooling ([milestone](https://github.com/jfcmartins/limen/milestone/18))
-- **Phase 14:** hardening and production readiness ([milestone](https://github.com/jfcmartins/limen/milestone/16))
-- **Docs:** documentation site and homepage ([milestone](https://github.com/jfcmartins/limen/milestone/8))
+- **Phase 14:** hardening and production readiness: Helm chart, ECS and EC2 modules, pentest ([milestone](https://github.com/jfcmartins/limen/milestone/16))
+- **Docs:** the documentation site and homepage are built (`website/`) and wait for the repository to be public before they are published ([milestone](https://github.com/jfcmartins/limen/milestone/8))
+- **Open ideas:** policy from evidence ([#117](https://github.com/jfcmartins/limen/issues/117), on the [Phase 13 milestone](https://github.com/jfcmartins/limen/milestone/18))
 
 ## Why "Limen"
 Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.
