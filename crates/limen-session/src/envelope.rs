@@ -200,6 +200,7 @@ pub fn verify<'a>(
 
 #[cfg(test)]
 mod tests {
+    use aws_lc_rs::signature::ECDSA_P256_SHA256_FIXED;
     use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 
     use super::*;
@@ -245,21 +246,10 @@ mod tests {
             .decode(signature)
             .expect("decode signature");
         assert_eq!(raw.len(), 64);
-        let mut der = Vec::from([0x30, 0x00]);
-        let mut ints = Vec::with_capacity(70);
-        for integer in raw.as_chunks::<32>().0 {
-            ints.push(0x02);
-            let leading_zero = integer[0] & 0x80 != 0;
-            ints.push(u8::try_from(integer.len() + usize::from(leading_zero)).expect("length"));
-            if leading_zero {
-                ints.push(0);
-            }
-            ints.extend(integer);
-        }
-        der[1] = u8::try_from(ints.len()).expect("sequence length");
-        der.extend(ints);
-        UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, point)
-            .verify(format!("{header}.{payload}").as_bytes(), &der)
+        // A JWT carries r || s as 64 bytes, so verify it as that (re-encoding it as
+        // DER needs minimal-length integers, which fails for 1 in 128 signatures).
+        UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
+            .verify(format!("{header}.{payload}").as_bytes(), &raw)
             .expect("JWT signature verifies");
     }
 }
