@@ -278,7 +278,11 @@ async fn login(
         )
         .await);
     }
-    let ttl = loaded.policy.cert_ttl(&roles, state.config.max_cert_ttl);
+    let ttl = loaded.policy.cert_ttl(
+        &roles,
+        state.config.default_cert_ttl,
+        state.config.max_cert_ttl,
+    );
     let login_id = Uuid::now_v7();
     let issued = state
         .cas

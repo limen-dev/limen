@@ -40,6 +40,7 @@ use state::{AppState, Limits, PolicyStore};
 /// Build the shared state: connect and migrate the database, load the CAs,
 /// load the policy, and open the audit sink.
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
+    config.check_cert_ttls().map_err(anyhow::Error::msg)?;
     let db = db::connect_with(
         config.database_url.expose(),
         config.database_max_connections,

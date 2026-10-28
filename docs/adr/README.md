@@ -10,7 +10,7 @@ Each ADR's status line gives its approval date.
 | [0003](0003-reverse-tunnel.md) | Reverse tunnel: gRPC served by the worker over an outbound connection | Accepted |
 | [0004](0004-proxy-peering.md) | Proxy HA through tunnel registry and proxy peering | Accepted |
 | [0005](0005-single-port-ingress.md) | Single public port with ALPN and path routing behind an NLB | Accepted |
-| [0006](0006-identity-and-credentials.md) | OIDC login with key-bound nonce, 10-minute X.509 and SSH certificates | Accepted |
+| [0006](0006-identity-and-credentials.md) | OIDC login with key-bound nonce, short-lived X.509 and SSH certificates | Accepted |
 | [0007](0007-certificate-authority.md) | Three CA keys behind a Signer trait, KMS in production | Accepted |
 | [0008](0008-policy-model.md) | YAML label-based policy, push-applied, signed snapshots | Accepted |
 | [0009](0009-audit-pipeline.md) | Disk spool, at-least-once delivery, S3 hash chain, Datadog | Accepted |
