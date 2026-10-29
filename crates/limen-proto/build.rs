@@ -5,6 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("{root}/limen/v1/audit.proto"),
             format!("{root}/limen/v1/control.proto"),
             format!("{root}/limen/v1/tunnel.proto"),
+            format!("{root}/limen/manage/v1/manage.proto"),
         ],
         &[root.to_owned()],
     )?;

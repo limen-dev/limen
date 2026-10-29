@@ -1,0 +1,746 @@
+syntax = "proto3";
+
+// The management API (ADR-0042): the one write path for policy documents.
+//
+// The CLI, the web console, and the Terraform provider are all clients of
+// this service; none has write logic of its own. Unlike the internal
+// `limen.v1` package, this package is kept compatible: changes are additive,
+// field numbers are never reused, and CI runs `buf breaking` against `main`.
+//
+// Conventions:
+// - A document is addressed by (kind, name). Names are unique per kind across
+//   the whole control plane and never change; a rename is a delete and a create.
+// - Every write is checked against the document's `etag`. A stale etag is
+//   refused, never merged.
+// - Every write that changes something produces exactly one new numbered,
+//   signed policy version and one `policy.change` audit event. A write whose
+//   audit event can't be recorded is not applied.
+// - Errors use the gRPC status code plus a `google.rpc.ErrorInfo` detail with
+//   `domain = "manage.limen.dev"` and `reason` set to an `ErrorReason` value's
+//   name without its prefix, for example `ETAG_MISMATCH`.
+// - Times are Unix seconds (`*_unix`), as in the rest of Limen.
+package limen.manage.v1;
+
+// Manages policy documents and the changes waiting for approval.
+//
+// Callers are people with `limen:admin`, or bots holding a `policy_writer`
+// grant (which never carries `limen:admin`). Each call states below what a
+// writer may do; anything not stated is refused with PERMISSION_DENIED.
+service ManagementService {
+  // What the caller may read and write. Any signed-in person or bot may call
+  // it; clients call it first, so they can explain a refusal before sending a
+  // write.
+  rpc DescribeCaller(DescribeCallerRequest) returns (DescribeCallerResponse);
+
+  // One document. A writer may read only documents in its namespace and the
+  // profiles its grant names.
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  // Documents of one kind, in name order, from one immutable policy version,
+  // so paging is consistent even while others write.
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+
+  // Creates one document. The grant is checked before the name, so a writer
+  // learns nothing about names outside its patterns; then ALREADY_EXISTS if
+  // the name is taken by any owner.
+  rpc CreateDocument(CreateDocumentRequest) returns (CreateDocumentResponse);
+  // Replaces one document's description, labels, and spec. There is no
+  // partial update: the caller sends the whole desired state.
+  rpc UpdateDocument(UpdateDocumentRequest) returns (UpdateDocumentResponse);
+  // Deletes one document. Deleting a resource ends its open sessions and
+  // active grants (ADR-0042 §7).
+  rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
+  // Applies several creates, updates, and deletes atomically, as one policy
+  // version: all of them or none.
+  rpc BatchWrite(BatchWriteRequest) returns (BatchWriteResponse);
+  // Makes the documents owned by one source exactly the given set: creates,
+  // updates, and deletes within that source only. `limen admin apply
+  // --source` calls this. Documents owned by any other source are untouched,
+  // and naming one is a conflict.
+  rpc ReplaceSource(ReplaceSourceRequest) returns (ReplaceSourceResponse);
+  // Moves a document to another owner. Within the caller's own namespace a
+  // writer may move between sources; anything else needs a person with
+  // `limen:admin`.
+  rpc TransferDocument(TransferDocumentRequest) returns (TransferDocumentResponse);
+
+  // Changes held for approval because they widen standing access.
+  rpc GetChange(GetChangeRequest) returns (GetChangeResponse);
+  // Pending changes (or changes in another state), newest first. A writer
+  // sees only its own.
+  rpc ListChanges(ListChangesRequest) returns (ListChangesResponse);
+  // Approves a pending change and applies it. Only people decide changes (an
+  // admin, or a member of the writer's approver groups); bots never do. The
+  // change is validated again
+  // against the current policy first; if a document it touches changed
+  // since, the change becomes SUPERSEDED instead. Never by its author, nor by
+  // a person whose name equals the CI account that started the run (`actor`
+  // on GitHub, `user_login` on GitLab).
+  rpc ApproveChange(ApproveChangeRequest) returns (ApproveChangeResponse);
+  // Refuses a pending change, with a reason. Same people as ApproveChange.
+  rpc RejectChange(RejectChangeRequest) returns (RejectChangeResponse);
+  // The author withdraws a pending change.
+  rpc CancelChange(CancelChangeRequest) returns (CancelChangeResponse);
+
+  // Applied policy versions, newest first.
+  rpc ListPolicyVersions(ListPolicyVersionsRequest) returns (ListPolicyVersionsResponse);
+  // The JSON Schema of one kind's `spec`, generated from the same types the
+  // control plane parses with. The Terraform provider is generated from it.
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+}
+
+// ---- Documents --------------------------------------------------------------
+
+// The kinds of policy document.
+enum DocumentKind {
+  // Not a valid kind; always refused.
+  DOCUMENT_KIND_UNSPECIFIED = 0;
+  // A set of allow and deny rules (ADR-0008).
+  DOCUMENT_KIND_ROLE = 1;
+  // IdP groups to roles.
+  DOCUMENT_KIND_ROLE_MAPPING = 2;
+  // Something people connect to.
+  DOCUMENT_KIND_RESOURCE = 3;
+  // A machine identity (ADR-0019). Written by people only.
+  DOCUMENT_KIND_BOT = 4;
+  // A cloud discovery rule (ADR-0027). Written by people only.
+  DOCUMENT_KIND_DISCOVERY = 5;
+  // Policy tests (ADR-0028).
+  DOCUMENT_KIND_POLICY_TEST = 6;
+  // The fixed half of a resource, which writers complete (ADR-0042 §4).
+  // Written by people only.
+  DOCUMENT_KIND_RESOURCE_PROFILE = 7;
+  // What one bot may write (ADR-0042 §3). Written by people only, and no
+  // grant can include this kind.
+  DOCUMENT_KIND_POLICY_WRITER = 8;
+}
+
+// One policy document, as stored.
+message Document {
+  // The document's kind.
+  DocumentKind kind = 1;
+  // Unique per kind; immutable. The same rule as in YAML: 1 to 128
+  // characters of `a-z`, `0-9`, `.`, `_`, and `-`.
+  string name = 2;
+  // Free text shown in the console and the CLI.
+  string description = 3;
+  // Labels that roles select on, with the same limits as in YAML: the ones
+  // the caller set. A writer may set only the keys and values its profile
+  // allows; the profile's fixed labels are in `effective_labels`, not here,
+  // so a client's own labels round-trip unchanged.
+  map<string, string> labels = 4;
+  // The kind's `spec` as JSON, in the same shape as the YAML (`GetSchema`).
+  // Parsed strictly: unknown fields are refused. For a resource created from
+  // a profile, this holds only the fields the writer set. The control plane
+  // returns it normalized (keys sorted, defaults left out), so clients can
+  // compare it byte for byte.
+  string spec_json = 5;
+  // For a resource only: the profile it completes, or empty for a resource
+  // written in full by a person.
+  string profile = 6;
+  // Output only. What enforcement uses: for a resource from a profile, the
+  // profile's template merged with `spec_json`; otherwise equal to `spec_json`.
+  string effective_spec_json = 7;
+  // Output only. Who manages this document.
+  Ownership ownership = 8;
+  // Output only. Opaque; changes whenever the document or its owner changes.
+  // Send it back to update, delete, or transfer.
+  string etag = 9;
+  // Output only. The policy version this revision first appeared in.
+  int64 policy_version = 10;
+  // Output only. When the document was created.
+  int64 create_time_unix = 11;
+  // Output only. When this revision was written.
+  int64 update_time_unix = 12;
+  // Output only. The person or `bot:<name>` that wrote this revision.
+  string updated_by = 13;
+  // Output only. What roles select on: `labels` plus, for a resource from a
+  // profile, the profile's fixed labels.
+  map<string, string> effective_labels = 14;
+}
+
+// The write channels.
+enum Channel {
+  // Not a valid channel; always refused.
+  CHANNEL_UNSPECIFIED = 0;
+  // `limen admin apply` from files, usually a Git repository in CI.
+  CHANNEL_GIT = 1;
+  // The web console.
+  CHANNEL_CONSOLE = 2;
+  // Any other client of this API, such as the Terraform provider.
+  CHANNEL_API = 3;
+}
+
+// Who manages a document. Exactly one owner per document; any other owner's
+// write to it is refused with the owner named in the error.
+message Ownership {
+  // Output only. Set by the control plane from how the write arrived.
+  Channel channel = 1;
+  // Who writes it within the channel, for example
+  // `github.com/acme/limen-policy` or `terraform/payments-prod`. Up to 200
+  // characters. A source keeps writers that share a namespace from
+  // overwriting each other by accident; it is not a security boundary.
+  string source = 2;
+  // The permission scope. A writer holds exactly one namespace. Existing
+  // policy lives in `default`.
+  string namespace = 3;
+}
+
+// ---- Caller -----------------------------------------------------------------
+
+// Request for `DescribeCaller`.
+message DescribeCallerRequest {}
+
+// Response for `DescribeCaller`.
+message DescribeCallerResponse {
+  // `alice` or `bot:payments-terraform`.
+  string principal = 1;
+  // True for a person with `limen:admin`, who may write everything subject to
+  // the guardrails.
+  bool admin = 2;
+  // The bot's grant, when the caller is a bot writer.
+  WriterGrant grant = 3;
+  // The policy version the answer was computed from.
+  int64 policy_version = 4;
+}
+
+// What a bot writer may do: the parsed `policy_writer` document.
+message WriterGrant {
+  // The `policy_writer` document's name.
+  string name = 1;
+  // The one namespace the writer owns documents in.
+  string namespace = 2;
+  // Name patterns its documents must match, such as `payments-*`.
+  repeated string name_patterns = 3;
+  // The kinds it may write.
+  repeated DocumentKind kinds = 4;
+  // The profiles its resources may complete.
+  repeated string profiles = 5;
+  // The most documents it may own. Writes past it are refused.
+  uint32 max_documents = 6;
+  // How many documents it owns now.
+  uint32 document_count = 7;
+  // IdP groups whose members may approve its held changes, besides admins.
+  repeated string approver_groups = 8;
+}
+
+// ---- Reads ------------------------------------------------------------------
+
+// Request for `GetDocument`.
+message GetDocumentRequest {
+  // The document's kind.
+  DocumentKind kind = 1;
+  // The document's name.
+  string name = 2;
+  // A past policy version to read from; 0 means the active one.
+  int64 policy_version = 3;
+}
+
+// Response for `GetDocument`.
+message GetDocumentResponse {
+  // The document.
+  Document document = 1;
+}
+
+// Request for `ListDocuments`.
+message ListDocumentsRequest {
+  // Required: the kind to list.
+  DocumentKind kind = 1;
+  // Only documents in this namespace. A writer's own namespace is implied.
+  string namespace = 2;
+  // Only documents owned by this source.
+  string source = 3;
+  // Only documents carrying all of these labels.
+  map<string, string> label_selector = 4;
+  // At most this many documents per page: 1 to 500, default 100.
+  int32 page_size = 5;
+  // From the previous page's `next_page_token`. It pins the policy version
+  // and the filter; changing the filter with a token is refused. A token
+  // grants nothing: every page is authorized again.
+  string page_token = 6;
+}
+
+// Response for `ListDocuments`.
+message ListDocumentsResponse {
+  // This page's documents, in name order.
+  repeated Document documents = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+  // The policy version every page of this listing is read from.
+  int64 policy_version = 3;
+}
+
+// ---- Writes -----------------------------------------------------------------
+
+// Options every write takes.
+message WriteOptions {
+  // Check everything and report the impact, but change nothing. A dry run
+  // that succeeds is not audited; one refused by the writer's grant is
+  // (`policy.write_denied`), so probing leaves a trace.
+  bool validate_only = 1;
+  // Makes a retry safe: a client-chosen UUID, kept for 24 hours per caller.
+  // A repeat with the same body returns the first result; with a different
+  // body it is refused (REQUEST_ID_REUSED). Ignored with `validate_only`, so
+  // a dry run never uses up the id of the real write.
+  string request_id = 2;
+  // Where the change came from, such as a Git commit SHA or a Terraform run
+  // URL. Recorded in the audit event. Up to 200 characters.
+  string source_ref = 3;
+  // Why, in a sentence. Shown to approvers when the change is held. Up to
+  // 1000 characters.
+  string reason = 4;
+  // Fail instead of creating a pending change when approval would be needed.
+  // Clients that can't wait (CI dry runs) set it to learn the outcome early.
+  bool fail_if_approval_needed = 5;
+}
+
+// What a write did, or would do with `validate_only`.
+enum WriteOutcome {
+  // Not used.
+  WRITE_OUTCOME_UNSPECIFIED = 0;
+  // Applied: `policy_version` is the new active version.
+  WRITE_OUTCOME_APPLIED = 1;
+  // Nothing to do: the documents already had this content.
+  WRITE_OUTCOME_UNCHANGED = 2;
+  // Held for approval: see `pending_change`.
+  WRITE_OUTCOME_PENDING_APPROVAL = 3;
+  // `validate_only`: it would apply as reported.
+  WRITE_OUTCOME_VALIDATED = 4;
+}
+
+// The result shared by every write.
+message WriteResult {
+  // What happened.
+  WriteOutcome outcome = 1;
+  // The new active version when applied; otherwise the version the write was
+  // checked against.
+  int64 policy_version = 2;
+  // The documents as written (or as they would be), with fresh etags when
+  // applied. Deleted documents are not listed.
+  repeated Document documents = 3;
+  // Who gains or loses access, test results, and warnings.
+  Impact impact = 4;
+  // The held change, when the outcome is PENDING_APPROVAL.
+  PolicyChange pending_change = 5;
+}
+
+// Request for `CreateDocument`.
+message CreateDocumentRequest {
+  // `kind`, `name`, `description`, `labels`, `spec_json`, and `profile` are
+  // read; output-only fields are ignored.
+  Document document = 1;
+  // The owner. `channel` is ignored. Required for a writer: its namespace
+  // and a source.
+  Ownership ownership = 2;
+  // Options shared by every write.
+  WriteOptions options = 3;
+}
+
+// Response for `CreateDocument`.
+message CreateDocumentResponse {
+  // What happened.
+  WriteResult result = 1;
+}
+
+// Request for `UpdateDocument`.
+message UpdateDocumentRequest {
+  // The whole desired state; `kind` and `name` select the document.
+  Document document = 1;
+  // Required: the etag from the last read.
+  string etag = 2;
+  // Options shared by every write.
+  WriteOptions options = 3;
+}
+
+// Response for `UpdateDocument`.
+message UpdateDocumentResponse {
+  // What happened.
+  WriteResult result = 1;
+}
+
+// Request for `DeleteDocument`.
+message DeleteDocumentRequest {
+  // The document's kind.
+  DocumentKind kind = 1;
+  // The document's name.
+  string name = 2;
+  // Required unless `allow_missing`: the etag from the last read.
+  string etag = 3;
+  // Succeed with UNCHANGED if the document doesn't exist (for clients that
+  // retry a delete). Without it, a missing document is NOT_FOUND.
+  bool allow_missing = 4;
+  // Options shared by every write.
+  WriteOptions options = 5;
+}
+
+// Response for `DeleteDocument`.
+message DeleteDocumentResponse {
+  // What happened.
+  WriteResult result = 1;
+}
+
+// One write inside a batch.
+message Write {
+  // The write to make.
+  oneof operation {
+    // Create this document.
+    CreateDocumentRequest create = 1;
+    // Replace this document.
+    UpdateDocumentRequest update = 2;
+    // Delete this document.
+    DeleteDocumentRequest delete = 3;
+  }
+}
+
+// Request for `BatchWrite`.
+message BatchWriteRequest {
+  // 1 to 100 writes, each to a different document. Per-write options are
+  // ignored; `options` applies to the batch.
+  repeated Write writes = 1;
+  // Options shared by every write.
+  WriteOptions options = 2;
+}
+
+// Response for `BatchWrite`.
+message BatchWriteResponse {
+  // What happened to the batch as a whole.
+  WriteResult result = 1;
+}
+
+// Request for `ReplaceSource`.
+message ReplaceSourceRequest {
+  // The source whose documents are replaced, and its namespace.
+  Ownership ownership = 1;
+  // The complete desired set for that source, as YAML or JSON files (the same
+  // format as `limen admin apply`). Up to 1 MiB in total.
+  repeated SourceFile files = 2;
+  // Apply only if the active policy is still this version (0: no check).
+  int64 expected_policy_version = 3;
+  // Options shared by every write.
+  WriteOptions options = 4;
+}
+
+// One file of policy documents.
+message SourceFile {
+  // A file name, for error messages.
+  string name = 1;
+  // The file's content.
+  string content = 2;
+}
+
+// Response for `ReplaceSource`.
+message ReplaceSourceResponse {
+  // What happened.
+  WriteResult result = 1;
+}
+
+// Request for `TransferDocument`.
+message TransferDocumentRequest {
+  // The document's kind.
+  DocumentKind kind = 1;
+  // The document's name.
+  string name = 2;
+  // Required: the etag from the last read.
+  string etag = 3;
+  // The new owner. `channel` is set from this call.
+  Ownership ownership = 4;
+  // Options shared by every write.
+  WriteOptions options = 5;
+}
+
+// Response for `TransferDocument`.
+message TransferDocumentResponse {
+  // What happened.
+  WriteResult result = 1;
+}
+
+// ---- Impact -----------------------------------------------------------------
+
+// What a write means for access, computed by the same engine as enforcement
+// (ADR-0028).
+message Impact {
+  // Who gains or loses access to what.
+  repeated AccessChange access_changes = 1;
+  // True if any change gives standing (not requested) access to someone who
+  // didn't have it.
+  bool widens_standing_access = 2;
+  // Results of the policy's `policy_test` documents after the write.
+  repeated TestResult tests = 3;
+  // Valid, but probably not what was meant.
+  repeated string warnings = 4;
+  // More access changes existed than were listed (the list stops at 500).
+  bool access_changes_truncated = 5;
+}
+
+// One access change.
+message AccessChange {
+  // Gained or lost.
+  enum Direction {
+    // Not used.
+    DIRECTION_UNSPECIFIED = 0;
+    // The subject can reach the resource after the write and couldn't before.
+    DIRECTION_GAIN = 1;
+    // The subject could reach the resource before the write and can't after.
+    DIRECTION_LOSS = 2;
+  }
+  // Gained or lost.
+  Direction direction = 1;
+  // `group:sre`, `user:alice`, or `bot:deploy`.
+  string subject = 2;
+  // The resource's name.
+  string resource = 3;
+  // The principal on the resource, such as `ssh login ubuntu` or
+  // `db role limen_read`.
+  string principal = 4;
+  // True for standing access; false for access by request (ADR-0025).
+  bool standing = 5;
+  // The role that causes it.
+  string via_role = 6;
+  // The whole change as one sentence, as `limen policy diff` prints it.
+  string text = 7;
+}
+
+// One `policy_test` case's result.
+message TestResult {
+  // The `policy_test` document.
+  string test = 1;
+  // The case's position in the document, from 1.
+  uint32 case_number = 2;
+  // The case's name.
+  string name = 3;
+  // Whether it passed.
+  bool passed = 4;
+  // What the case expected.
+  string expected = 5;
+  // What the policy answered.
+  string got = 6;
+  // Why, when it failed.
+  string detail = 7;
+}
+
+// ---- Pending changes --------------------------------------------------------
+
+// A write held because it widens standing access (ADR-0042 §5).
+message PolicyChange {
+  // A pending change's state.
+  enum State {
+    // Not used.
+    STATE_UNSPECIFIED = 0;
+    // Waiting for a decision.
+    STATE_PENDING = 1;
+    // Approved and applied.
+    STATE_APPLIED = 2;
+    // Refused by an approver.
+    STATE_REJECTED = 3;
+    // Withdrawn by its author.
+    STATE_CANCELLED = 4;
+    // Not decided within its lifetime (default 7 days).
+    STATE_EXPIRED = 5;
+    // A document it touches changed after it was made, so it can't be
+    // applied as reviewed. Write it again.
+    STATE_SUPERSEDED = 6;
+  }
+  // Opaque id.
+  string id = 1;
+  // Its state.
+  State state = 2;
+  // The person or `bot:<name>` that made the write.
+  string author = 3;
+  // For a bot author: the CI facts of the run (ADR-0019), such as the
+  // repository, workflow, commit, and the person who started the run.
+  map<string, string> author_ci = 4;
+  // The writes, as sent.
+  repeated Write writes = 5;
+  // The impact computed when it was made.
+  Impact impact = 6;
+  // The policy version it was checked against.
+  int64 base_policy_version = 7;
+  // `WriteOptions.reason`.
+  string reason = 8;
+  // `WriteOptions.source_ref`.
+  string source_ref = 9;
+  // When it was made.
+  int64 create_time_unix = 10;
+  // When it expires if no one decides.
+  int64 expire_time_unix = 11;
+  // Who decided, once decided.
+  string decided_by = 12;
+  // The approver's or rejecter's note.
+  string decision_note = 13;
+  // When it was decided.
+  int64 decide_time_unix = 14;
+  // The version it produced, once applied.
+  int64 applied_policy_version = 15;
+}
+
+// Request for `GetChange`.
+message GetChangeRequest {
+  // The change's id.
+  string id = 1;
+}
+
+// Response for `GetChange`.
+message GetChangeResponse {
+  // The change.
+  PolicyChange change = 1;
+}
+
+// Request for `ListChanges`.
+message ListChangesRequest {
+  // Only changes in this state; unspecified lists pending ones.
+  PolicyChange.State state = 1;
+  // At most this many per page: 1 to 200, default 50.
+  int32 page_size = 2;
+  // From the previous page's `next_page_token`.
+  string page_token = 3;
+}
+
+// Response for `ListChanges`.
+message ListChangesResponse {
+  // Newest first. A writer sees only its own.
+  repeated PolicyChange changes = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+}
+
+// Request for `ApproveChange`.
+message ApproveChangeRequest {
+  // The change's id.
+  string id = 1;
+  // Shown in the audit trail.
+  string note = 2;
+}
+
+// Response for `ApproveChange`.
+message ApproveChangeResponse {
+  // The change after the decision: APPLIED or SUPERSEDED.
+  PolicyChange change = 1;
+}
+
+// Request for `RejectChange`.
+message RejectChangeRequest {
+  // The change's id.
+  string id = 1;
+  // Required: why.
+  string note = 2;
+}
+
+// Response for `RejectChange`.
+message RejectChangeResponse {
+  // The change after the decision.
+  PolicyChange change = 1;
+}
+
+// Request for `CancelChange`.
+message CancelChangeRequest {
+  // The change's id.
+  string id = 1;
+}
+
+// Response for `CancelChange`.
+message CancelChangeResponse {
+  // The change after cancelling.
+  PolicyChange change = 1;
+}
+
+// ---- History and schema -----------------------------------------------------
+
+// Request for `ListPolicyVersions`.
+message ListPolicyVersionsRequest {
+  // At most this many per page: 1 to 200, default 50.
+  int32 page_size = 1;
+  // From the previous page's `next_page_token`.
+  string page_token = 2;
+}
+
+// One applied policy version.
+message PolicyVersion {
+  // Its number.
+  int64 version = 1;
+  // SHA-256 of the signed document set.
+  string digest = 2;
+  // The person or bot that applied it (or approved it, for a held change).
+  string author = 3;
+  // `WriteOptions.source_ref`.
+  string source_ref = 4;
+  // The owner of the documents the write touched.
+  Ownership ownership = 5;
+  // When it became active.
+  int64 create_time_unix = 6;
+  // Documents created, as `kind/name`.
+  repeated string created = 7;
+  // Documents changed, as `kind/name`.
+  repeated string updated = 8;
+  // Documents deleted, as `kind/name`.
+  repeated string deleted = 9;
+  // The pending change it came from, if any.
+  string change_id = 10;
+}
+
+// Response for `ListPolicyVersions`.
+message ListPolicyVersionsResponse {
+  // Newest first. A writer sees only versions that touched its namespace.
+  repeated PolicyVersion versions = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+}
+
+// Request for `GetSchema`.
+message GetSchemaRequest {
+  // The kind whose spec schema to return.
+  DocumentKind kind = 1;
+}
+
+// Response for `GetSchema`.
+message GetSchemaResponse {
+  // JSON Schema (draft 2020-12) of the kind's `spec`.
+  string json_schema = 1;
+  // The server version the schema came from.
+  string server_version = 2;
+}
+
+// ---- Errors -----------------------------------------------------------------
+
+// `google.rpc.ErrorInfo.reason` values (domain `manage.limen.dev`), sent
+// without the `ERROR_REASON_` prefix. Clients match on these, never on the
+// message text. `metadata` carries the details
+// named on each value.
+enum ErrorReason {
+  // Not used.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // FAILED_PRECONDITION. The etag is stale: read the document again.
+  // metadata: `current_etag`.
+  ERROR_REASON_ETAG_MISMATCH = 1;
+  // FAILED_PRECONDITION. Another owner manages the document.
+  // metadata: `channel`, `source`, `namespace`.
+  ERROR_REASON_OWNED_ELSEWHERE = 2;
+  // PERMISSION_DENIED. Outside the writer's grant.
+  // metadata: `rule` (namespace, name_pattern, kind, profile, label, field,
+  // builtin_role).
+  ERROR_REASON_OUTSIDE_GRANT = 3;
+  // INVALID_ARGUMENT. The document doesn't parse or validate.
+  // Field violations are in a `google.rpc.BadRequest` detail.
+  ERROR_REASON_INVALID_DOCUMENT = 4;
+  // FAILED_PRECONDITION. The policy's tests fail after the write.
+  ERROR_REASON_TESTS_FAILED = 5;
+  // FAILED_PRECONDITION. Approval is needed and `fail_if_approval_needed`
+  // was set.
+  ERROR_REASON_APPROVAL_REQUIRED = 6;
+  // FAILED_PRECONDITION. The active policy moved past
+  // `expected_policy_version`. metadata: `current_version`.
+  ERROR_REASON_POLICY_VERSION_MISMATCH = 7;
+  // INVALID_ARGUMENT. A `request_id` was reused with a different body.
+  ERROR_REASON_REQUEST_ID_REUSED = 8;
+  // RESOURCE_EXHAUSTED. The writer owns `max_documents` already.
+  ERROR_REASON_QUOTA_EXCEEDED = 9;
+  // RESOURCE_EXHAUSTED. Too many writes; retry after the
+  // `google.rpc.RetryInfo` delay.
+  ERROR_REASON_RATE_LIMITED = 10;
+  // FAILED_PRECONDITION. A profile or bot still has documents that use it.
+  // metadata: `used_by` (up to 20 `kind/name`).
+  ERROR_REASON_IN_USE = 11;
+  // UNAVAILABLE. The audit trail can't record the change, so it wasn't
+  // made. Safe to retry with the same `request_id`.
+  ERROR_REASON_AUDIT_UNAVAILABLE = 12;
+  // FAILED_PRECONDITION. The change can't be decided: it isn't pending, or
+  // the caller is its author or the CI account that started its run.
+  ERROR_REASON_CHANGE_NOT_DECIDABLE = 13;
+}

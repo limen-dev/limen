@@ -32,6 +32,7 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 LIMEN_TES
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 \
 cargo test --workspace --all-features --locked          # without the env vars, integration tests print SKIPPED
 cargo deny --locked check && cargo audit; mise exec -- actionlint
+(cd proto && mise exec -- buf lint && mise exec -- buf breaking --against "$(git rev-parse --git-common-dir)#ref=origin/main,subdir=proto")   # management API contract (ADR-0042)
 demos/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
 ```
 Tools are pinned in `mise.toml` (`mise exec -- <tool>`). Docker runtime is OrbStack.
