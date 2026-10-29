@@ -74,6 +74,46 @@ pub enum ManageCommand {
         #[arg(long)]
         if_exists: bool,
     },
+    /// Create a document of any kind, or with --etag replace it: a role,
+    /// role_mapping, policy_test, bot, discovery, resource_profile, or
+    /// policy_writer. Bot writers write only the kinds their grant names.
+    Put {
+        kind: String,
+        name: String,
+        /// The spec as JSON (a list for role_mapping), or @file to read it.
+        #[arg(long)]
+        spec: String,
+        /// key=value. Repeatable.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        etag: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        /// Why, shown to approvers if the write is held.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Delete a document of any kind you manage.
+    Delete {
+        kind: String,
+        name: String,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Required unless --if-exists.
+        #[arg(long)]
+        etag: Option<String>,
+        #[arg(long)]
+        if_exists: bool,
+    },
     /// Changes held for approval because they widen standing access.
     #[command(subcommand)]
     Changes(ChangesCommand),
@@ -112,54 +152,12 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
     let (_, channel) = api::authenticated(proxy)?;
     let mut api = ManagementServiceClient::new(channel);
     let out = match command {
-        ManageCommand::Whoami => {
-            let me = api
-                .describe_caller(pb::DescribeCallerRequest {})
-                .await
-                .map_err(|s| api::status_error(&s))?
-                .into_inner();
-            json!({
-                "principal": me.principal,
-                "admin": me.admin,
-                "policy_version": me.policy_version,
-                "grant": me.grant.map(|g| json!({
-                    "name": g.name,
-                    "namespace": g.namespace,
-                    "name_patterns": g.name_patterns,
-                    "profiles": g.profiles,
-                    "max_documents": g.max_documents,
-                    "document_count": g.document_count,
-                })),
-            })
-        }
+        ManageCommand::Whoami => whoami(&mut api).await?,
         ManageCommand::Ls {
             kind,
             namespace,
             source,
-        } => {
-            let kind = kind_value(&kind)?;
-            let mut documents = Vec::new();
-            let mut page_token = String::new();
-            loop {
-                let page = api
-                    .list_documents(pb::ListDocumentsRequest {
-                        kind,
-                        namespace: namespace.clone().unwrap_or_default(),
-                        source: source.clone().unwrap_or_default(),
-                        page_token: page_token.clone(),
-                        ..pb::ListDocumentsRequest::default()
-                    })
-                    .await
-                    .map_err(|s| api::status_error(&s))?
-                    .into_inner();
-                documents.extend(page.documents.iter().map(document));
-                if page.next_page_token.is_empty() {
-                    break;
-                }
-                page_token = page.next_page_token;
-            }
-            Value::Array(documents)
-        }
+        } => ls(&mut api, &kind, namespace, source).await?,
         ManageCommand::Get { kind, name } => {
             let doc = api
                 .get_document(pb::GetDocumentRequest {
@@ -197,38 +195,12 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
                 profile: profile.unwrap_or_default(),
                 ..pb::Document::default()
             };
-            let ownership = Some(ownership(source, namespace));
             let options = pb::WriteOptions {
                 validate_only: dry_run,
                 request_id: request_id.unwrap_or_default(),
                 ..pb::WriteOptions::default()
             };
-            let result = match etag {
-                None => {
-                    api.create_document(pb::CreateDocumentRequest {
-                        document: Some(doc),
-                        ownership,
-                        options: Some(options),
-                    })
-                    .await
-                    .map_err(|s| api::status_error(&s))?
-                    .into_inner()
-                    .result
-                }
-                Some(etag) => {
-                    api.update_document(pb::UpdateDocumentRequest {
-                        document: Some(doc),
-                        etag,
-                        options: Some(options),
-                        ownership,
-                    })
-                    .await
-                    .map_err(|s| api::status_error(&s))?
-                    .into_inner()
-                    .result
-                }
-            };
-            write_result(&result.context("the server sent no result")?)
+            put(&mut api, doc, ownership(source, namespace), options, etag).await?
         }
         ManageCommand::DeleteResource {
             name,
@@ -237,21 +209,67 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
             etag,
             if_exists,
         } => {
-            let result = api
-                .delete_document(pb::DeleteDocumentRequest {
-                    kind: pb::DocumentKind::Resource.into(),
-                    name,
-                    etag: etag.unwrap_or_default(),
-                    allow_missing: if_exists,
-                    options: None,
-                    ownership: Some(ownership(source, namespace)),
-                })
-                .await
-                .map_err(|s| api::status_error(&s))?
-                .into_inner()
-                .result
-                .context("the server sent no result")?;
-            write_result(&result)
+            delete(
+                &mut api,
+                pb::DocumentKind::Resource.into(),
+                name,
+                ownership(source, namespace),
+                etag,
+                if_exists,
+            )
+            .await?
+        }
+        ManageCommand::Put {
+            kind,
+            name,
+            spec,
+            labels,
+            description,
+            source,
+            namespace,
+            etag,
+            dry_run,
+            reason,
+        } => {
+            let spec = match spec.strip_prefix('@') {
+                Some(path) => {
+                    std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?
+                }
+                None => spec,
+            };
+            serde_json::from_str::<Value>(&spec).context("--spec must be JSON")?;
+            let doc = pb::Document {
+                kind: kind_value(&kind)?,
+                name,
+                description: description.unwrap_or_default(),
+                labels: parse_labels(&labels)?,
+                spec_json: spec,
+                ..pb::Document::default()
+            };
+            let options = pb::WriteOptions {
+                validate_only: dry_run,
+                reason: reason.unwrap_or_default(),
+                ..pb::WriteOptions::default()
+            };
+            put(&mut api, doc, ownership(source, namespace), options, etag).await?
+        }
+        ManageCommand::Delete {
+            kind,
+            name,
+            source,
+            namespace,
+            etag,
+            if_exists,
+        } => {
+            delete(
+                &mut api,
+                kind_value(&kind)?,
+                name,
+                ownership(source, namespace),
+                etag,
+                if_exists,
+            )
+            .await?
         }
         ManageCommand::Changes(command) => changes(&mut api, command).await?,
     };
@@ -259,10 +277,123 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
     Ok(())
 }
 
-async fn changes(
-    api: &mut ManagementServiceClient<limen_tunnel::connect::TracedChannel>,
-    command: ChangesCommand,
+type Api = ManagementServiceClient<limen_tunnel::connect::TracedChannel>;
+
+async fn whoami(api: &mut Api) -> anyhow::Result<Value> {
+    let me = api
+        .describe_caller(pb::DescribeCallerRequest {})
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner();
+    Ok(json!({
+        "principal": me.principal,
+        "admin": me.admin,
+        "policy_version": me.policy_version,
+        "grant": me.grant.map(|g| json!({
+            "name": g.name,
+            "namespace": g.namespace,
+            "name_patterns": g.name_patterns,
+            "kinds": g.kinds.iter().map(|k| kind_name(*k)).collect::<Vec<_>>(),
+            "profiles": g.profiles,
+            "max_documents": g.max_documents,
+            "document_count": g.document_count,
+        })),
+    }))
+}
+
+async fn ls(
+    api: &mut Api,
+    kind: &str,
+    namespace: Option<String>,
+    source: Option<String>,
 ) -> anyhow::Result<Value> {
+    let kind = kind_value(kind)?;
+    let mut documents = Vec::new();
+    let mut page_token = String::new();
+    loop {
+        let page = api
+            .list_documents(pb::ListDocumentsRequest {
+                kind,
+                namespace: namespace.clone().unwrap_or_default(),
+                source: source.clone().unwrap_or_default(),
+                page_token: page_token.clone(),
+                ..pb::ListDocumentsRequest::default()
+            })
+            .await
+            .map_err(|s| api::status_error(&s))?
+            .into_inner();
+        documents.extend(page.documents.iter().map(document));
+        if page.next_page_token.is_empty() {
+            break;
+        }
+        page_token = page.next_page_token;
+    }
+    Ok(Value::Array(documents))
+}
+
+/// Create, or with an etag replace, a document.
+async fn put(
+    api: &mut Api,
+    doc: pb::Document,
+    ownership: pb::Ownership,
+    options: pb::WriteOptions,
+    etag: Option<String>,
+) -> anyhow::Result<Value> {
+    let (ownership, options) = (Some(ownership), Some(options));
+    let result = match etag {
+        None => {
+            api.create_document(pb::CreateDocumentRequest {
+                document: Some(doc),
+                ownership,
+                options,
+            })
+            .await
+            .map_err(|s| api::status_error(&s))?
+            .into_inner()
+            .result
+        }
+        Some(etag) => {
+            api.update_document(pb::UpdateDocumentRequest {
+                document: Some(doc),
+                etag,
+                options,
+                ownership,
+            })
+            .await
+            .map_err(|s| api::status_error(&s))?
+            .into_inner()
+            .result
+        }
+    };
+    Ok(write_result(&result.context("the server sent no result")?))
+}
+
+async fn delete(
+    api: &mut Api,
+    kind: i32,
+    name: String,
+    ownership: pb::Ownership,
+    etag: Option<String>,
+    allow_missing: bool,
+) -> anyhow::Result<Value> {
+    let result = api
+        .delete_document(pb::DeleteDocumentRequest {
+            kind,
+            name,
+            etag: etag.unwrap_or_default(),
+            allow_missing,
+            options: None,
+            ownership: Some(ownership),
+        })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner()
+        .result
+        .context("the server sent no result")?;
+    Ok(write_result(&result))
+}
+
+async fn changes(api: &mut Api, command: ChangesCommand) -> anyhow::Result<Value> {
     let change = |c: Option<pb::PolicyChange>| -> anyhow::Result<Value> {
         Ok(policy_change(&c.context("the server sent no change")?))
     };
