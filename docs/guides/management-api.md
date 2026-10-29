@@ -55,7 +55,7 @@ A write that widens **standing** access (someone reaches something they couldn't
 
 A held write returns `WRITE_OUTCOME_PENDING_APPROVAL` and the change in `pending_change`. Nothing is applied. A client that can't wait, such as a Terraform plan, sets `fail_if_approval_needed` (with `validate_only` in a plan) and gets `APPROVAL_REQUIRED` instead. Without it, a dry run returns `VALIDATED` with a warning that applying it waits for approval.
 
-People decide changes, with `ApproveChange` or `RejectChange` (a note is required), or `limen manage changes approve|reject <id>`. That is an admin, or a member of the writer grant's `approvers.groups`. Bots never decide. Neither the author nor the person who started the CI run (`actor` on GitHub, `user_login` on GitLab) can decide it. The author withdraws a change with `CancelChange`.
+People decide changes, with `ApproveChange` or `RejectChange` (a note is required), `limen manage changes approve|reject <id>`, or the console's **Policy changes** page. That is an admin, or a member of the writer grant's `approvers.groups`. Bots never decide. Neither the author nor the person who started the CI run (`actor` on GitHub, `user_login` on GitLab) can decide it. The author withdraws a change with `CancelChange`.
 
 Approval writes again on the **current** policy, as the author, with the author's grant checked again. The change becomes `SUPERSEDED` instead when:
 - a document it touches changed;
