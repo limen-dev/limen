@@ -156,12 +156,10 @@ jobs:
         image: jaegertracing/jaeger:2.22.0
         ports: ["4318:4318"]
     env:
-      # No debug info: with it the x86 runner ran out of disk.
+      # No debug info: a smaller build that links and caches faster.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-      # Hosted runners are small: more parallel compiles can run out of memory.
-      CARGO_BUILD_JOBS: "2"
       # Show the components' warnings in the log when a test fails.
       LIMEN_TEST_LOG: "1"
       RUST_LOG: warn
@@ -174,12 +172,6 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
     steps:
-      # Hosted runners are short on disk.
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
-          df -h /
-
       - name: Check out the commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -214,11 +206,9 @@ jobs:
           if grep -q '^SKIPPED:' test.log; then grep '^SKIPPED:' test.log; exit 1; fi
 
   # No containers on macOS, so integration tests skip (they print SKIPPED) and only unit tests run.
-  # Not on pull requests: macOS minutes cost 10x on a private repository. Runs on main and releases.
   test-macos:
     name: Tests (macOS, unit only)
     needs: lint
-    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:

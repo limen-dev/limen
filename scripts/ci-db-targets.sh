@@ -45,7 +45,7 @@ docker run -d --name "$pg" -p 127.0.0.1:15432:5432 \
   "$POSTGRES_IMAGE" postgres -c ssl=on -c ssl_cert_file=/tls/pg.crt -c ssl_key_file=/tls/pg.key \
   -c hba_file=/etc/limen/pg_hba.conf >/dev/null
 
-# Small on purpose: the runner's memory is shared with the build.
+# Small on purpose: the build and every target share the runner's memory.
 docker run -d --name "$my" -p 127.0.0.1:13306:3306 \
   -e MYSQL_ROOT_PASSWORD=mysql-target-dev-only \
   -v "$here/config/targets/mysql/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro" \
