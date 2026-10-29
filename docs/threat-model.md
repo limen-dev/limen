@@ -165,6 +165,8 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in the console's audit trail | The `audit_events` table stores only a fixed list of summary fields (never statements, claims, or payloads), is readable by admins only, and is trimmed after 30 days. The sinks remain the record |
 | I: Kubernetes request details in the console's Kubernetes tab (ADR-0038) | The `kube_requests` table keeps only the request's shape: user, cluster, verb, resource, namespace, name, status, latency. Never a body, query string, header, or the exec command. Each request is also grouped into a per-login console session (a row in `sessions`, derived from the login and cluster), readable by admins and by that user. Trimmed after 30 days, and a convenience copy: the signed events are in the sinks |
 | E: a copy of a logged-out certificate keeps working (ADR-0038) | `limen logout` calls `Auth.Logout` (user certificate required; it ends only the caller's own login). The login id goes into `login_revocations` (kept until the certificate expires, however long it is configured to live) and the signed snapshot's `revoked_logins`; proxies, workers (every Kubernetes request, every new session) and SSH certificate issuance refuse it, and open sessions end within about 10 seconds. Audited (`auth.logout`, fail closed). Residual: the control plane's own API does not check revoked logins (same as locks), so a stolen certificate that is also an admin's can still call it until it expires |
+| T: the console overwrites policy that files or a pipeline own (ADR-0042) | Console writes go through `policy_store` as the console's own owner: documents of other owners are read-only (shown, never posted), and a forged post is refused (`OWNED_ELSEWHERE`); every edit carries the etag it was read with, so a stale page can't undo a newer change; the same tests and widening approval as every channel |
+| E: a person approves their own policy change in the console | The console calls the same decision functions as the API: never the author, nor whoever started the change's CI run, only admins and the grant's approver groups (checked against today's policy and the groups at their latest login); decisions are CSRF-protected posts and audited (`policy.change_decided`) |
 | S: a stolen cookie lives longer now that sign-ins last 8 hours (A-console) | Lock, kill and every-request lock checks still end it at once; the lifetime is configurable (`LIMEN_CONSOLE_SESSION_TTL`) and capped by the maximum certificate lifetime. Limit: no device binding |
 
 ### TB8: CI platform ↔ control plane (bot login, ADR-0019)
@@ -256,7 +258,7 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
 ### TB13: Management API and delegated writers (ADR-0042, Phase 14)
-*Built: stage 1 (PRs #189 to #192), pending changes and their approval (#195), and every kind through the API with writers' roles, mappings, and tests (#178). Bot logins are tested against a stand-in CI issuer only.*
+*Built: stage 1 (PRs #189 to #192), pending changes and their approval (#195), every kind through the API with writers' roles, mappings, and tests (#197), and console editing and approval (#179). Bot logins are tested against a stand-in CI issuer only.*
 
 | Threat | Mitigation |
 |---|---|
@@ -311,6 +313,7 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (stage 2) | Built: console editing through `policy_store` (`/console/policy/documents`, read-only for documents owned elsewhere) and the **Policy changes** pages (`/console/changes`), deciding with the API's functions |
 | 2026-10-29 | 14 (stage 2) | Built: every kind through `limen.manage.v1` (people-only kinds for admins); writers' roles, mappings, and tests with the escalation rules above; `IN_USE` for bots and profiles a grant names |
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |

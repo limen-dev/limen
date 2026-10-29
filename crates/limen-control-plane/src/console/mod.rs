@@ -20,6 +20,7 @@ mod auth;
 mod dashboards;
 pub mod oidc_flow;
 mod pages;
+mod policy_edit;
 mod query;
 pub mod store;
 mod views;
@@ -103,6 +104,20 @@ pub fn router(state: AppState) -> Router {
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))
         .route("/console/policy/simulate", post(pages::simulate))
+        .route(
+            "/console/policy/documents",
+            post(policy_edit::save_document),
+        )
+        .route(
+            "/console/policy/documents/delete",
+            post(policy_edit::delete_document),
+        )
+        .route("/console/changes", get(policy_edit::changes_page))
+        .route("/console/changes/{id}", get(policy_edit::change_detail))
+        .route(
+            "/console/changes/{id}/decide",
+            post(policy_edit::change_decide),
+        )
         .route("/console/access", get(workflows::access_page))
         .route("/console/access/request", post(workflows::access_request))
         .route("/console/access/{id}", get(workflows::access_detail))
@@ -269,6 +284,8 @@ pub struct Auth {
     /// Show the Access and Reviews pages in the menu: for people with something there.
     pub sees_access: bool,
     pub sees_reviews: bool,
+    /// Show the Policy changes page: admins, and approvers of a writer grant.
+    pub sees_changes: bool,
     pub expires_at: time::OffsetDateTime,
     pub addr: Option<IpAddr>,
 }
@@ -373,8 +390,8 @@ impl FromRequestParts<AppState> for Auth {
         let addr = parts.extensions.get::<ClientAddr>().and_then(|a| a.0);
         let is_admin = session.roles.iter().any(|r| r == ADMIN_ROLE);
         let is_auditor = session.roles.iter().any(|r| r == AUDITOR_ROLE);
-        let (sees_access, sees_reviews) = if is_admin || is_auditor {
-            (true, true)
+        let (sees_access, sees_reviews, approves) = if is_admin || is_auditor {
+            (true, true, false)
         } else {
             store::menu_pages(state, &session.username).await
         };
@@ -383,6 +400,7 @@ impl FromRequestParts<AppState> for Auth {
             is_auditor,
             sees_access,
             sees_reviews,
+            sees_changes: is_admin || approves,
             username: session.username,
             roles: session.roles,
             csrf: session.csrf,

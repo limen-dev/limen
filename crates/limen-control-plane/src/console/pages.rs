@@ -1615,8 +1615,15 @@ fn summarize(doc: &Document) -> String {
     }
 }
 
-fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
+/// The policy's documents by kind, each with its owner. Only documents the
+/// console owns can be edited here; the rest belong to another channel.
+async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
     let docs = state.policy.base().policy.documents();
+    let heads = crate::policy_store::heads(&state.db)
+        .await
+        .inspect_err(|e| tracing::warn!(error = %e, "reading document owners"))
+        .unwrap_or_default();
+    let console = super::policy_edit::console_owner();
     [
         ("Roles", "role"),
         ("Role mappings", "role_mapping"),
@@ -1633,27 +1640,42 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
         docs: docs
             .iter()
             .filter(|d| d.kind() == kind)
-            .map(|d| PolicyDoc {
-                name: d.name().to_owned(),
-                summary: summarize(d),
-                yaml: serde_saphyr::to_string(d)
-                    .unwrap_or_else(|e| format!("(couldn't render: {e})")),
+            .map(|d| {
+                let head = heads.get(&(kind.to_owned(), d.name().to_owned()));
+                PolicyDoc {
+                    kind,
+                    name: d.name().to_owned(),
+                    summary: summarize(d),
+                    yaml: serde_saphyr::to_string(d)
+                        .unwrap_or_else(|e| format!("(couldn't render: {e})")),
+                    owner: head.map_or_else(|| "unknown".to_owned(), |h| h.owner.describe()),
+                    editable: head.is_some_and(|h| h.owner == console),
+                    etag: head.map(|h| h.etag.clone()).unwrap_or_default(),
+                }
             })
             .collect(),
     })
     .collect()
 }
 
-fn policy_page(
-    state: &AppState,
-    auth: &Auth,
+/// What the policy page shows besides the documents.
+#[derive(Default)]
+struct PolicyExtras {
     pasted: String,
     result: Option<DryRun>,
     simulation: Option<Simulation>,
     query: String,
-) -> Response {
+    /// A new document being written, kept when the write was refused.
+    draft: String,
+    error: Option<String>,
+    notice: Option<String>,
+}
+
+async fn policy_page(state: &AppState, auth: &Auth, extras: PolicyExtras) -> Response {
     let loaded = state.policy.base();
+    let query = extras.query;
     let groups: Vec<views::PolicyGroup> = policy_groups(state)
+        .await
         .into_iter()
         .map(|mut g| {
             g.docs
@@ -1675,12 +1697,35 @@ fn policy_page(
             created: time_text(loaded.created_at),
             groups,
             query,
-            pasted,
-            result,
-            simulation,
+            pasted: extras.pasted,
+            result: extras.result,
+            simulation: extras.simulation,
+            draft: extras.draft,
+            error: extras.error,
+            notice: extras.notice,
         }
         .render(),
     )
+}
+
+/// The policy page after a refused console write: the reason, and a new
+/// document's YAML kept for another try.
+pub(super) async fn policy_page_with(
+    state: &AppState,
+    auth: &Auth,
+    draft: String,
+    error: Option<String>,
+) -> Response {
+    policy_page(
+        state,
+        auth,
+        PolicyExtras {
+            draft,
+            error,
+            ..PolicyExtras::default()
+        },
+    )
+    .await
 }
 
 pub async fn policy(
@@ -1694,11 +1739,13 @@ pub async fn policy(
     policy_page(
         &state,
         &auth,
-        String::new(),
-        None,
-        None,
-        search_text(q.q.as_ref()),
+        PolicyExtras {
+            query: search_text(q.q.as_ref()),
+            notice: q.done.as_deref().and_then(super::policy_edit::notice),
+            ..PolicyExtras::default()
+        },
     )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1784,7 +1831,16 @@ pub async fn dry_run(
             removed: vec![],
         },
     };
-    policy_page(&state, &auth, form.yaml, Some(result), None, String::new())
+    policy_page(
+        &state,
+        &auth,
+        PolicyExtras {
+            pasted: form.yaml,
+            result: Some(result),
+            ..PolicyExtras::default()
+        },
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1862,7 +1918,15 @@ pub async fn simulate(
             },
         }
     };
-    policy_page(&state, &auth, String::new(), None, Some(sim), String::new())
+    policy_page(
+        &state,
+        &auth,
+        PolicyExtras {
+            simulation: Some(sim),
+            ..PolicyExtras::default()
+        },
+    )
+    .await
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Policy changes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Policy changes</h1>
+    <p class="sub">Writes that widen standing access wait here for a person: a pipeline's roles and mappings, or another admin's change when every widening needs two. Approving applies the change to the policy as it is now, or supersedes it if that would give access you didn't see.</p>
+  </div>
+</div>
+<nav class="tabs" aria-label="Change states">
+  <a href="/console/changes"{% if state == "pending" %} aria-current="true"{% endif %}>Waiting</a>
+  <a href="/console/changes?state=applied"{% if state == "applied" %} aria-current="true"{% endif %}>Applied</a>
+  <a href="/console/changes?state=rejected"{% if state == "rejected" %} aria-current="true"{% endif %}>Rejected</a>
+  <a href="/console/changes?state=superseded"{% if state == "superseded" %} aria-current="true"{% endif %}>Superseded</a>
+  <a href="/console/changes?state=expired"{% if state == "expired" %} aria-current="true"{% endif %}>Expired</a>
+  <a href="/console/changes?state=cancelled"{% if state == "cancelled" %} aria-current="true"{% endif %}>Cancelled</a>
+</nav>
+{% if rows.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg><div>No {{ state }} changes you can see.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+<thead><tr><th>Change</th><th>By</th><th>Gives</th><th>Made</th><th>{% if state == "pending" %}Expires{% else %}Decided by{% endif %}</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr>
+  <td><a href="/console/changes/{{ r.id }}" class="mono">{{ r.id }}</a>{% if !r.reason.is_empty() %}<div class="muted">{{ r.reason }}</div>{% endif %}</td>
+  <td>{{ r.author }}{% if !r.run_by.is_empty() %}<div class="muted">run by {{ r.run_by }}</div>{% endif %}</td>
+  <td>{% for g in r.gains.iter().take(3) %}<div>{{ g }}</div>{% endfor %}{% if r.gains.len() > 3 %}<div class="muted">and {{ r.gains.len() - 3 }} more</div>{% endif %}</td>
+  <td>{{ r.created }}</td>
+  <td>{% if state == "pending" %}{{ r.expires }}{% else %}{{ r.decided_by }}{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+{% endif %}
+{% endblock %}

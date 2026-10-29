@@ -31,7 +31,7 @@ use crate::policy_changes;
 use crate::policy_store::{self, Change, Channel, Head, Input, Key, Owner, StoreError};
 use crate::state::{AppState, internal, unix};
 
-mod changes;
+pub(crate) mod changes;
 
 const DOMAIN: &str = "manage.limen.dev";
 const MAX_SPEC_BYTES: usize = 256 * 1024;
