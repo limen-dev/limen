@@ -532,6 +532,15 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
             .execute(&mut *tx)
             .await?
             .rows_affected();
+    // Decided changes stay readable for 90 days; their events stay in the
+    // audit trail.
+    deleted += sqlx::query(
+        "DELETE FROM policy_changes WHERE decided_at < now() - interval '90 days' \
+         AND state NOT IN ('pending', 'applying')",
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
     deleted += sqlx::query("DELETE FROM login_nonces WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?
