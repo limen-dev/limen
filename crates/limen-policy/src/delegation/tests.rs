@@ -439,7 +439,7 @@ fn a_writer_grant_is_narrow_and_points_at_real_documents() {
     assert!(!grant.spec.name_allowed("orders-prod"));
     assert_eq!(grant.spec.max_documents, DEFAULT_WRITER_DOCUMENTS);
 
-    let cases: [Case; 8] = [
+    let cases: [Case; 9] = [
         (
             &|w| w.replace("namespace: payments", "namespace: default"),
             "namespace default",
@@ -465,7 +465,11 @@ fn a_writer_grant_is_narrow_and_points_at_real_documents() {
             "needs profiles",
         ),
         (
-            &|w| w.replace("kinds: [resource]", "kinds: [role]"),
+            &|w| w.replace("kinds: [resource]", "kinds: [bot]"),
+            "unknown variant",
+        ),
+        (
+            &|w| w.replace("kinds: [resource]", "kinds: [policy_writer]"),
             "unknown variant",
         ),
         (&|w| format!("{w}  max_documents: 0\n"), "max_documents"),
@@ -474,6 +478,28 @@ fn a_writer_grant_is_narrow_and_points_at_real_documents() {
         let err = writer_error(edit);
         assert!(err.contains(why), "expected {why:?}, got {err}");
     }
+    // Roles, mappings, and tests need no profile.
+    let rbac = WRITER
+        .replace(
+            "kinds: [resource]",
+            "kinds: [role, role_mapping, policy_test]",
+        )
+        .replace("  profiles: [payments-postgres]\n", "");
+    let policy = Policy::parse_yaml([
+        ("b.yaml", BOTS),
+        ("p.yaml", PROFILE),
+        ("w.yaml", rbac.as_str()),
+    ])
+    .expect("roles, mappings, and tests");
+    let kinds = &policy
+        .writer_for_bot("deploy-staging")
+        .expect("grant")
+        .spec
+        .kinds;
+    assert_eq!(
+        kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
+        ["role", "role_mapping", "policy_test"]
+    );
     // One grant per bot.
     let second = WRITER.replace("name: payments-terraform", "name: second");
     let err = Policy::parse_yaml([
@@ -484,6 +510,28 @@ fn a_writer_grant_is_narrow_and_points_at_real_documents() {
     ])
     .expect_err("two grants");
     assert!(err.to_string().contains("one grant per bot"), "{err}");
+}
+
+#[test]
+fn writers_sharing_a_namespace_are_warned_about() {
+    let other = WRITER
+        .replace("name: payments-terraform", "name: deployer-grant")
+        .replace("bot: deploy-staging", "bot: nightly-report");
+    let policy = Policy::parse_yaml([
+        ("b.yaml", BOTS),
+        ("p.yaml", PROFILE),
+        ("w.yaml", WRITER),
+        ("w2.yaml", other.as_str()),
+    ])
+    .expect("allowed, on purpose");
+    assert!(
+        policy
+            .warnings()
+            .iter()
+            .any(|w| w.contains("share namespace \"payments\"")),
+        "{:?}",
+        policy.warnings()
+    );
 }
 
 #[test]
