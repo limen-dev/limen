@@ -256,14 +256,17 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
 ### TB13: Management API and delegated writers (ADR-0042, Phase 14)
-*Stage 1 is built (PRs #189 to #192), and pending changes with their approval (#177). Writers' roles and mappings are not yet. Bot logins are tested against a stand-in CI issuer only.*
+*Built: stage 1 (PRs #189 to #192), pending changes and their approval (#195), and every kind through the API with writers' roles, mappings, and tests (#178). Bot logins are tested against a stand-in CI issuer only.*
 
 | Threat | Mitigation |
 |---|---|
 | E: a compromised pipeline (a bot writer) gains admin | Bots never hold `limen:admin`; a `policy_writer` grant names one namespace, name patterns, kinds, and profiles; `bot`, `discovery`, `resource_profile`, and `policy_writer` are people-only kinds no grant can name; writers never assign or name built-in roles |
 | E: a writer's resource borrows another team's credentials, files, or IAM through a shared worker (confused deputy) | Writers only complete person-written resource profiles; credential, file, IAM, worker-selection, bootstrap, TLS, and audit fields are profile-only, behind a list in code that a test keeps complete for every `ResourceSpec` field |
 | S/I: a delegated resource points at the metadata endpoint or an internal address (SSRF) | Settable endpoints need `hosts` or `cidrs` and `ports`; the worker refuses loopback, link-local, unspecified, multicast, and metadata addresses, and addresses outside the profile's `cidrs`, checked on the address it dials (DNS rebinding included) |
-| E: a writer widens standing access through roles or mappings | Stage 2 only; any widening from a writer is held as a pending change for a person, whatever the grant says |
+| E: a writer widens standing access through roles or mappings | Standing access that comes from the writer's own roles and mappings is held for a person, whatever the grant says. It is weighed on every write as the access diff with and without the writer's roles and mappings, so building a role and mapping before the resources they reach still waits. Only access people's roles give a resource from a profile is approved by the grant |
+| E: a writer gets access by request instead (not standing, so never held) | A writer's role is never requestable or break-glass, so a writer can't name its own approvers |
+| E: a writer assigns a role it doesn't own (another team's, or a built-in one) | A writer's mapping assigns only roles its namespace owns, checked inside the write against the documents after it; built-in roles (`limen:*`) are refused by name |
+| T: a person deletes a bot or profile a writer grant still names | Refused with `IN_USE`, naming the grant |
 | E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor a person whose name (or the part of an email before `@`) equals the run's CI account, case-insensitive; approval re-validates against the current policy and supersedes a change whose documents moved since, or that would now give standing access the approver didn't see |
 | T: two approvers apply one change twice, or a crash leaves it half-decided | Approving claims the change first (`applying`); a second approver is refused; a claim older than five minutes, from a replica that died, can be taken again; a change is decided once |
 | E: a pending change sits until the policy around it makes it worse | Changes expire (`--policy-change-ttl`, 7 days); approval writes against the current policy, never the one it was made on, and is held to the gains the approver reviewed |
@@ -308,6 +311,7 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (stage 2) | Built: every kind through `limen.manage.v1` (people-only kinds for admins); writers' roles, mappings, and tests with the escalation rules above; `IN_USE` for bots and profiles a grant names |
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |

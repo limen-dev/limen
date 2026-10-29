@@ -1323,6 +1323,50 @@ Options:
 - `--etag <ETAG>`: Required unless --if-exists.
 - `--if-exists`: Succeed when it's already gone.
 
+#### `limen manage put`
+
+Create a document of any kind, or with --etag replace it: a role, role_mapping, policy_test, bot, discovery, resource_profile, or policy_writer. Bot writers write only the kinds their grant names
+
+```text
+Usage: limen manage put [OPTIONS] --spec <SPEC> --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--spec <SPEC>`: The spec as JSON (a list for role_mapping), or @file to read it.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`
+- `--dry-run`
+- `--reason <REASON>`: Why, shown to approvers if the write is held.
+
+#### `limen manage delete`
+
+Delete a document of any kind you manage
+
+```text
+Usage: limen manage delete [OPTIONS] --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`
+
 #### `limen manage changes`
 
 Changes held for approval because they widen standing access

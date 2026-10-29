@@ -20,38 +20,10 @@ fn create(kind: &str, profile: Option<&str>) -> Change {
 }
 
 #[test]
-fn only_resources_from_profiles_are_approved_by_the_grant() {
-    assert!(!beyond_profiles(&[create("resource", Some("pg"))]));
-    assert!(beyond_profiles(&[create("resource", None)]));
-    assert!(beyond_profiles(&[create("role_mapping", None)]));
-    assert!(beyond_profiles(&[
-        create("resource", Some("pg")),
-        create("role", None)
-    ]));
-    let delete = |kind: &str| Change::Delete {
-        owner: Owner::default_git(),
-        key: (kind.into(), "x".into()),
-        etag: None,
-        allow_missing: true,
-    };
-    assert!(!beyond_profiles(&[delete("resource")]));
-    assert!(beyond_profiles(&[delete("role")]));
-}
-
-#[test]
 fn people_are_held_only_when_everything_is() {
-    let changes = [create("role", None)];
-    assert!(hold_for(false, WideningApproval::Writers, &changes).is_none());
-    assert!(hold_for(false, WideningApproval::All, &changes).is_some());
-    assert!(hold_for(true, WideningApproval::Writers, &changes).is_some());
-    assert!(
-        hold_for(
-            true,
-            WideningApproval::Writers,
-            &[create("resource", Some("pg"))]
-        )
-        .is_none()
-    );
+    assert!(hold_for(None, WideningApproval::Writers).is_none());
+    assert!(hold_for(None, WideningApproval::All).is_some());
+    assert!(hold_for(Some("payments"), WideningApproval::Writers).is_some());
 }
 
 #[test]
@@ -88,4 +60,44 @@ fn applying_reads_as_pending() {
     assert_eq!(State::parse("applying"), Some(State::Pending));
     assert_eq!(State::parse("superseded"), Some(State::Superseded));
     assert_eq!(State::parse("nope"), None);
+}
+
+#[test]
+fn only_people_and_bots_gain_standing_access() {
+    use limen_core::resource::ResourceKind;
+    use limen_policy::tooling::{AccessChange, ChangeKind, Subject, Via};
+    let change = |subject: Subject, change: ChangeKind, via: Via| AccessChange {
+        change,
+        subject,
+        resource: "web".into(),
+        kind: ResourceKind::Ssh,
+        via,
+        principals: vec!["ubuntu".into()],
+    };
+    assert!(gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    assert!(gives_standing(&change(
+        Subject::Bot("ci".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    // A role reaching more is nobody's access until someone holds it.
+    assert!(!gives_standing(&change(
+        Subject::Role("ops".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    assert!(!gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Gain,
+        Via::Request
+    )));
+    assert!(!gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Loss,
+        Via::Standing
+    )));
 }
