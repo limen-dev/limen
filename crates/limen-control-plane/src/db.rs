@@ -16,6 +16,7 @@ pub mod locks {
     pub const CA_BOOTSTRAP: i64 = 0x4c49_4d45_4e00_0001;
     pub const CLEANUP_JOB: i64 = 0x4c49_4d45_4e00_0002;
     pub const REVIEW_SCHEDULE: i64 = 0x4c49_4d45_4e00_0003;
+    pub const POLICY_WRITE: i64 = 0x4c49_4d45_4e00_0004;
 }
 
 /// Connections a replica's pool may hold unless told otherwise.
@@ -82,13 +83,19 @@ pub struct PolicyRow {
     pub created_at: OffsetDateTime,
 }
 
-pub async fn latest_policy_version(db: &Db) -> Result<Option<i64>, sqlx::Error> {
+/// Takes a pool, or a transaction's connection to read inside it.
+pub async fn latest_policy_version<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query_scalar("SELECT max(version) FROM policy_versions")
         .fetch_one(db)
         .await
 }
 
-pub async fn latest_policy(db: &Db) -> Result<Option<PolicyRow>, sqlx::Error> {
+/// Takes a pool, or a transaction's connection to read inside it.
+pub async fn latest_policy<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+) -> Result<Option<PolicyRow>, sqlx::Error> {
     let row = sqlx::query("SELECT version, digest, documents, author, created_at FROM policy_versions ORDER BY version DESC LIMIT 1")
         .fetch_optional(db)
         .await?;
@@ -102,6 +109,16 @@ pub async fn latest_policy(db: &Db) -> Result<Option<PolicyRow>, sqlx::Error> {
         })
     })
     .transpose()
+}
+
+/// Serializes policy writes across replicas until the transaction ends, so
+/// each write is computed against the version it replaces (#182).
+pub async fn lock_policy_writes(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(locks::POLICY_WRITE)
+        .execute(&mut **tx)
+        .await
+        .map(|_| ())
 }
 
 pub async fn insert_policy(
