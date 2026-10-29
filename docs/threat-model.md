@@ -58,7 +58,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 ### TB1: Laptop ↔ proxy (public)
 | Threat | Mitigation |
 |---|---|
-| S: stolen user cert and key | 10-minute TTL. Keys stored with 0600. Optional OS keychain (Phase 14) |
+| S: stolen user cert and key | Short TTL (1 hour by default, shorter per role); locks and logout end it sooner. Keys stored with 0600. Optional OS keychain (Phase 14) |
 | S: another local process or user connects to the CLI's loopback DB, Redis, MongoDB, search, RabbitMQ, or Kafka listener and rides the session | **Known risk.** Mitigations: bind to 127.0.0.1 only. `--socket` puts a unix socket in a 0700 directory. Each listener serves one target and closes after an hour with no connection. A unix socket (`--socket`) has mode 0600. A non-loopback `--listen` prints a warning. Sessions are audited under the user. Documented in the user guide |
 | T/I: downgrade or MITM | TLS 1.3 only (rustls). Public cert pinned through system roots plus an optional pin of the Limen CA |
 | D: connection floods, handshake CPU exhaustion | NLB plus a per-IP pre-auth rate limit and a concurrent handshake cap. Max sessions per user |
@@ -89,7 +89,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | T: rolled-back or stale policy on proxies and workers | Snapshots are signed by a control plane and versioned. Rollbacks are refused. Age counts from issue time, including across restarts. Past the grace period, decisions fail closed |
 | S: a compromised worker claims resources it doesn't serve | The worker's cert carries its pool and labels. The control plane only routes resources whose `worker_selector` matches the cert attributes |
 | S: a compromised proxy forges identities toward the control plane | The control plane re-verifies the forwarded user cert against the user CA. The proxy can't mint certs (no `kms:Sign`) |
-| T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (10 min). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
+| T: a compromised proxy replays a user cert it observed, to open new sessions | **Residual risk**, bounded by the cert TTL (1 hour by default, shorter per role, capped by `--max-cert-ttl`). The proxy would also need the user's private key for the TLS handshake on TB1, which it never sees. Session grants are only produced by proxies. Workers check that `grant.user` equals the forwarded cert. Accepted |
 | T: grant replay | Grant TTL ≤ 60 s to establish. Nonce LRU on the worker. The grant is bound to the session ID |
 | R: proxy denies having routed a session | Both the proxy and the worker emit events that share the `session_id` |
 | D: tunnel exhaustion | Max concurrent streams per tunnel. Per-user session caps |
@@ -245,6 +245,15 @@ Pull request code runs on the owner's machines: a macOS runner and two OrbStack 
 
 Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
 
+### TB12: Public website (ADR-0021)
+A static site, built by hand and not yet published or built in CI (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
+| Threat | Mitigation |
+|---|---|
+| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand until #138 adds CI). The site holds no secrets and is never deployed from a laptop |
+| I: the site tracks or leaks visitors to a third party | Fonts and scripts are self-hosted and `check-site.mjs` fails the build on any request to another origin. No analytics or cookies |
+| S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
+| T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
+
 ## 5. Cross-cutting
 
 | Threat | Mitigation |
@@ -277,6 +286,7 @@ Residual: the macOS runner has the owner's user access, which the owner accepts 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |

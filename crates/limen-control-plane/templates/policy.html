@@ -34,7 +34,7 @@
 <div class="card">
 <form method="post" action="/console/policy/dry-run" class="stack wide">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-  <textarea name="yaml" rows="14" spellcheck="false" class="mono" required>{{ pasted }}</textarea>
+  <textarea name="yaml" rows="14" spellcheck="false" class="mono" required aria-label="Complete policy YAML to check">{{ pasted }}</textarea>
   <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Show the difference</button></div>
 </form>
 </div>

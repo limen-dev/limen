@@ -30,15 +30,16 @@ fn event(component: &str, instance_id: &str, seq: u64) -> Vec<u8> {
 }
 
 /// Ship like the pipeline does: a failed batch is retried (the shared dev
-/// `SeaweedFS` sometimes answers 500).
+/// `SeaweedFS` sometimes answers 500, and under load on a CI runner it can stay
+/// unhealthy for more than a few seconds).
 async fn ship(sink: &S3Sink, batch: Vec<(u64, Vec<u8>)>) {
     let mut last = None;
-    for _ in 0..10 {
+    for _ in 0..30 {
         match sink.ship(batch.clone()).await {
             Ok(()) => return,
             Err(e) => last = Some(e),
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     panic!("ship: {last:?}");
 }

@@ -74,6 +74,9 @@ spec:
               valueFrom: { secretKeyRef: { name: limen-database, key: url } }
             - { name: LIMEN_OIDC_ISSUER, value: REPLACE }
             - { name: LIMEN_OIDC_CLIENT_ID, value: REPLACE }
+            # User certificate lifetime when no role sets cert_ttl (default 1h,
+            # at most LIMEN_MAX_CERT_TTL, which defaults to 12h).
+            # - { name: LIMEN_DEFAULT_CERT_TTL, value: 1h }
             - { name: LIMEN_AUDIT_S3_BUCKET, value: REPLACE }
           volumeMounts:
             - { name: spool, mountPath: /var/lib/limen/spool }

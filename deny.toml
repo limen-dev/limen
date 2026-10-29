@@ -15,6 +15,13 @@ ignore = [
     # Limen only verifies IdP RS256 signatures with public keys and never holds
     # an RSA private key. No fixed version exists. See ADR-0012.
     { id = "RUSTSEC-2023-0071", reason = "public-key verification only; no RSA private keys" },
+    # crypto-bigint 0.5.5 (via openidconnect 4.0.1 -> p256/p384 0.13 -> elliptic-curve
+    # 0.13): timing variability in constant-time operations. Limen only verifies IdP
+    # ES256/ES384 ID token signatures with public keys, so no secret integers are
+    # processed. Fixed on openidconnect master (4.1.0, p256/p384 0.14), not yet on
+    # crates.io. Remove this entry when it ships. See ADR-0012 and
+    # https://github.com/ramosbugs/openidconnect-rs/issues/244
+    { id = "RUSTSEC-2026-0387", reason = "public-key verification only; fix pending in openidconnect 4.1.0" },
 ]
 
 [licenses]

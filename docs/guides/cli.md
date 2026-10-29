@@ -1,4 +1,4 @@
-The `limen` command is for signing in and connecting. For browsing and admin actions in a browser, see [the console guide](console.md).
+The `limen` command is for signing in and connecting. For browsing and admin actions in a browser, see [the console guide](console.md). Every command and option is in the [CLI reference](../cli-reference.md).
 
 # Using the CLI
 
@@ -95,5 +95,5 @@ Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the firs
 ### Good to know
 - **Credentials are short-lived on purpose.** They live in `~/.limen/` (override with `LIMEN_HOME`) and expire in minutes. When they do, the CLI tells you to run `limen login`.
 - **Plain `ssh` works too.** Run `limen config ssh >> ~/.ssh/config`, then `ssh <login>@<resource>.limen`.
-- **Scripting.** Output is plain text when piped; `limen ls --json` is stable for tools; `NO_COLOR=1` or `--color never` turns colour off everywhere.
+- **Scripting.** Output is plain text when piped; `limen ls --json` is stable for tools; `NO_COLOR=1` or `--color never` turns colour off everywhere. The logo shown by `limen --help` and `limen login` goes to stderr and only on a terminal; `LIMEN_NO_BANNER=1` hides it.
 - **Admin commands need the `limen:admin` role** and are audited like everything else.

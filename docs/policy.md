@@ -25,6 +25,8 @@ A selector matches when:
 
 Roles come from IdP groups **at login** and are fixed into the short-lived certificate. Policy changes to role mappings take effect at the user's next login. Changes to roles and resources take effect immediately.
 
+The certificate lasts the shortest `cert_ttl` among the user's roles. When none sets one, it lasts the control plane's `--default-cert-ttl` (`LIMEN_DEFAULT_CERT_TTL`, **1 hour** unless the operator changes it). Either way it is capped by `--max-cert-ttl` (`LIMEN_MAX_CERT_TTL`, 12 hours by default), and the control plane refuses to start with a default above that cap. A shorter TTL also shortens how long a role removed in the IdP keeps working; to cut someone off at once, lock them.
+
 ## `role`
 
 ```yaml
@@ -32,7 +34,7 @@ kind: role
 version: v1
 metadata: { name: dev-readonly, description: optional }
 spec:
-  cert_ttl: 10m            # credential lifetime; the shortest across a user's roles wins (default 10m)
+  cert_ttl: 10m            # credential lifetime; the shortest across a user's roles wins (default 1h, set by the control plane's --default-cert-ttl)
   max_session_ttl: 8h      # cap on a single session; the shortest across a user's roles wins
   allow:
     - resources: { kind: [postgres, mysql], labels: { env: [staging] } }

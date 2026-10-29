@@ -8,174 +8,254 @@
 <p align="center"><b>Identity-aware access to your infrastructure. Short-lived, audited, self-hosted.</b></p>
 
 <p align="center">
-  <a href="https://github.com/jfcmartins/limen/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jfcmartins/limen/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml"><img alt="CI" src="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-14B8A6"></a>
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-DEA584?logo=rust&logoColor=white">
   <a href="https://github.com/jfcmartins/limen/milestones"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-milestones-5319e7"></a>
 </p>
 
+<p align="center">
+  <a href="#try-it-on-your-laptop">Try it</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#what-it-connects-to">What it connects to</a> ·
+  <a href="#what-is-not-verified-yet">What is not verified yet</a> ·
+  <a href="#documentation">Docs</a>
+</p>
+
 # Limen
 
-Limen is a self-hosted, open-source platform for identity-aware access to infrastructure. Engineers, and the bots that act for them, log in through their identity provider and get short-lived, audited access to SSH hosts, databases, caches, search and message brokers, Kubernetes, and internal web apps. There are no static SSH keys, shared database passwords, or hand-made users.
+Limen decides who can reach your servers, databases and clusters, and keeps a record of what they did there.
 
-## What it connects to
+Engineers sign in through your company's identity provider. Limen checks a policy you keep in Git, then gives them a certificate that **expires in an hour** (or sooner: you choose per role). They connect with the tools they already use (`ssh`, `psql`, `kubectl`, `redis-cli`), and every session is recorded or audited into a **signed trail you can verify yourself**. CI jobs sign in the same way, with their own short-lived token, so your pipelines hold no long-lived secret either.
 
-<table>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/terminal.svg" height="48" alt="SSH"><br><br><b>SSH</b><br><sub>EC2 and any SSH host<br>per-session certificates, recorded</sub><br><sub>✅ Working</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/postgresql" height="48" alt="PostgreSQL"><br><br><b>PostgreSQL</b><br><sub>RDS · Aurora · Amazon Redshift<br>IAM auth, every statement audited</sub><br><sub>✅ Working (IAM and Redshift unverified on AWS)</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mysql" height="48" alt="MySQL"><br><br><b>MySQL</b><br><sub>RDS · Aurora<br>IAM auth, every statement audited</sub><br><sub>✅ Working (IAM unverified on AWS)</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/redis" height="48" alt="Redis / Valkey"><br><br><b>Redis / Valkey</b><br><sub>ElastiCache<br>values redacted in audit</sub><br><sub>✅ Working with Redis and Valkey<br>⚠️ ElastiCache IAM not yet tested</sub><br><br></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>Amazon EKS and any cluster<br>impersonation, recorded exec</sub><br><sub>✅ Working on kind<br>⚠️ not yet on EKS</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt="MongoDB"><br><br><b>MongoDB</b><br><sub>any server · Atlas · DocumentDB<br>SCRAM, X.509, IAM · values redacted in audit</sub><br><sub>✅ Working (Atlas, DocumentDB, and IAM unverified)</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opensearch" height="48" alt="OpenSearch"><br><br><b>OpenSearch</b><br><sub>Amazon OpenSearch Service<br>index-aware policy</sub><br><sub>✅ Working<br>⚠️ Not yet tested on the AWS or Elastic Cloud services</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt="Elasticsearch"></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>index-aware policy</sub><br><sub>✅ Working<br>⚠️ Not yet tested on the AWS or Elastic Cloud services</sub><br><br></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/rabbitmq" height="48" alt="RabbitMQ"><br><br><b>RabbitMQ</b><br><sub>any broker · Amazon MQ<br>no message bodies in audit</sub><br><sub>✅ Working with local RabbitMQ<br>⚠️ Amazon MQ unverified</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/apachekafka/white"><img src="https://cdn.simpleicons.org/apachekafka" height="48" alt="Kafka"></picture><br><br><b>Kafka</b><br><sub>any cluster · Amazon MSK<br>SCRAM and PLAIN; record values never audited</sub><br><sub>✅ Working with local Kafka<br>⚠️ MSK and IAM unverified</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/globe.svg" height="48" alt="Internal web apps"><br><br><b>Internal web apps</b><br><sub>SSO in front of any web UI<br>every request audited</sub><br><sub>✅ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/network.svg" height="48" alt="TCP services"><br><br><b>TCP services</b><br><sub>anything else, through a local port<br>same policy, same audit</sub><br><sub>✅ <a href="https://github.com/jfcmartins/limen/milestone/15">Phase 12</a></sub><br><br></td>
-  </tr>
-</table>
+It is open source (Apache-2.0), written in Rust, and you run it on your own infrastructure. It is not production-ready yet: there is no release, and nothing has been tried against real cloud services. [What is not verified yet](#what-is-not-verified-yet) has the details.
 
-Where a managed AWS service exists, each target works with it and compatible self-hosted servers. ✅ working and tested, ⏳ planned (the link goes to its milestone). Everything is tested against local stand-ins. Nothing has been verified against real AWS, Okta, or Datadog yet.
+## Why you might want it
 
-## Who and what can log in
+Keys, passwords and tokens tend to outlive the reason they were handed out. Limen is built so that no person or pipeline holds one for long, and so that you can always answer two questions: who can get in right now, and what did they do?
 
-<table>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/okta" height="48" alt="Okta"><br><br><b>Okta</b><br><sub>OIDC login, groups to roles</sub><br><sub>✅ Tested with Dex<br>⚠️ not yet with Okta</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/openid" height="48" alt="Any OIDC provider"><br><br><b>Any OIDC provider</b><br><sub>Keycloak, Entra ID, Auth0, Dex</sub><br><sub>✅ Working with Dex</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt="Bots and automation"><br><br><b>Bots and automation</b><br><sub>CI jobs as audited principals<br>no long-lived secrets</sub><br><sub>✅ Working<br>⚠️ tested with a stand-in issuer</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt="GitHub Actions"><br><br><b>GitHub Actions</b><br><sub>OIDC tokens become bot logins</sub><br><sub>✅ Working with a stand-in<br>⚠️ not yet with real tokens</sub><br><br></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt="GitLab CI"><br><br><b>GitLab CI</b><br><sub>ID tokens become bot logins</sub><br><sub>✅ Working with a stand-in<br>⚠️ not yet with real tokens</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/key-round.svg" height="48" alt="AWS IAM and Kubernetes"><br><br><b>AWS IAM and Kubernetes</b><br><sub>workload identity for bots<br>Kubernetes tokens via generic OIDC</sub><br><sub>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/datadog/white"><img src="https://cdn.simpleicons.org/datadog" height="48" alt="Datadog"></picture><br><br><b>Datadog</b><br><sub>logs and monitors as Terraform</sub><br><sub>✅ Working (fake intake)</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/grafana" height="48" alt="Grafana"><br><br><b>Grafana</b><br><sub>optional dashboards over S3 and Athena</sub><br><sub>✅ Working (Trino locally)</sub><br><br></td>
-  </tr>
-</table>
+| | Without it | With Limen |
+|---|---|---|
+| **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in an hour, or sooner if you choose |
+| **Getting into a database** | A password that people copy and share | `limen db connect orders-prod`. Only Limen's worker holds the database credential; no person sees it |
+| **Someone leaves the team** | Find and remove every key and password they had | Disable them in your identity provider and they can't start new sessions. `limen admin lock` also ends their open ones within seconds |
+| **A CI job deploys** | A long-lived secret stored in the CI settings | The job's own OIDC token becomes a short, scoped login |
+| **The network** | Targets reachable from a bastion or a VPN | Limen's worker dials out from your network, so targets need no inbound port |
+| **"Who ran that `DELETE`?"** | Depends on what the database logs, and for how long | Every statement, tied to the person or CI job that ran it, in a hash-chained trail |
 
-## How it works
-
-[![How Limen works: people and bots log in through your IdP, connect through one public load balancer to proxies, and reach targets through outbound-only workers; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
-
-[Two more diagrams](docs/diagrams/README.md) walk through one connection step by step and show how credentials, audit, and failures behave.
-
-## Where it runs
-
-<table>
-  <tr>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt="Kubernetes"><br><br><b>Kubernetes</b><br><sub>StatefulSet or Deployment</sub><br><sub>scale-out example, unverified on a cluster<br>EKS: ⏳ <a href="https://github.com/jfcmartins/limen/milestone/11">Phase 8</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/hard-drive.svg" height="48" alt="Amazon ECS and EC2"><br><br><b>Amazon ECS and EC2</b><br><sub>Fargate tasks or an Auto Scaling group</sub><br><sub>⏳ <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/terraform" height="48" alt="Terraform"><br><br><b>Terraform</b><br><sub>audit store and monitors today</sub><br><sub>✅ Working (audit module)</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/docker" height="48" alt="Docker Compose"><br><br><b>Docker Compose</b><br><sub>the full local stack</sub><br><sub>✅ Working</sub><br><br></td>
-  </tr>
-</table>
-
-## Observability
-
-Every component serves Prometheus metrics at `/metrics`, ships a set of example alerts (Prometheus and Datadog), and can export traces over OpenTelemetry (OTLP). Tracing is opt-in: set `--otlp-endpoint` on a component and a session becomes one trace across the proxy, the worker and the control plane, with the trace id on the log lines written inside it. Only ids and outcomes go into a trace, never user names, statements or tokens.
-
-To see one locally, start the dev stack with Jaeger and open a few sessions:
+## What using it looks like
 
 ```sh
-deploy/compose/setup.sh --yes --stacks ssh,tracing   # prints the Jaeger URL
+$ limen login --proxy limen.example.com:443   # a browser opens on your identity provider
+$ limen ls                                    # what am I allowed to reach?
+NAME             KIND        ACCESS AS                LABELS
+bastion-staging  ● ssh       ec2-user, ubuntu         env=staging tier=bastion
+orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
+web-staging-1    ● ssh       ec2-user, ubuntu         env=staging
+  3 resources · `limen show <name>` tells you how to connect to one
+
+$ limen ssh web-staging-1                     # a recorded SSH session
+$ limen db connect orders-staging             # a local address for psql, no password needed
+$ limen explain orders-prod                   # why can't I reach this one?
+$ limen request orders-prod --for 30m --reason "INC-123: orders table is locked"
 ```
 
-How it works, the flags and the limits: [metrics, traces and alerts](docs/guides/metrics.md) and [tracing](docs/guides/tracing.md).
+If a resource isn't in your list, `limen explain` tells you which rule stopped you, and `limen request` asks an approver for time-limited access.
 
-## Two ways in: the console and the CLI
+## Try it on your laptop
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🖥️ Web console</h3>
-      <ul>
-        <li><b>Resources:</b> everything Limen can reach, searchable, with who has access and whether a worker can serve it</li>
-        <li><b>Sessions:</b> live and past, with <b>in-browser replay</b> of SSH recordings and one-click <b>end session</b></li>
-        <li><b>Users:</b> who signed in, their roles, <b>lock and unlock</b> with a reason</li>
-        <li><b>Workers:</b> enrolled components, <b>join tokens</b>, <b>revoke</b></li>
-        <li><b>Policy:</b> the active YAML and a <b>dry-run diff</b> before you apply</li>
-        <li>Light and dark themes, SSO sign-in, CSRF and CSP hardening</li>
-        <li>People only see their own resources and sessions</li>
-      </ul>
-    </td>
-    <td width="50%" valign="top">
-      <h3>⌨️ Command line</h3>
-      <ul>
-        <li><b><code>limen login</code></b> through your identity provider (browser or device code), credentials last minutes</li>
-        <li><b><code>limen ls</code></b> shows exactly what you can reach, as a table or JSON</li>
-        <li><b><code>limen ssh</code></b> opens recorded SSH sessions; plain <code>ssh</code> works too through <code>limen config ssh</code></li>
-        <li><b><code>limen admin</code></b> applies policy, creates join tokens, locks users, ends sessions, revokes workers</li>
-        <li>Colour, glyphs, and a spinner on a terminal; plain text when piped or with <code>NO_COLOR</code></li>
-        <li>Helpful errors that say what to do next</li>
-      </ul>
-    </td>
-  </tr>
-</table>
-
-Behind both: short-lived certificates instead of keys and passwords, deny-by-default YAML policy, an audit trail that cannot silently lose events (S3 with a signed hash chain, Datadog, Grafana), and reverse tunnels so targets never need an open inbound port.
-
-## Quickstart
-
-You need Docker (OrbStack on macOS) and the tools in `mise.toml` (`mise install`). Everything below runs on your machine against local stand-ins.
+There is no release to download yet, so this builds Limen from source and runs the whole system on your machine, with a test identity provider and test users. You need Docker (on macOS, OrbStack or Docker Desktop) and the tools pinned in `mise.toml` (run `mise install`). The first build takes several minutes.
 
 ```sh
-# 1. One script: checks what you need, asks what to enable (SSH host, databases, Redis,
-#    Kubernetes, observability...), starts Limen, applies the example policy, and prints
-#    the ports, a command for each resource, and the CLI and console sign-in.
+git clone https://github.com/jfcmartins/limen && cd limen
+
+# 1. Start everything. The script checks your tools, asks what to enable (an SSH host,
+#    databases, Redis, Kubernetes, observability...), applies an example policy, and
+#    prints a ready-to-run command for each resource.
 deploy/compose/setup.sh
 
-# 2. Install the CLI (once; re-run after pulling to upgrade)
+# 2. Install the CLI (re-run after pulling to upgrade)
 scripts/install-cli.sh
 
-# 3. Sign in (a browser opens on Dex; the dev admin is admin@example.com, password "password")
+# 3. Sign in. A browser opens; use admin@example.com with the password "password".
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 
-# 4. Use it
-limen ls                                          # what can I reach?
-limen ssh web-staging-1                           # a recorded SSH session
-# databases, Redis and Kubernetes: the script prints the commands, or see docs/guides/
+# 4. Connect
+limen ls
+limen ssh web-staging-1
 
-# 5. Open the console in your browser (sign in with the same user)
-open https://localhost:3443/console/              # macOS; elsewhere just paste the URL
+# 5. Open the web console, sign in as the same user, and replay the session you just had
+open https://localhost:3443/console/        # on Linux, paste the address into a browser
 ```
 
 > [!NOTE]
-> The proxy's certificate comes from the Limen dev CA, so a browser warns about it. That is expected here. Don't add the CA to your system trust store; click through the warning on localhost, or use `curl --cacert deploy/compose/.state/internal-ca.pem`. The dev users and their passwords are in [`deploy/compose/README.md`](deploy/compose/README.md).
+> Your browser will warn about the console's certificate. That is expected: it comes from a development CA the script just created. Click through the warning on localhost. **Don't** add that CA to your system's trust store. The other test users, and what each one is allowed to see, are listed in [`deploy/compose/README.md`](deploy/compose/README.md).
+
+The [quickstart](website/src/content/docs/docs/quickstart.md) walks through the same steps with more explanation.
+
+## How it works
+
+[![How Limen works: people and bots sign in through your identity provider, connect through one public load balancer to proxies, and reach targets through workers that only dial out; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+
+Limen is three programs:
+
+- **The control plane** signs people and bots in through your identity provider, issues their short-lived certificates, keeps the policy, and writes the audit trail. The only database it needs is PostgreSQL.
+- **The proxy** is the one public entry point. It checks each connection against the policy and passes it to the right worker.
+- **The worker** runs inside your network, next to the things you want to reach. It dials *out* to the proxy, so nothing on your side needs an open inbound port. It speaks each target's protocol, records or audits the session, and signs in to the target with credentials only it holds.
+
+All three are static binaries. If Limen can't write the audit trail, it refuses new sessions rather than let them run unrecorded.
+
+The [diagrams page](docs/diagrams/README.md) follows one connection step by step, and shows where credentials and audit events go when parts of the system fail.
+
+## What it connects to
+
+Each target works with ordinary self-hosted servers and with the managed services listed under it. **✅** means built and tested against a local copy of that software. **⚠️** names the managed-service parts that have not been tried for real yet.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/terminal.svg" height="48" alt=""><br><br><b>SSH</b><br><sub>Amazon EC2 and any SSH host<br>a certificate per session, recorded and replayable</sub><br><br><sub>✅ tested locally</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/postgresql" height="48" alt=""><br><br><b>PostgreSQL</b><br><sub>RDS · Aurora · Redshift<br>every statement audited</sub><br><br><sub>✅ tested locally<br>⚠️ RDS IAM and Redshift</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mysql" height="48" alt=""><br><br><b>MySQL</b><br><sub>RDS · Aurora<br>every statement audited</sub><br><br><sub>✅ tested locally<br>⚠️ RDS IAM</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/redis" height="48" alt=""><br><br><b>Redis and Valkey</b><br><sub>ElastiCache<br>commands audited, values redacted</sub><br><br><sub>✅ tested locally<br>⚠️ ElastiCache IAM</sub><br><br></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/kubernetes" height="48" alt=""><br><br><b>Kubernetes</b><br><sub>Amazon EKS and any cluster<br>impersonation, recorded <code>exec</code></sub><br><br><sub>✅ tested on kind<br>⚠️ EKS</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/mongodb" height="48" alt=""><br><br><b>MongoDB</b><br><sub>Atlas · DocumentDB<br>commands audited, values redacted</sub><br><br><sub>✅ tested locally<br>⚠️ Atlas, DocumentDB, AWS IAM</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opensearch" height="48" alt=""><br><br><b>OpenSearch</b><br><sub>Amazon OpenSearch Service<br>policy by index pattern</sub><br><br><sub>✅ tested locally<br>⚠️ the AWS service</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/elasticsearch/white"><img src="https://cdn.simpleicons.org/elasticsearch" height="48" alt=""></picture><br><br><b>Elasticsearch</b><br><sub>self-hosted and Elastic Cloud<br>policy by index pattern</sub><br><br><sub>✅ tested locally<br>⚠️ Elastic Cloud</sub><br><br></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/rabbitmq" height="48" alt=""><br><br><b>RabbitMQ</b><br><sub>Amazon MQ<br>message bodies never audited</sub><br><br><sub>✅ tested locally<br>⚠️ Amazon MQ</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/apachekafka/white"><img src="https://cdn.simpleicons.org/apachekafka" height="48" alt=""></picture><br><br><b>Kafka</b><br><sub>Amazon MSK<br>record values never audited</sub><br><br><sub>✅ tested locally<br>⚠️ MSK and its IAM sign-in</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/globe.svg" height="48" alt=""><br><br><b>Internal web apps</b><br><sub>single sign-on in front of any web UI<br>every request audited</sub><br><br><sub>✅ tested locally</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/network.svg" height="48" alt=""><br><br><b>Anything else over TCP</b><br><sub>through a port on your machine<br>same policy, same audit</sub><br><br><sub>✅ tested locally</sub><br><br></td>
+  </tr>
+</table>
+
+## Who can sign in
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/openid" height="48" alt=""><br><br><b>Any OIDC provider</b><br><sub>Okta, Entra ID, Keycloak, Auth0, Dex<br>your groups map to Limen roles</sub><br><br><sub>✅ tested with Dex<br>⚠️ Okta and the others</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt=""><br><br><b>GitHub Actions</b><br><sub>the job's OIDC token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitHub tokens</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt=""><br><br><b>GitLab CI</b><br><sub>the job's ID token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitLab tokens</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt=""><br><br><b>Other automation</b><br><sub>any OIDC token, including<br>Kubernetes service accounts</sub><br><br><sub>✅ tested with a stand-in issuer<br>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
+  </tr>
+</table>
+
+A bot is matched on exact claims of its token (for example the repository and the branch), gets a short-lived certificate (15 minutes by default, at most an hour), and is bound by the same policy. The CI run that made each request is written into every audit event.
+
+## Audit and monitoring
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/scroll-text.svg" height="48" alt=""><br><br><b>S3, signed and chained</b><br><sub>batches signed and linked by hash<br>checked by <code>limen-audit-verify</code></sub><br><br><sub>✅ tested with a local S3<br>⚠️ Amazon S3</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/datadog/white"><img src="https://cdn.simpleicons.org/datadog" height="48" alt=""></picture><br><br><b>Datadog</b><br><sub>logs, plus monitors<br>as Terraform</sub><br><br><sub>✅ tested with a fake intake<br>⚠️ real Datadog</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/grafana" height="48" alt=""><br><br><b>Grafana</b><br><sub>optional dashboards<br>over S3 and Athena</sub><br><br><sub>✅ tested with Trino<br>⚠️ Athena</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opentelemetry" height="48" alt=""><br><br><b>Metrics and traces</b><br><sub>Prometheus <code>/metrics</code>, OpenTelemetry traces,<br>example alerts</sub><br><br><sub>✅ tested locally</sub><br><br></td>
+  </tr>
+</table>
+
+Audit events are written to S3 in signed batches, and each batch records the hash of the one before it, like links in a chain. If a batch goes missing, is reordered, or is edited, one command finds it:
+
+```sh
+limen-audit-verify --bucket <your-audit-bucket> --ca-file internal-ca.pem
+```
+
+Traces carry only ids and outcomes, never user names, SQL statements or tokens. To see one locally, start the dev stack with Jaeger: `deploy/compose/setup.sh --yes --stacks ssh,tracing`.
+
+## The console and the CLI
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Web console</h3>
+      <ul>
+        <li><b>Resources:</b> everything Limen can reach, who has access, and whether a worker is serving it</li>
+        <li><b>Sessions:</b> live and past, with SSH sessions you can <b>replay</b> or <b>watch live</b> in the browser, and a button to <b>end a session</b></li>
+        <li><b>Access:</b> ask for access, and approve or deny requests, seeing what the person did on that resource in the past 30 days</li>
+        <li><b>Audit:</b> search every event, and jump from a statement to the moment in the recording</li>
+        <li><b>Reviews:</b> keep or remove each person's access, and download a <b>signed evidence pack</b></li>
+        <li><b>Users, bots and workers:</b> <b>lock</b> a user with a reason, issue <b>join tokens</b>, <b>revoke</b> a worker</li>
+        <li><b>Policy:</b> the active policy, and a <b>preview of what changes</b> before you apply a new one</li>
+        <li>Everyone except admins and auditors sees only their own resources and sessions</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Command line</h3>
+      <ul>
+        <li><b><code>limen login</code></b> through your identity provider, in a browser or with <code>--device</code>; <b><code>limen status</code></b> shows who you are and the time left</li>
+        <li><b><code>limen ls</code></b> shows what you can reach, as a table or as JSON; <b><code>limen show &lt;name&gt;</code></b> says how to connect to one</li>
+        <li><b><code>limen ssh</code></b>, <b><code>limen db connect</code></b>, <b><code>limen kube login</code></b> and the rest, one per protocol, or <b><code>limen connect &lt;name&gt;</code></b> to pick for you</li>
+        <li><b><code>limen config ssh</code></b> lets plain <code>ssh</code> work through Limen</li>
+        <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
+        <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen approve</code></b> and <b><code>deny</code></b> answer one</li>
+        <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>
+        <li><b><code>limen admin</code></b> applies policy, locks users, ends sessions and manages workers</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## Where it runs
+
+| | Status |
+|---|---|
+| **Docker Compose**, the full stack on one machine | ✅ works; this is the local dev stack |
+| **Kubernetes**, several copies of each program | ✅ example manifests; ⚠️ not yet run on a real cluster |
+| **Terraform** for the audit store (S3, Glue, Athena) and the Datadog monitors | ✅ works |
+| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 14](https://github.com/jfcmartins/limen/milestone/16) |
+
+## What is not verified yet
+
+Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/jfcmartins/limen/milestone/21).
+
+Production hardening (a Helm chart, cloud deployment modules, a penetration test) is the next phase, and there is no tagged release yet. Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
 
 ## Roadmap
 
-The roadmap lives in [GitHub milestones](https://github.com/jfcmartins/limen/milestones): one per phase, with the checklist in its epic issue and the exit criteria in its description. [`docs/design.md`](docs/design.md#13-phases-and-exit-criteria) holds the technical definition of "done" ([ADR-0023](docs/adr/0023-roadmap-in-github.md)).
+Phases 0 to 13 are done: login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, the database, cache, Kubernetes, search and messaging protocols, internal web apps, and access workflows (requests and break-glass, audit search, discovery, policy tooling, access reviews, and watching a live session).
 
-Phases 0 to 12 are done: foundations, login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, databases, Redis, Kubernetes, MongoDB, search, messaging, and internal web apps with TCP. Which parts are still unverified against real services is shown in the tables above. Next:
+Next:
 
-- **Phase 13:** access requests and approvals, audit and recording search, resource discovery, policy tooling ([milestone](https://github.com/jfcmartins/limen/milestone/18))
-- **Phase 14:** hardening and production readiness ([milestone](https://github.com/jfcmartins/limen/milestone/16))
-- **Docs:** documentation site and homepage ([milestone](https://github.com/jfcmartins/limen/milestone/8))
+- **Phase 14, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/jfcmartins/limen/milestone/16))
+- **Verification against real services** ([milestone](https://github.com/jfcmartins/limen/milestone/21))
+- **The documentation site**, already built in [`website/`](website/), is published when the repository goes public ([milestone](https://github.com/jfcmartins/limen/milestone/8))
 
-## Why "Limen"
-Limen is Latin for "threshold", the root of the English word *liminal*. A threshold is the point you cross once you are allowed in. That is what Limen does: you prove who you are through your identity provider, Limen lets you across into infrastructure for a short, audited window, and then closes the door behind you.
-
-The name is short enough to type as a command (`limen login`, `limen ssh`). Both "LIE-men" and "LEE-men" are in common use.
+Every phase is a [GitHub milestone](https://github.com/jfcmartins/limen/milestones) with its checklist in an epic issue. What "done" means for each one is in [`docs/design.md` §13](docs/design.md#13-phases-and-exit-criteria).
 
 ## Documentation
-- Guides in [`docs/guides/`](docs/guides/): [console](docs/guides/console.md), [CLI](docs/guides/cli.md), [databases](docs/guides/databases.md), [Redis](docs/guides/redis.md), [Kubernetes](docs/guides/kubernetes.md), [MongoDB](docs/guides/mongodb.md), [search](docs/guides/search.md), [messaging](docs/guides/messaging.md), [web apps](docs/guides/web-apps.md), [TCP](docs/guides/tcp.md), [bots for CI](docs/guides/bots.md), [scale-out](docs/guides/scale-out.md), [metrics and alerts](docs/guides/metrics.md), [tracing](docs/guides/tracing.md)
-- [The three server programs](docs/components.md): what the control plane, proxy and worker each do
-- [Design](docs/design.md): architecture, data paths, failure semantics, and the [architecture diagram](docs/diagrams/README.md)
-- [ADRs](docs/adr/README.md): key decisions and their trade-offs
-- [Threat model](docs/threat-model.md) and the [pentest plan](docs/pentest-plan.md)
-- [Policy reference](docs/policy.md)
-- [Runbooks](docs/runbooks/README.md)
-- A public documentation site and homepage are planned ([ADR-0021](docs/adr/0021-docs-site-and-homepage.md))
 
-## Contributing and development
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the repository layout, how to build and test, and the conventions. Coding agents: [AGENTS.md](AGENTS.md).
+**Start here**
+- [Quickstart](website/src/content/docs/docs/quickstart.md) and [concepts](website/src/content/docs/docs/concepts.md): run it, then understand what happened
+- [What is built and what is verified](website/src/content/docs/docs/status.mdx), item by item
+
+**Connect**
+- [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md)
+
+**Control access**
+- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [resource discovery](docs/guides/discovery.md)
+
+**Audit and operate**
+- [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [watching a live session](docs/guides/watching-sessions.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)
+
+**How it is built**
+- [The three programs](docs/components.md) · [design](docs/design.md) · [diagrams](docs/diagrams/README.md) · [decision records (ADRs)](docs/adr/README.md) · [threat model](docs/threat-model.md) · [penetration test plan](docs/pentest-plan.md)
+
+## Why "Limen"
+
+*Limen* is Latin for "threshold", the root of the English word *liminal*. A threshold is where you stop until you're allowed in. That is the job: you prove who you are, Limen lets you across for a short, recorded visit, and the door closes behind you.
+
+It's also short enough to type all day (`limen login`, `limen ssh`). Say it "LIE-men" or "LEE-men"; both are common.
+
+## Security
+
+Found a vulnerability? Please report it privately through GitHub, not in a public issue. [SECURITY.md](SECURITY.md) explains how, and what is in scope.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the repository layout, how to build and test, and the conventions. Coding agents should read [AGENTS.md](AGENTS.md).
 
 ## License
+
 [Apache-2.0](LICENSE). Icons are from [Simple Icons](https://simpleicons.org) (CC0) and [Lucide](https://lucide.dev) (ISC). Product names and logos belong to their owners and appear here only to say what Limen works with.

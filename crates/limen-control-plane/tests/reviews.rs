@@ -352,7 +352,10 @@ async fn a_review_closes_when_its_last_item_is_decided_and_counts_silent_certifi
         .expect("list")
         .into_inner()
         .reviews
-        .remove(0);
+        .into_iter()
+        // The harness's own schedule may have started a review too, so pick ours.
+        .find(|r| r.id == id)
+        .expect("the review this test started");
     assert_eq!(review.status, "complete");
     assert_eq!(review.items, review.decided);
     assert!(
@@ -513,7 +516,14 @@ async fn overdue_items_escalate_to_the_admins_and_the_schedule_starts_one_review
         .expect("list")
         .into_inner()
         .reviews;
-    assert!(listed[0].overdue);
+    // The harness's own schedule may have started a review too, so pick ours.
+    assert!(
+        listed
+            .iter()
+            .find(|r| r.id == id)
+            .expect("the review this test started")
+            .overdue
+    );
 
     // The default schedule has started one already (this harness's first tick),
     // and further ticks don't start another.

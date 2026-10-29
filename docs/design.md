@@ -13,7 +13,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 ## 1. Goals and non-goals
 
 **Goals (v1)**
-- Log in with OIDC (Okta first) and turn IdP groups into roles. Credentials last 10 minutes by default.
+- Log in with OIDC (Okta first) and turn IdP groups into roles. Credentials last 1 hour by default (`--default-cert-ttl`), shorter per role.
 - Access, end to end: SSH (EC2 and any SSH host), RDS PostgreSQL and MySQL, Aurora (both engines), ElastiCache for Redis and Valkey (and self-managed servers), and EKS.
 - Policy as YAML, deny by default, with resources selected by label.
 - Audit everything: a versioned JSON event schema, delivered at least once to S3 and Datadog, with Grafana over Athena.
@@ -89,7 +89,7 @@ The proxy still owns session start and end and the authorization decision.
 ## 3. Network and ingress (ADR-0005)
 
 - **One public endpoint.** An NLB on TCP 443 passes traffic straight through to the proxies. Proxies route by TLS ALPN (`limen-tunnel/1`, `limen-peer/1`, `limen-db/1`, `limen-redis/1`, `limen-search/1`, `limen-ssh/1`, `h2` and `http/1.1`). HTTP traffic is then routed by path: `/v1/...` is the CLI API, which is relayed to the control plane, and `/k8s/<cluster>/...` is the Kubernetes API. Path routing for kube avoids wildcard certificates. kubectl supports a server URL with a path prefix.
-- The **control plane is private**. Only proxies (and admins over a bastion or VPN) reach it. Workers and the CLI talk to it through the proxy. The proxy **forwards the client's verified certificate** and the control plane **verifies it again** itself. That way a compromised proxy can't make up identities. The residual risk is replaying a cert it observed, which is bounded by the cert's 10-minute TTL (see the threat model).
+- The **control plane is private**. Only proxies (and admins over a bastion or VPN) reach it. Workers and the CLI talk to it through the proxy. The proxy **forwards the client's verified certificate** and the control plane **verifies it again** itself. That way a compromised proxy can't make up identities. The residual risk is replaying a cert it observed, which is bounded by the cert's TTL (1 hour by default, shorter per role; see the threat model).
 - **The proxy's public certificate** is publicly trusted. Options are ACM exportable public certificates or an operator-supplied cert in Secrets Manager; *this is an assumption to verify in Phase 14*. In dev, the CLI is pointed at the Limen CA with `--ca-file`. Every other TLS hop uses the Limen internal CA with mTLS.
 - **Workers need egress only**, to the proxy NLB on port 443. They don't need any route to the control plane, S3, or Datadog. Audit data and recordings go through the proxy to the control plane.
 
@@ -105,7 +105,7 @@ The proxy still owns session start and end and the authorization decision.
    - maps groups to roles
    - emits `auth.login`, or `auth.denied` on failure
 4. The control plane returns:
-   - an **X.509 client cert** (user CA, TTL 10 min by default, configurable per role up to a cluster-wide maximum). Subject = username. The identity is carried as URI SANs: `limen://user/<name>`, one `limen://role/<role>` per role, and `limen://login/<uuid>` (ADR-0006, amended). Component certificates carry `limen://component/<kind>/<id>`.
+   - an **X.509 client cert** (user CA, TTL 1 hour by default, set per deployment with `--default-cert-ttl` / `LIMEN_DEFAULT_CERT_TTL`, overridden per role by `cert_ttl`, and capped by `--max-cert-ttl`, 12 hours by default). Subject = username. The identity is carried as URI SANs: `limen://user/<name>`, one `limen://role/<role>` per role, and `limen://login/<uuid>` (ADR-0006, amended). Component certificates carry `limen://component/<kind>/<id>`.
    - the CA bundle, and the public key of the **SSH host CA**, which the CLI writes to its own known_hosts as `@cert-authority * <key>`
    - *Amended in Phase 2:* no SSH certificate is issued at login. A login certificate trusted by targets would let its holder SSH straight to any reachable host, bypassing the proxy, recording, and audit. SSH certificates are issued per session instead (§5.1).
 5. Credentials are stored in `~/.limen/<proxy>/` with mode 0600. The **refresh token is not stored by default**: re-login is cheap with an active IdP session. Making this optional (encrypted in the OS keychain) is a Phase 14 decision.
@@ -138,7 +138,7 @@ Every session follows the same skeleton:
    It then gets upstream credentials and bridges the session.
 6. When the session ends for any reason, the worker emits its protocol events, the recording goes to the audit pipeline, and the proxy emits `session.end`. That event includes the duration, bytes in and out, and the end reason.
 
-**Session lifetime vs. cert TTL.** An established session can outlive the 10-minute cert, as with Teleport. A per-role `max_session_ttl` (default 8 hours) caps it, and the session ends early if the user is locked out (an extension point).
+**Session lifetime vs. cert TTL.** An established session can outlive the certificate, as with Teleport. A per-role `max_session_ttl` (default 8 hours) caps it, and the session ends early if the user is locked out (an extension point).
 
 ### 5.1 SSH (Phase 2, implemented)
 ```
@@ -378,7 +378,7 @@ Status lives in GitHub milestones (ADR-0023); this table is the contract for wha
 | 3.5 ✅ | Web console (ADR-0017): users, sessions, workers, policy browsing and dry run, tokens, lock and session kill, worker revoke, recording playback, light and dark themes | An admin sees users, workers, and live sessions in a browser, plays a recording, locks a user, and the user's open SSH session ends. A normal user sees only their resources. CSRF, CSP, and cookie tests |
 | 4 ✅ | **Machine identities** (ADR-0019): `bot` principals that join with GitHub Actions, GitLab CI, or any OIDC provider (Kubernetes service account tokens work through generic OIDC; **the AWS IAM join moved to Phase 14** with the IAM join for components); the run (repository, workflow, commit, trigger) is in every audit event | A GitHub Actions-shaped token logs in as a bot and runs an SSH command; a bot that matches too broadly is rejected by policy validation; the audit trail and console show bots apart from people; lock works on bots |
 | 5 ✅ | **Scale-out** (ADR-0020): several control planes, proxies, and workers behind load balancers; stable writer IDs; spool drain and handoff; connection rebalancing; per-worker limits; optional names for proxies and workers. The Kubernetes example is unverified on a cluster; the ECS and EC2 examples move to Phase 14 | Three control planes on one database serve a session while one is killed and another is rolling-restarted, with no lost audit events and a verifying hash chain. Compose and a Kubernetes StatefulSet example run it |
-| Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host |
+| Docs | **Docs site and homepage** (ADR-0021): Starlight site with quickstart, deploy guides, per-protocol guides, policy and CLI reference; landing page | The quickstart runs in CI against compose. Links check. The site builds and deploys to the chosen host. *In progress: the site, homepage, docs sync and CI checks are built; the quickstart test, generated CLI reference, deploy guides and domain remain (milestone "Docs site and homepage").* |
 | 6 ✅ | PostgreSQL, then MySQL, Aurora, and **Redshift** (ADR-0015, ADR-0018, ADR-0033) | `psql` and `mysql` through `limen db connect`. Each statement is audited. Role bootstrap is idempotent. Redshift passes the PostgreSQL conformance tests it supports, with a documented difference list |
 | 7 ✅ | Redis and Valkey (ADR-0034) | `redis-cli` through `limen redis connect`. Values are redacted |
 | 8 ✅ | **EKS** (ADR-0038) | kubectl get, exec, and port-forward on kind through impersonation. Exec is recorded |

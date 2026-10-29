@@ -1,0 +1,48 @@
+---
+title: Introduction
+description: What Limen is, the problem it solves, how it works, and where to start.
+tableOfContents: false
+---
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Limen decides who can reach your servers, databases and clusters, and keeps a record of what they did there.
+
+Engineers, and the CI jobs that act for them, sign in through the identity provider you already run. Limen checks your policy and hands out access that **expires in minutes**. Every session is recorded or audited, into a trail **you can verify yourself**. It works with SSH hosts, PostgreSQL and MySQL, Redis, MongoDB, OpenSearch and Elasticsearch, RabbitMQ and Kafka, Kubernetes, and internal web apps.
+
+Limen is open source (Apache-2.0), written in Rust, and you run it on your own infrastructure.
+
+## The problem
+
+Most teams reach production with credentials that outlive their reason to exist: an SSH key copied to a laptop years ago, a database password shared in a vault, a CI secret nobody remembers creating. When someone leaves, or something goes wrong, two simple questions get hard to answer. **Who can get in right now? And what did they do?**
+
+Limen answers both by never handing out a long-lived credential in the first place.
+
+## How it works
+
+1. **You sign in.** `limen login` opens your identity provider in a browser. Limen gives back a certificate that lasts an hour (less if your policy says so), tied to a key that never leaves your machine.
+2. **Policy decides.** Your identity provider's groups become roles. A policy file in Git says which roles reach which resources, chosen by label. Anything no rule allows is denied, and `limen explain` tells you why.
+3. **You connect with your usual tools.** `ssh`, `psql`, `kubectl`, `redis-cli` and the rest. A Limen worker runs next to the target and signs in to it with credentials you never see. The worker dials out to Limen, so the target needs no open inbound port.
+4. **Everything is written down.** SSH sessions are recorded and can be replayed. Databases, caches, search and brokers are audited command by command. The trail is signed and chained by hash, so `limen-audit-verify` finds any event that was removed, reordered or changed.
+
+When you need more than your roles allow, `limen request` asks an approver for time-limited access, with a reason. CI jobs sign in with their platform's own token, so no secret has to sit in your pipelines.
+
+## What you get
+
+- **No standing credentials.** Certificates last an hour by default, and you can make them shorter per role. Nothing long-lived sits on a laptop or in a CI secret.
+- **Policy you can test.** It is YAML in Git, deny by default. You can [test it in CI](guides/policy-tooling/), see who gains access before a change lands, and ask [why a request was denied](guides/policy-tooling/#who-can-reach-this-and-what-can-they-reach).
+- **Access you ask for.** [Requests with a reason, approvals and break-glass](guides/access-requests/). A grant expires on its own and ends the sessions it allowed.
+- **An audit trail you can check.** Events go to S3 as a signed hash chain, and to Datadog. [One command verifies it](runbooks/audit-verify/). If a session can't be audited, it doesn't start.
+- **Plain to run.** Static binaries, PostgreSQL as the only required store, and no paid tier: everything on this site is in the Apache-2.0 build.
+
+:::caution[Read this before you rely on it]
+Limen is tested against local stand-ins: Dex as the identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The [status page](status/) lists what is built and what is unverified, item by item.
+:::
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Quickstart" description="Run the whole stack on your laptop and open a recorded SSH session." href="quickstart/" />
+  <LinkCard title="Concepts" description="Certificates, the three programs, policy and the audit chain, on one page." href="concepts/" />
+  <LinkCard title="Connect to things" description="The CLI, and one guide per protocol: databases, Redis, MongoDB, search, brokers, Kubernetes, web apps, TCP." href="guides/cli/" />
+  <LinkCard title="Architecture" description="The design, the decision records and the threat model." href="architecture/design/" />
+</CardGrid>

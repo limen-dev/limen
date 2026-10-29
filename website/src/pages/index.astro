@@ -1,0 +1,303 @@
+---
+import Site from '../layouts/Site.astro';
+import { GH, docsUrl } from '../data/site';
+
+const base = import.meta.env.BASE_URL;
+const docs = (p: string) => docsUrl(base, p);
+
+const steps = [
+  { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. Your login is tied to a key that never leaves your machine.', c: 'limen login' },
+  { n: '02', t: 'Policy decides', d: 'Your IdP groups become roles, and roles reach resources by label. Anything no rule allows is denied, and you can ask why.', c: 'limen explain orders-prod' },
+  { n: '03', t: 'Connect', d: 'You get a certificate that lasts an hour, or less if you choose. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
+  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Anyone who can read the bucket can check it.', c: 'limen-audit-verify --bucket …' },
+];
+
+type Proto = { g: string; name: string; sub: string; warn?: string; href: string };
+const protos: Proto[] = [
+  { g: 'SSH', name: 'SSH', sub: 'Per-session certificates, recorded and replayable', href: 'guides/cli/' },
+  { g: 'PG', name: 'PostgreSQL', sub: 'RDS, Aurora, Redshift. Every statement audited', warn: 'IAM and Redshift on AWS', href: 'guides/databases/' },
+  { g: 'My', name: 'MySQL', sub: 'RDS and Aurora. Every statement audited', warn: 'IAM on AWS', href: 'guides/databases/' },
+  { g: 'Rd', name: 'Redis and Valkey', sub: 'Values redacted in audit', warn: 'ElastiCache IAM', href: 'guides/redis/' },
+  { g: 'K8', name: 'Kubernetes', sub: 'Impersonation, recorded exec', warn: 'EKS. Works on kind', href: 'guides/kubernetes/' },
+  { g: 'Mg', name: 'MongoDB', sub: 'Any server, Atlas, DocumentDB', warn: 'Atlas and DocumentDB', href: 'guides/mongodb/' },
+  { g: 'Os', name: 'OpenSearch and Elasticsearch', sub: 'Policy by index pattern', warn: 'Amazon OpenSearch and Elastic Cloud', href: 'guides/search/' },
+  { g: 'Rb', name: 'RabbitMQ', sub: 'No message bodies in audit', warn: 'Amazon MQ', href: 'guides/messaging/' },
+  { g: 'Kf', name: 'Kafka', sub: 'Record values never audited', warn: 'MSK and IAM', href: 'guides/messaging/' },
+  { g: 'Wb', name: 'Internal web apps', sub: 'SSO in front of any web UI, every request audited', href: 'guides/web-apps/' },
+  { g: 'Tc', name: 'Raw TCP', sub: 'Anything else, through a local port', href: 'guides/tcp/' },
+  { g: 'Bt', name: 'CI bots', sub: 'GitHub Actions, GitLab CI, any OIDC. No long-lived secrets', warn: 'Real CI tokens. Tested with a stand-in', href: 'guides/bots/' },
+];
+
+// The ⌘K palette. Plain data, no third-party search.
+---
+<Site
+  home
+  title="Limen: access you can prove"
+  description="Self-hosted, open-source access to SSH, databases, Kubernetes and internal apps. Short-lived credentials, policy as code, and an audit trail you can verify yourself."
+>
+      <!-- HERO -->
+      <section class="hero">
+        <canvas id="flow" aria-hidden="true"></canvas>
+        <div class="hero-grid" aria-hidden="true"></div>
+        <div class="wrap hero-inner">
+          <div class="hero-copy">
+            <a class="pill" href={docs('status/')}>
+              <span class="dot"></span> Open source · Apache-2.0 · self-hosted · written in Rust
+            </a>
+            <h1>Access you can <span class="grad">prove</span>.</h1>
+            <p class="lede">
+              Limen replaces SSH keys, shared database passwords and CI secrets with a sign-in through your identity provider. Engineers and CI jobs get <b><span class="nb">short-lived</span>, audited access</b> to SSH, databases, Kubernetes and internal apps, and every session leaves a trail <b>you can verify yourself</b>.
+            </p>
+            <div class="cta">
+              <a class="btn primary" href={docs('quickstart/')}>Try it on your laptop
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+              <a class="btn" href={docs('')}>Read the docs</a>
+            </div>
+            <ul class="facts">
+              <li><b>1 hour</b> certificates, no static keys</li>
+              <li><b>0</b> inbound ports</li>
+              <li><b>1</b> required store: PostgreSQL</li>
+            </ul>
+          </div>
+
+          <div class="threshold" aria-label="A doorway with a certificate that expires in an hour">
+            <svg viewBox="0 0 420 500" role="img" aria-hidden="true">
+              <defs>
+                <linearGradient id="g-arch" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="var(--lm-accent-strong)"/><stop offset="1" stop-color="var(--lm-accent-2)"/>
+                </linearGradient>
+                <radialGradient id="g-light" cx="50%" cy="78%" r="65%">
+                  <stop offset="0" stop-color="var(--lm-accent)" stop-opacity=".55"/><stop offset=".55" stop-color="var(--lm-accent-2)" stop-opacity=".12"/><stop offset="1" stop-color="transparent"/>
+                </radialGradient>
+                <filter id="f-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+                <clipPath id="c-arch"><path d="M96 410 V210 a114 114 0 0 1 228 0 V410 Z"/></clipPath>
+              </defs>
+              <g clip-path="url(#c-arch)"><rect x="60" y="80" width="300" height="340" fill="url(#g-light)" class="light"/></g>
+              <g filter="url(#f-glow)" opacity=".7"><path d="M96 410 V210 a114 114 0 0 1 228 0 V410" fill="none" stroke="url(#g-arch)" stroke-width="10" stroke-linecap="round"/></g>
+              <path class="arch" d="M96 410 V210 a114 114 0 0 1 228 0 V410" fill="none" stroke="url(#g-arch)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+              <path class="arch-inner" d="M128 410 V212 a82 82 0 0 1 164 0 V410" fill="none" stroke="var(--lm-line-strong)" stroke-width="1.5" stroke-dasharray="3 7"/>
+              <line x1="40" y1="438" x2="380" y2="438" stroke="var(--lm-accent)" stroke-width="7" stroke-linecap="round"/>
+              <g filter="url(#f-glow)" opacity=".8"><line x1="40" y1="438" x2="380" y2="438" stroke="var(--lm-accent)" stroke-width="7" stroke-linecap="round"/></g>
+              <g class="ring" transform="translate(210 300)">
+                <circle r="62" fill="var(--lm-glass)" stroke="var(--lm-line-strong)" stroke-width="1.5"/>
+                <circle r="62" fill="none" stroke="var(--lm-accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="0" transform="rotate(-90)" id="ring-arc"/>
+                <text id="ttl" y="8" text-anchor="middle" class="ttl">60:00</text>
+                <text y="30" text-anchor="middle" class="ttl-sub" id="ttl-sub">expires in</text>
+              </g>
+              <circle cx="210" cy="438" r="6" fill="var(--lm-accent-strong)" class="beacon"/>
+            </svg>
+            <div class="threshold-cap"><span class="live-dot"></span><span id="ttl-note">Credentials that expire. By design.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- LIVE SESSION -->
+      <section class="section" id="session">
+        <div class="wrap">
+          <div class="eyebrow">See it work</div>
+          <h2>A session, and the proof it leaves.</h2>
+          <p class="sub">Every command below writes an audit event, and each event's hash includes the one before it. Edit anything in the past and the chain stops verifying. Press the tamper button and see.</p>
+
+          <div class="theater" id="theater">
+            <div class="term" role="group" aria-label="Terminal demo">
+              <div class="term-bar">
+                <span class="lights"><i></i><i></i><i></i></span>
+                <div class="tabs" role="tablist" aria-label="Demo scenario">
+                  <button role="tab" aria-selected="true" data-scn="ssh" type="button">SSH</button>
+                  <button role="tab" aria-selected="false" data-scn="pg" type="button">Postgres</button>
+                  <button role="tab" aria-selected="false" data-scn="k8s" type="button">Kubernetes</button>
+                  <button role="tab" aria-selected="false" data-scn="req" type="button">Ask for access</button>
+                </div>
+                <button class="replay" id="replay" type="button" aria-label="Replay">↻ replay</button>
+              </div>
+              <p class="sr-only">A replayed terminal session. The audit events it produces appear in the list beside it.</p>
+              <pre class="term-body" id="term" aria-hidden="true"></pre>
+              <noscript><p class="noscript">Turn on JavaScript to replay this session.</p></noscript>
+              <div class="term-foot">Illustrative output. The commands are real; see the <a href={docs('guides/cli/')}>CLI guide</a>.</div>
+            </div>
+
+            <div class="ledger" aria-label="Audit trail demo">
+              <div class="ledger-head">
+                <div>
+                  <div class="ledger-title">Audit trail</div>
+                  <div class="ledger-sub">each hash covers the previous one</div>
+                </div>
+                <div class="status ok" id="chain-status"><span class="dot"></span><span id="chain-text">chain intact</span></div>
+              </div>
+              <ol class="blocks" id="blocks"></ol>
+              <p class="ledger-msg" id="ledger-msg" aria-live="polite"></p>
+              <div class="ledger-actions">
+                <button class="btn small danger" id="tamper" type="button" disabled>✎ Tamper with an event</button>
+                <button class="btn small" id="restore" type="button" disabled>Restore</button>
+              </div>
+              <p class="ledger-note">A simplified picture of the idea. The real trail is batched, signed, and chained per writer in S3, and <code>limen-audit-verify</code> walks it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW -->
+      <section class="section" id="how">
+        <div class="wrap">
+          <div class="eyebrow">How it works</div>
+          <h2>What happens when you connect.</h2>
+          <ol class="steps" id="steps">
+            {steps.map((s) => (
+              <li class="step reveal">
+                <div class="step-n">{s.n}</div>
+                <h3>{s.t}</h3>
+                <p>{s.d}</p>
+                <code>{s.c}</code>
+              </li>
+            ))}
+          </ol>
+          <div class="diagram-link reveal">
+            <a href={docs('architecture/diagrams/')}>See the architecture diagrams →</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- WHO -->
+      <section class="section" id="who">
+        <div class="wrap">
+          <div class="eyebrow">Who it is for</div>
+          <h2>For the people who get paged, and the people who get audited.</h2>
+          <div class="people">
+            <article class="person reveal">
+              <div class="who-tag">Developers</div>
+              <h3>Get in, get on with it.</h3>
+              <p>Sign in once. <code>limen ls</code> shows what you can reach. Keep using <code>ssh</code>, <code>psql</code> and <code>kubectl</code>, with no passwords or keys to look after. When you need more, ask for it, with a reason.</p>
+              <a class="more" href={docs('guides/cli/')}>The CLI →</a>
+            </article>
+            <article class="person reveal">
+              <div class="who-tag">Platform and SRE</div>
+              <h3>Run it like the rest of your stack.</h3>
+              <p>Policy in Git, tested in CI. Workers dial out, so you open no inbound holes. Run several copies of each part behind a load balancer. Prometheus metrics, OpenTelemetry traces and ready-made alerts.</p>
+              <a class="more" href={docs('guides/scale-out/')}>Running at scale →</a>
+            </article>
+            <article class="person reveal">
+              <div class="who-tag">Security and compliance</div>
+              <h3>Evidence, not promises.</h3>
+              <p>A signed, hash-chained trail. Recordings that are checked before playback. Access reviews with signed evidence packs. A threat model and pen-test plan you can read before you trust it.</p>
+              <a class="more" href={docs('architecture/threat-model/')}>The threat model →</a>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- PILLARS -->
+      <section class="section" id="why">
+        <div class="wrap">
+          <div class="eyebrow">Why Limen</div>
+          <h2>A door that keeps a record you can check.</h2>
+          <p class="sub">Knowing who connected is the start. Limen is built so that every grant, every decision and every session can be checked by someone who doesn't have to trust Limen.</p>
+          <div class="bento">
+            <article class="card w4 reveal">
+              <h3><span class="ico">▣</span> Provable</h3>
+              <p>The audit trail is signed and hash-chained. Each control plane's S3 batches name the previous batch's hash, so a missing, reordered or altered batch is found by one command.</p>
+              <pre class="snip"><span class="c"># walks every writer's chain</span>
+<span class="p">$</span> limen-audit-verify --bucket audit --ca-file internal-ca.pem
+<span class="ok">✔</span> chain intact</pre>
+              <div class="minichain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i class="head"></i></div>
+              <a class="more" href={docs('runbooks/audit-verify/')}>Verifying the chain →</a>
+            </article>
+            <article class="card reveal">
+              <h3><span class="ico">?</span> Explainable and testable</h3>
+              <p>Policy is YAML in Git, with tests that run in CI. Ask who can reach what, diff <i>effective</i> access, and get the reason for a denial.</p>
+              <pre class="snip"><span class="c">kind: policy_test</span>
+- name: devs cannot ssh to prod as root
+  resource: orders-prod
+  expect: <span class="ok">deny</span></pre>
+              <a class="more" href={docs('guides/policy-tooling/')}>Policy tooling →</a>
+            </article>
+            <article class="card half reveal">
+              <h3><span class="ico">⏱</span> Short-lived and justified</h3>
+              <p>Access you ask for, with a reason. The approver sees what you did on that resource in the past 30 days. When the grant expires, so do the sessions it allowed.</p>
+              <pre class="snip"><span class="p">$</span> limen request orders-prod --for 30m \
+    --reason "INC-123: orders is locked" --wait</pre>
+              <a class="more" href={docs('guides/access-requests/')}>Requests and break-glass →</a>
+            </article>
+            <article class="card half reveal">
+              <h3><span class="ico">⚙</span> CI jobs are principals too</h3>
+              <p>A GitHub Actions or GitLab CI job signs in with its own token and gets a scoped, short-lived bot login. The run is named in every audit event. No secret lives in the repository.</p>
+              <pre class="snip"><span class="p">$</span> limen login --bot github_actions
+<span class="p">$</span> limen ssh web-staging-1 -- ./deploy.sh</pre>
+              <a class="more" href={docs('guides/bots/')}>Bots →</a>
+            </article>
+            <article class="card full reveal plain">
+              <h3><span class="ico">◇</span> Open and plain to run</h3>
+              <p>Everything on this page is in the Apache-2.0 build. Static binaries, PostgreSQL as the only required store, workers that dial out. No paid tier for approvals, auditing or discovery.</p>
+              <ul class="chips">
+                <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose, Terraform for audit</li><li>Prometheus and OpenTelemetry</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROTOCOLS -->
+      <section class="section" id="protocols">
+        <div class="wrap">
+          <div class="eyebrow">What it connects to</div>
+          <h2>One policy and one audit trail for all of it.</h2>
+          <p class="sub">Each tile says where it stands. <span class="chip ok">built</span> means it works and is tested against a local copy of the software. <span class="chip warn">unverified</span> marks a cloud-specific path that is written but has not yet run against the real service.</p>
+          <div class="protos">
+            {protos.map((p) => (
+              <a class="proto reveal" href={docs(p.href)}>
+                <span class="proto-top">
+                  <span class="glyph" aria-hidden="true">{p.g}</span>
+                  <span class="chip ok">built</span>
+                </span>
+                <span class="pname">{p.name}</span>
+                <span class="psub">{p.sub}</span>
+                {p.warn && <span class="pwarn"><i aria-hidden="true"></i><span><b>Unverified:</b> {p.warn}</span></span>}
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <!-- HONESTY -->
+      <section class="section honest" id="honest">
+        <div class="wrap">
+          <div class="honest-card reveal">
+            <div class="honest-text">
+              <div class="honest-mark" aria-hidden="true">!</div>
+              <h2>We tell you what isn't proven.</h2>
+              <p>Limen is tested thoroughly against local stand-ins. <b>It has not yet been verified against real AWS, Okta or Datadog.</b> Those checks are on the roadmap, one issue per service, and every page that describes a capability says whether it has met the real thing.</p>
+              <div class="cta left">
+                <a class="btn" href={docs('status/')}>The status page</a>
+                <a class="btn ghost" href={`${GH}/milestone/21`}>Verification roadmap</a>
+              </div>
+            </div>
+            <ul class="verify" aria-label="Verification status">
+              <li class="y"><span class="mark" aria-hidden="true">✔</span><span>Local stand-ins: Dex, databases and brokers in containers, local S3 and KMS</span><em>tested</em></li>
+              <li class="n"><span class="mark" aria-hidden="true">○</span><span>Real AWS: RDS, EKS, MSK, KMS and more</span><em>not yet</em></li>
+              <li class="n"><span class="mark" aria-hidden="true">○</span><span>Real Okta</span><em>not yet</em></li>
+              <li class="n"><span class="mark" aria-hidden="true">○</span><span>Real Datadog</span><em>not yet</em></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- START -->
+      <section class="section start" id="start">
+        <div class="wrap narrow">
+          <div class="eyebrow">Try it</div>
+          <h2>From clone to a recorded session, on your laptop.</h2>
+          <div class="install">
+            <div class="install-bar"><span>terminal</span><button class="copy" id="copy" type="button">Copy</button></div>
+<pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/jfcmartins/limen &amp;&amp; cd limen
+<span class="p">$</span> deploy/compose/setup.sh
+<span class="p">$</span> scripts/install-cli.sh
+<span class="p">$</span> limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+<span class="p">$</span> limen ssh web-staging-1</pre>
+          </div>
+          <p class="fineprint">Needs Docker and the tools in <code>mise.toml</code>. The first build takes several minutes. This is a local stack with test users and passwords, not for production.</p>
+          <div class="cta"><a class="btn primary" href={docs('quickstart/')}>Read the quickstart</a><a class="btn" href={`${GH}`}>Star on GitHub</a></div>
+        </div>
+      </section>
+  <script>
+    import '../scripts/landing.ts';
+  </script>
+</Site>

@@ -54,3 +54,5 @@ LIMEN_TEST_OTLP_ENDPOINT=http://localhost:4318 cargo test -p limen-core --test o
 ```
 
 then look for service `limen-collector-test`.
+
+CI runs this test against a Jaeger service container (the `jaeger` service in `.github/workflows/ci-rust.yml`, whose image must match `JAEGER_IMAGE` in `deploy/compose/.env`).

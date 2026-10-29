@@ -1,0 +1,62 @@
+---
+import Site from '../layouts/Site.astro';
+import { docsUrl } from '../data/site';
+
+const base = import.meta.env.BASE_URL;
+const docs = (p: string) => docsUrl(base, p);
+---
+<Site
+  noindex
+  title="Page not found · Limen"
+  description="This page does not exist. Find what you were looking for in the Limen docs."
+>
+  <section class="nf">
+    <div class="nf-grid" aria-hidden="true"></div>
+    <div class="wrap nf-inner">
+      <div class="nf-door" aria-hidden="true">
+        <svg viewBox="0 0 420 460">
+          <defs>
+            <linearGradient id="nf-arch" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="var(--lm-warn)" /><stop offset="1" stop-color="var(--lm-accent-2)" />
+            </linearGradient>
+            <filter id="nf-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9" /></filter>
+          </defs>
+          <g filter="url(#nf-glow)" opacity=".5"><path d="M96 380 V190 a114 114 0 0 1 228 0 V380" fill="none" stroke="url(#nf-arch)" stroke-width="10" stroke-linecap="round" /></g>
+          <path d="M96 380 V190 a114 114 0 0 1 228 0 V380" fill="none" stroke="url(#nf-arch)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M128 380 V192 a82 82 0 0 1 164 0 V380" fill="none" stroke="var(--lm-line-strong)" stroke-width="1.5" stroke-dasharray="3 7" />
+          <line x1="40" y1="408" x2="380" y2="408" stroke="var(--lm-line-strong)" stroke-width="7" stroke-linecap="round" />
+          <circle cx="210" cy="280" r="62" fill="var(--lm-glass)" stroke="var(--lm-line-strong)" stroke-width="1.5" />
+          <circle cx="210" cy="280" r="62" fill="none" stroke="var(--lm-warn)" stroke-width="5" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="389.6" transform="rotate(-90 210 280)" />
+          <text x="210" y="290" text-anchor="middle" class="ttl nf-ttl">404</text>
+          <text x="210" y="312" text-anchor="middle" class="ttl-sub">no such page</text>
+        </svg>
+      </div>
+
+      <div class="nf-copy">
+        <div class="eyebrow">Page not found</div>
+        <h1>This door doesn't lead anywhere.</h1>
+        <p class="lede">
+          Nothing lives at <code class="nf-path" id="nf-path">this address</code>. The page may have moved, or the link may have a typo.
+        </p>
+
+        <p class="nf-guess" id="nf-guess" hidden></p>
+
+        <div class="nf-suggest" id="nf-suggest-wrap" hidden>
+          <h2 id="nf-suggest-title">Closest pages</h2>
+          <ul id="nf-suggest"></ul>
+        </div>
+
+        <div class="cta">
+          <a class="btn primary" href={docs('')}>Open the docs
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a>
+          <a class="btn" href={base}>Go home</a>
+          <button class="btn" id="nf-search" type="button">Search <kbd>⌘K</kbd></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    import '../scripts/notfound.ts';
+  </script>
+</Site>

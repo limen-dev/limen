@@ -1,0 +1,63 @@
+name: audit
+
+# cargo-deny and cargo-audit. Also runs on weekdays: advisories appear without a commit.
+# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+
+on:
+  push:
+    branches: [main]
+    # Only these start it: add a path here when a check reads a new file (manifests, lock file, deny config).
+    paths: &paths
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "deny.toml"
+      - "mise.toml"
+      - ".github/workflows/audit.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
+  schedule:
+    - cron: "17 5 * * 1-5"
+  # Called by release.yml, which tests the exact commit before building anything.
+  workflow_call:
+    inputs:
+      hosted:
+        description: Run on GitHub-hosted runners instead of the self-hosted ones
+        type: boolean
+        default: false
+  # A manual run ignores the path filter.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # (github.workflow is release.yml's name when it calls this, hence the prefix.)
+  group: audit-${{ github.workflow }}-${{ github.ref }}
+  # A new push cancels the older pull request run; a push to main always runs to the end.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    name: Dependency audit (cargo-deny, cargo-audit)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-deny and cargo-audit
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        with:
+          install_args: rust cargo-deny cargo:cargo-audit
+
+      - name: Licenses, bans and sources (cargo deny)
+        run: cargo deny --locked check
+
+      - name: Known vulnerabilities (cargo audit)
+        run: cargo audit

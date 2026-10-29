@@ -28,7 +28,8 @@ use model::{ResourceDoc, RoleDoc, Rule, Selector};
 pub use model::{SearchAudit, SearchClass, SearchGrant, SearchTarget};
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
-pub const DEFAULT_CERT_TTL: Duration = Duration::from_mins(10);
+/// The control plane's `--default-cert-ttl` overrides it per deployment.
+pub const DEFAULT_CERT_TTL: Duration = Duration::from_hours(1);
 /// Default cap on a single session's length.
 pub const DEFAULT_MAX_SESSION_TTL: Duration = Duration::from_hours(8);
 const MAX_NAME_LEN: usize = 128;
@@ -431,14 +432,15 @@ impl Policy {
     }
 
     /// Credential lifetime for a set of roles: the shortest `cert_ttl`,
-    /// otherwise [`DEFAULT_CERT_TTL`], always capped at `max`.
+    /// otherwise `default` (the deployment's, [`DEFAULT_CERT_TTL`] unless
+    /// set), always capped at `max`.
     #[must_use]
-    pub fn cert_ttl(&self, roles: &[String], max: Duration) -> Duration {
+    pub fn cert_ttl(&self, roles: &[String], default: Duration, max: Duration) -> Duration {
         roles
             .iter()
             .filter_map(|r| self.roles.get(r)?.spec.cert_ttl.map(|d| d.0))
             .min()
-            .unwrap_or(DEFAULT_CERT_TTL)
+            .unwrap_or(default)
             .min(max)
     }
 
