@@ -233,6 +233,9 @@ message ApplyPolicyRequest {
   // Refuse to apply unless the policy's `policy_test` documents all pass
   // (and there is at least one).
   bool require_tests = 4;
+  // The source these files replace (ADR-0042 §3). Empty is `default`: what
+  // every apply before Phase 14 wrote. Other sources' documents are untouched.
+  string source = 5;
 }
 
 message PolicyDiff {

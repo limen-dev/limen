@@ -587,6 +587,7 @@ async fn removing_access_applies_to_the_next_request() {
     let applied = env
         .admin
         .apply_policy(limen_proto::v1::ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: vec![limen_proto::v1::PolicySource {
                 name: "policy.yaml".into(),

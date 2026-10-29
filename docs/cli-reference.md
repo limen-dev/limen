@@ -914,6 +914,7 @@ Options:
 - `--dry-run`: Show what would change without applying it.
 - `--source-ref <SOURCE_REF>`: Where the policy came from, recorded in the audit trail (for example a Git SHA).
 - `--require-tests`: Refuse to apply unless the policy's own `policy_test` cases pass.
+- `--source <SOURCE>`: The source these files replace. Documents other sources (and Terraform) manage are left alone; naming one is refused. Default: `default`.
 
 #### `limen admin policy`
 

@@ -225,6 +225,16 @@ impl Policy {
     pub fn parse_yaml<'a>(
         sources: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Result<Self, PolicyError> {
+        let docs = Self::parse_yaml_documents(sources)?;
+        Self::from_documents(docs)
+    }
+
+    /// The documents in YAML sources, parsed strictly (unknown fields are
+    /// refused) but not yet validated: [`Policy::from_documents`] does that,
+    /// on a source together with every other owner's documents (ADR-0042 §3).
+    pub fn parse_yaml_documents<'a>(
+        sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Vec<Document>, PolicyError> {
         let mut docs = Vec::new();
         for (source_name, text) in sources {
             let parsed: Vec<Document> =
@@ -234,7 +244,7 @@ impl Policy {
                 })?;
             docs.extend(parsed);
         }
-        Self::from_documents(docs)
+        Ok(docs)
     }
 
     pub fn from_documents(docs: impl IntoIterator<Item = Document>) -> Result<Self, PolicyError> {

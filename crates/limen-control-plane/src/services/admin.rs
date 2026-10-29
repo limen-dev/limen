@@ -1,10 +1,8 @@
 //! Administrative API. Every call requires the `limen:admin` role.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
-use limen_audit::{Context, EventKind};
 use limen_core::labels::Labels;
 use limen_policy::Policy;
 use limen_proto::v1::admin_server::Admin;
@@ -17,14 +15,13 @@ use limen_proto::v1::{
     PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
     TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
-use serde_json::json;
-use time::OffsetDateTime;
 use tonic::{Request, Response, Status};
 
 use super::{b64url, ops};
 use crate::caller;
 use crate::db;
-use crate::state::{AppState, LoadedPolicy, internal, unix};
+use crate::policy_store::{self, Change, Input, Owner, StoreError};
+use crate::state::{AppState, internal, unix};
 
 const MAX_POLICY_BYTES: usize = 1024 * 1024;
 
@@ -63,152 +60,82 @@ impl Admin for AdminService {
                 "policy exceeds {MAX_POLICY_BYTES} bytes"
             )));
         }
-        let next = Policy::parse_yaml(
+        let documents = Policy::parse_yaml_documents(
             req.sources
                 .iter()
                 .map(|s| (s.name.as_str(), s.content.as_str())),
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        // Versions and diffs are about what admins applied, not discovered
-        // resources. A write holds the policy lock and starts from the latest
-        // version in the database, never this replica's copy, which another
-        // replica's apply reaches only at the next refresh (#182). A dry run
-        // reads the latest too, without the lock.
-        let mut tx = self
-            .0
-            .db
-            .begin()
-            .await
-            .map_err(|e| internal("starting transaction", e))?;
-        if !req.dry_run {
-            db::lock_policy_writes(&mut tx)
-                .await
-                .map_err(|e| internal("locking policy writes", e))?;
-        }
-        let current = self
-            .0
-            .policy
-            .latest(&mut tx)
-            .await
-            .map_err(|e| internal("loading the latest policy", e))?;
-        let diff = current.policy.diff(&next);
-        let digest = next.digest();
-        let proto_diff = PolicyDiff {
-            added: diff.added.clone(),
-            removed: diff.removed.clone(),
-            changed: diff.changed.clone(),
+        // Files replace their own source only (ADR-0042 §3): without
+        // `--source`, the default one, which is everything applied before
+        // Phase 14. Other owners' documents stay, and naming one is refused.
+        let owner = Owner {
+            source: if req.source.is_empty() {
+                "default".into()
+            } else {
+                policy_store::validate_source(&req.source).map_err(Status::invalid_argument)?;
+                req.source.clone()
+            },
+            ..Owner::default_git()
         };
-        // Who gains or loses access, the policy's own tests, and anything
-        // valid but suspicious (ADR-0028). The same engine as enforcement.
-        let access = current.policy.access_diff(&next);
-        let access_changes: Vec<String> = access
-            .changes
+        let inputs = documents
             .iter()
-            .map(|c| {
-                let sign = if c.change == limen_policy::tooling::ChangeKind::Gain {
-                    '+'
-                } else {
-                    '-'
-                };
-                format!("{sign} {}", c.text())
-            })
-            .collect();
-        let report = next.run_tests();
-        let test_results: Vec<PolicyTestResult> = report
-            .results
-            .iter()
-            .map(|r| PolicyTestResult {
-                test: r.test.clone(),
-                case_number: u32::try_from(r.case).unwrap_or(u32::MAX),
-                name: r.name.clone(),
-                passed: r.passed,
-                expected: r.expected.clone(),
-                got: r.got.clone(),
-                detail: r.detail.clone(),
-            })
-            .collect();
-        let warnings = next.warnings();
-        if req.require_tests && !req.dry_run {
-            if report.results.is_empty() {
-                return Err(Status::failed_precondition(
-                    "--require-tests: the policy has no policy_test documents",
-                ));
-            }
-            if !report.ok() {
-                let failed: Vec<String> = report
-                    .results
-                    .iter()
-                    .filter(|r| !r.passed)
-                    .map(|r| {
-                        format!(
-                            "{} #{} {}: expected {}, got {} {}",
-                            r.test, r.case, r.name, r.expected, r.got, r.detail
-                        )
-                    })
-                    .collect();
-                return Err(Status::failed_precondition(format!(
-                    "--require-tests: {} policy test(s) failed:\n{}",
-                    failed.len(),
-                    failed.join("\n")
-                )));
-            }
-        }
-        let response = |version: i64, applied: bool| ApplyPolicyResponse {
-            diff: Some(proto_diff.clone()),
-            version,
-            digest: digest.clone(),
-            applied,
-            access_changes: access_changes.clone(),
-            warnings: warnings.clone(),
-            test_results: test_results.clone(),
-        };
-        if req.dry_run || diff.is_empty() {
-            return Ok(Response::new(response(current.version, false)));
-        }
-
-        let documents = serde_json::to_value(next.documents())
-            .map_err(|e| internal("serializing policy", e))?;
-        let source_ref = Some(req.source_ref.as_str()).filter(|s| !s.is_empty());
-        let version = db::insert_policy(&mut tx, &digest, &documents, &admin.username, source_ref)
-            .await
-            .map_err(|e| internal("storing policy", e))?;
-        // Audit before commit: if the event can't be written, the change isn't applied.
-        let data = json!({
-            "version": version,
-            "previous_version": current.version,
-            "digest": digest,
-            "source_ref": source_ref,
-            "diff": diff,
-            // Who gained or lost access, so a reviewer of the trail sees
-            // what the change meant, not only which documents moved.
-            "access_changes": access_changes.iter().take(200).collect::<Vec<_>>(),
-        });
-        self.0
-            .audit
-            .emit(
-                EventKind::PolicyChange,
-                Context {
-                    user: Some(admin.username.clone()),
-                    session_id: None,
-                },
-                data,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "audit unavailable; refusing policy change");
-                Status::unavailable("audit unavailable")
-            })?;
-        tx.commit()
-            .await
-            .map_err(|e| internal("committing policy", e))?;
-        self.0.policy.set(LoadedPolicy {
-            version,
-            policy: Arc::new(next),
-            author: admin.username.clone(),
-            created_at: Some(OffsetDateTime::now_utc()),
-        });
-        tracing::info!(version, %digest, author = %admin.username, "policy applied");
-        Ok(Response::new(response(version, true)))
+            .map(Input::document)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| store_status(&e))?;
+        let outcome = policy_store::write(
+            &self.0,
+            policy_store::Request {
+                actor: admin.username.clone(),
+                changes: vec![Change::ReplaceSource {
+                    owner,
+                    documents: inputs,
+                }],
+                dry_run: req.dry_run,
+                require_tests: req.require_tests,
+                source_ref: Some(req.source_ref).filter(|s| !s.is_empty()),
+            },
+        )
+        .await
+        .map_err(|e| store_status(&e))?;
+        Ok(Response::new(ApplyPolicyResponse {
+            diff: Some(PolicyDiff {
+                added: outcome.diff.added,
+                removed: outcome.diff.removed,
+                changed: outcome.diff.changed,
+            }),
+            version: outcome.version,
+            digest: outcome.digest,
+            applied: outcome.applied,
+            access_changes: outcome
+                .access
+                .changes
+                .iter()
+                .map(|c| {
+                    let sign = if c.change == limen_policy::tooling::ChangeKind::Gain {
+                        '+'
+                    } else {
+                        '-'
+                    };
+                    format!("{sign} {}", c.text())
+                })
+                .collect(),
+            warnings: outcome.warnings,
+            test_results: outcome
+                .tests
+                .results
+                .iter()
+                .map(|r| PolicyTestResult {
+                    test: r.test.clone(),
+                    case_number: u32::try_from(r.case).unwrap_or(u32::MAX),
+                    name: r.name.clone(),
+                    passed: r.passed,
+                    expected: r.expected.clone(),
+                    got: r.got.clone(),
+                    detail: r.detail.clone(),
+                })
+                .collect(),
+        }))
     }
 
     async fn list_discovered(
@@ -415,5 +342,21 @@ fn actor(username: &str) -> ops::Actor<'_> {
     ops::Actor {
         username,
         via: "api",
+    }
+}
+
+/// The gRPC status for a store error.
+#[must_use]
+pub fn store_status(e: &StoreError) -> Status {
+    match e {
+        StoreError::Invalid(_) => Status::invalid_argument(e.to_string()),
+        StoreError::OwnedElsewhere { .. }
+        | StoreError::EtagMismatch { .. }
+        | StoreError::TestsFailed(_)
+        | StoreError::InUse { .. } => Status::failed_precondition(e.to_string()),
+        StoreError::NotFound(_) => Status::not_found(e.to_string()),
+        StoreError::AlreadyExists(_) => Status::already_exists(e.to_string()),
+        StoreError::AuditUnavailable => Status::unavailable("audit unavailable"),
+        StoreError::Internal(m) => internal("writing policy", m),
     }
 }

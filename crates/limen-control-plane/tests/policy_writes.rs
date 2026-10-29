@@ -57,6 +57,7 @@ async fn apply(
     AdminClient::new(h.channel(Some(proxy)))
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 sources,
                 dry_run: false,
                 source_ref: String::new(),
@@ -166,4 +167,159 @@ async fn concurrent_applies_on_two_replicas_audit_an_unbroken_chain() {
         );
         previous = version;
     }
+}
+
+/// One apply, from the named source, returning the refusal if there is one.
+async fn apply_as(
+    h: &Harness,
+    admin: &CertificateDer<'static>,
+    source: &str,
+    sources: Vec<PolicySource>,
+) -> Result<ApplyPolicyResponse, tonic::Status> {
+    let (_, proxy) = h.enroll_proxy().await;
+    AdminClient::new(h.channel(Some(proxy)))
+        .apply_policy(forwarded(
+            ApplyPolicyRequest {
+                source: source.into(),
+                sources,
+                dry_run: false,
+                source_ref: String::new(),
+                require_tests: false,
+            },
+            Some(admin),
+        ))
+        .await
+        .map(tonic::Response::into_inner)
+}
+
+fn tcp(name: &str) -> PolicySource {
+    PolicySource {
+        name: format!("{name}.yaml"),
+        content: format!(
+            "kind: resource\nversion: v1\nmetadata: {{ name: {name} }}\nspec:\n  tcp: {{ address: \"db.internal:5432\" }}\n"
+        ),
+    }
+}
+
+/// ADR-0042 §3: files replace their own source. Two sources share the
+/// policy without touching each other, and one can't take the other's.
+#[tokio::test]
+async fn sources_replace_only_their_own_documents() {
+    let Some((a, _b, admin)) = Box::pin(pair()).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    assert!(
+        apply_as(&a, &admin, "default", small())
+            .await
+            .expect("default")
+            .applied
+    );
+    assert!(
+        apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+            .await
+            .expect("a")
+            .applied
+    );
+    assert!(
+        apply_as(&a, &admin, "team-b", vec![tcp("b-db"), tcp("b-cache")])
+            .await
+            .expect("b")
+            .applied
+    );
+    // team-b drops one of its own; team-a's and default's stay.
+    let shrink = apply_as(&a, &admin, "team-b", vec![tcp("b-db")])
+        .await
+        .expect("b again");
+    assert_eq!(shrink.diff.expect("diff").removed, ["resource/b-cache"]);
+    let names: Vec<String> = a
+        .state
+        .policy
+        .base()
+        .policy
+        .resources()
+        .map(|r| r.metadata.name.clone())
+        .collect();
+    assert!(names.contains(&"a-db".to_owned()) && names.contains(&"b-db".to_owned()));
+    assert!(
+        names.contains(&"web-staging-1".to_owned()),
+        "default's resources stay: {names:?}"
+    );
+    // team-a can't take team-b's resource, and says who has it.
+    let err = apply_as(&a, &admin, "team-a", vec![tcp("a-db"), tcp("b-db")])
+        .await
+        .expect_err("owned");
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert!(err.message().contains("team-b"), "{}", err.message());
+    // An apply that names nothing new is a no-op, as before Phase 14.
+    assert!(
+        !apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+            .await
+            .expect("same")
+            .applied
+    );
+    // A bad source name is refused.
+    let err = apply_as(&a, &admin, "has space", vec![tcp("x")])
+        .await
+        .expect_err("bad source");
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+}
+
+/// A replica from before Phase 14 writes versions without heads. The next
+/// write through the store starts from that version, not from stale heads.
+#[tokio::test]
+async fn a_version_written_without_heads_is_respected() {
+    let Some((a, _b, admin)) = Box::pin(pair()).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    assert!(
+        apply_as(&a, &admin, "default", large())
+            .await
+            .expect("large")
+            .applied
+    );
+    assert!(
+        apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+            .await
+            .expect("a")
+            .applied
+    );
+    // The old replica applies `small` the old way: the whole policy, which
+    // also drops team-a's resource.
+    let old = limen_policy::Policy::parse_yaml(
+        small()
+            .iter()
+            .map(|s| (s.name.as_str(), s.content.as_str())),
+    )
+    .expect("small");
+    let mut tx = a.state.db.begin().await.expect("tx");
+    limen_control_plane::db::insert_policy(
+        &mut tx,
+        &old.digest(),
+        &serde_json::to_value(old.documents()).expect("json"),
+        "old-replica",
+        None,
+    )
+    .await
+    .expect("insert");
+    tx.commit().await.expect("commit");
+    // team-a applies again: its resource comes back, and nothing `small`
+    // dropped does.
+    let after = apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+        .await
+        .expect("a again");
+    assert!(after.applied);
+    assert_eq!(after.diff.expect("diff").added, ["resource/a-db"]);
+    let policy = a.state.policy.base();
+    assert!(policy.policy.resource("a-db").is_some());
+    assert!(
+        policy.policy.resource("orders-staging").is_none(),
+        "large's databases stay gone"
+    );
+    // And the heads now say exactly what the version has.
+    let heads = limen_control_plane::policy_store::heads(&a.state.db)
+        .await
+        .expect("heads");
+    assert_eq!(heads.len(), policy.policy.documents().len());
 }

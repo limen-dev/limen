@@ -126,6 +126,7 @@ async fn rig_with(worker_args: &[&str], console: bool) -> Option<Rig> {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: true,
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
@@ -594,6 +595,7 @@ spec:
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_id)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: vec![PolicySource {
                 name: "p.yaml".into(),
