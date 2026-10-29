@@ -15,7 +15,7 @@ use limen_proto::manage::v1::management_service_client::ManagementServiceClient;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, PolicySource};
 use limen_testkit::idp::WorkloadToken;
-use limen_testkit::users::ADMIN;
+use limen_testkit::users::{ADMIN, ONCALL};
 use rustls_pki_types::CertificateDer;
 use tonic::Code;
 use tonic_types::StatusExt;
@@ -43,7 +43,15 @@ fn stack(issuer: &str) -> String {
 }
 
 async fn start() -> Option<Fixture> {
-    let h = Harness::start_with(&["--bot-allow-insecure-issuers".to_owned()]).await?;
+    start_with(&[]).await
+}
+
+async fn start_with(extra: &[&str]) -> Option<Fixture> {
+    let args: Vec<String> = std::iter::once("--bot-allow-insecure-issuers")
+        .chain(extra.iter().copied())
+        .map(str::to_owned)
+        .collect();
+    let h = Harness::start_with(&args).await?;
     let (_, admin) = h.login(ADMIN, &["admins"]).await.expect("admin");
     let (_, proxy) = h.enroll_proxy().await;
     let f = Fixture {
@@ -140,6 +148,77 @@ impl Fixture {
             .await
             .map(|r| r.into_inner().result.expect("result"))
     }
+}
+
+impl Fixture {
+    /// A person creates a whole resource (no profile) in `default`.
+    async fn person_creates(
+        &self,
+        who: &CertificateDer<'static>,
+        name: &str,
+        team: &str,
+        options: pb::WriteOptions,
+    ) -> Result<pb::WriteResult, tonic::Status> {
+        let request = pb::CreateDocumentRequest {
+            document: Some(pb::Document {
+                kind: pb::DocumentKind::Resource.into(),
+                name: name.into(),
+                spec_json: r#"{"postgres":{"endpoint":"ledger.internal:5432","default_database":"ledger"}}"#.into(),
+                labels: HashMap::from([
+                    ("team".to_owned(), team.to_owned()),
+                    ("env".to_owned(), "staging".to_owned()),
+                ]),
+                ..pb::Document::default()
+            }),
+            ownership: Some(pb::Ownership {
+                source: "console-test".into(),
+                ..pb::Ownership::default()
+            }),
+            options: Some(options),
+        };
+        self.api()
+            .create_document(forwarded(request, Some(who)))
+            .await
+            .map(|r| r.into_inner().result.expect("result"))
+    }
+
+    async fn approve(
+        &self,
+        who: &CertificateDer<'static>,
+        id: &str,
+    ) -> Result<pb::PolicyChange, tonic::Status> {
+        self.api()
+            .approve_change(forwarded(
+                pb::ApproveChangeRequest {
+                    id: id.into(),
+                    note: "looked at it".into(),
+                },
+                Some(who),
+            ))
+            .await
+            .map(|r| r.into_inner().change.expect("change"))
+    }
+
+    async fn exists(&self, name: &str) -> bool {
+        self.api()
+            .get_document(forwarded(
+                pb::GetDocumentRequest {
+                    kind: pb::DocumentKind::Resource.into(),
+                    name: name.into(),
+                    policy_version: 0,
+                },
+                Some(&self.admin),
+            ))
+            .await
+            .is_ok()
+    }
+}
+
+fn reason(status: &tonic::Status) -> String {
+    status
+        .get_details_error_info()
+        .map(|i| i.reason)
+        .unwrap_or_default()
 }
 
 fn endpoint(endpoint: &str) -> String {
@@ -583,4 +662,430 @@ async fn a_writer_moves_documents_between_its_own_sources_only() {
         .await
         .expect_err("not its document");
     assert_eq!(rule(&err).1, "kind");
+}
+
+#[tokio::test]
+async fn widening_by_a_person_waits_for_a_second_admin() {
+    let Some(f) = start_with(&["--widening-approval=all"]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    // team=payments, env=staging: developers' payments-ci role reaches it.
+    let options = pb::WriteOptions {
+        reason: "the ledger moves to RDS".into(),
+        ..pb::WriteOptions::default()
+    };
+    // A plan that can't wait learns it early.
+    let err = f
+        .person_creates(
+            &f.admin,
+            "payments-ledger",
+            "payments",
+            pb::WriteOptions {
+                validate_only: true,
+                fail_if_approval_needed: true,
+                ..pb::WriteOptions::default()
+            },
+        )
+        .await
+        .expect_err("needs approval");
+    assert_eq!(reason(&err), "APPROVAL_REQUIRED");
+    // Without it, a dry run says so in its warnings.
+    let dry = f
+        .person_creates(
+            &f.admin,
+            "payments-ledger",
+            "payments",
+            pb::WriteOptions {
+                validate_only: true,
+                ..pb::WriteOptions::default()
+            },
+        )
+        .await
+        .expect("dry run");
+    assert_eq!(dry.outcome, i32::from(pb::WriteOutcome::Validated));
+    assert!(dry.pending_change.is_none(), "a dry run holds nothing");
+    assert!(
+        dry.impact
+            .expect("impact")
+            .warnings
+            .iter()
+            .any(|w| w.contains("waits for a person's approval")),
+        "the plan learns it would wait"
+    );
+
+    let held = f
+        .person_creates(&f.admin, "payments-ledger", "payments", options)
+        .await
+        .expect("held");
+    assert_eq!(held.outcome, i32::from(pb::WriteOutcome::PendingApproval));
+    let change = held.pending_change.expect("the held change");
+    assert_eq!(change.state, i32::from(pb::policy_change::State::Pending));
+    assert_eq!(change.reason, "the ledger moves to RDS");
+    assert!(
+        change
+            .impact
+            .as_ref()
+            .is_some_and(|i| i.widens_standing_access),
+        "the approver sees what it gives"
+    );
+    assert_eq!(change.writes.len(), 1);
+    assert!(!f.exists("payments-ledger").await, "nothing applied yet");
+
+    // Not its author.
+    let err = f.approve(&f.admin, &change.id).await.expect_err("author");
+    assert_eq!(reason(&err), "CHANGE_NOT_DECIDABLE");
+    // Bots see nothing that isn't theirs, and never decide.
+    let err = f
+        .api()
+        .get_change(forwarded(
+            pb::GetChangeRequest {
+                id: change.id.clone(),
+            },
+            Some(&f.bot),
+        ))
+        .await
+        .expect_err("not the bot's");
+    assert_eq!(err.code(), Code::NotFound);
+
+    // Resources a writer completes from its profile are approved by the
+    // grant: never held, even with --widening-approval=all.
+    let bot_write = f
+        .create(
+            "payments-orders-db",
+            &endpoint(ENDPOINT),
+            &[("env", "staging")],
+            pb::WriteOptions::default(),
+        )
+        .await
+        .expect("bot create");
+    assert_eq!(bot_write.outcome, i32::from(pb::WriteOutcome::Applied));
+
+    let (_, second) = f.h.login(ONCALL, &["admins"]).await.expect("second admin");
+    let pending = f
+        .api()
+        .list_changes(forwarded(pb::ListChangesRequest::default(), Some(&second)))
+        .await
+        .expect("list")
+        .into_inner()
+        .changes;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, change.id);
+
+    let applied = f.approve(&second, &change.id).await.expect("approve");
+    assert_eq!(applied.state, i32::from(pb::policy_change::State::Applied));
+    assert_eq!(applied.decided_by, ONCALL);
+    assert!(applied.applied_policy_version > change.base_policy_version);
+    assert!(f.exists("payments-ledger").await, "applied on approval");
+    let err = f.approve(&second, &change.id).await.expect_err("decided");
+    assert_eq!(reason(&err), "CHANGE_NOT_DECIDABLE");
+
+    let events = f.h.audit_events().await;
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == EventKind::PolicyChangePending)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == EventKind::PolicyChangeDecided && e.data["state"] == "applied")
+    );
+    let applied_event = events
+        .iter()
+        .rfind(|e| e.kind == EventKind::PolicyChange)
+        .expect("policy.change");
+    assert_eq!(applied_event.data["approval"]["approved_by"], ONCALL);
+    assert_eq!(
+        applied_event.user.as_deref(),
+        Some(ADMIN),
+        "written as its author"
+    );
+}
+
+#[tokio::test]
+async fn held_changes_are_rejected_cancelled_or_superseded() {
+    let Some(f) = start_with(&["--widening-approval=all"]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let (_, second) = f.h.login(ONCALL, &["admins"]).await.expect("second admin");
+    let f = &f;
+    let hold = |name: &'static str| async move {
+        f.person_creates(&f.admin, name, "payments", pb::WriteOptions::default())
+            .await
+            .expect("held")
+            .pending_change
+            .expect("held change")
+    };
+
+    // Rejected, with a reason.
+    let rejected = hold("payments-a").await;
+    let reject = |note: &str| pb::RejectChangeRequest {
+        id: rejected.id.clone(),
+        note: note.into(),
+    };
+    let err = f
+        .api()
+        .reject_change(forwarded(reject(""), Some(&second)))
+        .await
+        .expect_err("a reason is required");
+    assert_eq!(err.code(), Code::InvalidArgument);
+    let decided = f
+        .api()
+        .reject_change(forwarded(reject("not this quarter"), Some(&second)))
+        .await
+        .expect("reject")
+        .into_inner()
+        .change
+        .expect("change");
+    assert_eq!(decided.state, i32::from(pb::policy_change::State::Rejected));
+    assert_eq!(decided.decision_note, "not this quarter");
+
+    // Withdrawn by its author only.
+    let cancelled = hold("payments-b").await;
+    let cancel = || pb::CancelChangeRequest {
+        id: cancelled.id.clone(),
+    };
+    let err = f
+        .api()
+        .cancel_change(forwarded(cancel(), Some(&second)))
+        .await
+        .expect_err("not the author");
+    assert_eq!(err.code(), Code::PermissionDenied);
+    let decided = f
+        .api()
+        .cancel_change(forwarded(cancel(), Some(&f.admin)))
+        .await
+        .expect("cancel")
+        .into_inner()
+        .change
+        .expect("change");
+    assert_eq!(
+        decided.state,
+        i32::from(pb::policy_change::State::Cancelled)
+    );
+
+    // Superseded: the document it creates was made since, in another way.
+    let superseded = hold("payments-c").await;
+    let other = f
+        .person_creates(
+            &f.admin,
+            "payments-c",
+            "elsewhere",
+            pb::WriteOptions::default(),
+        )
+        .await
+        .expect("a write that gives nobody access goes through");
+    assert_eq!(other.outcome, i32::from(pb::WriteOutcome::Applied));
+    let decided = f.approve(&second, &superseded.id).await.expect("decide");
+    assert_eq!(
+        decided.state,
+        i32::from(pb::policy_change::State::Superseded)
+    );
+    assert!(
+        decided.decision_note.contains("already exists"),
+        "{}",
+        decided.decision_note
+    );
+
+    let listed = f
+        .api()
+        .list_changes(forwarded(
+            pb::ListChangesRequest {
+                state: pb::policy_change::State::Superseded.into(),
+                ..pb::ListChangesRequest::default()
+            },
+            Some(&f.admin),
+        ))
+        .await
+        .expect("list")
+        .into_inner()
+        .changes;
+    assert_eq!(listed.len(), 1);
+    assert!(
+        f.api()
+            .list_changes(forwarded(pb::ListChangesRequest::default(), Some(&f.admin)))
+            .await
+            .expect("list")
+            .into_inner()
+            .changes
+            .is_empty(),
+        "nothing pending is left"
+    );
+}
+
+#[tokio::test]
+async fn required_tests_refuse_writes_that_break_them() {
+    let Some(f) = start_with(&["--policy-tests=required"]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    // Without tests in the policy, required changes nothing.
+    let created = f
+        .person_creates(
+            &f.admin,
+            "payments-ledger",
+            "elsewhere",
+            pb::WriteOptions::default(),
+        )
+        .await
+        .expect("no tests yet");
+    let etag = created.documents[0].etag.clone();
+    // Tests from their own source: developers never reach the ledger.
+    AdminClient::new(f.proxy())
+        .apply_policy(forwarded(
+            ApplyPolicyRequest {
+                source: "tests".into(),
+                sources: vec![PolicySource {
+                    name: "tests.yaml".into(),
+                    content: "kind: policy_test\nversion: v1\nmetadata: { name: ledger-closed }\nspec:\n  cases:\n    - name: developers can't reach the ledger\n      who: { groups: [developers] }\n      resource: payments-ledger\n      principal: { db_role: limen_read, database: ledger }\n      expect: deny\n".into(),
+                }],
+                dry_run: false,
+                source_ref: String::new(),
+                require_tests: false,
+            },
+            Some(&f.admin),
+        ))
+        .await
+        .expect("apply the tests");
+    let mut doc = created.documents[0].clone();
+    doc.labels.insert("team".into(), "payments".into());
+    let err = f
+        .api()
+        .update_document(forwarded(
+            pb::UpdateDocumentRequest {
+                document: Some(doc),
+                etag,
+                options: None,
+                ownership: Some(pb::Ownership {
+                    source: "console-test".into(),
+                    ..pb::Ownership::default()
+                }),
+            },
+            Some(&f.admin),
+        ))
+        .await
+        .expect_err("it breaks the test");
+    assert_eq!(reason(&err), "TESTS_FAILED", "{err:?}");
+    assert!(err.message().contains("ledger-closed"), "{}", err.message());
+}
+
+#[tokio::test]
+async fn a_held_apply_never_undoes_a_newer_one() {
+    let Some(f) = start_with(&["--widening-approval=all"]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let ledger = |team: &str| {
+        format!(
+            "kind: resource\nversion: v1\nmetadata: {{ name: payments-ledger, labels: {{ team: {team}, env: staging }} }}\nspec:\n  postgres: {{ endpoint: \"ledger.internal:5432\", default_database: ledger }}\n"
+        )
+    };
+    let f = &f;
+    let apply = |content: String| async move {
+        AdminClient::new(f.proxy())
+            .apply_policy(forwarded(
+                ApplyPolicyRequest {
+                    source: "ledger".into(),
+                    sources: vec![PolicySource {
+                        name: "ledger.yaml".into(),
+                        content,
+                    }],
+                    dry_run: false,
+                    source_ref: String::new(),
+                    require_tests: false,
+                },
+                Some(&f.admin),
+            ))
+            .await
+            .expect("apply")
+            .into_inner()
+    };
+    let held = apply(ledger("payments")).await;
+    assert!(!held.applied);
+    assert!(
+        !held.pending_change_id.is_empty(),
+        "held for a second admin"
+    );
+    // Meanwhile the same source is applied again, giving nobody access.
+    let newer = apply(ledger("elsewhere")).await;
+    assert!(newer.applied && newer.pending_change_id.is_empty());
+
+    let (_, second) = f.h.login(ONCALL, &["admins"]).await.expect("second admin");
+    let decided = f
+        .approve(&second, &held.pending_change_id)
+        .await
+        .expect("decide");
+    assert_eq!(
+        decided.state,
+        i32::from(pb::policy_change::State::Superseded),
+        "{}",
+        decided.decision_note
+    );
+    let doc = f
+        .api()
+        .get_document(forwarded(
+            pb::GetDocumentRequest {
+                kind: pb::DocumentKind::Resource.into(),
+                name: "payments-ledger".into(),
+                policy_version: 0,
+            },
+            Some(&f.admin),
+        ))
+        .await
+        .expect("get")
+        .into_inner()
+        .document
+        .expect("doc");
+    assert_eq!(
+        doc.labels.get("team").map(String::as_str),
+        Some("elsewhere"),
+        "the newer apply stands"
+    );
+}
+
+#[tokio::test]
+async fn held_changes_expire() {
+    let Some(f) = start_with(&["--widening-approval=all", "--policy-change-ttl=1s"]).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let change = f
+        .person_creates(
+            &f.admin,
+            "payments-ledger",
+            "payments",
+            pb::WriteOptions::default(),
+        )
+        .await
+        .expect("held")
+        .pending_change
+        .expect("held change");
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let (_, second) = f.h.login(ONCALL, &["admins"]).await.expect("second admin");
+    let err = f.approve(&second, &change.id).await.expect_err("expired");
+    assert_eq!(reason(&err), "CHANGE_NOT_DECIDABLE");
+    let expired = f
+        .api()
+        .list_changes(forwarded(
+            pb::ListChangesRequest {
+                state: pb::policy_change::State::Expired.into(),
+                ..pb::ListChangesRequest::default()
+            },
+            Some(&second),
+        ))
+        .await
+        .expect("list")
+        .into_inner()
+        .changes;
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].decided_by, "limen", "marked, not only shown");
+    assert!(
+        f.h.audit_events()
+            .await
+            .iter()
+            .any(|e| e.kind == EventKind::PolicyChangeDecided && e.data["state"] == "expired")
+    );
+    assert!(!f.exists("payments-ledger").await);
 }

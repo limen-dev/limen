@@ -15,11 +15,14 @@ use limen_proto::v1::{
     PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
     TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
+use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::{b64url, ops};
 use crate::caller;
+use crate::config::PolicyTests;
 use crate::db;
+use crate::policy_changes;
 use crate::policy_store::{self, Change, Input, Owner, StoreError};
 use crate::state::{AppState, internal, unix};
 
@@ -83,23 +86,62 @@ impl Admin for AdminService {
             .map(Input::document)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| store_status(&e))?;
+        let changes = vec![Change::ReplaceSource {
+            owner,
+            documents: inputs,
+        }];
+        let source_ref = Some(req.source_ref).filter(|s| !s.is_empty());
         let outcome = policy_store::write(
             &self.0,
             policy_store::Request {
                 actor: admin.username.clone(),
-                changes: vec![Change::ReplaceSource {
-                    owner,
-                    documents: inputs,
-                }],
+                changes: changes.clone(),
                 dry_run: req.dry_run,
                 require_tests: req.require_tests,
-                source_ref: Some(req.source_ref).filter(|s| !s.is_empty()),
+                keep_tests_passing: self.0.config.policy_tests == PolicyTests::Required,
+                source_ref: source_ref.clone(),
                 expected_version: None,
                 guard: None,
+                hold: policy_changes::hold_for(false, self.0.config.widening_approval, &changes),
+                approval: None,
             },
         )
         .await
         .map_err(|e| store_status(&e))?;
+        let mut warnings = outcome.warnings.clone();
+        if outcome.held && req.dry_run {
+            warnings.push(policy_changes::WOULD_BE_HELD.to_owned());
+        }
+        // Held for a second admin (`--widening-approval=all`).
+        let pending_change_id = if outcome.held && !req.dry_run {
+            let new = policy_changes::New {
+                author: admin.username.clone(),
+                author_ci: BTreeMap::new(),
+                plan: policy_changes::Plan {
+                    changes,
+                    require_tests: req.require_tests,
+                    gains: policy_changes::widening_gains(&outcome),
+                    basis: outcome.basis.clone(),
+                },
+                writes: Vec::new(),
+                impact: crate::services::manage::impact(&outcome).encode_to_vec(),
+                base_policy_version: outcome.version,
+                reason: String::new(),
+                source_ref: source_ref.unwrap_or_default(),
+            };
+            policy_changes::hold(&self.0, new, self.0.config.policy_change_ttl)
+                .await
+                .map_err(|e| match e {
+                    policy_changes::Error::AuditUnavailable => {
+                        Status::unavailable("audit unavailable")
+                    }
+                    other => internal("holding the change", other),
+                })?
+                .id
+                .to_string()
+        } else {
+            String::new()
+        };
         Ok(Response::new(ApplyPolicyResponse {
             diff: Some(PolicyDiff {
                 added: outcome.diff.added,
@@ -122,7 +164,7 @@ impl Admin for AdminService {
                     format!("{sign} {}", c.text())
                 })
                 .collect(),
-            warnings: outcome.warnings,
+            warnings,
             test_results: outcome
                 .tests
                 .results
@@ -137,6 +179,7 @@ impl Admin for AdminService {
                     detail: r.detail.clone(),
                 })
                 .collect(),
+            pending_change_id,
         }))
     }
 
