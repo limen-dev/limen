@@ -2,7 +2,7 @@ name: ci-rust
 
 # Lint, tests on three platforms, container images. Tests and images wait for lint.
 # Starts for any change except docs, the website, demos, Terraform and dashboards.
-# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
   push:
@@ -27,11 +27,6 @@ on:
     paths: *paths
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
-    inputs:
-      hosted:
-        description: Run on GitHub-hosted runners instead of the self-hosted ones
-        type: boolean
-        default: false
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -53,7 +48,7 @@ jobs:
   lint:
     name: Lint (fmt, clippy, image versions)
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out the commit
@@ -91,7 +86,7 @@ jobs:
   api-contract:
     name: Management API contract (buf)
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out the commit
@@ -138,9 +133,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x64, hosted: ubuntu-24.04, self-hosted: '["self-hosted","Linux","X64"]' }
-          - { arch: arm64, hosted: ubuntu-24.04-arm, self-hosted: '["self-hosted","Linux","ARM64"]' }
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && matrix.hosted || fromJSON(matrix.self-hosted) }}
+          - { arch: x64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     services:
       postgres:
         image: postgres:18-alpine
@@ -165,7 +160,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-      # The self-hosted VMs have 8 GiB: more parallel compiles got the runner OOM-killed.
+      # Hosted runners are small: more parallel compiles can run out of memory.
       CARGO_BUILD_JOBS: "2"
       # Show the components' warnings in the log when a test fails.
       LIMEN_TEST_LOG: "1"
@@ -179,9 +174,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
     steps:
-      # Hosted runners are short on disk; self-hosted machines have room.
-      - name: Free disk space (hosted runners only)
-        if: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') }}
+      # Hosted runners are short on disk.
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h /
@@ -228,10 +222,12 @@ jobs:
           docker rm -fv s3 >/dev/null 2>&1 || true
 
   # No containers on macOS, so integration tests skip (they print SKIPPED) and only unit tests run.
+  # Not on pull requests: macOS minutes cost 10x on a private repository. Runs on main and releases.
   test-macos:
     name: Tests (macOS, unit only)
     needs: lint
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64"]') }}
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - name: Check out the commit
@@ -256,7 +252,7 @@ jobs:
   images:
     name: Container images
     needs: lint
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       # The Dockerfile needs BuildKit.

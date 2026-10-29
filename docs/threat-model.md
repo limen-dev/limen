@@ -232,19 +232,18 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in audit (PII in SQL literals, Redis and MongoDB values) | Redis values and MongoDB command values redacted by default. SQL full text by default (owner decision), with per-resource literal normalization. Bound parameters redacted by default. Access to the bucket and Grafana is limited to auditors |
 | S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
-### TB9: GitHub Actions ↔ self-hosted runners (CI)
-Pull request code runs on the owner's machines: a macOS runner and two OrbStack VMs on it, under the owner's user account. See [the CI runbook](runbooks/ci-runners.md).
+### TB9: GitHub Actions ↔ GitHub-hosted runners (CI)
+Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded afterwards. Until 2026-10-29 it ran on the owner's machines. See [the CI runbook](runbooks/ci-runners.md).
 
 | Threat | Mitigation |
 |---|---|
-| E: a pull request runs commands on the owner's machines (a PR's workflow is code) | The repository is private, so only collaborators can open pull requests. Keep it private, and never point the runners at forks or public repositories. Limit: anyone who can push a branch can run code on the runners |
-| E: a workflow reads the owner's files or secrets | The Linux VMs are separate from the Mac. Workflows use `permissions: contents: read`. Publishing secrets are used only by `release.yml`, which runs on hosted runners. Limit: the macOS runner runs as the owner's user, so a workflow there can read the laptop's files |
-| T: one job leaves state for the next | Each VM runs one job at a time. The checkout cleans the workspace (`git clean -ffdx`). The macOS runner is not isolated per job |
-| I: the checkout token leaks into logs or onto disk | The fetch step passes the token through the environment (`GIT_CONFIG_*`) and writes no credentials into `.git/config`. Nothing echoes it |
-| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint`. Only repository admins can set the `CI_RUNNERS` variable |
-| D: a runner stops or runs out of memory mid-job | Every job has a timeout. Integration tests compile two crates at a time on the 8 GiB VM. A lost runner fails its job, which is then rerun by hand |
+| E: a pull request runs code with the repository's credentials (a PR's workflow is code) | Workflows use `permissions: contents: read` and `persist-credentials: false`. No CI workflow reads a repository secret; only `release.yml` publishes, and it runs on pushes to `main` |
+| T: one job leaves state for the next | Each job gets a new VM. The Rust cache is written only from `main` (`save-if`), so a pull request cannot poison it for later runs |
+| I: the checkout token leaks into logs or onto disk | `persist-credentials: false` writes no token into `.git/config`. Nothing echoes it |
+| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint` |
+| D: a job runs out of memory, disk or minutes | Every job has a timeout. Integration tests compile two crates at a time and free disk first. macOS tests skip pull requests to save minutes. A lost job is rerun by hand |
 
-Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
+Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.
 
 ### TB12: Public website (ADR-0021)
 A static site, built by hand and not yet published or built in CI (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
@@ -305,6 +304,7 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | CI | Self-hosted runners removed; CI runs on GitHub-hosted runners (TB9) |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |

@@ -1,7 +1,7 @@
 name: ci-website
 
 # Builds the site and runs its link and rule checks (npm run build).
-# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
   website:
     name: Website build and checks
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ vars.CI_RUNNERS == 'github-hosted' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out the commit

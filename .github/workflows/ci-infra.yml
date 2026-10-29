@@ -1,7 +1,7 @@
 name: ci-infra
 
 # Terraform, generated dashboards, dev users. crates/ counts: dashboards come from metric names.
-# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
   push:
@@ -20,11 +20,6 @@ on:
     paths: *paths
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
-    inputs:
-      hosted:
-        description: Run on GitHub-hosted runners instead of the self-hosted ones
-        type: boolean
-        default: false
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -41,7 +36,7 @@ jobs:
   infra:
     name: Terraform, dashboards, dev users
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out the commit

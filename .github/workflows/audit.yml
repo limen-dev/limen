@@ -1,7 +1,7 @@
 name: audit
 
 # cargo-deny and cargo-audit. Also runs on weekdays: advisories appear without a commit.
-# Self-hosted runners, unless CI_RUNNERS=github-hosted (docs/runbooks/ci-runners.md).
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
   push:
@@ -22,11 +22,6 @@ on:
     - cron: "17 5 * * 1-5"
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
-    inputs:
-      hosted:
-        description: Run on GitHub-hosted runners instead of the self-hosted ones
-        type: boolean
-        default: false
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -43,7 +38,7 @@ jobs:
   audit:
     name: Dependency audit (cargo-deny, cargo-audit)
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ${{ (inputs.hosted || vars.CI_RUNNERS == 'github-hosted') && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out the commit
