@@ -10,7 +10,7 @@ Users need mTLS with client certs, raw TCP-like streams for DB, Redis, and SSH, 
 - **One public NLB, TCP 443, passthrough** to the proxies. The proxies terminate TLS with rustls and route on the **ALPN** value (see `limen_tunnel::alpn`).
 - HTTP (`h2` and `http/1.1`) is then routed by path: `/v1/...` goes to the CLI API (relayed to the control plane), and `/k8s/<cluster>/...` goes to the Kubernetes API. Path routing avoids wildcard certificates for per-cluster SNI.
 - The **control plane has no public endpoint**. The proxy relays CLI and worker API calls and forwards the client cert. The control plane checks the client cert again itself.
-- **Public cert on the proxy:** an ACM exportable public certificate, or an operator-supplied cert in Secrets Manager. *Unverified: confirm ACM export support in Terraform during Phase 14.* In dev the cert comes from the internal CA, and the CLI uses `--ca-file`.
+- **Public cert on the proxy:** an ACM exportable public certificate, or an operator-supplied cert in Secrets Manager. *Unverified: confirm ACM export support in Terraform during Phase 15.* In dev the cert comes from the internal CA, and the CLI uses `--ca-file`.
 
 ## Consequences
 - \+ One port to open in firewalls, and one DNS name.

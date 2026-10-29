@@ -7,4 +7,4 @@ Guide: [docs/guides/kubernetes.md](../../../docs/guides/kubernetes.md). Design: 
 
 Try it on kind: `demos/demo-phase8.sh` creates a cluster, applies both files, starts Limen in front of it, and checks `kubectl get`, `exec`, `port-forward`, RBAC, recordings, and locks.
 
-A Helm chart and Terraform for EKS come with Phase 14.
+A Helm chart and Terraform for EKS come with Phase 15.
