@@ -31,6 +31,10 @@ pub enum AdminCommand {
         /// Refuse to apply unless the policy's own `policy_test` cases pass.
         #[arg(long)]
         require_tests: bool,
+        /// The source these files replace. Documents other sources (and
+        /// Terraform) manage are left alone; naming one is refused.
+        #[arg(long, default_value = "default")]
+        source: String,
     },
     /// Show the active policy version.
     Policy,
@@ -181,6 +185,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             dry_run,
             source_ref,
             require_tests,
+            source,
         } => {
             let sources = collect_sources(&paths)?;
             let resp = admin
@@ -189,6 +194,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     dry_run,
                     source_ref: source_ref.unwrap_or_default(),
                     require_tests,
+                    source,
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?

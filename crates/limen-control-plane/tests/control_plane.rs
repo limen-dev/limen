@@ -222,6 +222,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let dry = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: true,
@@ -239,6 +240,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let applied = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: false,
@@ -263,6 +265,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let again = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: false,
@@ -320,6 +323,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let err = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: true,
@@ -353,6 +357,7 @@ async fn invalid_policy_is_rejected() {
     let err = AdminClient::new(h.channel(Some(proxy)))
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: bad,
                 dry_run: false,

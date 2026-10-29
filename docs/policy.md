@@ -2,6 +2,8 @@
 
 Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. The document kinds are `role`, `role_mapping`, `resource`, `bot`, `discovery`, `policy_test`, and, for delegated writes (ADR-0042), `resource_profile` and `policy_writer`; plus the built-in roles below. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
 
+**Every document has one owner** (ADR-0042). Files you apply replace their own *source* only: without `--source`, the `default` one, which holds everything applied before Phase 14. `limen admin apply --source team-a dir/` makes team-a's documents exactly `dir/` and leaves every other source's documents alone, and so does Terraform through the management API. Naming a document another source manages is refused, with the owner in the error.
+
 The examples are grouped into `shared/` policy and `stacks/<kind>/` files.
 Applying the `examples/policy/` directory still recursively applies the full
 example policy. To apply one stack's examples, include the shared policy and

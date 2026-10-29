@@ -97,6 +97,7 @@ async fn tcp_is_fixed_destination_policy_checked_and_audited() {
     let mut admin = AdminClient::new(deployment.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: policy(&target),
             dry_run: false,

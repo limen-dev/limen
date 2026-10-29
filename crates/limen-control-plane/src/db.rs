@@ -527,6 +527,11 @@ pub async fn cleanup(db: &Db) -> Result<Option<u64>, sqlx::Error> {
         return Ok(None);
     }
     let mut deleted = 0;
+    deleted +=
+        sqlx::query("DELETE FROM policy_requests WHERE created_at < now() - interval '24 hours'")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
     deleted += sqlx::query("DELETE FROM login_nonces WHERE expires_at < now()")
         .execute(&mut *tx)
         .await?
