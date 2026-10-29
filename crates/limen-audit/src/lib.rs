@@ -92,6 +92,14 @@ pub enum EventKind {
     WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// A bot writer's write was refused by its grant or the escalation rules
+    /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
+    /// detection signal.
+    #[serde(rename = "policy.write_denied")]
+    PolicyWriteDenied,
+    /// A document moved to another owner (ADR-0042 §3).
+    #[serde(rename = "policy.ownership_transfer")]
+    PolicyOwnershipTransfer,
     /// A proxy or worker enrolled. `data.kind` says which.
     #[serde(rename = "worker.enroll")]
     WorkerEnroll,
