@@ -274,7 +274,7 @@ spec:
   kinds: [resource]
   profiles: [payments-postgres]
   max_documents: 50          # 1 to 10000; 200 by default
-  approvers: { groups: [security] }   # for held changes (stage 2)
+  approvers: { groups: [security] }   # may approve its held changes, besides admins
 ```
 
 The bot keeps the roles in its `bot` document for its own sessions. The grant gives it no admin rights; it only lets it write documents in its namespace. Never give `limen:admin` to a pipeline.

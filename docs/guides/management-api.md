@@ -2,7 +2,7 @@
 
 `limen.manage.v1.ManagementService` ([ADR-0042](../adr/0042-management-api.md)) is how the CLI, the console, and the Terraform provider ([`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen)) read policy and write resources. This page is for whoever writes a client. The contract is [`proto/limen/manage/v1/manage.proto`](../../proto/limen/manage/v1/manage.proto): every message and field is documented there, and CI refuses breaking changes to it.
 
-**Stage 1 (what is served now):** reads of every document kind; writes of **resources**: create, update, delete, batch, replace a source, and transfer. Pending changes (`ListChanges` is empty) and `GetSchema` are `UNIMPLEMENTED` until a later stage, and so is writing roles, mappings, and bots through the API (apply them from files).
+**What is served now:** reads of every document kind; writes of **resources**: create, update, delete, batch, replace a source, and transfer; and **changes held for approval** (get, list, approve, reject, cancel). `GetSchema` is `UNIMPLEMENTED` until a later stage, and so is writing roles, mappings, and bots through the API (apply them from files).
 
 ## Who can call it
 
@@ -41,6 +41,26 @@ A `limen_resource` is one resource document. Keep `name`, `etag`, and the `owner
 - **`ownership.source`** names your writer, such as `terraform/<workspace>`. Two states in one namespace should use different sources; a write to a document another source manages is `OWNED_ELSEWHERE`.
 - **Plans in pull requests can't log in:** a pull request run never matches a bot (ADR-0019). Plan online in the protected-branch run, and validate offline in pull requests.
 
+## Changes held for approval
+
+A write that widens **standing** access (someone reaches something they couldn't, without asking) can be held for a person instead of applied ([ADR-0042 §6](../adr/0042-management-api.md)):
+
+- A bot writer's write is held unless it only creates or updates resources from its profiles. The grant's bounds are that approval.
+- With the control plane's `--widening-approval=all`, a person's write is held too, and a second admin approves it. `limen admin apply` prints the held change's id.
+
+A held write returns `WRITE_OUTCOME_PENDING_APPROVAL` and the change in `pending_change`. Nothing is applied. A client that can't wait, such as a Terraform plan, sets `fail_if_approval_needed` (with `validate_only` in a plan) and gets `APPROVAL_REQUIRED` instead. Without it, a dry run returns `VALIDATED` with a warning that applying it waits for approval.
+
+People decide changes, with `ApproveChange` or `RejectChange` (a note is required), or `limen manage changes approve|reject <id>`. That is an admin, or a member of the writer grant's `approvers.groups`. Bots never decide. Neither the author nor the person who started the CI run (`actor` on GitHub, `user_login` on GitLab) can decide it. The author withdraws a change with `CancelChange`.
+
+Approval writes again on the **current** policy, as the author, with the author's grant checked again. The change becomes `SUPERSEDED` instead when:
+- a document it touches changed;
+- it no longer fits the grant;
+- it would now give standing access that wasn't in the impact the approver saw.
+
+Changes expire after 7 days (`--policy-change-ttl`), and decided ones stay readable for 90 days (their audit events stay in the trail). A client that sees `PENDING_APPROVAL` reports the change's id and stops. Run it again after the approval: the documents are in place, and the run finds them unchanged.
+
+**Tests.** With `--policy-tests=required`, a write that makes any `policy_test` fail is refused (`TESTS_FAILED`), on every channel. The default, `advisory`, only reports the results in `Impact.tests`.
+
 ## Errors
 
 Every refusal has a gRPC code and a `google.rpc.ErrorInfo` detail (domain `manage.limen.dev`) whose `reason` is an `ErrorReason` name without its prefix. Match on the reason, never on the message.
@@ -56,6 +76,9 @@ Every refusal has a gRPC code and a `google.rpc.ErrorInfo` detail (domain `manag
 | `RATE_LIMITED` | `RESOURCE_EXHAUSTED` | Wait for the `RetryInfo` delay. |
 | `REQUEST_ID_REUSED` | `INVALID_ARGUMENT` | A new id for a new write. |
 | `AUDIT_UNAVAILABLE` | `UNAVAILABLE` | Nothing changed; retry with the same `request_id`. |
+| `TESTS_FAILED` | `FAILED_PRECONDITION` | `--policy-tests=required` and the write breaks a test; the message lists the cases. |
+| `APPROVAL_REQUIRED` | `FAILED_PRECONDITION` | `fail_if_approval_needed` was set and the write would be held. |
+| `CHANGE_NOT_DECIDABLE` | `FAILED_PRECONDITION` | The change isn't pending (`metadata.state`), another approver is applying it, or you are its author or started its run. |
 
 `NOT_FOUND` and `ALREADY_EXISTS` carry no detail.
 
