@@ -42,6 +42,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
                                      TB6 ── [Datadog, Grafana]
 [CLI] ──TB0── [IdP]
 [Browser] ──TB10── [Proxy] ──TB2── [Worker] ──TB10── [Web app]
+[CI / Terraform as a bot writer] ──TB8── [Proxy] ──TB13── [Control plane: management API]   (planned, ADR-0042)
 ```
 
 ## 4. STRIDE by boundary
@@ -254,6 +255,24 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
+### TB13: Management API and delegated writers (ADR-0042, planned for Phase 14)
+*Design only: nothing serves `limen.manage.v1` yet. Each row names the mitigation the implementation must ship with.*
+
+| Threat | Mitigation |
+|---|---|
+| E: a compromised pipeline (a bot writer) gains admin | Bots never hold `limen:admin`; a `policy_writer` grant names one namespace, name patterns, kinds, and profiles; `bot`, `discovery`, `resource_profile`, and `policy_writer` are people-only kinds no grant can name; writers never assign or name built-in roles |
+| E: a writer's resource borrows another team's credentials, files, or IAM through a shared worker (confused deputy) | Writers only complete person-written resource profiles; credential, file, IAM, worker-selection, bootstrap, TLS, and audit fields are profile-only, behind a list in code that a test keeps complete for every `ResourceSpec` field |
+| S/I: a delegated resource points at the metadata endpoint or an internal address (SSRF) | Settable endpoints need `hosts` or `cidrs` and `ports`; the worker refuses loopback, link-local, unspecified, multicast, and metadata addresses, and addresses outside the profile's `cidrs`, checked on the address it dials (DNS rebinding included) |
+| E: a writer widens standing access through roles or mappings | Stage 2 only; any widening from a writer is held as a pending change for a person, whatever the grant says |
+| E/R: a change is approved by the person who caused it | Never by its author, nor by a person whose name equals the run's CI account; approval re-validates against the current policy and supersedes a change whose documents moved since |
+| T: writers overwrite or delete each other's documents | One owner per document; other owners' writes refused (`OWNED_ELSEWHERE`); `ReplaceSource` touches only its own source; etags on every update, delete, and transfer; writers can't delete tests they don't own |
+| T: concurrent writes through different replicas lose updates or audit the wrong diff | Every write holds a transaction-scoped advisory lock and computes against the latest version read inside the transaction (also fixes the existing `ApplyPolicy` race, #182) |
+| R: delegated writes can't be tied to a run | `policy.change` carries channel, source, namespace, grant, and the bot's CI facts; refusals are `policy.write_denied`; writes fail closed when audit is unavailable |
+| I: a writer reads other teams' documents | A writer reads only its namespace and the profiles its grant names; list page tokens grant nothing and every page is authorized again |
+| D: a writer floods writes or documents | Per-principal rate limits, `max_documents` per grant, bounded requests (1 MiB, 100 writes a batch) and lists; storage proportional to changes, not to versions |
+| T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
+| Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |
+
 ## 5. Cross-cutting
 
 | Threat | Mitigation |
@@ -281,10 +300,12 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
 7. Until IAM join exists (Phase 15), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
+9. (Phase 14, planned) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |
@@ -294,6 +315,6 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | 2026-10-17 | 6 | SQL databases: verified TLS to targets, secret files and the bootstrap admin, statement text in audit, role and database guards, shared-role cancel and kill (residual), SigV4 and Redshift credential calls (unverified), injection into bootstrap SQL, frame limits |
 | 2026-10-17 | 8 (final review) | Kubernetes: built-in user names, audit of requests that fail upstream, upstream 401 as a service error, token refresh during rotation |
 | Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |
-| 2026-10-25 | 14 | OTLP trace export: opt-in outbound flow to a collector; allow-listed spans (ADR-0040) |
-| 2026-10-24 | 14 | Observability: `/metrics` on the admin port is unauthenticated and label-restricted; CA signing metrics |
+| 2026-10-25 | 15 | OTLP trace export: opt-in outbound flow to a collector; allow-listed spans (ADR-0040) |
+| 2026-10-24 | 15 | Observability: `/metrics` on the admin port is unauthenticated and label-restricted; CA signing metrics |
 | 2026-10-17 | 8 | Kubernetes: the `/k8s/` entry point and upgrade proxy, identity-header stripping at two hops, recordability of streams, the worker's impersonation token, ALPN-less HTTP/1.1 |
