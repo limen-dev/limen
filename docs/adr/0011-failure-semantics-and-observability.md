@@ -11,7 +11,7 @@ The brief requires that, when the control plane is down, existing sessions conti
 - **New DB, Redis, and Kube sessions** are allowed when the proxy's and the worker's signed policy snapshot is no older than `policy.grace_period` (default **5 minutes**, 0 disables it) **and** the user's cert is still valid. The workers mint IAM tokens and impersonate on their own, so no control plane round trip is needed.
 - **New SSH sessions always fail closed**, because only the control plane can reach the SSH CA. The proxy deliberately does **not** get `kms:Sign` (the owner chose this over proxy-side signing).
 - **Logins** fail, since they need OIDC verification and cert signing.
-- Each case is covered by an integration test in Phase 14. Some get an earlier unit test (snapshot age checks in Phase 1).
+- Each case is covered by an integration test in Phase 15. Some get an earlier unit test (snapshot age checks in Phase 1).
 
 ## Decision: observability
 - `tracing` everywhere. JSON logs in production, with `env`, `service`, `version`, `instance_id`, and `trace_id` on every line.

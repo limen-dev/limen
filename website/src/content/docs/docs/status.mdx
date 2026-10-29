@@ -25,11 +25,12 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 |---|---|---|
 | OIDC login, groups to roles | <span class="chip ok">built</span> with Dex | <span class="chip warn">unverified</span> with Okta |
 | Bots: GitHub Actions, GitLab CI, any OIDC | <span class="chip ok">built</span> with a stand-in issuer | real CI tokens |
-| AWS IAM join for components and bots | <span class="chip plan">planned</span> | Phase 14 |
+| AWS IAM join for components and bots | <span class="chip plan">planned</span> | Phase 15 |
 | Access requests, approvals, break-glass | <span class="chip ok">built</span> | Slack and webhook notifiers against real endpoints |
 | Search across audit and recordings | <span class="chip ok">built</span> | link to Athena history |
 | Resource discovery | <span class="chip ok">built</span> | against real AWS (EC2, RDS, Redshift, ElastiCache, EKS) |
 | Policy tests, who-can, diff, explain | <span class="chip ok">built</span> | |
+| One management API: policy from the CLI, the console, or Terraform | <span class="chip plan">planned</span> | Phase 14, proposed in ADR-0042 |
 | Access reviews, signed evidence packs | <span class="chip ok">built</span> | PDF evidence pack not built |
 | Live session watch | <span class="chip ok">built</span> for SSH | other protocols |
 
@@ -43,7 +44,7 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 | Scale-out: several control planes, proxies, workers | <span class="chip ok">built</span> | Kubernetes example on a real cluster |
 | Docker Compose stack | <span class="chip ok">built</span> | |
 | Terraform for the audit store | <span class="chip ok">built</span> | |
-| ECS, EC2 and Kubernetes deploy examples | <span class="chip plan">planned</span> | Phase 14 |
+| ECS, EC2 and Kubernetes deploy examples | <span class="chip plan">planned</span> | Phase 15 |
 
 ## Not claimed
 

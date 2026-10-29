@@ -139,7 +139,7 @@ Each target works with ordinary self-hosted servers and with the managed service
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/openid" height="48" alt=""><br><br><b>Any OIDC provider</b><br><sub>Okta, Entra ID, Keycloak, Auth0, Dex<br>your groups map to Limen roles</sub><br><br><sub>✅ tested with Dex<br>⚠️ Okta and the others</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt=""><br><br><b>GitHub Actions</b><br><sub>the job's OIDC token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitHub tokens</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt=""><br><br><b>GitLab CI</b><br><sub>the job's ID token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitLab tokens</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt=""><br><br><b>Other automation</b><br><sub>any OIDC token, including<br>Kubernetes service accounts</sub><br><br><sub>✅ tested with a stand-in issuer<br>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 14</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt=""><br><br><b>Other automation</b><br><sub>any OIDC token, including<br>Kubernetes service accounts</sub><br><br><sub>✅ tested with a stand-in issuer<br>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 15</a></sub><br><br></td>
   </tr>
 </table>
 
@@ -204,13 +204,13 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
 | **Docker Compose**, the full stack on one machine | ✅ works; this is the local dev stack |
 | **Kubernetes**, several copies of each program | ✅ example manifests; ⚠️ not yet run on a real cluster |
 | **Terraform** for the audit store (S3, Glue, Athena) and the Datadog monitors | ✅ works |
-| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 14](https://github.com/jfcmartins/limen/milestone/16) |
+| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 15](https://github.com/jfcmartins/limen/milestone/16) |
 
 ## What is not verified yet
 
 Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/jfcmartins/limen/milestone/21).
 
-Production hardening (a Helm chart, cloud deployment modules, a penetration test) is the next phase, and there is no tagged release yet. Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
+Production hardening (a Helm chart, cloud deployment modules, a penetration test) comes after the next phase, and there is no tagged release yet. Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
 
 ## Roadmap
 
@@ -218,7 +218,8 @@ Phases 0 to 13 are done: login and tunnels, SSH with recording, the audit pipeli
 
 Next:
 
-- **Phase 14, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/jfcmartins/limen/milestone/16))
+- **Phase 14, one management API (proposed):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/jfcmartins/limen/milestone/23))
+- **Phase 15, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/jfcmartins/limen/milestone/16))
 - **Verification against real services** ([milestone](https://github.com/jfcmartins/limen/milestone/21))
 - **The documentation site**, already built in [`website/`](website/), is published when the repository goes public ([milestone](https://github.com/jfcmartins/limen/milestone/8))
 
