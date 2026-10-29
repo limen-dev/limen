@@ -1234,3 +1234,92 @@ Options:
 
 - `--reason <REASON>`: Why. Recorded in the audit trail.
 
+### `limen manage`
+
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant (ADR-0042)
+
+```text
+Usage: limen manage [OPTIONS] <COMMAND>
+```
+
+#### `limen manage whoami`
+
+What you may read and write: admin, or your writer grant
+
+```text
+Usage: limen manage whoami [OPTIONS]
+```
+
+#### `limen manage ls`
+
+List documents of one kind (resource, role, resource_profile, ...)
+
+```text
+Usage: limen manage ls [OPTIONS] <KIND>
+```
+
+Arguments:
+
+- `<KIND>`
+
+Options:
+
+- `--namespace <NAMESPACE>`: Only this namespace (a writer's own is implied).
+- `--source <SOURCE>`: Only documents this source manages.
+
+#### `limen manage get`
+
+Show one document, with its owner and etag
+
+```text
+Usage: limen manage get [OPTIONS] <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+#### `limen manage put-resource`
+
+Create a resource, or with --etag replace it. A writer completes a profile: --spec holds only the fields the profile lets it set
+
+```text
+Usage: limen manage put-resource [OPTIONS] --spec <SPEC> --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--profile <PROFILE>`: The profile it completes. Required for bot writers.
+- `--spec <SPEC>`: The resource spec as JSON, for example '{"postgres":{"endpoint":"db.internal:5432"}}'.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
+- `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
+- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
+- `--dry-run`: Check everything and show the impact, but change nothing.
+- `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
+
+#### `limen manage delete-resource`
+
+Delete a resource you manage
+
+```text
+Usage: limen manage delete-resource [OPTIONS] --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`: Succeed when it's already gone.
+
