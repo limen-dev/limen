@@ -4,7 +4,7 @@ import { defineConfig } from 'astro/config';
 
 // A project site on GitHub Pages is served under /<repo>/; a custom domain from /.
 // Both come from the environment so moving hosts is a settings change (issues #136, #138).
-const site = process.env.SITE_URL ?? 'https://jfcmartins.github.io';
+const site = process.env.SITE_URL ?? 'https://limen-dev.github.io';
 const base = (process.env.SITE_BASE ?? '/').replace(/\/?$/, '/');
 
 // Wraps every table in a scroll container, so a wide one scrolls on its own instead of
@@ -33,7 +33,7 @@ export default defineConfig({
       description: 'Identity-aware access to SSH, databases, Kubernetes and internal apps. Short-lived, audited, self-hosted.',
       logo: { light: './src/assets/mark-light.svg', dark: './src/assets/mark-dark.svg', alt: '' },
       favicon: '/favicon.svg',
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/jfcmartins/limen' }],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/limen-dev/limen' }],
       customCss: [
         '@fontsource-variable/geist/index.css',
         '@fontsource-variable/geist-mono/index.css',

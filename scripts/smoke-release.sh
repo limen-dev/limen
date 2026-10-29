@@ -16,7 +16,7 @@ set -euo pipefail
 tag="${1:?usage: smoke-release.sh <tag> [--dir DIR] [--repo OWNER/REPO]}"
 shift
 dir=""
-repo="${GITHUB_REPOSITORY:-jfcmartins/limen}"
+repo="${GITHUB_REPOSITORY:-limen-dev/limen}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) dir="${2:?--dir needs a path}"; shift 2 ;;
