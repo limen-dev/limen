@@ -218,7 +218,7 @@ Phases 0 to 13 are done: login and tunnels, SSH with recording, the audit pipeli
 
 Next:
 
-- **Phase 14, one management API (proposed):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/jfcmartins/limen/milestone/23))
+- **Phase 14, one management API (in progress):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/jfcmartins/limen/milestone/23))
 - **Phase 15, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/jfcmartins/limen/milestone/16))
 - **Verification against real services** ([milestone](https://github.com/jfcmartins/limen/milestone/21))
 - **The documentation site**, already built in [`website/`](website/), is published when the repository goes public ([milestone](https://github.com/jfcmartins/limen/milestone/8))

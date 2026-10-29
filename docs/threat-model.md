@@ -256,7 +256,7 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
 ### TB13: Management API and delegated writers (ADR-0042, planned for Phase 14)
-*Design only: nothing serves `limen.manage.v1` yet. Each row names the mitigation the implementation must ship with.*
+*Accepted design; stage 1 is being built. Until a row's mitigation ships, nothing serves the part it covers.*
 
 | Threat | Mitigation |
 |---|---|
@@ -264,11 +264,11 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | E: a writer's resource borrows another team's credentials, files, or IAM through a shared worker (confused deputy) | Writers only complete person-written resource profiles; credential, file, IAM, worker-selection, bootstrap, TLS, and audit fields are profile-only, behind a list in code that a test keeps complete for every `ResourceSpec` field |
 | S/I: a delegated resource points at the metadata endpoint or an internal address (SSRF) | Settable endpoints need `hosts` or `cidrs` and `ports`; the worker refuses loopback, link-local, unspecified, multicast, and metadata addresses, and addresses outside the profile's `cidrs`, checked on the address it dials (DNS rebinding included) |
 | E: a writer widens standing access through roles or mappings | Stage 2 only; any widening from a writer is held as a pending change for a person, whatever the grant says |
-| E/R: a change is approved by the person who caused it | Never by its author, nor by a person whose name equals the run's CI account; approval re-validates against the current policy and supersedes a change whose documents moved since |
+| E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor by a person whose name equals the run's CI account; approval re-validates against the current policy and supersedes a change whose documents moved since |
 | T: writers overwrite or delete each other's documents | One owner per document; other owners' writes refused (`OWNED_ELSEWHERE`); `ReplaceSource` touches only its own source; etags on every update, delete, and transfer; writers can't delete tests they don't own |
 | T: concurrent writes through different replicas lose updates or audit the wrong diff | Every write holds a transaction-scoped advisory lock and computes against the latest version read inside the transaction (also fixes the existing `ApplyPolicy` race, #182) |
-| R: delegated writes can't be tied to a run | `policy.change` carries channel, source, namespace, grant, and the bot's CI facts; refusals are `policy.write_denied`; writes fail closed when audit is unavailable |
-| I: a writer reads other teams' documents | A writer reads only its namespace and the profiles its grant names; list page tokens grant nothing and every page is authorized again |
+| R: delegated writes can't be tied to a run | `policy.change` carries channel, source, namespace, grant, and the bot's CI facts; refusals are `policy.write_denied`, dry runs included; writes fail closed when audit is unavailable |
+| I: a writer reads other teams' documents | A writer reads only its namespace and the profiles its grant names; the grant is checked before existence, so names outside it can't be probed; list page tokens grant nothing and every page is authorized again. By design, a write's impact names the groups that reach the writer's own documents, so its reviewers see who gains access |
 | D: a writer floods writes or documents | Per-principal rate limits, `max_documents` per grant, bounded requests (1 MiB, 100 writes a batch) and lists; storage proportional to changes, not to versions |
 | T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
 | Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |

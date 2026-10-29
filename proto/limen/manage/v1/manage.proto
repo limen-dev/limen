@@ -27,8 +27,9 @@ package limen.manage.v1;
 // grant (which never carries `limen:admin`). Each call states below what a
 // writer may do; anything not stated is refused with PERMISSION_DENIED.
 service ManagementService {
-  // What the caller may read and write. Clients call it first, so they can
-  // explain a refusal before sending a write.
+  // What the caller may read and write. Any signed-in person or bot may call
+  // it; clients call it first, so they can explain a refusal before sending a
+  // write.
   rpc DescribeCaller(DescribeCallerRequest) returns (DescribeCallerResponse);
 
   // One document. A writer may read only documents in its namespace and the
@@ -38,8 +39,9 @@ service ManagementService {
   // so paging is consistent even while others write.
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
 
-  // Creates one document. Refused with ALREADY_EXISTS if the name is taken
-  // by any owner.
+  // Creates one document. The grant is checked before the name, so a writer
+  // learns nothing about names outside its patterns; then ALREADY_EXISTS if
+  // the name is taken by any owner.
   rpc CreateDocument(CreateDocumentRequest) returns (CreateDocumentResponse);
   // Replaces one document's description, labels, and spec. There is no
   // partial update: the caller sends the whole desired state.
@@ -65,13 +67,15 @@ service ManagementService {
   // Pending changes (or changes in another state), newest first. A writer
   // sees only its own.
   rpc ListChanges(ListChangesRequest) returns (ListChangesResponse);
-  // Approves a pending change and applies it. The change is validated again
+  // Approves a pending change and applies it. Only people decide changes (an
+  // admin, or a member of the writer's approver groups); bots never do. The
+  // change is validated again
   // against the current policy first; if a document it touches changed
   // since, the change becomes SUPERSEDED instead. Never by its author, nor by
   // a person whose name equals the CI account that started the run (`actor`
   // on GitHub, `user_login` on GitLab).
   rpc ApproveChange(ApproveChangeRequest) returns (ApproveChangeResponse);
-  // Refuses a pending change, with a reason. Same approvers as ApproveChange.
+  // Refuses a pending change, with a reason. Same people as ApproveChange.
   rpc RejectChange(RejectChangeRequest) returns (RejectChangeResponse);
   // The author withdraws a pending change.
   rpc CancelChange(CancelChangeRequest) returns (CancelChangeResponse);
@@ -118,8 +122,10 @@ message Document {
   string name = 2;
   // Free text shown in the console and the CLI.
   string description = 3;
-  // Labels that roles select on, with the same limits as in YAML. A writer
-  // may set only the keys and values its profile allows.
+  // Labels that roles select on, with the same limits as in YAML: the ones
+  // the caller set. A writer may set only the keys and values its profile
+  // allows; the profile's fixed labels are in `effective_labels`, not here,
+  // so a client's own labels round-trip unchanged.
   map<string, string> labels = 4;
   // The kind's `spec` as JSON, in the same shape as the YAML (`GetSchema`).
   // Parsed strictly: unknown fields are refused. For a resource created from
@@ -146,6 +152,9 @@ message Document {
   int64 update_time_unix = 12;
   // Output only. The person or `bot:<name>` that wrote this revision.
   string updated_by = 13;
+  // Output only. What roles select on: `labels` plus, for a resource from a
+  // profile, the profile's fixed labels.
+  map<string, string> effective_labels = 14;
 }
 
 // The write channels.
@@ -263,16 +272,20 @@ message ListDocumentsResponse {
 
 // Options every write takes.
 message WriteOptions {
-  // Check everything and report the impact, but change nothing. Not audited.
+  // Check everything and report the impact, but change nothing. A dry run
+  // that succeeds is not audited; one refused by the writer's grant is
+  // (`policy.write_denied`), so probing leaves a trace.
   bool validate_only = 1;
   // Makes a retry safe: a client-chosen UUID, kept for 24 hours per caller.
   // A repeat with the same body returns the first result; with a different
-  // body it is refused (REQUEST_ID_REUSED).
+  // body it is refused (REQUEST_ID_REUSED). Ignored with `validate_only`, so
+  // a dry run never uses up the id of the real write.
   string request_id = 2;
   // Where the change came from, such as a Git commit SHA or a Terraform run
   // URL. Recorded in the audit event. Up to 200 characters.
   string source_ref = 3;
-  // Why, in a sentence. Shown to approvers when the change is held.
+  // Why, in a sentence. Shown to approvers when the change is held. Up to
+  // 1000 characters.
   string reason = 4;
   // Fail instead of creating a pending change when approval would be needed.
   // Clients that can't wait (CI dry runs) set it to learn the outcome early.
@@ -700,7 +713,8 @@ enum ErrorReason {
   // metadata: `channel`, `source`, `namespace`.
   ERROR_REASON_OWNED_ELSEWHERE = 2;
   // PERMISSION_DENIED. Outside the writer's grant.
-  // metadata: `rule` (namespace, name_pattern, kind, profile, label, field).
+  // metadata: `rule` (namespace, name_pattern, kind, profile, label, field,
+  // builtin_role).
   ERROR_REASON_OUTSIDE_GRANT = 3;
   // INVALID_ARGUMENT. The document doesn't parse or validate.
   // Field violations are in a `google.rpc.BadRequest` detail.

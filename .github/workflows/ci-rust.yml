@@ -87,7 +87,7 @@ jobs:
   # The management API is a compatibility promise (ADR-0042): buf lints it and
   # refuses breaking changes against the base. Before 1.0, a break the owner
   # accepted goes through with the api-breaking-approved label and an upgrade
-  # note (ADR-0024).
+  # note (ADR-0024). Adding the label doesn't start a run: re-run this job.
   api-contract:
     name: Management API contract (buf)
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft

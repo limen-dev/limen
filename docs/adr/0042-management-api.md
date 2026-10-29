@@ -1,6 +1,6 @@
 # ADR-0042: One management API for the CLI, the console, and infrastructure as code
 
-- Status: Proposed, final design (owner asked for it on 2026-10-29; Phase 14). Accepting it closes #171 and opens stage 1.
+- Status: Accepted (owner approved the final design and stage 1 on 2026-10-29; Phase 14). Stages 2 and 3 need their own approval.
 - Date: 2026-10-29
 - Contract: [`proto/limen/manage/v1/manage.proto`](../../proto/limen/manage/v1/manage.proto). The proto is the reference for every message and field; this ADR says why it is shaped that way and what the server must enforce.
 
@@ -27,7 +27,8 @@ The API is designed for clients that retry and run in parallel:
 - **Whole-state updates, no field masks.** An update sends the complete desired document. Terraform always knows the whole desired state, and a partial-update API is where "which fields did that clear?" bugs live.
 - **Idempotent retries.** `request_id` (a UUID) is remembered per caller for 24 hours: a retry with the same body returns the first result, a different body is refused. `DeleteDocument` takes `allow_missing` for clients that retry deletes.
 - **Atomic batches.** `BatchWrite` applies up to 100 writes as one policy version, all or none, so a role and the mapping that uses it land together. `ReplaceSource` is the declarative form for a whole source.
-- **Dry runs that are the real thing.** Every write takes `validate_only`, which runs the full path (authorization, validation, profiles, tests, impact) and stops before the commit. It is what `terraform plan` and `limen admin apply --dry-run` call.
+- **Dry runs that are the real thing.** Every write takes `validate_only`, which runs the full path (authorization, validation, profiles, tests, impact) and stops before the commit. It is what `terraform plan` and `limen admin apply --dry-run` call. It ignores `request_id`, so a plan never uses up the id of the apply that follows.
+- **Checks in a fixed order.** Authentication, then the grant (namespace, name pattern, kind, profile), then existence and etag, then validation, then guardrails. A writer refused by its grant learns nothing about documents outside it, not even whether a name exists.
 - **Consistent paging.** Policy versions are immutable, so a listing is served from the version its first page saw; the page token pins version and filter and grants nothing (every page is authorized again).
 - **Errors a program can act on.** gRPC codes plus `google.rpc.ErrorInfo` with a stable `reason` (`ErrorReason`), `BadRequest` field violations for invalid documents, and `RetryInfo` on rate limits. Building them adds `tonic-types` (same project and version as `tonic`), assessed in ADR-0012 in stage 1.
 
@@ -97,7 +98,7 @@ spec:
     allowed: { env: [dev, staging] }
 ```
 
-With Terraform: `limen_resource { name = "payments-orders-db", profile = "payments-postgres", spec = { postgres = { endpoint = aws_db_instance.orders.endpoint } }, labels = { env = "staging" } }`.
+With Terraform: `limen_resource { name = "payments-orders-db", profile = "payments-postgres", spec = { postgres = { endpoint = aws_db_instance.orders.endpoint } }, labels = { env = "staging" } }`. The document keeps exactly what the writer set (`spec_json`, `labels`); what enforcement uses is returned beside it (`effective_spec_json`, `effective_labels`), so the provider never sees the profile's fixed parts as drift.
 
 The design has three layers, so one sloppy profile can't open what the code forbids:
 
@@ -133,7 +134,7 @@ Writes are audited before commit, and a write whose event can't be recorded is n
 - `policy.write_denied` for a writer refused by its grant or the escalation rules: a pipeline probing outside its grant is a detection signal, so it is recorded (rate-limited per principal), and the write is refused whether or not the event is recorded;
 - `policy.change_pending`, `policy.change_decided` (approved, rejected, superseded, expired, cancelled), and `policy.ownership_transfer`.
 
-Dry runs and reads are not audited, as today.
+Reads and successful dry runs are not audited, as today. A dry run refused by the writer's grant is audited as `policy.write_denied`, like a real write, so a pipeline can't probe its limits without a trace.
 
 ### 12. Compatibility
 `limen.manage.v1` is a promise: additive changes only, field numbers and names never reused or renamed. CI runs `buf lint` (the STANDARD and COMMENTS rules: every message, field, and RPC is documented) and `buf breaking` with the strictest `FILE` rules against the base of each pull request (`proto/buf.yaml`, `ci-rust.yml`). The Go provider compiles against generated names, so a rename breaks it even when the wire format doesn't. Before 1.0, a break the owner accepts goes through with the `api-breaking-approved` label and an upgrade note in the release (ADR-0024). The internal `limen.v1` package is not held to this.
@@ -170,7 +171,7 @@ The full table is in `docs/threat-model.md` (TB13). In short:
 - **A compromised pipeline** can do what its grant and profiles allow and no more: no people-only kinds, no built-in roles, no other namespace, no profile-only fields, no widening without a person, no approving its own change. Its writes carry the run's CI facts and the bot can be locked.
 - **Confused deputy through the worker**: credentials, files, IAM, and the worker choice are profile-only, behind a code ceiling and a connect-time guard.
 - **Lost updates and silent overwrites**: etags, one owner, source-scoped replace, writes serialized against the database.
-- **Approval bypass**: approvers are people other than the author and (by name) the run's CI account, and approval re-validates. Residual: different names on the IdP and the CI platform.
+- **Approval bypass**: approvers are people (never bots) other than the author and (by name) the run's CI account, and approval re-validates. Residual: different names on the IdP and the CI platform.
 - **Growth and flooding**: quotas, rate limits, change-proportional storage, bounded requests and lists.
 
 ## Consequences
