@@ -31,8 +31,8 @@ service ManagementService {
   // explain a refusal before sending a write.
   rpc DescribeCaller(DescribeCallerRequest) returns (DescribeCallerResponse);
 
-  // One document. A writer may read only documents in its namespace, and the
-  // roles and profiles its grant names.
+  // One document. A writer may read only documents in its namespace and the
+  // profiles its grant names.
   rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
   // Documents of one kind, in name order, from one immutable policy version,
   // so paging is consistent even while others write.
@@ -68,7 +68,8 @@ service ManagementService {
   // Approves a pending change and applies it. The change is validated again
   // against the current policy first; if a document it touches changed
   // since, the change becomes SUPERSEDED instead. Never by its author, nor by
-  // the person whose CI run produced it.
+  // a person whose name equals the CI account that started the run (`actor`
+  // on GitHub, `user_login` on GitLab).
   rpc ApproveChange(ApproveChangeRequest) returns (ApproveChangeResponse);
   // Refuses a pending change, with a reason. Same approvers as ApproveChange.
   rpc RejectChange(RejectChangeRequest) returns (RejectChangeResponse);
@@ -112,13 +113,13 @@ enum DocumentKind {
 message Document {
   // The document's kind.
   DocumentKind kind = 1;
-  // Unique per kind; immutable. Lowercase letters, digits, and `-`, up to 63
-  // characters, starting and ending with a letter or digit.
+  // Unique per kind; immutable. The same rule as in YAML: 1 to 128
+  // characters of `a-z`, `0-9`, `.`, `_`, and `-`.
   string name = 2;
-  // Free text shown in the console and the CLI. Up to 1024 characters.
+  // Free text shown in the console and the CLI.
   string description = 3;
-  // Labels that roles select on. A writer may set only the keys and values
-  // its profile allows.
+  // Labels that roles select on, with the same limits as in YAML. A writer
+  // may set only the keys and values its profile allows.
   map<string, string> labels = 4;
   // The kind's `spec` as JSON, in the same shape as the YAML (`GetSchema`).
   // Parsed strictly: unknown fields are refused. For a resource created from
@@ -134,8 +135,8 @@ message Document {
   string effective_spec_json = 7;
   // Output only. Who manages this document.
   Ownership ownership = 8;
-  // Output only. Opaque; changes on every write. Send it back to update,
-  // delete, or transfer.
+  // Output only. Opaque; changes whenever the document or its owner changes.
+  // Send it back to update, delete, or transfer.
   string etag = 9;
   // Output only. The policy version this revision first appeared in.
   int64 policy_version = 10;
@@ -208,6 +209,8 @@ message WriterGrant {
   uint32 max_documents = 6;
   // How many documents it owns now.
   uint32 document_count = 7;
+  // IdP groups whose members may approve its held changes, besides admins.
+  repeated string approver_groups = 8;
 }
 
 // ---- Reads ------------------------------------------------------------------
@@ -724,6 +727,6 @@ enum ErrorReason {
   // made. Safe to retry with the same `request_id`.
   ERROR_REASON_AUDIT_UNAVAILABLE = 12;
   // FAILED_PRECONDITION. The change can't be decided: it isn't pending, or
-  // the caller is its author or started its CI run.
+  // the caller is its author or the CI account that started its run.
   ERROR_REASON_CHANGE_NOT_DECIDABLE = 13;
 }

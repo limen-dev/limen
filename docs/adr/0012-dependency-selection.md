@@ -65,6 +65,7 @@ A dependency is adopted only if all of these hold:
 | Site | astro 7.4.2 (MIT), @astrojs/starlight 0.42.7 (MIT) | | 2026-10-21 / 2026-10-23 | Adopt. Static output, search without a server, 0 advisories under `npm audit`. Versions are exact in `website/package.json` and locked in `package-lock.json` |
 | Site | @fontsource-variable/geist and geist-mono 5.3.0 (OFL-1.1) | | 2026-07-19 | Adopt. Fonts are served from the site itself, so a visitor makes no request to a font service |
 | Site | @astrojs/markdown-satteri 0.4.5 (MIT) | | 2026-10-21 | Adopt. Astro's own Markdown engine, already in the tree through Starlight. Declared so `astro.config.mjs` can wrap every table in a scroll container. 0 advisories under `npm audit` |
+| API contract (CI and dev only) | buf 1.74.0 (Apache-2.0, pinned in `mise.toml`) | 1.75.0 | 2026-10-14 | Adopt (ADR-0042). `buf lint` and `buf breaking` for `limen.manage.v1` only (`proto/buf.yaml`); not used to build, so `protoc` stays the code generator. Pinned one release behind the newest (1.75.0 is a week old). Actively maintained, no published security advisories (checked 2026-10-29) |
 
 ## Accepted advisories
 
