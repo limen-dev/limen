@@ -35,8 +35,9 @@ service ManagementService {
   // One document. A writer may read only documents in its namespace and the
   // profiles its grant names.
   rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
-  // Documents of one kind, in name order, from one immutable policy version,
-  // so paging is consistent even while others write.
+  // Documents of one kind, in name order. Every page comes from the same
+  // policy version: if the policy changes during a listing, the next page is
+  // refused with ABORTED and the client starts again.
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
 
   // Creates one document. The grant is checked before the name, so a writer
@@ -253,7 +254,8 @@ message ListDocumentsRequest {
   // At most this many documents per page: 1 to 500, default 100.
   int32 page_size = 5;
   // From the previous page's `next_page_token`. It pins the policy version
-  // and the filter; changing the filter with a token is refused. A token
+  // and the filter; changing the filter with a token is refused, and a token
+  // from a version that is no longer active is refused with ABORTED. A token
   // grants nothing: every page is authorized again.
   string page_token = 6;
 }
@@ -348,6 +350,9 @@ message UpdateDocumentRequest {
   string etag = 2;
   // Options shared by every write.
   WriteOptions options = 3;
+  // Who the caller writes as. Must be the document's owner (`channel` is
+  // ignored): a writer's namespace and the source that created it.
+  Ownership ownership = 4;
 }
 
 // Response for `UpdateDocument`.
@@ -369,6 +374,9 @@ message DeleteDocumentRequest {
   bool allow_missing = 4;
   // Options shared by every write.
   WriteOptions options = 5;
+  // Who the caller writes as. Must be the document's owner (`channel` is
+  // ignored).
+  Ownership ownership = 6;
 }
 
 // Response for `DeleteDocument`.

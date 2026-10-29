@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod enrollment;
 pub mod handoff;
 pub mod ingest;
+pub mod manage;
 pub mod ops;
 pub mod policy_sync;
 pub mod registry;

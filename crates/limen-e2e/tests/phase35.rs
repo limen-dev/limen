@@ -95,6 +95,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,

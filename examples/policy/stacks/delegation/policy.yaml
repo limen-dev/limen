@@ -1,0 +1,67 @@
+# Delegated writes (ADR-0042): a team's Terraform pipeline registers its own
+# databases in Limen, from its own state, without limen:admin.
+#
+# People write the profile (what's fixed: the worker, IAM, TLS, labels) and the
+# writer grant (who may complete it). The pipeline logs in as the bot and can
+# only create resources named payments-*, from this profile, pointing at this
+# account's RDS hosts on 5432, labelled env=dev or env=staging.
+kind: role
+version: v1
+metadata:
+  name: payments-ci
+  description: What the payments pipeline's own sessions may do (read staging).
+spec:
+  cert_ttl: 15m
+  allow:
+    - resources: { kind: [postgres], labels: { team: [payments], env: [staging] } }
+      db: { roles: [limen_read] }
+---
+kind: bot
+version: v1
+metadata:
+  name: payments-terraform
+  description: Terraform applies of acme/payments-infra from main, in the staging environment.
+spec:
+  join:
+    method: github_actions
+    match:
+      repository: acme/payments-infra
+      ref: refs/heads/main
+      environment: staging
+  roles: [payments-ci]
+  max_ttl: 1h
+---
+kind: resource_profile
+version: v1
+metadata:
+  name: payments-postgres
+  description: An RDS PostgreSQL database of the payments team, reached with IAM.
+spec:
+  template:
+    postgres:
+      iam_auth: true
+      region: eu-west-1
+      tls_ca_file: /etc/limen/rds-ca.pem
+    worker_selector: { network: payments-vpc }
+  settable:
+    postgres.endpoint:
+      hosts: ["*.c9xk2p.eu-west-1.rds.amazonaws.com"]
+      ports: [5432]
+    postgres.default_database: {}
+  labels:
+    fixed: { team: payments }
+    allowed: { env: [dev, staging] }
+---
+kind: policy_writer
+version: v1
+metadata:
+  name: payments-terraform
+  description: The payments pipeline may register its own databases.
+spec:
+  bot: payments-terraform
+  namespace: payments
+  names: ["payments-*"]
+  kinds: [resource]
+  profiles: [payments-postgres]
+  max_documents: 50
+  approvers: { groups: [security] }

@@ -42,7 +42,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
                                      TB6 ── [Datadog, Grafana]
 [CLI] ──TB0── [IdP]
 [Browser] ──TB10── [Proxy] ──TB2── [Worker] ──TB10── [Web app]
-[CI / Terraform as a bot writer] ──TB8── [Proxy] ──TB13── [Control plane: management API]   (planned, ADR-0042)
+[CI / Terraform as a bot writer] ──TB8── [Proxy] ──TB13── [Control plane: management API]   (ADR-0042)
 ```
 
 ## 4. STRIDE by boundary
@@ -246,16 +246,16 @@ Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded a
 Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.
 
 ### TB12: Public website (ADR-0021)
-A static site, built by hand and not yet published or built in CI (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
+A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub Pages by `deploy-website.yml` once the repository is public and `PUBLISH_SITE` is set (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
 | Threat | Mitigation |
 |---|---|
-| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand until #138 adds CI). The site holds no secrets and is never deployed from a laptop |
+| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand). The site holds no secrets and is never deployed from a laptop: the deploy runs in Actions with only `pages: write` and `id-token: write`, from `main`, behind the same build checks |
 | I: the site tracks or leaks visitors to a third party | Fonts and scripts are self-hosted and `check-site.mjs` fails the build on any request to another origin. No analytics or cookies |
 | S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
-### TB13: Management API and delegated writers (ADR-0042, planned for Phase 14)
-*Accepted design; stage 1 is being built. Until a row's mitigation ships, nothing serves the part it covers.*
+### TB13: Management API and delegated writers (ADR-0042, Phase 14)
+*Stage 1 is built (PRs #189 to #192), and pending changes with their approval (#177). Writers' roles and mappings are not yet. Bot logins are tested against a stand-in CI issuer only.*
 
 | Threat | Mitigation |
 |---|---|
@@ -263,7 +263,10 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | E: a writer's resource borrows another team's credentials, files, or IAM through a shared worker (confused deputy) | Writers only complete person-written resource profiles; credential, file, IAM, worker-selection, bootstrap, TLS, and audit fields are profile-only, behind a list in code that a test keeps complete for every `ResourceSpec` field |
 | S/I: a delegated resource points at the metadata endpoint or an internal address (SSRF) | Settable endpoints need `hosts` or `cidrs` and `ports`; the worker refuses loopback, link-local, unspecified, multicast, and metadata addresses, and addresses outside the profile's `cidrs`, checked on the address it dials (DNS rebinding included) |
 | E: a writer widens standing access through roles or mappings | Stage 2 only; any widening from a writer is held as a pending change for a person, whatever the grant says |
-| E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor by a person whose name equals the run's CI account; approval re-validates against the current policy and supersedes a change whose documents moved since |
+| E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor a person whose name (or the part of an email before `@`) equals the run's CI account, case-insensitive; approval re-validates against the current policy and supersedes a change whose documents moved since, or that would now give standing access the approver didn't see |
+| T: two approvers apply one change twice, or a crash leaves it half-decided | Approving claims the change first (`applying`); a second approver is refused; a claim older than five minutes, from a replica that died, can be taken again; a change is decided once |
+| E: a pending change sits until the policy around it makes it worse | Changes expire (`--policy-change-ttl`, 7 days); approval writes against the current policy, never the one it was made on, and is held to the gains the approver reviewed |
+| R: a held change, or its decision, leaves no trace | `policy.change_pending` is written in the transaction that holds the change, and `policy.change_decided` in the one that decides it: no event, no change. An applied change's `policy.change` names the change and the approver, and is written as the author |
 | T: writers overwrite or delete each other's documents | One owner per document; other owners' writes refused (`OWNED_ELSEWHERE`); `ReplaceSource` touches only its own source; etags on every update, delete, and transfer; writers can't delete tests they don't own |
 | T: concurrent writes through different replicas lose updates or audit the wrong diff | Every write holds a transaction-scoped advisory lock and computes against the latest version read inside the transaction (also fixes the existing `ApplyPolicy` race, #182) |
 | R: delegated writes can't be tied to a run | `policy.change` carries channel, source, namespace, grant, and the bot's CI facts; refusals are `policy.write_denied`, dry runs included; writes fail closed when audit is unavailable |
@@ -299,13 +302,16 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
 7. Until IAM join exists (Phase 15), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
-9. (Phase 14, planned) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
+9. (Phase 14, stage 2) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
+| 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
 | 2026-10-29 | CI | CI runs pull request code on GitHub-hosted runners (TB9) |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
+| 2026-10-29 | Docs | Website deploy (TB12): GitHub Pages from Actions, off until the repository is public |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |

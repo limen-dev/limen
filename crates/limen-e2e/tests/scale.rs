@@ -202,6 +202,7 @@ async fn capped_deployment_full(
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: session_policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,

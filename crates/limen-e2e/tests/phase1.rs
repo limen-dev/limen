@@ -70,6 +70,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
         .collect();
     let applied = AdminClient::new(admin_ch.clone())
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources,
             dry_run: false,

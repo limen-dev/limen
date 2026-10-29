@@ -44,6 +44,7 @@ prost = "0.14.4"
 tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router", "server", "channel"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
+tonic-types = "0.14.6"
 hyper = { version = "1.12", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2", "service"] }
 http = "1.5"

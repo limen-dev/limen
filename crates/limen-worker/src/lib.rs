@@ -5,6 +5,7 @@
 pub mod amqp;
 pub mod broker;
 pub mod db;
+pub mod dial;
 pub mod discovery;
 pub mod kafka;
 mod kube;

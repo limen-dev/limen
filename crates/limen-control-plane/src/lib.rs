@@ -17,6 +17,8 @@ pub mod jobs;
 pub mod live;
 pub mod oidc;
 pub mod pipeline;
+pub mod policy_changes;
+pub mod policy_store;
 pub mod replicas;
 pub mod reviews;
 pub mod search;

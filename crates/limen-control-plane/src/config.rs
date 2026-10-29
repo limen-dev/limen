@@ -357,6 +357,43 @@ pub struct Config {
     /// default so resource names don't leave Limen.
     #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]
     pub notify_include_details: bool,
+
+    /// Whether failing `policy_test` documents refuse a write (`required`)
+    /// or are only reported (`advisory`), on every channel (ADR-0042 §6).
+    #[arg(
+        long,
+        env = "LIMEN_POLICY_TESTS",
+        value_enum,
+        default_value = "advisory"
+    )]
+    pub policy_tests: PolicyTests,
+
+    /// Whose writes that widen standing access wait for a person's approval:
+    /// bot writers' only (`writers`), or people's too (`all`, a second
+    /// admin approves).
+    #[arg(
+        long,
+        env = "LIMEN_WIDENING_APPROVAL",
+        value_enum,
+        default_value = "writers"
+    )]
+    pub widening_approval: WideningApproval,
+
+    /// How long a change held for approval waits before it expires.
+    #[arg(long, env = "LIMEN_POLICY_CHANGE_TTL", value_parser = parse_duration, default_value = "7d")]
+    pub policy_change_ttl: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PolicyTests {
+    Advisory,
+    Required,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WideningApproval {
+    Writers,
+    All,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

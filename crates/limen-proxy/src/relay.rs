@@ -24,8 +24,9 @@ use crate::Proxy;
 /// proxies call it, directly. `PolicySync` and `SshCertificates` are for
 /// workers; the control plane rejects other callers. `Access`, `AuditSearch`,
 /// and `Reviews` are for people (each call checks the caller's roles);
-/// `Discovery` and `Watch` are for workers.
-const RELAYED_PREFIXES: [&str; 12] = [
+/// `Discovery` and `Watch` are for workers. `ManagementService` is for
+/// admins and bot writers (ADR-0042); the control plane checks each call.
+const RELAYED_PREFIXES: [&str; 13] = [
     "/limen.v1.AuditIngest/",
     "/limen.v1.Auth/",
     "/limen.v1.Resources/",
@@ -38,6 +39,7 @@ const RELAYED_PREFIXES: [&str; 12] = [
     "/limen.v1.Enrollment/",
     "/limen.v1.PolicySync/",
     "/limen.v1.SshCertificates/",
+    "/limen.manage.v1.ManagementService/",
 ];
 
 #[derive(Debug, Clone)]

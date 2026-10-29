@@ -20,7 +20,6 @@ use limen_policy::SearchTarget;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject as _};
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio::net::TcpStream;
 
 use crate::db::sigv4::{self, Credentials};
 
@@ -289,6 +288,8 @@ pub struct Plan {
     /// A connection with no request for this long ends.
     pub idle: Duration,
     connector: Connector,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    pub guard: Option<limen_policy::model::Delegated>,
 }
 
 #[derive(Debug)]
@@ -387,16 +388,20 @@ pub fn plan(
         max_body: settings.max_body.max(1024),
         idle: settings.idle,
         connector: Connector { tls, server_name },
+        guard: None,
     })
 }
 
 impl Plan {
     /// Open a connection to the target.
     pub async fn connect(&self) -> anyhow::Result<Upstream> {
-        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&self.target.endpoint))
-            .await
-            .context("connecting to the search server timed out")?
-            .with_context(|| format!("connecting to {}", self.target.endpoint))?;
+        let tcp = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            crate::dial::connect(&self.target.endpoint, self.guard.as_ref()),
+        )
+        .await
+        .context("connecting to the search server timed out")?
+        .with_context(|| format!("connecting to {}", self.target.endpoint))?;
         tcp.set_nodelay(true)?;
         let sender = match (&self.connector.tls, &self.connector.server_name) {
             (Some(config), Some(name)) => {

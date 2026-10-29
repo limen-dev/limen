@@ -12,7 +12,6 @@ use anyhow::{Context as _, bail};
 use limen_core::secret::Secret;
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 
 /// How long reaching a broker may take, TLS included.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -122,8 +121,9 @@ impl Settings {
         endpoint: &str,
         tls: bool,
         credential: Option<&Credential>,
+        guard: Option<&limen_policy::model::Delegated>,
     ) -> anyhow::Result<BoxedStream> {
-        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(endpoint))
+        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, crate::dial::connect(endpoint, guard))
             .await
             .context("connecting to the broker timed out")?
             .with_context(|| format!("connecting to {endpoint}"))?;

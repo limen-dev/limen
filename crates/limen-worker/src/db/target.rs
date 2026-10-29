@@ -61,6 +61,9 @@ pub struct Target {
     fixed_name: bool,
     /// `None` only for `insecure_dev` targets.
     tls: Option<Arc<ClientConfig>>,
+    /// Set for a resource built from a profile (ADR-0042): what the worker
+    /// may dial. Kept when the endpoint follows a replica set primary.
+    guard: Option<limen_policy::model::Delegated>,
 }
 
 impl Target {
@@ -119,6 +122,7 @@ impl Target {
                 host,
                 fixed_name,
                 tls: None,
+                guard: None,
             });
         }
         let path = spec
@@ -156,7 +160,15 @@ impl Target {
             host,
             fixed_name,
             tls: Some(Arc::new(config)),
+            guard: None,
         })
+    }
+
+    /// The same target, dialed only where `guard` allows (ADR-0042).
+    #[must_use]
+    pub fn guarded(mut self, guard: Option<limen_policy::model::Delegated>) -> Self {
+        self.guard = guard;
+        self
     }
 
     /// The same settings for another `host:port` (a replica set's primary).
@@ -177,11 +189,12 @@ impl Target {
     }
 
     pub async fn dial(&self) -> std::io::Result<TcpStream> {
-        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&self.endpoint))
-            .await
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")
-            })??;
+        let tcp = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            crate::dial::connect(&self.endpoint, self.guard.as_ref()),
+        )
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out"))??;
         tcp.set_nodelay(true)?;
         Ok(tcp)
     }

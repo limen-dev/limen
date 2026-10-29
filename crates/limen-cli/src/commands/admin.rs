@@ -31,6 +31,10 @@ pub enum AdminCommand {
         /// Refuse to apply unless the policy's own `policy_test` cases pass.
         #[arg(long)]
         require_tests: bool,
+        /// The source these files replace. Documents other sources (and
+        /// Terraform) manage are left alone; naming one is refused.
+        #[arg(long, default_value = "default")]
+        source: String,
     },
     /// Show the active policy version.
     Policy,
@@ -181,6 +185,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             dry_run,
             source_ref,
             require_tests,
+            source,
         } => {
             let sources = collect_sources(&paths)?;
             let resp = admin
@@ -189,6 +194,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     dry_run,
                     source_ref: source_ref.unwrap_or_default(),
                     require_tests,
+                    source,
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?
@@ -234,6 +240,11 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 ui::success(&format!(
                     "No changes. Policy version {} is current.",
                     resp.version
+                ));
+            } else if !resp.pending_change_id.is_empty() {
+                ui::warn(&format!(
+                    "Held for approval: it widens standing access, and another admin approves it with `limen manage changes approve {}`.",
+                    resp.pending_change_id
                 ));
             } else if resp.applied {
                 ui::success(&format!(
@@ -641,12 +652,19 @@ mod tests {
     fn collects_yaml_from_directories() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy");
         let sources = super::collect_sources(&[dir]).expect("collect");
-        assert_eq!(sources.len(), 17);
+        assert_eq!(sources.len(), 18);
         assert!(sources.iter().all(|s| {
             std::path::Path::new(&s.name)
                 .extension()
                 .is_some_and(|e| e == "yaml")
         }));
+        // Applied together, as the demos do, the examples are one valid policy.
+        limen_policy::Policy::parse_yaml(
+            sources
+                .iter()
+                .map(|s| (s.name.as_str(), s.content.as_str())),
+        )
+        .expect("examples/policy is a valid policy");
     }
 
     #[test]

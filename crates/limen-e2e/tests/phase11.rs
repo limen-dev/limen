@@ -266,6 +266,7 @@ async fn amqp_through_limen() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: policy(&target),
             dry_run: false,
