@@ -70,6 +70,10 @@ pub fn notice(done: &str) -> Option<String> {
 /// has: tests with `--policy-tests=required`, and a second admin with
 /// `--widening-approval=all`.
 async fn write(state: &AppState, auth: &Auth, changes: Vec<Change>) -> Result<Done, String> {
+    // The same per-person limit as the API's writes.
+    if !state.limits.allow_policy_write(&auth.username, false) {
+        return Err("Too many policy writes; wait a moment and try again.".into());
+    }
     let outcome = policy_store::write(
         state,
         policy_store::Request {

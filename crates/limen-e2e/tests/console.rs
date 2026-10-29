@@ -1261,7 +1261,7 @@ async fn the_console_edits_what_it_owns_and_decides_held_changes() {
         .into_inner();
     assert!(!applied.applied, "held");
     let first = applied.pending_change_id;
-    assert!(!first.is_empty());
+    assert_eq!(first.len(), 36, "a change id");
     let mut admin = Browser::new(&d, true);
     assert_eq!(admin.login(&d, ADMIN, &["admins"]).await.status, 200);
     let mut second = Browser::new(&d, true);
