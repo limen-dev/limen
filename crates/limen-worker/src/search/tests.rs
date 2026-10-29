@@ -306,6 +306,7 @@ async fn try_start(o: Options, fake: Arc<Fake>, addr: String) -> anyhow::Result<
     let emitter = Emitter::new("worker", "w1", sink.clone(), FailureMode::FailClosed);
     let session = Uuid::now_v7();
     let config = SessionConfig {
+        guard: None,
         session_id: session,
         username: "alice@example.com".into(),
         resource: "logs".into(),

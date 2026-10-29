@@ -185,7 +185,9 @@ pub async fn bootstrap_plans(
         }
         plans.push((
             name.clone(),
-            bootstrap::Plan::from_spec(name, engine, spec, allow_insecure).await,
+            bootstrap::Plan::from_spec(name, engine, spec, allow_insecure)
+                .await
+                .map(|plan| plan.guarded(resource.spec.delegated.clone())),
         ));
     }
     plans

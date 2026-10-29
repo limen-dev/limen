@@ -68,6 +68,14 @@ metadata: {{ name: tcp-blocked, labels: {{ env: test, team: blocked }} }}
 spec:
   tcp: {{ address: "{address}" }}
   worker_selector: {{ pool: dev }}
+---
+kind: resource
+version: v1
+metadata: {{ name: tcp-delegated, labels: {{ env: test, team: platform }} }}
+spec:
+  tcp: {{ address: "{address}" }}
+  worker_selector: {{ pool: dev }}
+  delegated: {{ profile: test }}
 "#
     );
     vec![PolicySource {
@@ -155,6 +163,7 @@ async fn tcp_is_fixed_destination_policy_checked_and_audited() {
     assert_eq!(response, b"phase12-tcp-roundtrip");
     assert!(refused.lock().expect("refusal list").is_empty());
 
+    let developer_again = developer.clone();
     let (blocked_listener, blocked_refused) = db_client::listen_on(
         &deployment.proxy_addr.to_string(),
         &ca,
@@ -175,6 +184,32 @@ async fn tcp_is_fixed_destination_policy_checked_and_audited() {
     assert!(
         blocked_refused.lock().expect("refusal list")[0].contains("access denied"),
         "the deny rule should win"
+    );
+
+    // The same address, marked as built from a profile (ADR-0042): the worker
+    // refuses loopback for it, whatever the policy allows.
+    let (delegated_listener, delegated_refused) = db_client::listen_on(
+        &deployment.proxy_addr.to_string(),
+        &ca,
+        developer_again.clone(),
+        limen_tunnel::alpn::TCP,
+        "tcp-delegated",
+        "access",
+        "",
+    )
+    .await;
+    let mut probe = TcpStream::connect(delegated_listener)
+        .await
+        .expect("delegated local listener");
+    let _ = probe.write_all(b"never-echoed").await;
+    eventually(Duration::from_secs(10), "delegated refusal", || async {
+        !delegated_refused.lock().expect("refusal list").is_empty()
+    })
+    .await;
+    let refusal = delegated_refused.lock().expect("refusal list")[0].clone();
+    assert!(
+        refusal.contains("couldn't connect"),
+        "the worker's guard should refuse loopback: {refusal}"
     );
 
     eventually(Duration::from_secs(10), "TCP session audit", || async {

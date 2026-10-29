@@ -108,8 +108,11 @@ pub async fn connect(
     credential: &Credential,
     address: &str,
     user: &str,
+    guard: Option<&limen_policy::model::Delegated>,
 ) -> anyhow::Result<Upstream> {
-    let mut stream = settings.dial(address, target.tls, Some(credential)).await?;
+    let mut stream = settings
+        .dial(address, target.tls, Some(credential), guard)
+        .await?;
     let mut correlation = 0;
     let mut next = || {
         correlation += 1;
@@ -319,6 +322,7 @@ pub async fn cluster_brokers(
     user: &str,
     target: &BrokerTarget,
     credential: &Credential,
+    guard: Option<&limen_policy::model::Delegated>,
 ) -> anyhow::Result<Vec<Broker>> {
     let key = format!("{resource}/{user}");
     if let Some(cached) = settings.cached_brokers(&key, BROKER_CACHE) {
@@ -332,7 +336,7 @@ pub async fn cluster_brokers(
             })
             .collect());
     }
-    let mut up = connect(settings, target, credential, &target.endpoint, user).await?;
+    let mut up = connect(settings, target, credential, &target.endpoint, user, guard).await?;
     let brokers = brokers_of(&mut up).await?;
     settings.cache_brokers(
         key,

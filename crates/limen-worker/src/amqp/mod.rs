@@ -72,6 +72,8 @@ pub struct SessionConfig {
     pub mq_user: String,
     pub resource: String,
     pub target: BrokerTarget,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    pub guard: Option<limen_policy::model::Delegated>,
 }
 
 /// A session whose grants are loaded and whose broker credential exists.
@@ -280,6 +282,7 @@ async fn connect_broker(prepared: &Prepared, hello: &ClientHello) -> anyhow::Res
             &config.target.endpoint,
             config.target.tls,
             Some(&prepared.credential),
+            config.guard.as_ref(),
         )
         .await?;
     let (read, mut write) = tokio::io::split(stream);
