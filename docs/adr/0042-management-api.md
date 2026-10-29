@@ -154,7 +154,7 @@ Dry runs and reads are not audited, as today.
 1. **Does automation ever write bots?** No. `bot`, `discovery`, `resource_profile`, and `policy_writer` are people-only (section 4).
 2. **Namespace as a field or a name prefix?** A field, so names and commands don't change, plus name patterns per writer to prevent squatting (section 3).
 3. **Policy version rate.** One version per write or batch. Storage is made proportional to changes (section 9) and writes are rate-limited (section 10). Snapshot distribution is unchanged; measured in the stage 1 demo.
-4. **Registry name.** Decided at stage 3, when the repository goes public. The provider's source address follows the GitHub owner then (`<owner>/limen`).
+4. **Registry name.** The GitHub organization `limen-dev` (free plan, created 2026-10-29) owns the provider: repository `limen-dev/terraform-provider-limen`, source address `limen-dev/limen`. Limen itself moves there before its first public release, so image and module paths don't change after users depend on them.
 
 ## Alternatives considered
 - **A provider over today's API** (one `limen_policy` resource holding every document): one state would own all of policy, and CI would need `limen:admin`.
