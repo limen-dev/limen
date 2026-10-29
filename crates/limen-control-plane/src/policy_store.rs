@@ -14,6 +14,7 @@ use limen_audit::{Context, EventKind};
 use limen_policy::delegation::{self, WriterResource};
 use limen_policy::tooling::AccessDiff;
 use limen_policy::{Document, Policy, PolicyDiff, testing};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
@@ -23,7 +24,8 @@ use crate::db;
 use crate::state::{AppState, LoadedPolicy};
 
 /// How a write arrived (ADR-0042 §3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Channel {
     Git,
     Console,
@@ -51,7 +53,7 @@ impl Channel {
 }
 
 /// Who manages a document. One per document.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Owner {
     pub channel: Channel,
     pub source: String,
@@ -146,7 +148,7 @@ impl Head {
 
 /// A document to write: a whole document, or, with `profile`, a writer's half
 /// of a resource (`{"kind": "resource", "metadata": {..}, "spec": {..}}`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub kind: String,
     pub name: String,
@@ -172,7 +174,8 @@ impl Input {
 
 /// One change. Ownership is checked against `owner`: a write to a document
 /// that another owner manages is refused.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
 pub enum Change {
     /// Make `owner`'s documents exactly `documents`: create, update, and
     /// delete within that owner only.
@@ -210,6 +213,10 @@ pub type Guard = Arc<
         + Sync,
 >;
 
+/// Decides, from what a write would do, that it waits for approval instead
+/// (ADR-0042 §6). Runs inside the write, after the guard and the tests.
+pub type Hold = Arc<dyn Fn(&Outcome) -> bool + Send + Sync>;
+
 /// A write: its changes, applied together as one version.
 #[derive(Clone)]
 pub struct Request {
@@ -219,11 +226,19 @@ pub struct Request {
     pub dry_run: bool,
     /// Refuse unless the policy's tests exist and pass.
     pub require_tests: bool,
+    /// Refuse if the policy has tests and any fails after the write
+    /// (`--policy-tests=required`).
+    pub keep_tests_passing: bool,
     pub source_ref: Option<String>,
     /// Refuse unless the active version is this one.
     pub expected_version: Option<i64>,
     /// Called as `guard(latest policy, heads before, heads after)`.
     pub guard: Option<Guard>,
+    /// When it says so, nothing is written and the outcome is `held`.
+    pub hold: Option<Hold>,
+    /// For a held change being applied: who approved it, recorded in the
+    /// `policy.change` event.
+    pub approval: Option<Value>,
 }
 
 impl std::fmt::Debug for Request {
@@ -235,7 +250,10 @@ impl std::fmt::Debug for Request {
             .field("require_tests", &self.require_tests)
             .field("source_ref", &self.source_ref)
             .field("expected_version", &self.expected_version)
+            .field("keep_tests_passing", &self.keep_tests_passing)
             .field("guard", &self.guard.is_some())
+            .field("hold", &self.hold.is_some())
+            .field("approval", &self.approval)
             .finish()
     }
 }
@@ -262,6 +280,12 @@ pub struct Outcome {
     pub changed: bool,
     /// The policy after the write (or as it would be).
     pub policy: Arc<Policy>,
+    /// The hold said this write waits for approval: nothing was written.
+    pub held: bool,
+    /// The etag (or absence) of every document the changes mention, and for
+    /// a source every document it owned, before the write: a held change is
+    /// applied only while these are unchanged (`unchanged_since`).
+    pub basis: Vec<(Key, Option<String>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -349,6 +373,9 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
     if request.require_tests && !request.dry_run {
         require_passing(&tests)?;
     }
+    if request.keep_tests_passing && !request.dry_run && !tests.ok() {
+        require_passing(&tests)?;
+    }
     let heads_changed = heads_differ(&stored, &heads);
     let mut outcome = Outcome {
         applied: false,
@@ -366,8 +393,11 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         deleted,
         changed: false,
         policy: Arc::new(next.clone()),
+        held: false,
+        basis: basis(&request.changes, &before),
     };
-    if request.dry_run || (outcome.diff.is_empty() && !heads_changed) {
+    outcome.held = !outcome.diff.is_empty() && request.hold.as_ref().is_some_and(|h| h(&outcome));
+    if request.dry_run || outcome.held || (outcome.diff.is_empty() && !heads_changed) {
         return Ok(outcome);
     }
 
@@ -440,6 +470,65 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         outcome.version = version;
     }
     Ok(outcome)
+}
+
+fn basis(changes: &[Change], before: &BTreeMap<Key, Head>) -> Vec<(Key, Option<String>)> {
+    let mut keys = std::collections::BTreeSet::new();
+    for change in changes {
+        match change {
+            Change::ReplaceSource { owner, documents } => {
+                keys.extend(documents.iter().map(Input::key));
+                keys.extend(before.values().filter(|h| &h.owner == owner).map(Head::key));
+            }
+            Change::Create { input, .. } | Change::Update { input, .. } => {
+                keys.insert(input.key());
+            }
+            Change::Delete { key, .. } | Change::Transfer { key, .. } => {
+                keys.insert(key.clone());
+            }
+        }
+    }
+    keys.into_iter()
+        .map(|k| {
+            let etag = before.get(&k).map(|h| h.etag.clone());
+            (k, etag)
+        })
+        .collect()
+}
+
+/// A guard that refuses (`EtagMismatch`, or `AlreadyExists` for a document
+/// made since) unless every document in `basis` is as it was.
+#[must_use]
+pub fn unchanged_since(basis: Vec<(Key, Option<String>)>) -> Guard {
+    Arc::new(move |_, before, _| {
+        for (key, etag) in &basis {
+            match (before.get(key), etag) {
+                (None, None) => {}
+                (Some(_), None) => return Err(StoreError::AlreadyExists(key.clone())),
+                (Some(head), Some(etag)) if &head.etag == etag => {}
+                (Some(head), Some(_)) => {
+                    return Err(StoreError::EtagMismatch {
+                        key: key.clone(),
+                        current: head.etag.clone(),
+                    });
+                }
+                (None, Some(_)) => return Err(StoreError::NotFound(key.clone())),
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Both guards, `first` first.
+#[must_use]
+pub fn both(first: Guard, second: Option<Guard>) -> Guard {
+    match second {
+        None => first,
+        Some(second) => Arc::new(move |policy, before, after| {
+            first(policy, before, after)?;
+            second(policy, before, after)
+        }),
+    }
 }
 
 /// One `policy.ownership_transfer` event per document a transfer moved,
@@ -520,6 +609,7 @@ async fn audit_change(
         "owners": owners,
         "sessions_ended": sessions_ended,
         "grants_revoked": grants_revoked,
+        "approval": request.approval,
     });
     state
         .audit
@@ -894,7 +984,7 @@ fn require_passing(tests: &testing::Report) -> Result<(), StoreError> {
             })
             .collect();
         return Err(StoreError::TestsFailed(format!(
-            "--require-tests: {} policy test(s) failed:\n{}",
+            "{} policy test(s) fail after this write:\n{}",
             failed.len(),
             failed.join("\n")
         )));
