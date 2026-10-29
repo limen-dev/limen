@@ -234,19 +234,18 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in audit (PII in SQL literals, Redis and MongoDB values) | Redis values and MongoDB command values redacted by default. SQL full text by default (owner decision), with per-resource literal normalization. Bound parameters redacted by default. Access to the bucket and Grafana is limited to auditors |
 | S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
-### TB9: GitHub Actions ↔ self-hosted runners (CI)
-Pull request code runs on the owner's machines: a macOS runner and two OrbStack VMs on it, under the owner's user account. See [the CI runbook](runbooks/ci-runners.md).
+### TB9: GitHub Actions ↔ GitHub-hosted runners (CI)
+Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded afterwards. See [the CI runbook](runbooks/ci-runners.md).
 
 | Threat | Mitigation |
 |---|---|
-| E: a pull request runs commands on the owner's machines (a PR's workflow is code) | The repository is private, so only collaborators can open pull requests. Keep it private, and never point the runners at forks or public repositories. Limit: anyone who can push a branch can run code on the runners |
-| E: a workflow reads the owner's files or secrets | The Linux VMs are separate from the Mac. Workflows use `permissions: contents: read`. Publishing secrets are used only by `release.yml`, which runs on hosted runners. Limit: the macOS runner runs as the owner's user, so a workflow there can read the laptop's files |
-| T: one job leaves state for the next | Each VM runs one job at a time. The checkout cleans the workspace (`git clean -ffdx`). The macOS runner is not isolated per job |
-| I: the checkout token leaks into logs or onto disk | The fetch step passes the token through the environment (`GIT_CONFIG_*`) and writes no credentials into `.git/config`. Nothing echoes it |
-| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint`. Only repository admins can set the `CI_RUNNERS` variable |
-| D: a runner stops or runs out of memory mid-job | Every job has a timeout. Integration tests compile two crates at a time on the 8 GiB VM. A lost runner fails its job, which is then rerun by hand |
+| E: a pull request runs code with the repository's credentials (a PR's workflow is code) | Workflows use `permissions: contents: read` and `persist-credentials: false`. No CI workflow reads a repository secret; only `release.yml` publishes, and it runs on pushes to `main` |
+| T: one job leaves state for the next | Each job gets a new VM. The Rust cache is written only from `main` (`save-if`), so a pull request cannot poison it for later runs |
+| I: the checkout token leaks into logs or onto disk | `persist-credentials: false` writes no token into `.git/config`. Nothing echoes it |
+| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint` |
+| D: a job runs out of memory, disk or minutes | Every job has a timeout. Integration tests compile two crates at a time and free disk first. macOS tests skip pull requests to save minutes. A lost job is rerun by hand |
 
-Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
+Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.
 
 ### TB12: Public website (ADR-0021)
 A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub Pages by `deploy-website.yml` once the repository is public and `PUBLISH_SITE` is set (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
@@ -317,6 +316,7 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 | 2026-10-29 | 14 (stage 2) | Built: every kind through `limen.manage.v1` (people-only kinds for admins); writers' roles, mappings, and tests with the escalation rules above; `IN_USE` for bots and profiles a grant names |
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
+| 2026-10-29 | CI | CI runs pull request code on GitHub-hosted runners (TB9) |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-29 | Docs | Website deploy (TB12): GitHub Pages from Actions, off until the repository is public |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
@@ -324,7 +324,6 @@ A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
 | 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |
-| 2026-10-15 | CI | Self-hosted runners run pull request code on the owner's machines (TB9). Private repository only |
 | 2026-10-17 | 6 | SQL databases: verified TLS to targets, secret files and the bootstrap admin, statement text in audit, role and database guards, shared-role cancel and kill (residual), SigV4 and Redshift credential calls (unverified), injection into bootstrap SQL, frame limits |
 | 2026-10-17 | 8 (final review) | Kubernetes: built-in user names, audit of requests that fail upstream, upstream 401 as a service error, token refresh during rotation |
 | Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |

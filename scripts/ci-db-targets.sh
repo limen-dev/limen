@@ -18,8 +18,7 @@ pg=limen-ci-pg-target
 my=limen-ci-mysql-target
 mongo=limen-ci-mongo-target
 
-# -v removes the containers' anonymous volumes too. Without it every job left one behind
-# on the self-hosted runners, and their disks filled up.
+# -v removes the containers' anonymous volumes too, so repeated local runs don't pile them up.
 stop() { docker rm -fv "$pg" "$my" "$mongo" >/dev/null 2>&1 || true; }
 
 case "${1:-}" in
@@ -46,7 +45,7 @@ docker run -d --name "$pg" -p 127.0.0.1:15432:5432 \
   "$POSTGRES_IMAGE" postgres -c ssl=on -c ssl_cert_file=/tls/pg.crt -c ssl_key_file=/tls/pg.key \
   -c hba_file=/etc/limen/pg_hba.conf >/dev/null
 
-# Small on purpose: the self-hosted runners have 8 GiB, shared with the build.
+# Small on purpose: the runner's memory is shared with the build.
 docker run -d --name "$my" -p 127.0.0.1:13306:3306 \
   -e MYSQL_ROOT_PASSWORD=mysql-target-dev-only \
   -v "$here/config/targets/mysql/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro" \
