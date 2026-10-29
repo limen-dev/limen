@@ -2,6 +2,7 @@
 //! evaluator (ADR-0008).
 
 pub mod bot;
+pub mod delegation;
 pub mod discovery;
 pub mod duration;
 pub mod model;
@@ -197,6 +198,10 @@ pub struct Policy {
     discovery: BTreeMap<String, discovery::DiscoveryDoc>,
     #[serde(default)]
     policy_tests: BTreeMap<String, testing::PolicyTestDoc>,
+    #[serde(default)]
+    profiles: BTreeMap<String, delegation::ResourceProfileDoc>,
+    #[serde(default)]
+    writers: BTreeMap<String, delegation::PolicyWriterDoc>,
 }
 
 /// Changes between two policies, by `kind/name`.
@@ -280,6 +285,26 @@ impl Policy {
                         });
                     }
                 }
+                Document::ResourceProfile(doc) => {
+                    delegation::validate_profile(&doc)?;
+                    let name = doc.metadata.name.clone();
+                    if policy.profiles.insert(name.clone(), doc).is_some() {
+                        return Err(PolicyError::Duplicate {
+                            kind: "resource_profile",
+                            name,
+                        });
+                    }
+                }
+                Document::PolicyWriter(doc) => {
+                    delegation::validate_writer(&doc)?;
+                    let name = doc.metadata.name.clone();
+                    if policy.writers.insert(name.clone(), doc).is_some() {
+                        return Err(PolicyError::Duplicate {
+                            kind: "policy_writer",
+                            name,
+                        });
+                    }
+                }
                 Document::Resource(resource) => {
                     validate_resource(&resource)?;
                     let name = resource.metadata.name.clone();
@@ -326,6 +351,7 @@ impl Policy {
                 }
             }
         }
+        check_writer_references(&policy)?;
         let mut web_hosts = BTreeMap::new();
         for (name, resource) in &policy.resources {
             if let Some(web) = &resource.spec.web
@@ -376,7 +402,36 @@ impl Policy {
                 .cloned()
                 .map(Document::PolicyTest),
         );
+        out.extend(
+            self.profiles
+                .values()
+                .cloned()
+                .map(Document::ResourceProfile),
+        );
+        out.extend(self.writers.values().cloned().map(Document::PolicyWriter));
         out
+    }
+
+    /// What proxies and workers receive: every document except the control
+    /// plane's own (resource profiles and writer grants). Leaving them out
+    /// also keeps snapshots readable by components from before Phase 14.
+    #[must_use]
+    pub fn snapshot_documents(&self) -> Vec<Document> {
+        self.documents()
+            .into_iter()
+            .filter(|d| !matches!(d, Document::ResourceProfile(_) | Document::PolicyWriter(_)))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn profile(&self, name: &str) -> Option<&delegation::ResourceProfileDoc> {
+        self.profiles.get(name)
+    }
+
+    /// The writer grant of `bot`, if it has one.
+    #[must_use]
+    pub fn writer_for_bot(&self, bot: &str) -> Option<&delegation::PolicyWriterDoc> {
+        self.writers.values().find(|w| w.spec.bot == bot)
     }
 
     /// What changes when going from `self` to `next`.
@@ -1139,6 +1194,38 @@ fn rule_principals(rule: &Rule, kind: ResourceKind) -> Vec<String> {
         ResourceKind::Web => rule.web.iter().map(|_| "access".to_owned()).collect(),
         ResourceKind::Tcp => rule.tcp.iter().map(|_| "access".to_owned()).collect(),
     }
+}
+
+/// A writer grant names a real bot (one grant per bot) and real profiles.
+fn check_writer_references(policy: &Policy) -> Result<(), PolicyError> {
+    let mut writer_bots = BTreeMap::new();
+    for (name, writer) in &policy.writers {
+        let bot = &writer.spec.bot;
+        if !policy.bots.contains_key(bot) {
+            return Err(invalid(
+                "policy_writer",
+                name,
+                format!("unknown bot {bot:?}"),
+            ));
+        }
+        if let Some(previous) = writer_bots.insert(bot, name) {
+            return Err(invalid(
+                "policy_writer",
+                name,
+                format!("bot {bot:?} already has the grant {previous:?}; one grant per bot"),
+            ));
+        }
+        for profile in &writer.spec.profiles {
+            if !policy.profiles.contains_key(profile) {
+                return Err(invalid(
+                    "policy_writer",
+                    name,
+                    format!("unknown resource_profile {profile:?}"),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_name(kind: &'static str, doc: &str, name: &str) -> Result<(), PolicyError> {

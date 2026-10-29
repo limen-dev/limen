@@ -641,12 +641,19 @@ mod tests {
     fn collects_yaml_from_directories() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy");
         let sources = super::collect_sources(&[dir]).expect("collect");
-        assert_eq!(sources.len(), 17);
+        assert_eq!(sources.len(), 18);
         assert!(sources.iter().all(|s| {
             std::path::Path::new(&s.name)
                 .extension()
                 .is_some_and(|e| e == "yaml")
         }));
+        // Applied together, as the demos do, the examples are one valid policy.
+        limen_policy::Policy::parse_yaml(
+            sources
+                .iter()
+                .map(|s| (s.name.as_str(), s.content.as_str())),
+        )
+        .expect("examples/policy is a valid policy");
     }
 
     #[test]

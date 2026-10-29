@@ -20,6 +20,11 @@ pub enum Document {
     Bot(crate::bot::BotDoc),
     Discovery(crate::discovery::DiscoveryDoc),
     PolicyTest(crate::testing::PolicyTestDoc),
+    /// The fixed half of a resource that bot writers complete (ADR-0042).
+    /// Control plane only: never in a snapshot.
+    ResourceProfile(crate::delegation::ResourceProfileDoc),
+    /// What one bot may write (ADR-0042). Control plane only.
+    PolicyWriter(crate::delegation::PolicyWriterDoc),
 }
 
 impl Document {
@@ -32,6 +37,8 @@ impl Document {
             Document::Bot(_) => "bot",
             Document::Discovery(_) => "discovery",
             Document::PolicyTest(_) => "policy_test",
+            Document::ResourceProfile(_) => "resource_profile",
+            Document::PolicyWriter(_) => "policy_writer",
         }
     }
 
@@ -44,6 +51,8 @@ impl Document {
             Document::Bot(d) => &d.metadata.name,
             Document::Discovery(d) => &d.metadata.name,
             Document::PolicyTest(d) => &d.metadata.name,
+            Document::ResourceProfile(d) => &d.metadata.name,
+            Document::PolicyWriter(d) => &d.metadata.name,
         }
     }
 }
@@ -475,6 +484,27 @@ pub struct ResourceSpec {
     /// Labels a worker must carry to serve this resource.
     #[serde(default)]
     pub worker_selector: Labels,
+    /// Set by the control plane on a resource built from a profile (ADR-0042
+    /// §5). Left out otherwise, so components from before Phase 14 still read
+    /// every other resource.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated: Option<Delegated>,
+}
+
+/// Marks a resource a bot writer completed from a profile. The worker refuses
+/// the addresses `delegation::forbidden_address` names for it, and, when
+/// these bounds are set, any address outside them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Delegated {
+    /// The profile it was built from.
+    pub profile: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cidrs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
 }
 
 impl ResourceSpec {
