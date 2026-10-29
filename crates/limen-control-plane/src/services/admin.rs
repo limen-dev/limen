@@ -245,7 +245,9 @@ impl Admin for AdminService {
     ) -> Result<Response<GetPolicyDocumentsResponse>, Status> {
         caller::resolve(&request, &self.0.cas)?.admin()?;
         let loaded = self.0.policy.current();
-        let documents_json = serde_json::to_string(&loaded.policy.documents())
+        // The snapshot view: older CLIs can't parse the control plane's own
+        // kinds, and they don't change who can reach what.
+        let documents_json = serde_json::to_string(&loaded.policy.snapshot_documents())
             .map_err(|e| internal("serializing policy", e))?;
         Ok(Response::new(GetPolicyDocumentsResponse {
             version: loaded.version,

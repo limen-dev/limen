@@ -870,6 +870,20 @@ impl Policy {
                 }
             }
         }
+        for profile in self.profiles.values() {
+            for (path, bound) in &profile.spec.settable {
+                for warning in bound
+                    .hosts
+                    .iter()
+                    .filter_map(|h| delegation::broad_wildcard(h))
+                {
+                    out.push(format!(
+                        "resource_profile {}: {path}: {warning}",
+                        profile.metadata.name
+                    ));
+                }
+            }
+        }
         out.sort();
         out.dedup();
         out
@@ -1714,6 +1728,27 @@ fn validate_mongo_target(name: &str, t: &model::MongoTarget) -> Result<(), Polic
     Ok(())
 }
 
+/// A hand-written `delegated` marker must agree with the endpoint, or the
+/// worker would refuse the resource at connect time.
+fn check_delegated(
+    name: &str,
+    spec: &model::ResourceSpec,
+    address: Option<&str>,
+) -> Result<(), PolicyError> {
+    if let (Some(d), Some(address)) = (&spec.delegated, address)
+        && !(d.hosts.is_empty() && d.cidrs.is_empty() && d.ports.is_empty())
+    {
+        let bound = delegation::Bound {
+            hosts: d.hosts.clone(),
+            cidrs: d.cidrs.clone(),
+            ports: d.ports.clone(),
+        };
+        delegation::check_endpoint(address, &bound)
+            .map_err(|m| invalid("resource", name, format!("delegated bounds: {m}")))?;
+    }
+    Ok(())
+}
+
 fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     let name = &resource.metadata.name;
     validate_name("resource", name, name)?;
@@ -1849,6 +1884,7 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     if let Some(target) = &resource.spec.mongodb {
         validate_mongo_target(name, target)?;
     }
+    check_delegated(name, &resource.spec, address)?;
     if let Some(address) = address {
         let valid = address.rsplit_once(':').is_some_and(|(host, port)| {
             !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0)

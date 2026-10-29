@@ -597,3 +597,31 @@ fn the_example_stack_stands_alone() {
     )
     .expect("the example's own case works");
 }
+
+#[test]
+fn numeric_names_and_broad_wildcards() {
+    let bound = Bound {
+        hosts: vec!["*.payments.internal".into()],
+        cidrs: vec![],
+        ports: vec![5432],
+    };
+    for host in ["127.1:5432", "167772161:5432", "0x7f000001:5432"] {
+        assert!(check_endpoint(host, &bound).is_err(), "{host}");
+    }
+    assert!(broad_wildcard("*.eu-west-1.rds.amazonaws.com").is_some());
+    assert!(broad_wildcard("*.c9xk2p.eu-west-1.rds.amazonaws.com").is_none());
+    assert!(broad_wildcard("*.payments.internal").is_none());
+    let broad = PROFILE.replace(
+        "*.c9xk2p.eu-west-1.rds.amazonaws.com",
+        "*.eu-west-1.rds.amazonaws.com",
+    );
+    let policy = Policy::parse_yaml([("p.yaml", broad.as_str())]).expect("valid, but warned");
+    assert!(
+        policy
+            .warnings()
+            .iter()
+            .any(|w| w.contains("every customer")),
+        "{:?}",
+        policy.warnings()
+    );
+}

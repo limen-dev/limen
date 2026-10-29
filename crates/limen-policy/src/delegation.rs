@@ -283,6 +283,9 @@ fn validate_bound(path: &str, bound: &Bound) -> Result<(), String> {
                 "host {host:?} must be a lowercase DNS name or *.name"
             ));
         }
+        if numeric_looking(exact) {
+            return Err(format!("host {host:?} must not end in a numeric label"));
+        }
         if host.starts_with("*.") && labels < 2 {
             return Err(format!(
                 "host {host:?} is too broad: a wildcard needs a suffix of at least two labels"
@@ -524,6 +527,11 @@ pub fn check_endpoint(endpoint: &str, bound: &Bound) -> Result<(), String> {
         }
         return Ok(());
     }
+    if numeric_looking(host) {
+        return Err(format!(
+            "{host:?} looks like a number a resolver may read as an IP address; use an IP literal or a real name"
+        ));
+    }
     if !host_allowed(host, &bound.hosts) {
         return Err(format!(
             "{host:?} doesn't match the allowed hosts {:?}",
@@ -531,6 +539,39 @@ pub fn check_endpoint(endpoint: &str, bound: &Bound) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Whether a name ends in an all-digit or `0x` label: `127.1` or
+/// `167772161` aren't IP literals to Rust, but a system resolver may read
+/// them as IPv4 addresses.
+#[must_use]
+pub fn numeric_looking(host: &str) -> bool {
+    let last = host.trim_end_matches('.').rsplit('.').next().unwrap_or("");
+    last.bytes().all(|b| b.is_ascii_digit()) || last.to_ascii_lowercase().starts_with("0x")
+}
+
+/// Shared cloud domains, and the fewest labels a wildcard under them needs
+/// before it stops covering other customers' hosts.
+const SHARED_ROOTS: &[(&str, usize)] = &[
+    ("amazonaws.com", 5),
+    ("amazonaws.com.cn", 6),
+    ("mongodb.net", 3),
+    ("windows.net", 4),
+    ("azure.com", 4),
+    ("googleapis.com", 4),
+    ("cloud.es.io", 4),
+];
+
+/// A warning for a wildcard that covers a whole shared cloud domain, such as
+/// `*.eu-west-1.rds.amazonaws.com` (every account's RDS in the region).
+#[must_use]
+pub fn broad_wildcard(pattern: &str) -> Option<String> {
+    let suffix = pattern.strip_prefix("*.")?;
+    let labels = suffix.split('.').count();
+    SHARED_ROOTS
+        .iter()
+        .find(|(root, min)| (suffix == *root || suffix.ends_with(&format!(".{root}"))) && labels < *min)
+        .map(|(root, _)| format!("{pattern:?} covers hosts of every customer of {root}; add the account- or cluster-specific label"))
 }
 
 /// Whether a host name matches one of the patterns (exact, or `*.suffix`).
