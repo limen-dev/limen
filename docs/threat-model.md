@@ -247,10 +247,10 @@ Pull request code runs on the owner's machines: a macOS runner and two OrbStack 
 Residual: the macOS runner has the owner's user access, which the owner accepts for a private repository. Forks and public repositories would change that, so they're out of scope.
 
 ### TB12: Public website (ADR-0021)
-A static site, built by hand and not yet published or built in CI (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
+A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub Pages by `deploy-website.yml` once the repository is public and `PUBLISH_SITE` is set (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
 | Threat | Mitigation |
 |---|---|
-| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand until #138 adds CI). The site holds no secrets and is never deployed from a laptop |
+| T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand). The site holds no secrets and is never deployed from a laptop: the deploy runs in Actions with only `pages: write` and `id-token: write`, from `main`, behind the same build checks |
 | I: the site tracks or leaks visitors to a third party | Fonts and scripts are self-hosted and `check-site.mjs` fails the build on any request to another origin. No analytics or cookies |
 | S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
@@ -311,6 +311,7 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
+| 2026-10-29 | Docs | Website deploy (TB12): GitHub Pages from Actions, off until the repository is public |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |

@@ -25,13 +25,13 @@ GitHub Pages is a reasonable place to **start**: free, deploys from the Actions 
 ## Decision update (2026-10-26)
 - **Hosting: GitHub Pages first**, once the repository is public. One Pages site per repository, so the homepage is at `/` and the documentation at `/docs/`. `docs.<domain>` can redirect there later.
 - **Host-independent.** `SITE_URL` and `SITE_BASE` (environment variables read by `astro.config.mjs`) are the only places a host or domain appears. Links in synced documents are relative, so a custom domain is a settings change.
-- **Not published yet, and no CI for it (owner, 2026-10-28).** Nothing goes anywhere until the repository is public, so the first pull request ships no workflow. `npm run build` is the check, run by hand. CI and the Pages deploy are #138.
+- **Not published yet (owner, 2026-10-28).** Nothing goes anywhere until the repository is public. `ci-website.yml` builds and checks the site on pull requests. The deploy is `deploy-website.yml` to <https://limen-dev.github.io/limen> (owner, 2026-10-29: GitHub Pages, project site under `/limen/`), switched off by default: it runs only when the repository variable `PUBLISH_SITE` is `true`, so merging it publishes nothing. How to turn it on: [the runbook](../runbooks/website-publishing.md).
 - **The homepage is not a Starlight splash page.** It is its own Astro page with plain CSS and one small script (a terminal replay, a hash-chain demo, a command palette). The docs are Starlight with the same design tokens, so the two read as one site.
 - **One source.** `website/scripts/sync-docs.mjs` publishes `docs/guides`, `docs/runbooks`, `docs/adr`, the design, threat model and policy reference, and `deploy/compose/README.md` into the site at build time. The generated pages are git-ignored. Hand-written pages (introduction, quickstart, concepts, status) live in `website/src/content/docs/docs/`.
 - **Checks in the build.** `check-links.mjs` fails on a broken page or anchor. `check-site.mjs` fails when a guide is missing, a page loads anything from another origin, or the homepage stops saying what is unverified or claims something ADR-0031 forbids (access receipts, AI agents, comparisons).
 - **Tolerant URLs and a Limen 404.** `trailingSlash` is `ignore`, so `/docs` and `/docs/` both load in dev and preview (built pages keep the slash). `404.html` is the site's own page, which sends a missing-slash address to the right page and suggests the closest pages otherwise (#143).
 - **Fonts and scripts are self-hosted.** No analytics, no third-party requests.
-- **Still open:** CI and publishing (#138), run the quickstart in CI (#135), generate the CLI reference from `clap` (#133), deploy guides after Phase 15 (#134), domain and redirects (#136).
+- **Still open:** switching publishing on when the repository is public (#138), run the quickstart in CI (#135), generate the CLI reference from `clap` (#133), deploy guides after Phase 15 (#134), domain and redirects (#136).
 
 ## Consequences
 - A new milestone ("Docs site and homepage") and a `website/` workspace outside the Rust build; CI builds it and checks links.
