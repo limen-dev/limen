@@ -48,5 +48,5 @@ Built as decided, with these changes found while building and testing it. The op
 - **Names** for proxies and workers (added at the owner's request during the phase): approved by the join token, unique among live components, display only. Policy refuses a `worker_selector` on the name label.
 - **Rate limits** stay per replica and in memory, and the rate and burst are now settings (defaults unchanged).
 - **Scale signals** are exported as metrics (see the guide). The bundled Grafana dashboards read audit data, not metrics, so no panel was added.
-- **Not done in this phase:** the ECS and EC2 Auto Scaling examples move to Phase 14 with the other Terraform and Helm work. A Kubernetes example ships in `deploy/kubernetes/`, checked offline only.
+- **Not done in this phase:** the ECS and EC2 Auto Scaling examples move to Phase 15 with the other Terraform and Helm work. A Kubernetes example ships in `deploy/kubernetes/`, checked offline only.
 - **Known limits:** a recording upload longer than about the connection age plus grace on an old connection is retried from the start; a large handoff backlog may not fit in the last 20 % of the drain time (the remainder stays on `durable` volumes and is lost on `ephemeral` ones); the load test runs in one process.

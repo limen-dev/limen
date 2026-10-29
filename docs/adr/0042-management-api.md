@@ -1,6 +1,6 @@
 # ADR-0042: One management API for the CLI, the console, and infrastructure as code
 
-- Status: Proposed (owner asked for the proposal on 2026-10-29; Phase 15)
+- Status: Proposed (owner asked for the proposal on 2026-10-29; Phase 14)
 - Date: 2026-10-29
 
 ## Context
@@ -77,7 +77,7 @@ Deleting a resource (including `terraform destroy`) ends its open sessions and a
 ### 6. The Terraform provider is a separate repository, built last
 `terraform-provider-limen`: Go with `terraform-plugin-framework`, a thin client of `limen.manage.v1`. It has its own semantic version and documents which server versions it supports. It lives outside this repository because the Terraform and OpenTofu registries expect a repository with that name holding signed releases, because it brings a second toolchain, and because ADR-0024's one-version rule doesn't fit a client with its own release rhythm. Until the repository is public, it is installed with `dev_overrides` or a private mirror. `limen_resource` comes first, then `limen_role`, `limen_role_mapping`, `limen_bot`, and data sources (`limen_resource_access`, which shows who can reach a resource through `who-can`, and `limen_workers`). Plan shows the effective-access changes from `Plan` as warnings.
 
-## Stages (one phase, Phase 15)
+## Stages (one phase, Phase 14)
 1. **Ownership and the API for resources.** Section 1 for `resource`, section 2, section 3 with `kinds: [resource]`, section 5, CLI commands over the new API, the threat-model update, and a demo where two sources and one bot writer share a control plane without touching each other.
 2. **Guardrails and the remaining kinds.** Section 4, then `role`, `role_mapping`, `bot`, `discovery`, `policy_test` in the API; the console edits policy documents (until now it browses and dry-runs).
 3. **The provider** (#73), in its own repository, against the stage 1 and 2 API.
