@@ -1,6 +1,6 @@
 # CI on self-hosted runners
 
-CI for `jfcmartins/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflows are `.github/workflows/ci-rust.yml`, `audit.yml`, `ci-infra.yml`, `ci-workflows.yml` and `ci-website.yml`. The machines are set up with [gha-local-ci](https://github.com/jfcmartins/gha-local-ci) (`~/projects/gha-local-ci`).
+CI for `limen-dev/limen` runs on the owner's machines to save GitHub-hosted minutes. The workflows are `.github/workflows/ci-rust.yml`, `audit.yml`, `ci-infra.yml`, `ci-workflows.yml` and `ci-website.yml`. The machines and their runner setup are maintained outside this repository.
 
 ## What runs for a change
 
@@ -31,22 +31,19 @@ The repository variable `CI_RUNNERS` picks the runners:
 Releases always use hosted runners (`release.yml` passes `hosted: true`).
 
 ```sh
-gh variable set CI_RUNNERS --body github-hosted --repo jfcmartins/limen   # use hosted runners
-gh variable delete CI_RUNNERS --repo jfcmartins/limen                     # back to self-hosted
-gh variable list --repo jfcmartins/limen                                  # see what is set
+gh variable set CI_RUNNERS --body github-hosted --repo limen-dev/limen   # use hosted runners
+gh variable delete CI_RUNNERS --repo limen-dev/limen                     # back to self-hosted
+gh variable list --repo limen-dev/limen                                  # see what is set
 ```
 
 Jobs wait for a runner. If the machines are off and `CI_RUNNERS` is unset, CI stays queued until they come back. Either start them or switch to hosted.
 
-## Turning the machines on and off
+## Checking the runners
 
-From `~/projects/gha-local-ci`:
+The machines are started and stopped outside this repository. To see what GitHub sees:
 
 ```sh
-./gha-power.sh status          # what GitHub sees
-./gha-power.sh on              # start the macOS runner and both VMs
-./gha-power.sh off             # stop them; refuses while a job is running
-./gha-power.sh off --force     # stop them anyway; the running job is lost
+gh api repos/limen-dev/limen/actions/runners --jq '.runners[] | "\(.name) \(.status) busy=\(.busy)"'
 ```
 
 Known limits: the three runners share a 16 GiB host, so running them all at once can run out of memory. The ARM64 VM runs with 8 GiB. The integration job compiles two crates at a time to fit.

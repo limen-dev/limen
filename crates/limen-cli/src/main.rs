@@ -928,7 +928,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
     anyhow::bail!(
         "`{command}` isn't available yet: {what} is planned for {phase}. \
-         You can already see these resources with `limen ls`. Roadmap: https://github.com/jfcmartins/limen/milestones"
+         You can already see these resources with `limen ls`. Roadmap: https://github.com/limen-dev/limen/milestones"
     )
 }
 

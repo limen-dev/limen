@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const out = resolve(root, 'website', 'src', 'content', 'docs', 'docs');
-const GITHUB = 'https://github.com/jfcmartins/limen';
+const GITHUB = 'https://github.com/limen-dev/limen';
 
 // Generated sections. Hand-written pages live beside them and are never touched.
 const generated = ['guides', 'runbooks', 'architecture', 'reference'];
