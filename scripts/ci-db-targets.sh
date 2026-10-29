@@ -18,8 +18,7 @@ pg=limen-ci-pg-target
 my=limen-ci-mysql-target
 mongo=limen-ci-mongo-target
 
-# -v removes the containers' anonymous volumes too. Without it every job left one behind
-# on a runner, and its disk filled up.
+# -v removes the containers' anonymous volumes too, so repeated local runs don't pile them up.
 stop() { docker rm -fv "$pg" "$my" "$mongo" >/dev/null 2>&1 || true; }
 
 case "${1:-}" in

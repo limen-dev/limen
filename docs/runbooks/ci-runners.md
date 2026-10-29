@@ -32,5 +32,3 @@ In `ci-rust.yml` the slow test and image jobs start only after lint passes, so a
 Minutes come from the `limen-dev` organization's plan. Check usage under the organization's Settings, Billing.
 
 Hosted runners are small. The integration job compiles two crates at a time (`CARGO_BUILD_JOBS=2`) and frees disk before it builds.
-
-Until 2026-10-29, CI ran on the owner's machines (self-hosted runners, PR 20), chosen by a `CI_RUNNERS` variable. That setup was removed; the git history of `.github/workflows/` has it if it is ever needed again.

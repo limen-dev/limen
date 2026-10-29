@@ -233,7 +233,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
 ### TB9: GitHub Actions ↔ GitHub-hosted runners (CI)
-Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded afterwards. Until 2026-10-29 it ran on the owner's machines. See [the CI runbook](runbooks/ci-runners.md).
+Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded afterwards. See [the CI runbook](runbooks/ci-runners.md).
 
 | Threat | Mitigation |
 |---|---|
@@ -304,14 +304,13 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
-| 2026-10-29 | CI | Self-hosted runners removed; CI runs on GitHub-hosted runners (TB9) |
+| 2026-10-29 | CI | CI runs pull request code on GitHub-hosted runners (TB9) |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |
 | 2026-10-13 | 0 | Initial model |
 | 2026-10-14 | 1 | Device-flow binding gap; static join tokens; relay header spoofing; worker forwarding. Identity moved to URI SANs |
 | 2026-10-14 | 2 | SSH: per-session certificates, host CA for workers, `none` auth on authorized streams, pinned target host keys, grant forgery and replay, certified labels, peering identity, snapshot rollback; recording tampering is a residual until Phase 3 |
-| 2026-10-15 | CI | Self-hosted runners run pull request code on the owner's machines (TB9). Private repository only |
 | 2026-10-17 | 6 | SQL databases: verified TLS to targets, secret files and the bootstrap admin, statement text in audit, role and database guards, shared-role cancel and kill (residual), SigV4 and Redshift credential calls (unverified), injection into bootstrap SQL, frame limits |
 | 2026-10-17 | 8 (final review) | Kubernetes: built-in user names, audit of requests that fail upstream, upstream 401 as a service error, token refresh during rotation |
 | Phase 12 | Web OIDC handoff and app-session replay, fixed-host routing, identity-header spoofing, web request audit projection, and fixed-target TCP forwarding |
