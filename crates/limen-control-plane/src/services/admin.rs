@@ -94,6 +94,8 @@ impl Admin for AdminService {
                 dry_run: req.dry_run,
                 require_tests: req.require_tests,
                 source_ref: Some(req.source_ref).filter(|s| !s.is_empty()),
+                expected_version: None,
+                guard: None,
             },
         )
         .await
@@ -353,8 +355,11 @@ pub fn store_status(e: &StoreError) -> Status {
         StoreError::OwnedElsewhere { .. }
         | StoreError::EtagMismatch { .. }
         | StoreError::TestsFailed(_)
-        | StoreError::InUse { .. } => Status::failed_precondition(e.to_string()),
+        | StoreError::InUse { .. }
+        | StoreError::VersionMismatch { .. } => Status::failed_precondition(e.to_string()),
         StoreError::NotFound(_) => Status::not_found(e.to_string()),
+        StoreError::Denied { .. } => Status::permission_denied(e.to_string()),
+        StoreError::QuotaExceeded { .. } => Status::resource_exhausted(e.to_string()),
         StoreError::AlreadyExists(_) => Status::already_exists(e.to_string()),
         StoreError::AuditUnavailable => Status::unavailable("audit unavailable"),
         StoreError::Internal(m) => internal("writing policy", m),

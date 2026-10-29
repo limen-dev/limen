@@ -192,10 +192,26 @@ pub enum Change {
         etag: Option<String>,
         allow_missing: bool,
     },
+    /// Move a document to `to`. With `from`, only if `from` manages it.
+    Transfer {
+        from: Option<Owner>,
+        key: Key,
+        etag: String,
+        to: Owner,
+    },
 }
 
+/// A check that runs inside the write, after the changes are applied, with
+/// the latest policy (not this replica's copy) and the heads before and
+/// after. Writer grants and quotas are checked here (ADR-0042 §4).
+pub type Guard = Arc<
+    dyn Fn(&Policy, &BTreeMap<Key, Head>, &BTreeMap<Key, Head>) -> Result<(), StoreError>
+        + Send
+        + Sync,
+>;
+
 /// A write: its changes, applied together as one version.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Request {
     /// The person or `bot:<name>` writing.
     pub actor: String,
@@ -204,6 +220,24 @@ pub struct Request {
     /// Refuse unless the policy's tests exist and pass.
     pub require_tests: bool,
     pub source_ref: Option<String>,
+    /// Refuse unless the active version is this one.
+    pub expected_version: Option<i64>,
+    /// Called as `guard(latest policy, heads before, heads after)`.
+    pub guard: Option<Guard>,
+}
+
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("actor", &self.actor)
+            .field("changes", &self.changes)
+            .field("dry_run", &self.dry_run)
+            .field("require_tests", &self.require_tests)
+            .field("source_ref", &self.source_ref)
+            .field("expected_version", &self.expected_version)
+            .field("guard", &self.guard.is_some())
+            .finish()
+    }
 }
 
 /// What a write did, or would do.
@@ -224,6 +258,10 @@ pub struct Outcome {
     pub written: Vec<Head>,
     /// Documents the changes deleted.
     pub deleted: Vec<Key>,
+    /// Something was stored: a new version, or heads only (a transfer).
+    pub changed: bool,
+    /// The policy after the write (or as it would be).
+    pub policy: Arc<Policy>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -242,6 +280,12 @@ pub enum StoreError {
     InUse { key: Key, used_by: Vec<String> },
     #[error("{0}")]
     TestsFailed(String),
+    #[error("{message}")]
+    Denied { rule: &'static str, message: String },
+    #[error("the writer owns {max} documents already, its limit")]
+    QuotaExceeded { max: u32 },
+    #[error("the active policy is version {current}, not {expected}")]
+    VersionMismatch { expected: i64, current: i64 },
     #[error("audit unavailable")]
     AuditUnavailable,
     #[error("{0}")]
@@ -270,6 +314,14 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
     // rolling upgrade: then the heads say what the latest version is.
     let before = reconcile(stored.clone(), &current);
 
+    if let Some(expected) = request.expected_version
+        && expected != current.version
+    {
+        return Err(StoreError::VersionMismatch {
+            expected,
+            current: current.version,
+        });
+    }
     let mut heads = before.clone();
     let mut touched: Vec<Key> = Vec::new();
     let mut deleted: Vec<Key> = Vec::new();
@@ -281,6 +333,9 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
             &mut touched,
             &mut deleted,
         )?;
+    }
+    if let Some(guard) = &request.guard {
+        guard(&current.policy, &before, &heads)?;
     }
     check_profiles_in_use(&heads)?;
 
@@ -309,6 +364,8 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
             .filter_map(|k| heads.get(k).cloned())
             .collect(),
         deleted,
+        changed: false,
+        policy: Arc::new(next.clone()),
     };
     if request.dry_run || (outcome.diff.is_empty() && !heads_changed) {
         return Ok(outcome);
@@ -346,54 +403,31 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         .iter()
         .filter_map(|k| heads.get(k).cloned())
         .collect();
+    // A resource that's gone ends what it allowed (ADR-0042 §7): its open
+    // sessions and its grants, in this transaction.
+    let gone: Vec<&str> = outcome
+        .deleted
+        .iter()
+        .filter(|(kind, _)| kind == "resource")
+        .map(|(_, name)| name.as_str())
+        .collect();
+    let (sessions_ended, grants_revoked) =
+        end_what_resources_allowed(&mut tx, &gone, &request.actor).await?;
 
+    audit_transfers(state, &request, &stored, &heads).await?;
     if version != current.version {
-        let owners: Vec<Value> = request
-            .changes
-            .iter()
-            .map(|c| change_owner(c).json())
-            .collect();
-        let access_changes: Vec<String> = outcome
-            .access
-            .changes
-            .iter()
-            .take(200)
-            .map(|c| {
-                let sign = if c.change == limen_policy::tooling::ChangeKind::Gain {
-                    '+'
-                } else {
-                    '-'
-                };
-                format!("{sign} {}", c.text())
-            })
-            .collect();
-        let data = json!({
-            "version": version,
-            "previous_version": current.version,
-            "digest": outcome.digest,
-            "source_ref": request.source_ref,
-            "diff": outcome.diff,
-            "access_changes": access_changes,
-            "owners": owners,
-        });
         // Audit before commit: if the event can't be written, nothing changes.
-        state
-            .audit
-            .emit(
-                EventKind::PolicyChange,
-                Context {
-                    user: Some(request.actor.clone()),
-                    session_id: None,
-                },
-                data,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "audit unavailable; refusing policy change");
-                StoreError::AuditUnavailable
-            })?;
+        audit_change(
+            state,
+            &request,
+            &outcome,
+            (version, current.version),
+            (sessions_ended, grants_revoked),
+        )
+        .await?;
     }
     tx.commit().await?;
+    outcome.changed = true;
     if version != current.version {
         state.policy.set(LoadedPolicy {
             version,
@@ -408,13 +442,154 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
     Ok(outcome)
 }
 
+/// One `policy.ownership_transfer` event per document a transfer moved,
+/// before commit like every other write.
+async fn audit_transfers(
+    state: &AppState,
+    request: &Request,
+    stored: &BTreeMap<Key, Head>,
+    heads: &BTreeMap<Key, Head>,
+) -> Result<(), StoreError> {
+    for change in &request.changes {
+        let Change::Transfer { key, .. } = change else {
+            continue;
+        };
+        let (Some(was), Some(now)) = (stored.get(key), heads.get(key)) else {
+            continue;
+        };
+        if was.owner == now.owner {
+            continue;
+        }
+        state
+            .audit
+            .emit(
+                EventKind::PolicyOwnershipTransfer,
+                Context {
+                    user: Some(request.actor.clone()),
+                    session_id: None,
+                },
+                json!({
+                    "document": key_text(key),
+                    "from": was.owner.json(),
+                    "to": now.owner.json(),
+                }),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "audit unavailable; refusing ownership transfer");
+                StoreError::AuditUnavailable
+            })?;
+    }
+    Ok(())
+}
+
+/// The `policy.change` event for a new version.
+async fn audit_change(
+    state: &AppState,
+    request: &Request,
+    outcome: &Outcome,
+    (version, previous): (i64, i64),
+    (sessions_ended, grants_revoked): (u64, u64),
+) -> Result<(), StoreError> {
+    let owners: Vec<Value> = request
+        .changes
+        .iter()
+        .map(|c| change_owner(c).json())
+        .collect();
+    let access_changes: Vec<String> = outcome
+        .access
+        .changes
+        .iter()
+        .take(200)
+        .map(|c| {
+            let sign = if c.change == limen_policy::tooling::ChangeKind::Gain {
+                '+'
+            } else {
+                '-'
+            };
+            format!("{sign} {}", c.text())
+        })
+        .collect();
+    let data = json!({
+        "version": version,
+        "previous_version": previous,
+        "digest": outcome.digest,
+        "source_ref": request.source_ref,
+        "diff": outcome.diff,
+        "access_changes": access_changes,
+        "owners": owners,
+        "sessions_ended": sessions_ended,
+        "grants_revoked": grants_revoked,
+    });
+    state
+        .audit
+        .emit(
+            EventKind::PolicyChange,
+            Context {
+                user: Some(request.actor.clone()),
+                session_id: None,
+            },
+            data,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| {
+            tracing::error!(error = %e, "audit unavailable; refusing policy change");
+            StoreError::AuditUnavailable
+        })
+}
+
 fn change_owner(change: &Change) -> &Owner {
     match change {
         Change::ReplaceSource { owner, .. }
         | Change::Create { owner, .. }
         | Change::Update { owner, .. }
-        | Change::Delete { owner, .. } => owner,
+        | Change::Delete { owner, .. }
+        | Change::Transfer { to: owner, .. } => owner,
     }
+}
+
+/// Queue a kill for every open session on `resources` and revoke their
+/// active grants. Returns how many of each.
+async fn end_what_resources_allowed(
+    tx: &mut Transaction<'_, Postgres>,
+    resources: &[&str],
+    by: &str,
+) -> Result<(u64, u64), StoreError> {
+    if resources.is_empty() {
+        return Ok((0, 0));
+    }
+    let names: Vec<String> = resources.iter().map(|r| (*r).to_owned()).collect();
+    let reason = "the resource was deleted";
+    let sessions = sqlx::query(
+        "INSERT INTO session_kills (session_id, reason, killed_by)
+         SELECT session_id::text, $2, $3 FROM sessions
+         WHERE resource = ANY($1) AND ended_at IS NULL
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(&names)
+    .bind(reason)
+    .bind(by)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let revoked: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "UPDATE access_grants SET revoked_at = now(), revoked_by = $2, revoke_reason = $3
+         WHERE resource = ANY($1) AND revoked_at IS NULL AND expires_at > now()
+         RETURNING request_id",
+    )
+    .bind(&names)
+    .bind(by)
+    .bind(reason)
+    .fetch_all(&mut **tx)
+    .await?;
+    if !revoked.is_empty() {
+        sqlx::query("UPDATE access_requests SET status = 'revoked' WHERE id = ANY($1)")
+            .bind(&revoked)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok((sessions, u64::try_from(revoked.len()).unwrap_or(u64::MAX)))
 }
 
 fn apply(
@@ -528,6 +703,30 @@ fn apply(
             }
             heads.remove(key);
             deleted.push(key.clone());
+        }
+        Change::Transfer {
+            from,
+            key,
+            etag,
+            to,
+        } => {
+            let existing = heads
+                .get(key)
+                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+            if let Some(from) = from {
+                owned_by(existing, from)?;
+            }
+            if existing.etag != *etag {
+                return Err(StoreError::EtagMismatch {
+                    key: key.clone(),
+                    current: existing.etag.clone(),
+                });
+            }
+            let mut head = existing.clone();
+            head.owner = to.clone();
+            actor.clone_into(&mut head.updated_by);
+            heads.insert(key.clone(), head);
+            touched.push(key.clone());
         }
     }
     Ok(())
@@ -816,6 +1015,21 @@ async fn save_heads(
 pub async fn heads(db: &db::Db) -> Result<BTreeMap<Key, Head>, StoreError> {
     let mut tx = db.begin().await?;
     load_heads(&mut tx).await
+}
+
+/// The latest policy and its heads, read together, for reads. Heads are
+/// reconciled the way a write would, without storing anything.
+pub async fn snapshot(
+    state: &AppState,
+) -> Result<(Arc<LoadedPolicy>, BTreeMap<Key, Head>), StoreError> {
+    let mut tx = state.db.begin().await?;
+    let current = state
+        .policy
+        .latest(&mut tx)
+        .await
+        .map_err(|e| StoreError::Internal(format!("loading the latest policy: {e}")))?;
+    let heads = reconcile(load_heads(&mut tx).await?, &current);
+    Ok((current, heads))
 }
 
 #[cfg(test)]
