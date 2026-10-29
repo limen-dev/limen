@@ -42,7 +42,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
                                      TB6 ── [Datadog, Grafana]
 [CLI] ──TB0── [IdP]
 [Browser] ──TB10── [Proxy] ──TB2── [Worker] ──TB10── [Web app]
-[CI / Terraform as a bot writer] ──TB8── [Proxy] ──TB13── [Control plane: management API]   (planned, ADR-0042)
+[CI / Terraform as a bot writer] ──TB8── [Proxy] ──TB13── [Control plane: management API]   (ADR-0042)
 ```
 
 ## 4. STRIDE by boundary
@@ -255,8 +255,8 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | S: marketing says more than is true (a claim that misleads operators) | ADR-0031's "will not claim" list is enforced by `check-site.mjs`; the homepage and the status page say what is unverified |
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
-### TB13: Management API and delegated writers (ADR-0042, planned for Phase 14)
-*Accepted design; stage 1 is being built. Until a row's mitigation ships, nothing serves the part it covers.*
+### TB13: Management API and delegated writers (ADR-0042, Phase 14)
+*Stage 1 is built (PRs #189 to #192): every row below ships except the stage 2 ones (writers' roles and mappings, pending changes and their approval). Bot logins are tested against a stand-in CI issuer only.*
 
 | Threat | Mitigation |
 |---|---|
@@ -300,11 +300,12 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
 7. Until IAM join exists (Phase 15), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
-9. (Phase 14, planned) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
+9. (Phase 14, stage 2) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
 
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
 | 2026-10-25 | 13 | Access requests and break-glass, audit search, discovery, policy tooling, reviews and evidence, live watch (TB11): new entry points `Access`, `AuditSearch`, `Reviews`, `Discovery`, `Watch` and the console pages; new data stores `access_*`, `audit_search`, `recording_text`, `discovered_resources`, `access_reviews`, `review_items`, `access_denies`, `session_watches`, `watch_chunks` |

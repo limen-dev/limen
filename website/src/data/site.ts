@@ -18,6 +18,7 @@ export const paletteFor = (base: string) => {
     { t: 'Kubernetes', h: docs('guides/kubernetes/'), k: 'kubectl eks k8s' },
     { t: 'Access requests and break-glass', h: docs('guides/access-requests/'), k: 'approve approval just in time jit' },
     { t: 'Bots for CI', h: docs('guides/bots/'), k: 'github actions gitlab machine identity' },
+    { t: 'Management API', h: docs('guides/management-api/'), k: 'terraform provider grpc manage writer profile' },
     { t: 'Policy reference', h: docs('reference/policy/'), k: 'yaml roles rules labels' },
     { t: 'Verify the audit chain', h: docs('runbooks/audit-verify/'), k: 'hash signed prove limen-audit-verify' },
     { t: 'Architecture and design', h: docs('architecture/design/'), k: 'design adr' },

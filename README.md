@@ -235,7 +235,7 @@ Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestone
 - [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md)
 
 **Control access**
-- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [resource discovery](docs/guides/discovery.md)
+- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API (Terraform)](docs/guides/management-api.md) · [resource discovery](docs/guides/discovery.md)
 
 **Audit and operate**
 - [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [watching a live session](docs/guides/watching-sessions.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)

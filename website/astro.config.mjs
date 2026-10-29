@@ -79,6 +79,7 @@ export default defineConfig({
           label: 'Identity and access',
           items: [
             { slug: 'docs/guides/bots' },
+            { slug: 'docs/guides/management-api' },
             { slug: 'docs/guides/access-requests' },
             { slug: 'docs/guides/access-reviews' },
             { slug: 'docs/guides/discovery' },
