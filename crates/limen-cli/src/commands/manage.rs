@@ -74,6 +74,38 @@ pub enum ManageCommand {
         #[arg(long)]
         if_exists: bool,
     },
+    /// Changes held for approval because they widen standing access.
+    #[command(subcommand)]
+    Changes(ChangesCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ChangesCommand {
+    /// Held changes, newest first: pending ones unless --state.
+    Ls {
+        /// pending, applied, rejected, cancelled, expired, or superseded.
+        #[arg(long)]
+        state: Option<String>,
+    },
+    /// One change: its writes, the access it gives, and the CI run behind it.
+    Show { id: String },
+    /// Approve a change and apply it. Not its author, nor whoever started its
+    /// CI run. If the policy moved so that it would give access you didn't
+    /// see here, it is superseded instead.
+    Approve {
+        id: String,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Refuse a change.
+    Reject {
+        id: String,
+        /// Why. Required.
+        #[arg(long)]
+        note: String,
+    },
+    /// Withdraw a change you made.
+    Cancel { id: String },
 }
 
 pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<()> {
@@ -221,9 +253,117 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
                 .context("the server sent no result")?;
             write_result(&result)
         }
+        ManageCommand::Changes(command) => changes(&mut api, command).await?,
     };
     println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
+}
+
+async fn changes(
+    api: &mut ManagementServiceClient<limen_tunnel::connect::TracedChannel>,
+    command: ChangesCommand,
+) -> anyhow::Result<Value> {
+    let change = |c: Option<pb::PolicyChange>| -> anyhow::Result<Value> {
+        Ok(policy_change(&c.context("the server sent no change")?))
+    };
+    Ok(match command {
+        ChangesCommand::Ls { state } => {
+            let state = match state {
+                None => pb::policy_change::State::Pending,
+                Some(s) => pb::policy_change::State::from_str_name(&format!(
+                    "STATE_{}",
+                    s.to_ascii_uppercase()
+                ))
+                .with_context(|| format!("unknown state {s:?}"))?,
+            };
+            let mut changes = Vec::new();
+            let mut page_token = String::new();
+            loop {
+                let page = api
+                    .list_changes(pb::ListChangesRequest {
+                        state: state.into(),
+                        page_size: 0,
+                        page_token: page_token.clone(),
+                    })
+                    .await
+                    .map_err(|s| api::status_error(&s))?
+                    .into_inner();
+                changes.extend(page.changes.iter().map(policy_change));
+                if page.next_page_token.is_empty() {
+                    break;
+                }
+                page_token = page.next_page_token;
+            }
+            Value::Array(changes)
+        }
+        ChangesCommand::Show { id } => change(
+            api.get_change(pb::GetChangeRequest { id })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .change,
+        )?,
+        ChangesCommand::Approve { id, note } => change(
+            api.approve_change(pb::ApproveChangeRequest {
+                id,
+                note: note.unwrap_or_default(),
+            })
+            .await
+            .map_err(|s| api::status_error(&s))?
+            .into_inner()
+            .change,
+        )?,
+        ChangesCommand::Reject { id, note } => change(
+            api.reject_change(pb::RejectChangeRequest { id, note })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .change,
+        )?,
+        ChangesCommand::Cancel { id } => change(
+            api.cancel_change(pb::CancelChangeRequest { id })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .change,
+        )?,
+    })
+}
+
+fn policy_change(c: &pb::PolicyChange) -> Value {
+    let impact = c.impact.clone().unwrap_or_default();
+    let writes: Vec<Value> = c
+        .writes
+        .iter()
+        .filter_map(|w| match w.operation.as_ref()? {
+            pb::write::Operation::Create(r) => r.document.as_ref().map(|d| {
+                json!({ "op": "create", "kind": kind_name(d.kind), "name": d.name, "spec": json_or_text(&d.spec_json) })
+            }),
+            pb::write::Operation::Update(r) => r.document.as_ref().map(|d| {
+                json!({ "op": "update", "kind": kind_name(d.kind), "name": d.name, "spec": json_or_text(&d.spec_json) })
+            }),
+            pb::write::Operation::Delete(r) => {
+                Some(json!({ "op": "delete", "kind": kind_name(r.kind), "name": r.name }))
+            }
+        })
+        .collect();
+    json!({
+        "id": c.id,
+        "state": pb::policy_change::State::try_from(c.state)
+            .map(|s| s.as_str_name().trim_start_matches("STATE_").to_ascii_lowercase())
+            .unwrap_or_default(),
+        "author": c.author,
+        "author_ci": c.author_ci.iter().collect::<std::collections::BTreeMap<_, _>>(),
+        "reason": c.reason,
+        "source_ref": c.source_ref,
+        "writes": writes,
+        "access_changes": impact.access_changes.iter().map(|a| a.text.clone()).collect::<Vec<_>>(),
+        "base_policy_version": c.base_policy_version,
+        "expires_at": c.expire_time_unix,
+        "decided_by": c.decided_by,
+        "decision_note": c.decision_note,
+        "applied_policy_version": c.applied_policy_version,
+    })
 }
 
 fn kind_value(kind: &str) -> anyhow::Result<i32> {
@@ -305,6 +445,7 @@ fn write_result(result: &pb::WriteResult) -> Value {
         "access_changes": impact.access_changes.iter().map(|c| c.text.clone()).collect::<Vec<_>>(),
         "widens_standing_access": impact.widens_standing_access,
         "warnings": impact.warnings,
+        "pending_change": result.pending_change.as_ref().map(policy_change),
     })
 }
 
