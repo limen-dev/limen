@@ -1598,6 +1598,20 @@ fn summarize(doc: &Document) -> String {
             d.spec.regions.join(", ")
         ),
         Document::PolicyTest(t) => format!("{} cases", t.spec.cases.len()),
+        Document::ResourceProfile(p) => format!(
+            "{} settable fields: {}",
+            p.spec.settable.len(),
+            p.spec
+                .settable
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Document::PolicyWriter(w) => format!(
+            "bot {} · namespace {} · up to {} documents",
+            w.spec.bot, w.spec.namespace, w.spec.max_documents
+        ),
     }
 }
 
@@ -1610,6 +1624,8 @@ fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
         ("Bots", "bot"),
         ("Discovery", "discovery"),
         ("Policy tests", "policy_test"),
+        ("Resource profiles", "resource_profile"),
+        ("Policy writers", "policy_writer"),
     ]
     .into_iter()
     .map(|(title, kind)| PolicyGroup {
