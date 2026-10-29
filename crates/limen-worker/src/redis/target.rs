@@ -14,7 +14,6 @@ use limen_policy::RedisTarget;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 use super::codec::{FrameScanner, Value, encode_command, parse_value};
 
@@ -117,11 +116,15 @@ pub async fn connect(
     target: &RedisTarget,
     redis_user: &str,
     session_id: &str,
+    guard: Option<&limen_policy::model::Delegated>,
 ) -> anyhow::Result<Connected> {
-    let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&target.endpoint))
-        .await
-        .context("connecting to the Redis server timed out")?
-        .with_context(|| format!("connecting to {}", target.endpoint))?;
+    let tcp = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        crate::dial::connect(&target.endpoint, guard),
+    )
+    .await
+    .context("connecting to the Redis server timed out")?
+    .with_context(|| format!("connecting to {}", target.endpoint))?;
     tcp.set_nodelay(true)?;
     let mut stream: BoxedStream = if target.tls {
         let config = settings.tls.clone().context(

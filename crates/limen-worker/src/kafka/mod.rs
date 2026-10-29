@@ -73,6 +73,9 @@ pub struct SessionConfig {
     pub slot: KafkaSlot,
     /// A field so tests can shorten it.
     pub dedupe_window: Duration,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    /// Brokers the cluster names are checked too.
+    pub guard: Option<limen_policy::model::Delegated>,
 }
 
 impl SessionConfig {
@@ -93,6 +96,7 @@ impl SessionConfig {
             target,
             slot,
             dedupe_window: DEDUPE_WINDOW,
+            guard: None,
         }
     }
 }
@@ -388,6 +392,7 @@ async fn broker_address(prepared: &Prepared) -> anyhow::Result<(String, Vec<Brok
         &c.kafka_user,
         &c.target,
         &prepared.credential,
+        c.guard.as_ref(),
     )
     .await?;
     brokers.sort_by_key(|b| b.node_id);
@@ -422,6 +427,7 @@ where
             &prepared.credential,
             &address,
             &c.kafka_user,
+            c.guard.as_ref(),
         ),
     )
     .await
@@ -1594,6 +1600,7 @@ async fn transform_response<'a>(
                         &cx.config.kafka_user,
                         &cx.config.target,
                         &cx.credential,
+                        cx.config.guard.as_ref(),
                     )
                     .await?;
                     *shared

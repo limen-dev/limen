@@ -240,6 +240,7 @@ async fn start(
         mq_user: "limen-app".into(),
         resource: "orders-mq".into(),
         target,
+        guard: None,
     };
     let prepared = prepare(&settings, grants, config).expect("prepared");
     let (client, server) = tokio::io::duplex(1 << 20);
@@ -651,6 +652,7 @@ async fn a_client_that_speaks_another_protocol_is_told_what_this_is() {
             mq_user: "limen-app".into(),
             resource: "orders-mq".into(),
             target,
+            guard: None,
         },
     )
     .expect("prepared");
@@ -702,6 +704,7 @@ fn a_missing_broker_credential_is_caught_when_the_session_is_prepared() {
             mq_user: "limen-app".into(),
             resource: "orders-mq".into(),
             target,
+            guard: None,
         },
     )
     .expect_err("no credential");
