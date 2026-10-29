@@ -1,0 +1,84 @@
+{{- range $key, $over := .Values.workers }}
+{{- $c := include "limen.merged" (dict "defaults" $.Values.workerDefaults "over" $over) | fromYaml }}
+{{- $ref := dict "component" "worker" "key" $key }}
+{{- $name := printf "worker-%s" $key }}
+{{- $px := index $.Values.proxies ($c.proxy | default (include "limen.firstKey" $.Values.proxies)) }}
+{{- $pxc := include "limen.merged" (dict "defaults" $.Values.proxyDefaults "over" $px) | fromYaml }}
+{{- $dns := first (splitList "," $pxc.dnsNames) }}
+---
+{{- if $c.serviceAccount.annotations }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{ include "limen.labels" $ref | nindent 4 }}
+  annotations: {{ toYaml $c.serviceAccount.annotations | nindent 4 }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{ include "limen.labels" $ref | nindent 4 }}
+spec:
+  replicas: {{ $c.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "limen.labels" $ref | nindent 8 }}
+    spec:
+      {{- if $c.serviceAccount.annotations }}
+      serviceAccountName: {{ $name }}
+      {{- end }}
+      {{- include "limen.pullSecrets" $ | nindent 6 }}
+      {{- if le (int $c.terminationGracePeriodSeconds) (int $c.drainTimeoutSecs) }}
+      {{- fail "workers.<key>.terminationGracePeriodSeconds must exceed worker.drainTimeoutSecs" }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds }}
+      {{- with $c.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "limen.image" (dict "root" $ "component" "worker") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: admin, containerPort: 3090 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: LIMEN_NAME, value: "{{ required "workers.<key>.namePrefix is required" $c.namePrefix }}-$(POD_NAME)" }
+            - { name: LIMEN_PROXY_ADDR, value: {{ $c.proxyAddr | default (printf "%s:%v" $dns $pxc.service.port) | quote }} }
+            - { name: LIMEN_PROXY_NAME, value: {{ $c.proxyName | default $dns | quote }} }
+            - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
+            - { name: LIMEN_MAX_SESSIONS, value: {{ $c.maxSessions | quote }} }
+            - { name: LIMEN_DRAIN_TIMEOUT_SECS, value: {{ $c.drainTimeoutSecs | quote }} }
+            - name: LIMEN_JOIN_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $c.joinSecret | default $.Values.existingSecrets.workerJoin | quote }}, key: token } }
+            - { name: LIMEN_DATA_DIR, value: /var/lib/limen/worker }
+            {{- if $c.discovery }}
+            - { name: LIMEN_DISCOVERY, value: "true" }
+            {{- end }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: ca, mountPath: /etc/limen, readOnly: true }
+            - { name: data, mountPath: /var/lib/limen/worker }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 3
+          resources: {{ toYaml $c.resources | nindent 12 }}
+      volumes:
+        - name: ca
+          configMap: { name: {{ $.Values.internalCA.configMap | quote }} }
+        - name: data
+          emptyDir: {}
+{{- end }}

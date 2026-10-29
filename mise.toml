@@ -15,5 +15,6 @@ kubectl = "1.35.4"
 # Releases and infrastructure
 gh = "2.102.0"
 terraform = "1.16.6"
+helm = "4.2.0"
 # Documentation site and homepage (website/)
 node = "24.22.1"
