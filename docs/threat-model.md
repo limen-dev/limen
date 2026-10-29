@@ -256,7 +256,7 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | T: a documentation page drifts from the repository | Pages are generated from `docs/` at build time, not copied |
 
 ### TB13: Management API and delegated writers (ADR-0042, Phase 14)
-*Stage 1 is built (PRs #189 to #192): every row below ships except the stage 2 ones (writers' roles and mappings, pending changes and their approval). Bot logins are tested against a stand-in CI issuer only.*
+*Stage 1 is built (PRs #189 to #192), and pending changes with their approval (#177). Writers' roles and mappings are not yet. Bot logins are tested against a stand-in CI issuer only.*
 
 | Threat | Mitigation |
 |---|---|
@@ -264,7 +264,10 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 | E: a writer's resource borrows another team's credentials, files, or IAM through a shared worker (confused deputy) | Writers only complete person-written resource profiles; credential, file, IAM, worker-selection, bootstrap, TLS, and audit fields are profile-only, behind a list in code that a test keeps complete for every `ResourceSpec` field |
 | S/I: a delegated resource points at the metadata endpoint or an internal address (SSRF) | Settable endpoints need `hosts` or `cidrs` and `ports`; the worker refuses loopback, link-local, unspecified, multicast, and metadata addresses, and addresses outside the profile's `cidrs`, checked on the address it dials (DNS rebinding included) |
 | E: a writer widens standing access through roles or mappings | Stage 2 only; any widening from a writer is held as a pending change for a person, whatever the grant says |
-| E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor by a person whose name equals the run's CI account; approval re-validates against the current policy and supersedes a change whose documents moved since |
+| E/R: a change is approved by the person who caused it | Only people decide changes, never bots; never its author, nor a person whose name (or the part of an email before `@`) equals the run's CI account, case-insensitive; approval re-validates against the current policy and supersedes a change whose documents moved since, or that would now give standing access the approver didn't see |
+| T: two approvers apply one change twice, or a crash leaves it half-decided | Approving claims the change first (`applying`); a second approver is refused; a claim older than five minutes, from a replica that died, can be taken again; a change is decided once |
+| E: a pending change sits until the policy around it makes it worse | Changes expire (`--policy-change-ttl`, 7 days); approval writes against the current policy, never the one it was made on, and is held to the gains the approver reviewed |
+| R: a held change, or its decision, leaves no trace | `policy.change_pending` is written in the transaction that holds the change, and `policy.change_decided` in the one that decides it: no event, no change. An applied change's `policy.change` names the change and the approver, and is written as the author |
 | T: writers overwrite or delete each other's documents | One owner per document; other owners' writes refused (`OWNED_ELSEWHERE`); `ReplaceSource` touches only its own source; etags on every update, delete, and transfer; writers can't delete tests they don't own |
 | T: concurrent writes through different replicas lose updates or audit the wrong diff | Every write holds a transaction-scoped advisory lock and computes against the latest version read inside the transaction (also fixes the existing `ApplyPolicy` race, #182) |
 | R: delegated writes can't be tied to a run | `policy.change` carries channel, source, namespace, grant, and the bot's CI facts; refusals are `policy.write_denied`, dry runs included; writes fail closed when audit is unavailable |
@@ -305,6 +308,7 @@ A static site, built by hand and not yet published or built in CI (#138). It hol
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |

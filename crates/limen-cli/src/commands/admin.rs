@@ -241,6 +241,11 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     "No changes. Policy version {} is current.",
                     resp.version
                 ));
+            } else if !resp.pending_change_id.is_empty() {
+                ui::warn(&format!(
+                    "Held for approval: it widens standing access, and another admin approves it with `limen manage changes approve {}`.",
+                    resp.pending_change_id
+                ));
             } else if resp.applied {
                 ui::success(&format!(
                     "Applied policy version {} ({})",

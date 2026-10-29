@@ -100,6 +100,14 @@ pub enum EventKind {
     /// A document moved to another owner (ADR-0042 §3).
     #[serde(rename = "policy.ownership_transfer")]
     PolicyOwnershipTransfer,
+    /// A write that widens standing access was held for a person's approval
+    /// (ADR-0042 §6).
+    #[serde(rename = "policy.change_pending")]
+    PolicyChangePending,
+    /// A held change was approved (and applied), rejected, cancelled,
+    /// superseded, or expired. `data.state` says which.
+    #[serde(rename = "policy.change_decided")]
+    PolicyChangeDecided,
     /// A proxy or worker enrolled. `data.kind` says which.
     #[serde(rename = "worker.enroll")]
     WorkerEnroll,

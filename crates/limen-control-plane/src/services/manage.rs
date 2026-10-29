@@ -1,10 +1,11 @@
 //! The management API (ADR-0042): `limen.manage.v1.ManagementService`.
 //!
 //! Callers are people with `limen:admin`, or bots with a `policy_writer`
-//! grant. Stage 1 serves reads of every kind and writes of resources; a
-//! writer only completes the profiles its grant names. Every write goes
-//! through `policy_store`, whose guard checks the grant and quota again,
-//! inside the transaction, against the latest policy.
+//! grant. It serves reads of every kind and writes of resources; a writer
+//! only completes the profiles its grant names. Every write goes through
+//! `policy_store`, whose guard checks the grant and quota again, inside the
+//! transaction, against the latest policy. A write that widens standing
+//! access beyond what a grant approves is held for a person (`changes`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -25,8 +26,12 @@ use tonic::{Code, Request, Response, Status};
 use tonic_types::{ErrorDetails, StatusExt};
 
 use crate::caller;
+use crate::config::PolicyTests;
+use crate::policy_changes;
 use crate::policy_store::{self, Change, Channel, Head, Input, Key, Owner, StoreError};
 use crate::state::{AppState, internal, unix};
+
+mod changes;
 
 const DOMAIN: &str = "manage.limen.dev";
 const MAX_SPEC_BYTES: usize = 256 * 1024;
@@ -51,6 +56,8 @@ enum Who {
     Writer {
         username: String,
         grant: Box<PolicyWriterDoc>,
+        /// The CI run behind the login (ADR-0019).
+        ci: BTreeMap<String, String>,
     },
     Other {
         username: String,
@@ -84,6 +91,7 @@ fn who<T>(state: &AppState, request: &Request<T>, policy: &Policy) -> Result<Who
             Some(grant) => Who::Writer {
                 username,
                 grant: Box::new(grant.clone()),
+                ci: id.ci.clone(),
             },
             None => Who::Other { username },
         });
@@ -492,6 +500,47 @@ fn writer_guard(bot: String, targets: Vec<Target>, transfers: Vec<Key>) -> polic
     })
 }
 
+/// The grant targets of stored changes, to check a held change's grant
+/// again when it is approved.
+fn targets_of(changes: &[Change]) -> (Vec<Target>, Vec<Key>) {
+    let kind = |k: &str| kind_name(kind_value(k)).unwrap_or("unknown");
+    let (mut targets, mut transfers) = (Vec::new(), Vec::new());
+    for change in changes {
+        let target = match change {
+            Change::Create { owner, input } | Change::Update { owner, input, .. } => Target {
+                kind: kind(&input.kind),
+                name: input.name.clone(),
+                namespace: owner.namespace.clone(),
+                profile: Completes::of(input),
+            },
+            Change::Delete { owner, key, .. } => Target {
+                kind: kind(&key.0),
+                name: key.1.clone(),
+                namespace: owner.namespace.clone(),
+                profile: Completes::Nothing,
+            },
+            Change::Transfer { key, to, .. } => {
+                transfers.push(key.clone());
+                Target {
+                    kind: kind(&key.0),
+                    name: key.1.clone(),
+                    namespace: to.namespace.clone(),
+                    profile: Completes::Nothing,
+                }
+            }
+            // Files are for people; a bot never holds one.
+            Change::ReplaceSource { owner, .. } => Target {
+                kind: "unknown",
+                name: String::new(),
+                namespace: owner.namespace.clone(),
+                profile: Completes::Nothing,
+            },
+        };
+        targets.push(target);
+    }
+    (targets, transfers)
+}
+
 // ---- Building inputs --------------------------------------------------------
 
 /// A document from a create or update: a writer's half of a resource (with a
@@ -575,6 +624,8 @@ struct Plan {
     expected_version: Option<i64>,
     /// The encoded request, for `request_id`.
     body: Vec<u8>,
+    /// The writes as sent, for approvers when the write is held.
+    writes: Vec<pb::Write>,
 }
 
 impl ManageService {
@@ -675,14 +726,23 @@ impl ManageService {
             )),
             _ => None,
         };
+        let wait = policy_changes::hold_for(
+            matches!(who, Who::Writer { .. }),
+            self.0.config.widening_approval,
+            &plan.changes,
+        );
+        let changes = plan.changes.clone();
         let request = policy_store::Request {
             actor: who.username().to_owned(),
             changes: plan.changes,
             dry_run: options.validate_only,
             require_tests: false,
+            keep_tests_passing: self.0.config.policy_tests == PolicyTests::Required,
             source_ref: Some(options.source_ref.clone()).filter(|s| !s.is_empty()),
             expected_version: plan.expected_version,
             guard,
+            hold: wait,
+            approval: None,
         };
         let outcome = match policy_store::write(&self.0, request).await {
             Ok(outcome) => outcome,
@@ -691,9 +751,33 @@ impl ManageService {
                 return Err(store_error(&e));
             }
         };
+        if outcome.held && options.fail_if_approval_needed {
+            return Err(error(
+                Code::FailedPrecondition,
+                pb::ErrorReason::ApprovalRequired,
+                "this write widens standing access and needs a person's approval",
+                &[],
+            ));
+        }
         let effective = effective_index(&outcome.policy);
+        let mut impact = impact(&outcome);
+        if outcome.held && options.validate_only {
+            impact
+                .warnings
+                .push(policy_changes::WOULD_BE_HELD.to_owned());
+        }
+        let pending_change = if outcome.held && !options.validate_only {
+            let held = self
+                .hold(who, &options, &outcome, changes, plan.writes)
+                .await?;
+            Some(changes::to_pb(&held))
+        } else {
+            None
+        };
         let result = pb::WriteResult {
-            outcome: if options.validate_only {
+            outcome: if pending_change.is_some() {
+                pb::WriteOutcome::PendingApproval
+            } else if options.validate_only {
                 pb::WriteOutcome::Validated
             } else if outcome.changed {
                 pb::WriteOutcome::Applied
@@ -707,11 +791,48 @@ impl ManageService {
                 .iter()
                 .map(|h| document(h, &effective))
                 .collect(),
-            impact: Some(impact(&outcome)),
-            pending_change: None,
+            impact: Some(impact),
+            pending_change,
         };
         self.remember(who, &options, &plan.body, &result).await;
         Ok(result)
+    }
+
+    /// Hold a write for approval (ADR-0042 §6).
+    async fn hold(
+        &self,
+        who: &Who,
+        options: &pb::WriteOptions,
+        outcome: &policy_store::Outcome,
+        changes: Vec<Change>,
+        writes: Vec<pb::Write>,
+    ) -> Result<policy_changes::Held, Status> {
+        let ci = match who {
+            Who::Writer { ci, .. } => ci.clone(),
+            _ => BTreeMap::new(),
+        };
+        let new = policy_changes::New {
+            author: who.username().to_owned(),
+            author_ci: ci,
+            plan: policy_changes::Plan {
+                changes,
+                require_tests: false,
+                gains: policy_changes::widening_gains(outcome),
+                basis: outcome.basis.clone(),
+            },
+            writes: pb::BatchWriteRequest {
+                writes,
+                options: None,
+            }
+            .encode_to_vec(),
+            impact: impact(outcome).encode_to_vec(),
+            base_policy_version: outcome.version,
+            reason: options.reason.clone(),
+            source_ref: options.source_ref.clone(),
+        };
+        policy_changes::hold(&self.0, new, self.0.config.policy_change_ttl)
+            .await
+            .map_err(|e| changes::held_error(&e))
     }
 
     /// A retry with a known `request_id` returns the first result.
@@ -789,7 +910,7 @@ fn body_hash(body: &[u8]) -> String {
         })
 }
 
-fn impact(outcome: &policy_store::Outcome) -> pb::Impact {
+pub(crate) fn impact(outcome: &policy_store::Outcome) -> pb::Impact {
     let changes = &outcome.access.changes;
     pb::Impact {
         access_changes: changes
@@ -1112,6 +1233,9 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: None,
                     body: req.encode_to_vec(),
+                    writes: vec![pb::Write {
+                        operation: Some(pb::write::Operation::Create(req.clone())),
+                    }],
                 },
             )
             .await?;
@@ -1138,6 +1262,9 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: None,
                     body: req.encode_to_vec(),
+                    writes: vec![pb::Write {
+                        operation: Some(pb::write::Operation::Update(req.clone())),
+                    }],
                 },
             )
             .await?;
@@ -1164,6 +1291,9 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: None,
                     body: req.encode_to_vec(),
+                    writes: vec![pb::Write {
+                        operation: Some(pb::write::Operation::Delete(req.clone())),
+                    }],
                 },
             )
             .await?;
@@ -1222,6 +1352,7 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: None,
                     body: req.encode_to_vec(),
+                    writes: req.writes.clone(),
                 },
             )
             .await?;
@@ -1272,6 +1403,7 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: Some(req.expected_policy_version).filter(|v| *v != 0),
                     body: req.encode_to_vec(),
+                    writes: Vec::new(),
                 },
             )
             .await?;
@@ -1317,6 +1449,7 @@ impl ManagementService for ManageService {
                     options: req.options.clone().unwrap_or_default(),
                     expected_version: None,
                     body: req.encode_to_vec(),
+                    writes: Vec::new(),
                 },
             )
             .await?;
@@ -1327,40 +1460,39 @@ impl ManagementService for ManageService {
 
     async fn get_change(
         &self,
-        _request: Request<pb::GetChangeRequest>,
+        request: Request<pb::GetChangeRequest>,
     ) -> Result<Response<pb::GetChangeResponse>, Status> {
-        Err(pending_changes_later())
+        self.get_change_rpc(request).await.map(Response::new)
     }
 
     async fn list_changes(
         &self,
         request: Request<pb::ListChangesRequest>,
     ) -> Result<Response<pb::ListChangesResponse>, Status> {
-        // Nothing is held for approval before stage 2: an empty list is true.
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
-        writers_and_admins(&who)?;
-        Ok(Response::new(pb::ListChangesResponse::default()))
+        self.list_changes_rpc(request).await.map(Response::new)
     }
 
     async fn approve_change(
         &self,
-        _request: Request<pb::ApproveChangeRequest>,
+        request: Request<pb::ApproveChangeRequest>,
     ) -> Result<Response<pb::ApproveChangeResponse>, Status> {
-        Err(pending_changes_later())
+        Box::pin(self.approve_change_rpc(request))
+            .await
+            .map(Response::new)
     }
 
     async fn reject_change(
         &self,
-        _request: Request<pb::RejectChangeRequest>,
+        request: Request<pb::RejectChangeRequest>,
     ) -> Result<Response<pb::RejectChangeResponse>, Status> {
-        Err(pending_changes_later())
+        self.reject_change_rpc(request).await.map(Response::new)
     }
 
     async fn cancel_change(
         &self,
-        _request: Request<pb::CancelChangeRequest>,
+        request: Request<pb::CancelChangeRequest>,
     ) -> Result<Response<pb::CancelChangeResponse>, Status> {
-        Err(pending_changes_later())
+        self.cancel_change_rpc(request).await.map(Response::new)
     }
 
     async fn list_policy_versions(
@@ -1421,10 +1553,6 @@ impl ManagementService for ManageService {
             "GetSchema comes in a later stage; docs/policy.md lists the settable fields",
         ))
     }
-}
-
-fn pending_changes_later() -> Status {
-    Status::unimplemented("changes held for approval come in stage 2; nothing is held before then")
 }
 
 #[cfg(test)]

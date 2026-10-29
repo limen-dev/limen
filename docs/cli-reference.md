@@ -1323,3 +1323,79 @@ Options:
 - `--etag <ETAG>`: Required unless --if-exists.
 - `--if-exists`: Succeed when it's already gone.
 
+#### `limen manage changes`
+
+Changes held for approval because they widen standing access
+
+```text
+Usage: limen manage changes [OPTIONS] <COMMAND>
+```
+
+##### `limen manage changes ls`
+
+Held changes, newest first: pending ones unless --state
+
+```text
+Usage: limen manage changes ls [OPTIONS]
+```
+
+Options:
+
+- `--state <STATE>`: pending, applied, rejected, cancelled, expired, or superseded.
+
+##### `limen manage changes show`
+
+One change: its writes, the access it gives, and the CI run behind it
+
+```text
+Usage: limen manage changes show [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+##### `limen manage changes approve`
+
+Approve a change and apply it. Not its author, nor whoever started its CI run. If the policy moved so that it would give access you didn't see here, it is superseded instead
+
+```text
+Usage: limen manage changes approve [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`
+
+##### `limen manage changes reject`
+
+Refuse a change
+
+```text
+Usage: limen manage changes reject [OPTIONS] --note <NOTE> <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`: Why. Required.
+
+##### `limen manage changes cancel`
+
+Withdraw a change you made
+
+```text
+Usage: limen manage changes cancel [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
