@@ -102,7 +102,7 @@ impl Admin for AdminService {
                 source_ref: source_ref.clone(),
                 expected_version: None,
                 guard: None,
-                hold: policy_changes::hold_for(false, self.0.config.widening_approval, &changes),
+                hold: policy_changes::hold_for(None, self.0.config.widening_approval),
                 approval: None,
             },
         )

@@ -20,38 +20,10 @@ fn create(kind: &str, profile: Option<&str>) -> Change {
 }
 
 #[test]
-fn only_resources_from_profiles_are_approved_by_the_grant() {
-    assert!(!beyond_profiles(&[create("resource", Some("pg"))]));
-    assert!(beyond_profiles(&[create("resource", None)]));
-    assert!(beyond_profiles(&[create("role_mapping", None)]));
-    assert!(beyond_profiles(&[
-        create("resource", Some("pg")),
-        create("role", None)
-    ]));
-    let delete = |kind: &str| Change::Delete {
-        owner: Owner::default_git(),
-        key: (kind.into(), "x".into()),
-        etag: None,
-        allow_missing: true,
-    };
-    assert!(!beyond_profiles(&[delete("resource")]));
-    assert!(beyond_profiles(&[delete("role")]));
-}
-
-#[test]
 fn people_are_held_only_when_everything_is() {
-    let changes = [create("role", None)];
-    assert!(hold_for(false, WideningApproval::Writers, &changes).is_none());
-    assert!(hold_for(false, WideningApproval::All, &changes).is_some());
-    assert!(hold_for(true, WideningApproval::Writers, &changes).is_some());
-    assert!(
-        hold_for(
-            true,
-            WideningApproval::Writers,
-            &[create("resource", Some("pg"))]
-        )
-        .is_none()
-    );
+    assert!(hold_for(None, WideningApproval::Writers).is_none());
+    assert!(hold_for(None, WideningApproval::All).is_some());
+    assert!(hold_for(Some("payments"), WideningApproval::Writers).is_some());
 }
 
 #[test]

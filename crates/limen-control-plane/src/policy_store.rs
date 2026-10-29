@@ -213,9 +213,11 @@ pub type Guard = Arc<
         + Sync,
 >;
 
-/// Decides, from what a write would do, that it waits for approval instead
-/// (ADR-0042 §6). Runs inside the write, after the guard and the tests.
-pub type Hold = Arc<dyn Fn(&Outcome) -> bool + Send + Sync>;
+/// Decides, from what a write would do and the heads before and after it,
+/// that it waits for approval instead (ADR-0042 §6). Runs inside the write,
+/// after the guard and the tests.
+pub type Hold =
+    Arc<dyn Fn(&Outcome, &BTreeMap<Key, Head>, &BTreeMap<Key, Head>) -> bool + Send + Sync>;
 
 /// A write: its changes, applied together as one version.
 #[derive(Clone)]
@@ -361,7 +363,7 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
     if let Some(guard) = &request.guard {
         guard(&current.policy, &before, &heads)?;
     }
-    check_profiles_in_use(&heads)?;
+    check_in_use(&before, &heads)?;
 
     let documents = effective(&heads)?;
     let next = Policy::from_documents(documents).map_err(|e| StoreError::Invalid(e.to_string()))?;
@@ -396,7 +398,11 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         held: false,
         basis: basis(&request.changes, &before),
     };
-    outcome.held = !outcome.diff.is_empty() && request.hold.as_ref().is_some_and(|h| h(&outcome));
+    outcome.held = !outcome.diff.is_empty()
+        && request
+            .hold
+            .as_ref()
+            .is_some_and(|h| h(&outcome, &before, &heads));
     if request.dry_run || outcome.held || (outcome.diff.is_empty() && !heads_changed) {
         return Ok(outcome);
     }
@@ -823,28 +829,60 @@ fn apply(
 }
 
 /// A profile can't go while a resource still completes it.
-fn check_profiles_in_use(heads: &BTreeMap<Key, Head>) -> Result<(), StoreError> {
-    let mut missing: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+/// Refuse to leave a document that something still uses: a profile its
+/// resources or a writer grant name, or a bot a writer grant names
+/// (ADR-0042 §7). `IN_USE` says who uses it. Only what the write removes
+/// counts: naming something that never existed is an invalid document.
+fn check_in_use(
+    before: &BTreeMap<Key, Head>,
+    heads: &BTreeMap<Key, Head>,
+) -> Result<(), StoreError> {
+    let mut missing: BTreeMap<Key, Vec<String>> = BTreeMap::new();
+    let mut need = |key: Key, by: &Head| {
+        if before.contains_key(&key) && !heads.contains_key(&key) {
+            missing.entry(key).or_default().push(key_text(&by.key()));
+        }
+    };
     for head in heads.values() {
-        if let Some(profile) = &head.profile
-            && !heads.contains_key(&("resource_profile".to_owned(), profile.clone()))
-        {
-            missing
-                .entry(profile.as_str())
-                .or_default()
-                .push(key_text(&head.key()));
+        if let Some(profile) = &head.profile {
+            need(("resource_profile".to_owned(), profile.clone()), head);
+        }
+        if head.kind == "policy_writer" {
+            let spec = head.input.get("spec");
+            if let Some(bot) = spec.and_then(|s| s.get("bot")).and_then(Value::as_str) {
+                need(("bot".to_owned(), bot.to_owned()), head);
+            }
+            let profiles = spec
+                .and_then(|s| s.get("profiles"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str);
+            for profile in profiles {
+                need(("resource_profile".to_owned(), profile.to_owned()), head);
+            }
         }
     }
     match missing.into_iter().next() {
-        Some((profile, mut used_by)) => {
+        Some((key, mut used_by)) => {
             used_by.truncate(20);
-            Err(StoreError::InUse {
-                key: ("resource_profile".into(), profile.to_owned()),
-                used_by,
-            })
+            Err(StoreError::InUse { key, used_by })
         }
         None => Ok(()),
     }
+}
+
+/// The policy the heads make without the ones `drop` picks.
+pub fn policy_without(
+    heads: &BTreeMap<Key, Head>,
+    drop: impl Fn(&Head) -> bool,
+) -> Result<Policy, StoreError> {
+    let kept: BTreeMap<Key, Head> = heads
+        .iter()
+        .filter(|(_, h)| !drop(h))
+        .map(|(k, h)| (k.clone(), h.clone()))
+        .collect();
+    Policy::from_documents(effective(&kept)?).map_err(|e| StoreError::Invalid(e.to_string()))
 }
 
 /// The documents enforcement uses: whole documents as written, and resources
