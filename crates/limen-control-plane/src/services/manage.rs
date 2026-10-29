@@ -244,16 +244,6 @@ fn required_kind(kind: i32) -> Result<&'static str, Status> {
     kind_name(kind).ok_or_else(|| Status::invalid_argument("kind is required"))
 }
 
-/// Stage 1 writes resources only; the other kinds come with the guardrails.
-fn writable_kind(kind: i32) -> Result<&'static str, Status> {
-    match required_kind(kind)? {
-        "resource" => Ok("resource"),
-        other => Err(Status::unimplemented(format!(
-            "writing {other} documents through the management API comes in a later stage; apply them from files"
-        ))),
-    }
-}
-
 fn channel_value(channel: Channel) -> i32 {
     match channel {
         Channel::Git => pb::Channel::Git,
@@ -392,11 +382,17 @@ fn check_grant(grant: &WriterSpec, target: &Target) -> Result<(), StoreError> {
             format!("{:?} doesn't match {:?}", target.name, grant.names),
         ));
     }
-    if target.kind != "resource" {
+    if !grant.kinds.iter().any(|k| k.as_str() == target.kind) {
         return Err(denied(
             "kind",
             format!("this writer can't write {}", target.kind),
         ));
+    }
+    if target.kind != "resource" {
+        return match target.profile {
+            Completes::Profile(_) => Err(denied("profile", "only resources complete profiles")),
+            Completes::Nothing | Completes::NoProfile => Ok(()),
+        };
     }
     match &target.profile {
         Completes::NoProfile => Err(denied(
@@ -440,6 +436,67 @@ fn check_fields(policy: &Policy, input: &Input) -> Result<(), StoreError> {
         })
 }
 
+/// Built-in roles (`limen:admin`, `limen:auditor`, and any later one) are
+/// never a writer's to name or assign.
+fn builtin_role(role: &str) -> bool {
+    role.starts_with("limen:")
+}
+
+/// The escalation rules for what a writer writes (ADR-0042 §4): a role is
+/// never built-in, requestable, or break-glass (access by request isn't
+/// standing, so it wouldn't wait for a person, and a writer could name its
+/// own approvers); a mapping never assigns a built-in role. The roles a
+/// mapping assigns must also be the writer's own, checked in the guard.
+fn check_content(kind: &str, value: &Value) -> Result<(), StoreError> {
+    let spec = value.get("spec");
+    match kind {
+        "role" => {
+            let name = value
+                .get("metadata")
+                .and_then(|m| m.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if builtin_role(name) {
+                return Err(denied("builtin_role", format!("{name} is a built-in role")));
+            }
+            let spec = spec.and_then(Value::as_object);
+            if spec.is_some_and(|s| s.get("request").is_some_and(|r| !r.is_null())) {
+                return Err(denied(
+                    "field",
+                    "a writer's role can't be requestable: request is for people to set",
+                ));
+            }
+            if spec.is_some_and(|s| s.get("break_glass").and_then(Value::as_bool) == Some(true)) {
+                return Err(denied("field", "a writer's role can't be break-glass"));
+            }
+        }
+        "role_mapping" => {
+            for role in mapped_roles(value) {
+                if builtin_role(role) {
+                    return Err(denied(
+                        "builtin_role",
+                        format!("a writer can't assign the built-in role {role}"),
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The roles a `role_mapping` assigns.
+fn mapped_roles(value: &Value) -> impl Iterator<Item = &str> {
+    value
+        .get("spec")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|g| g.get("roles").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
 fn writer_resource(input: &Input) -> WriterResource {
     let metadata = input.value.get("metadata");
     WriterResource {
@@ -468,6 +525,26 @@ fn writer_guard(bot: String, targets: Vec<Target>, transfers: Vec<Key>) -> polic
         let spec = &grant.spec;
         for target in &targets {
             check_grant(spec, target)?;
+            let Some(head) = after.get(&(target.kind.to_owned(), target.name.clone())) else {
+                continue;
+            };
+            check_content(target.kind, &head.input)?;
+            // A mapping assigns only roles this namespace owns, as they
+            // stand after the write.
+            for role in mapped_roles(&head.input) {
+                let owned = after
+                    .get(&("role".to_owned(), role.to_owned()))
+                    .is_some_and(|r| r.owner.namespace == spec.namespace);
+                if !owned {
+                    return Err(denied(
+                        "role",
+                        format!(
+                            "{role} isn't a role in namespace {:?}: a writer assigns only its own roles",
+                            spec.namespace
+                        ),
+                    ));
+                }
+            }
         }
         // A transfer stays inside the namespace on both ends.
         for key in &transfers {
@@ -546,7 +623,7 @@ fn targets_of(changes: &[Change]) -> (Vec<Target>, Vec<Key>) {
 /// A document from a create or update: a writer's half of a resource (with a
 /// profile), or a whole resource (admins).
 fn input_of(doc: &pb::Document) -> Result<Input, Status> {
-    let kind = writable_kind(doc.kind)?;
+    let kind = required_kind(doc.kind)?;
     if doc.name.is_empty() {
         return Err(Status::invalid_argument("name is required"));
     }
@@ -560,12 +637,31 @@ fn input_of(doc: &pb::Document) -> Result<Input, Status> {
             "description exceeds {MAX_DESCRIPTION} characters"
         )));
     }
-    let spec: Map<String, Value> = if doc.spec_json.trim().is_empty() {
-        Map::new()
+    let spec: Value = if doc.spec_json.trim().is_empty() {
+        Value::Object(Map::new())
     } else {
         serde_json::from_str(&doc.spec_json)
             .map_err(|e| Status::invalid_argument(format!("spec_json: {e}")))?
     };
+    // A mapping's spec is a list of groups; every other kind's is an object.
+    let shape_ok = if kind == "role_mapping" {
+        spec.is_array()
+    } else {
+        spec.is_object()
+    };
+    if !shape_ok {
+        return Err(Status::invalid_argument(format!(
+            "spec_json for {kind} must be a JSON {}",
+            if kind == "role_mapping" {
+                "array"
+            } else {
+                "object"
+            }
+        )));
+    }
+    if !doc.profile.is_empty() && kind != "resource" {
+        return Err(Status::invalid_argument("profile is for resources only"));
+    }
     let labels: BTreeMap<&String, &String> = doc.labels.iter().collect();
     let mut metadata = json!({ "name": doc.name, "labels": labels });
     if !doc.description.is_empty() {
@@ -688,9 +784,10 @@ impl ManageService {
                 .iter()
                 .try_for_each(|t| check_grant(grant, t))
                 .and_then(|()| {
-                    plan.inputs
-                        .iter()
-                        .try_for_each(|i| check_fields(&policy.policy, i))
+                    plan.inputs.iter().try_for_each(|i| {
+                        check_content(&i.kind, &i.value)?;
+                        check_fields(&policy.policy, i)
+                    })
                 });
             if let Err(e) = early {
                 self.audit_denied(who, &e, options.validate_only).await;
@@ -727,9 +824,8 @@ impl ManageService {
             _ => None,
         };
         let wait = policy_changes::hold_for(
-            matches!(who, Who::Writer { .. }),
+            who.grant().map(|g| g.namespace.as_str()),
             self.0.config.widening_approval,
-            &plan.changes,
         );
         let changes = plan.changes.clone();
         let request = policy_store::Request {
@@ -968,7 +1064,7 @@ fn create_plan(
     let input = input_of(doc)?;
     let owner = owner_of(who, req.ownership.as_ref())?;
     let target = Target {
-        kind: "resource",
+        kind: required_kind(doc.kind)?,
         name: input.name.clone(),
         namespace: owner.namespace.clone(),
         profile: Completes::of(&input),
@@ -997,7 +1093,7 @@ fn update_plan(
     let input = input_of(doc)?;
     let owner = owner_of(who, req.ownership.as_ref())?;
     let target = Target {
-        kind: "resource",
+        kind: required_kind(doc.kind)?,
         name: input.name.clone(),
         namespace: owner.namespace.clone(),
         profile: Completes::of(&input),
@@ -1014,7 +1110,7 @@ fn update_plan(
 }
 
 fn delete_plan(who: &Who, req: &pb::DeleteDocumentRequest) -> Result<(Change, Target), Status> {
-    let kind = writable_kind(req.kind)?;
+    let kind = required_kind(req.kind)?;
     if req.etag.is_empty() && !req.allow_missing {
         return Err(Status::invalid_argument(
             "etag is required unless allow_missing",
@@ -1102,7 +1198,7 @@ impl ManagementService for ManageService {
                     name: grant.metadata.name.clone(),
                     namespace: spec.namespace.clone(),
                     name_patterns: spec.names.clone(),
-                    kinds: vec![pb::DocumentKind::Resource.into()],
+                    kinds: spec.kinds.iter().map(|k| kind_value(k.as_str())).collect(),
                     profiles: spec.profiles.clone(),
                     max_documents: spec.max_documents,
                     document_count: u32::try_from(owned).unwrap_or(u32::MAX),
@@ -1611,6 +1707,87 @@ mod tests {
     }
 
     #[test]
+    fn writers_write_the_kinds_their_grant_names() {
+        let mut g = grant();
+        g.kinds.push(delegation::WriterKind::Role);
+        let role = |profile: Completes| Target {
+            kind: "role",
+            name: "payments-readers".into(),
+            namespace: "payments".into(),
+            profile,
+        };
+        check_grant(&g, &role(Completes::NoProfile)).expect("a role");
+        check_grant(&g, &role(Completes::Nothing)).expect("a role's delete");
+        let refused = check_grant(&g, &role(Completes::Profile("payments-postgres".into())));
+        assert!(matches!(
+            refused,
+            Err(StoreError::Denied {
+                rule: "profile",
+                ..
+            })
+        ));
+        // People-only kinds have no WriterKind, so no grant can name them.
+        for kind in ["bot", "discovery", "resource_profile", "policy_writer"] {
+            let t = Target {
+                kind,
+                ..role(Completes::NoProfile)
+            };
+            assert!(
+                matches!(
+                    check_grant(&g, &t),
+                    Err(StoreError::Denied { rule: "kind", .. })
+                ),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn writers_never_name_built_in_or_requestable_roles() {
+        let rule = |kind: &str, value: Value| match check_content(kind, &value) {
+            Err(StoreError::Denied { rule, .. }) => rule,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        let writer_role =
+            |spec: Value| json!({ "metadata": { "name": "payments-x" }, "spec": spec });
+        check_content("role", &writer_role(json!({ "allow": [] }))).expect("a plain role");
+        assert_eq!(
+            rule(
+                "role",
+                json!({ "metadata": { "name": "limen:admin" }, "spec": {} })
+            ),
+            "builtin_role"
+        );
+        assert_eq!(
+            rule(
+                "role",
+                writer_role(json!({ "request": { "who": { "groups": ["x"] } } }))
+            ),
+            "field"
+        );
+        assert_eq!(
+            rule("role", writer_role(json!({ "break_glass": true }))),
+            "field"
+        );
+        check_content(
+            "role",
+            &writer_role(json!({ "request": null, "break_glass": false })),
+        )
+        .expect("unset is fine");
+        let mapping =
+            |roles: Value| json!({ "spec": [{ "idp_group": "payments", "roles": roles }] });
+        check_content("role_mapping", &mapping(json!(["payments-readers"]))).expect("its own role");
+        assert_eq!(
+            rule("role_mapping", mapping(json!(["limen:auditor"]))),
+            "builtin_role"
+        );
+        assert_eq!(
+            mapped_roles(&mapping(json!(["a", "b"]))).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+    }
+
+    #[test]
     fn error_reasons_carry_their_names() {
         let status = store_error(&denied("namespace", "no"));
         assert_eq!(status.code(), Code::PermissionDenied);
@@ -1655,14 +1832,24 @@ mod tests {
             "db.payments.internal:5432"
         );
         assert_eq!(input.value["metadata"]["labels"]["env"], "staging");
-        // Other kinds wait for stage 2.
+        // Only resources complete profiles; a mapping's spec is a list.
         let role = pb::Document {
             kind: pb::DocumentKind::Role.into(),
-            ..doc
+            ..doc.clone()
         };
         assert_eq!(
-            input_of(&role).expect_err("stage 2").code(),
-            Code::Unimplemented
+            input_of(&role).expect_err("a role has no profile").code(),
+            Code::InvalidArgument
         );
+        let mapping = pb::Document {
+            kind: pb::DocumentKind::RoleMapping.into(),
+            profile: String::new(),
+            spec_json: r#"[{"idp_group":"payments","roles":["payments-readers"]}]"#.into(),
+            ..doc
+        };
+        let input = input_of(&mapping).expect("a mapping");
+        assert_eq!(input.kind, "role_mapping");
+        assert!(input.value["spec"].is_array());
+        assert_eq!(input.value["version"], "v1");
     }
 }
