@@ -17,7 +17,7 @@ The scripts are plain bash, tested on macOS and untested on Linux. On Windows us
 ## 1. Start it
 
 ```sh
-git clone https://github.com/jfcmartins/limen && cd limen
+git clone https://github.com/limen-dev/limen && cd limen
 deploy/compose/setup.sh
 ```
 
