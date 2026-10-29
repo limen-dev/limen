@@ -199,7 +199,7 @@ as_bot manage put-resource demo-api --profile demo-ssh --spec "$spec" --label en
 [ "$(json 'd["outcome"]' < "$state/work/held.json")" = pending_approval ] \
   || { cat "$state/work/held.json"; fail "access from the writer's own mapping went through"; }
 change="$(json 'd["pending_change"]["id"]' < "$state/work/held.json")"
-json '"\n".join("  waits: " + c for c in d["pending_change"]["access_changes"] if c.startswith("group:viewers"))' < "$state/work/held.json"
+json '"\n".join("  waits: " + c for c in d["pending_change"]["access_changes"] if "viewers" in c)' < "$state/work/held.json"
 if as_admin manage get resource demo-api >/dev/null 2>&1; then fail "a held resource exists"; fi
 if as_bot manage changes approve "$change" >/dev/null 2>"$state/work/refused.err"; then fail "the bot approved its own change"; fi
 grep -q "bots never do" "$state/work/refused.err" || { cat "$state/work/refused.err"; fail "the bot was refused for the wrong reason"; }
@@ -219,11 +219,11 @@ as_admin manage put role demo-auditors --source console/demo \
   --spec '{"allow":[{"resources":{"kind":["ssh"],"labels":{"team":["demo"]}},"ssh":{"logins":["ubuntu"]}}]}' \
   | json 'd["outcome"]' | grep -q applied || fail "an admin's role"
 etag="$(as_admin manage get bot demo-terraform | json 'd["etag"]')"
-if as_admin manage delete bot demo-terraform --source default --etag "$etag" >/dev/null 2>"$state/work/refused.err"; then
-  fail "deleted a bot a writer grant names"
+if as_admin manage delete bot demo-terraform --source console/demo --etag "$etag" >/dev/null 2>"$state/work/refused.err"; then
+  fail "the API deleted a bot that files own"
 fi
-grep -q "IN_USE\|still used" "$state/work/refused.err" || { cat "$state/work/refused.err"; fail "wrong refusal for an in-use bot"; }
-pass "an admin's role went through; a bot a grant names can't be deleted"
+grep -q 'managed by git source "default"' "$state/work/refused.err" || { cat "$state/work/refused.err"; fail "wrong refusal for a bot files own"; }
+pass "an admin's role went through; what files own stays theirs"
 
 step "The audit trail tells the story"
 "${compose[@]}" cp control-plane:/var/lib/limen/audit/control-plane.jsonl "$state/work/audit.jsonl" >/dev/null
