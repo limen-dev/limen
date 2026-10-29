@@ -1030,9 +1030,7 @@ pub(crate) fn impact(outcome: &policy_store::Outcome) -> pb::Impact {
                 text: c.text(),
             })
             .collect(),
-        widens_standing_access: changes
-            .iter()
-            .any(|c| c.change == ChangeKind::Gain && c.via == Via::Standing),
+        widens_standing_access: changes.iter().any(policy_changes::gives_standing),
         tests: outcome
             .tests
             .results

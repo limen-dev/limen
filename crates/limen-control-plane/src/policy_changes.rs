@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use limen_audit::{Context, EventKind};
-use limen_policy::tooling::{AccessChange, AccessDiff, ChangeKind, Via};
+use limen_policy::tooling::{AccessChange, AccessDiff, ChangeKind, Subject, Via};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -130,6 +130,15 @@ pub enum Error {
 
 // ---- What needs approval ----------------------------------------------------
 
+/// Whether `c` gives someone standing access they didn't have: a group or a
+/// bot. A role that reaches more ("role `x` gains ...") is access nobody
+/// holds until a mapping or a bot gives it to someone, and that shows as
+/// their gain in the same diff.
+#[must_use]
+pub fn gives_standing(c: &AccessChange) -> bool {
+    c.change == ChangeKind::Gain && c.via == Via::Standing && !matches!(c.subject, Subject::Role(_))
+}
+
 /// The standing access a write gives that nobody had, one line each.
 #[must_use]
 pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
@@ -137,7 +146,7 @@ pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
         .access
         .changes
         .iter()
-        .filter(|c| c.change == ChangeKind::Gain && c.via == Via::Standing)
+        .filter(|c| gives_standing(c))
         .map(AccessChange::text)
         .collect()
 }
@@ -146,7 +155,7 @@ fn gains_of(access: &AccessDiff) -> BTreeSet<String> {
     access
         .changes
         .iter()
-        .filter(|c| c.change == ChangeKind::Gain && c.via == Via::Standing)
+        .filter(|c| gives_standing(c))
         .map(AccessChange::text)
         .collect()
 }

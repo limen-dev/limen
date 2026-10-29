@@ -61,3 +61,43 @@ fn applying_reads_as_pending() {
     assert_eq!(State::parse("superseded"), Some(State::Superseded));
     assert_eq!(State::parse("nope"), None);
 }
+
+#[test]
+fn only_people_and_bots_gain_standing_access() {
+    use limen_core::resource::ResourceKind;
+    use limen_policy::tooling::{AccessChange, ChangeKind, Subject, Via};
+    let change = |subject: Subject, change: ChangeKind, via: Via| AccessChange {
+        change,
+        subject,
+        resource: "web".into(),
+        kind: ResourceKind::Ssh,
+        via,
+        principals: vec!["ubuntu".into()],
+    };
+    assert!(gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    assert!(gives_standing(&change(
+        Subject::Bot("ci".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    // A role reaching more is nobody's access until someone holds it.
+    assert!(!gives_standing(&change(
+        Subject::Role("ops".into()),
+        ChangeKind::Gain,
+        Via::Standing
+    )));
+    assert!(!gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Gain,
+        Via::Request
+    )));
+    assert!(!gives_standing(&change(
+        Subject::Group("sre".into()),
+        ChangeKind::Loss,
+        Via::Standing
+    )));
+}
