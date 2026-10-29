@@ -69,8 +69,28 @@ impl Admin for AdminService {
                 .map(|s| (s.name.as_str(), s.content.as_str())),
         )
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        // Versions and diffs are about what admins applied, not discovered resources.
-        let current = self.0.policy.base();
+        // Versions and diffs are about what admins applied, not discovered
+        // resources. A write holds the policy lock and starts from the latest
+        // version in the database, never this replica's copy, which another
+        // replica's apply reaches only at the next refresh (#182). A dry run
+        // reads the latest too, without the lock.
+        let mut tx = self
+            .0
+            .db
+            .begin()
+            .await
+            .map_err(|e| internal("starting transaction", e))?;
+        if !req.dry_run {
+            db::lock_policy_writes(&mut tx)
+                .await
+                .map_err(|e| internal("locking policy writes", e))?;
+        }
+        let current = self
+            .0
+            .policy
+            .latest(&mut tx)
+            .await
+            .map_err(|e| internal("loading the latest policy", e))?;
         let diff = current.policy.diff(&next);
         let digest = next.digest();
         let proto_diff = PolicyDiff {
@@ -149,12 +169,6 @@ impl Admin for AdminService {
         let documents = serde_json::to_value(next.documents())
             .map_err(|e| internal("serializing policy", e))?;
         let source_ref = Some(req.source_ref.as_str()).filter(|s| !s.is_empty());
-        let mut tx = self
-            .0
-            .db
-            .begin()
-            .await
-            .map_err(|e| internal("starting transaction", e))?;
         let version = db::insert_policy(&mut tx, &digest, &documents, &admin.username, source_ref)
             .await
             .map_err(|e| internal("storing policy", e))?;

@@ -159,23 +159,36 @@ impl PolicyStore {
 
     /// Reload from the database if another replica applied a newer version.
     pub async fn refresh(&self, db: &Db) -> anyhow::Result<()> {
-        let latest = db::latest_policy_version(db).await?.unwrap_or(0);
-        if latest == self.base().version {
-            return Ok(());
+        let mut conn = db.acquire().await?;
+        self.latest(&mut conn).await.map(|_| ())
+    }
+
+    /// The applied policy as the database has it now, read on `conn` (inside a
+    /// transaction, when the caller is about to write). Installs it when its
+    /// version differs from this replica's copy, older included, so a database
+    /// restored from a backup takes effect. A write must start from this, never
+    /// from [`PolicyStore::base`], which another replica's apply reaches only
+    /// at the next refresh (#182).
+    pub async fn latest(&self, conn: &mut sqlx::PgConnection) -> anyhow::Result<Arc<LoadedPolicy>> {
+        let known = self.base();
+        let latest = db::latest_policy_version(&mut *conn).await?.unwrap_or(0);
+        if latest == known.version {
+            return Ok(known);
         }
-        let Some(row) = db::latest_policy(db).await? else {
-            return Ok(());
+        let Some(row) = db::latest_policy(&mut *conn).await? else {
+            return Ok(known);
         };
         let docs: Vec<limen_policy::Document> = serde_json::from_value(row.documents)?;
         let policy = Policy::from_documents(docs)?;
         tracing::info!(version = row.version, digest = %row.digest, "loaded policy");
-        self.set(LoadedPolicy {
+        let loaded = LoadedPolicy {
             version: row.version,
             policy: Arc::new(policy),
             author: row.author,
             created_at: Some(row.created_at),
-        });
-        Ok(())
+        };
+        self.set(loaded.clone());
+        Ok(Arc::new(loaded))
     }
 }
 
