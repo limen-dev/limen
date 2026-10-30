@@ -27,8 +27,6 @@ In `ci-rust.yml` the slow test and image jobs start only after lint passes, so a
 |---|---|
 | `ubuntu-24.04` | Lint, buf, Linux x86_64 tests, container images, audit, infra, actionlint, website build and browser matrix |
 | `ubuntu-24.04-arm` | Linux arm64 tests |
-| `macos-latest` | macOS unit tests: pushes to `main`, releases and manual runs only. macOS minutes count 10x on a private repository |
+| `macos-latest` | macOS unit tests |
 
-Minutes come from the `limen-dev` organization's plan. Check usage under the organization's Settings, Billing.
-
-Hosted runners are small. The integration job compiles two crates at a time (`CARGO_BUILD_JOBS=2`) and frees disk before it builds.
+The repository is public, so standard hosted runners cost no minutes. They have about 145 GB of disk, so jobs neither cap the build's parallelism nor free disk first.

@@ -243,7 +243,7 @@ Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded a
 | T: one job leaves state for the next | Each job gets a new VM. The Rust cache is written only from `main` (`save-if`), so a pull request cannot poison it for later runs |
 | I: the checkout token leaks into logs or onto disk | `persist-credentials: false` writes no token into `.git/config`. Nothing echoes it |
 | S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint` |
-| D: a job runs out of memory, disk or minutes | Every job has a timeout. Integration tests compile two crates at a time and free disk first. macOS tests skip pull requests to save minutes. A lost job is rerun by hand |
+| D: a job hangs or a runner is lost | Every job has a timeout. A lost job is rerun by hand |
 
 Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.
 
