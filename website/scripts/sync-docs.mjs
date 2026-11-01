@@ -16,6 +16,21 @@ const GITHUB = 'https://github.com/limen-dev/limen';
 // Generated sections. Hand-written pages live beside them and are never touched.
 const generated = ['guides', 'runbooks', 'architecture', 'reference'];
 
+/** Short sidebar labels for pages whose H1 is too long for the sidebar. The page keeps its own title. */
+const SHORT = {
+  'guides/cli': 'The CLI',
+  'guides/databases': 'SQL databases',
+  'guides/mongodb': 'MongoDB',
+  'guides/search': 'OpenSearch and Elastic',
+  'guides/kubernetes': 'Kubernetes',
+  'guides/tcp': 'Raw TCP',
+  'guides/bots': 'CI bots',
+  'guides/management-api': 'Management API',
+  'guides/policy-tooling': 'Policy tests and explain',
+  'runbooks/audit-verify': 'Verify the audit chain',
+  'architecture/components': 'Server programs',
+};
+
 /** @type {Map<string, {slug: string, label?: string}>} repo-relative source -> page */
 const pages = new Map();
 
@@ -163,7 +178,7 @@ function transform(srcPath, page) {
   }
   const body = kept.join('\n').replace(/^\s+/, '');
   const adr = /^ADR-(\d+): (.*)$/.exec(title);
-  const label = page.label ?? (adr ? `${adr[1]} ${adr[2]}` : title);
+  const label = page.label ?? SHORT[page.slug] ?? (adr ? `${adr[1]} ${adr[2]}` : title);
   const fm = [
     '---',
     `title: ${JSON.stringify(title || page.slug)}`,

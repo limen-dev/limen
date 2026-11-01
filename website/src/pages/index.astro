@@ -68,7 +68,7 @@ const groups: Group[] = [
     ],
   },
 ];
-const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos)).filter((l) => l.color.startsWith('#'));
+const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l) => l.color.startsWith('#')).map((l) => ({ l, href: i.href }))));
 
 // The ⌘K palette. Plain data, no third-party search.
 ---
@@ -97,7 +97,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos)).filter(
             </div>
             <div class="strip" aria-label="Works with">
               <span>Works with</span>
-              {logoStrip.map((l) => <span class="logo sm" style={`--brand:${l.color}`} role="img" aria-label={l.label} title={l.label} set:html={l.svg} />)}
+              {logoStrip.map(({ l, href }) => <a class="logo sm" style={`--brand:${l.color}`} href={docs(href)} aria-label={`${l.label} guide`} title={l.label} set:html={l.svg} />)}
             </div>
             <ul class="facts">
               <li><b>1 hour</b> certificates, no static keys</li>
@@ -307,7 +307,6 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos)).filter(
               </div>
             </div>
           ))}
-          <p class="fineprint logo-note">Product names and logos belong to their owners and appear only to say what Limen works with. It does not imply endorsement.</p>
         </div>
       </section>
 
