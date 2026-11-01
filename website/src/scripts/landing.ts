@@ -404,3 +404,27 @@ const scenarios: Record<string, Step[]> = {
     }, { threshold: 0.3 }).observe(theater);
   } else start();
 }
+
+
+// PROTOCOL FILTER: show all tiles, only fully tested ones, or only those with an unverified cloud path.
+{
+  const bar = $('.pfilter');
+  const tiles = [...document.querySelectorAll<HTMLElement>('.proto[data-status]')];
+  const groups = [...document.querySelectorAll<HTMLElement>('.pgroup')];
+  const count = $('#pcount');
+  const apply = (f: string) => {
+    let shown = 0;
+    tiles.forEach((t) => {
+      const on = f === 'all' || t.dataset.status === f;
+      t.hidden = !on;
+      if (on) shown++;
+    });
+    groups.forEach((g) => (g.hidden = !g.querySelector('.proto:not([hidden])')));
+    if (count) count.textContent = f === 'all' ? '' : `${shown} of ${tiles.length}`;
+    bar?.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === f)));
+  };
+  bar?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-f]');
+    if (b) apply(b.dataset.f!);
+  });
+}
