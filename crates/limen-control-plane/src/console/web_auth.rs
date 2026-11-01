@@ -275,7 +275,11 @@ pub async fn login_callback(
     let ttl = state
         .config
         .console_session_ttl
-        .min(loaded.policy.cert_ttl(&roles, state.config.max_cert_ttl))
+        .min(loaded.policy.cert_ttl(
+            &roles,
+            state.config.default_cert_ttl,
+            state.config.max_cert_ttl,
+        ))
         .min(std::time::Duration::from_secs(LOGIN_TTL_SECS as u64));
     let key = match KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256) {
         Ok(key) => key,

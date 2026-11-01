@@ -233,6 +233,9 @@ message ApplyPolicyRequest {
   // Refuse to apply unless the policy's `policy_test` documents all pass
   // (and there is at least one).
   bool require_tests = 4;
+  // The source these files replace (ADR-0042 §3). Empty is `default`: what
+  // every apply before Phase 14 wrote. Other sources' documents are untouched.
+  string source = 5;
 }
 
 message PolicyDiff {
@@ -253,6 +256,10 @@ message ApplyPolicyResponse {
   repeated string warnings = 6;
   // Results of the `policy_test` documents in the new policy.
   repeated PolicyTestResult test_results = 7;
+  // Set when the apply widens standing access and the control plane runs
+  // with `--widening-approval=all`: nothing was applied, and another admin
+  // approves the held change (`limen manage changes approve <id>`).
+  string pending_change_id = 8;
 }
 
 message PolicyTestResult {

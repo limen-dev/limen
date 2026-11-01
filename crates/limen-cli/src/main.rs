@@ -321,6 +321,12 @@ enum Command {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
     },
+    /// The management API: read policy documents and write resources, as an
+    /// admin or as a bot with a policy_writer grant (ADR-0042).
+    Manage {
+        #[command(subcommand)]
+        command: commands::manage::ManageCommand,
+    },
 }
 
 /// Options shared by every `ls` view.
@@ -808,6 +814,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Review { command } => commands::review::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
+        Command::Manage { command } => commands::manage::run(proxy, command).await,
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
@@ -980,7 +987,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
     anyhow::bail!(
         "`{command}` isn't available yet: {what} is planned for {phase}. \
-         You can already see these resources with `limen ls`. Roadmap: https://github.com/jfcmartins/limen/milestones"
+         You can already see these resources with `limen ls`. Roadmap: https://github.com/limen-dev/limen/milestones"
     )
 }
 

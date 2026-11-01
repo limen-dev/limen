@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use limen_ca::ComponentCertRequest;
 use limen_core::identity::ComponentKind;
+use limen_proto::manage::v1::management_service_server::ManagementServiceServer;
 use limen_proto::v1::access_server::AccessServer;
 use limen_proto::v1::admin_server::AdminServer;
 use limen_proto::v1::audit_handoff_server::AuditHandoffServer;
@@ -42,6 +43,7 @@ use crate::services::discovery::DiscoveryService;
 use crate::services::enrollment::EnrollmentService;
 use crate::services::handoff::HandoffService;
 use crate::services::ingest::IngestService;
+use crate::services::manage::ManageService;
 use crate::services::policy_sync::PolicySyncService;
 use crate::services::registry::RegistryService;
 use crate::services::resources::ResourcesService;
@@ -101,7 +103,7 @@ pub async fn issue_server_config(state: &AppState) -> anyhow::Result<ServerConfi
 }
 
 /// The gRPC services the API serves (the names clients put in the path).
-fn grpc_services() -> [&'static str; 14] {
+fn grpc_services() -> [&'static str; 15] {
     [
         WatchServer::<WatchService>::NAME,
         ReviewsServer::<ReviewsService>::NAME,
@@ -111,6 +113,7 @@ fn grpc_services() -> [&'static str; 14] {
         AuthServer::<AuthService>::NAME,
         ResourcesServer::<ResourcesService>::NAME,
         AdminServer::<AdminService>::NAME,
+        ManagementServiceServer::<ManageService>::NAME,
         EnrollmentServer::<EnrollmentService>::NAME,
         RegistryServer::<RegistryService>::NAME,
         AuditIngestServer::<IngestService>::NAME,
@@ -202,6 +205,10 @@ pub async fn serve_api(
     )
     .add_service(
         AdminServer::new(AdminService(state.clone())).max_decoding_message_size(MAX_MESSAGE_BYTES),
+    )
+    .add_service(
+        ManagementServiceServer::new(ManageService(state.clone()))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES),
     )
     .add_service(
         AccessServer::new(AccessService(state.clone()))

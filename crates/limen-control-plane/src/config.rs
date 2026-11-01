@@ -168,6 +168,11 @@ pub struct Config {
     )]
     pub proxy_dns_names: Vec<String>,
 
+    /// User credential lifetime when none of the user's roles sets
+    /// `cert_ttl`. At most `--max-cert-ttl`.
+    #[arg(long, env = "LIMEN_DEFAULT_CERT_TTL", value_parser = parse_duration, default_value = "1h")]
+    pub default_cert_ttl: Duration,
+
     /// Upper bound on user credential lifetime, whatever roles say.
     #[arg(long, env = "LIMEN_MAX_CERT_TTL", value_parser = parse_duration, default_value = "12h")]
     pub max_cert_ttl: Duration,
@@ -352,6 +357,43 @@ pub struct Config {
     /// default so resource names don't leave Limen.
     #[arg(long, env = "LIMEN_NOTIFY_INCLUDE_DETAILS")]
     pub notify_include_details: bool,
+
+    /// Whether failing `policy_test` documents refuse a write (`required`)
+    /// or are only reported (`advisory`), on every channel (ADR-0042 §6).
+    #[arg(
+        long,
+        env = "LIMEN_POLICY_TESTS",
+        value_enum,
+        default_value = "advisory"
+    )]
+    pub policy_tests: PolicyTests,
+
+    /// Whose writes that widen standing access wait for a person's approval:
+    /// bot writers' only (`writers`), or people's too (`all`, a second
+    /// admin approves).
+    #[arg(
+        long,
+        env = "LIMEN_WIDENING_APPROVAL",
+        value_enum,
+        default_value = "writers"
+    )]
+    pub widening_approval: WideningApproval,
+
+    /// How long a change held for approval waits before it expires.
+    #[arg(long, env = "LIMEN_POLICY_CHANGE_TTL", value_parser = parse_duration, default_value = "7d")]
+    pub policy_change_ttl: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PolicyTests {
+    Advisory,
+    Required,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WideningApproval {
+    Writers,
+    All,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -458,6 +500,19 @@ fn pick_hostname(env: Option<String>, file: impl FnOnce() -> Option<String>) -> 
 }
 
 impl Config {
+    /// Refuses a `--default-cert-ttl` above `--max-cert-ttl`, which would
+    /// otherwise be cut silently.
+    pub fn check_cert_ttls(&self) -> Result<(), String> {
+        if self.default_cert_ttl > self.max_cert_ttl {
+            return Err(format!(
+                "--default-cert-ttl ({}s) is longer than --max-cert-ttl ({}s)",
+                self.default_cert_ttl.as_secs(),
+                self.max_cert_ttl.as_secs()
+            ));
+        }
+        Ok(())
+    }
+
     /// The notifiers these flags configure. Refuses a URL that is not
     /// `https` (or loopback `http`).
     pub fn notify_config(&self) -> Result<crate::access::notify::NotifyConfig, String> {
@@ -593,6 +648,20 @@ mod tests {
         ];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn default_cert_ttl_is_an_hour_and_at_most_the_max() {
+        let ok = parse_with(&[]).expect("defaults");
+        assert_eq!(ok.default_cert_ttl, Duration::from_hours(1));
+        assert_eq!(ok.max_cert_ttl, Duration::from_hours(12));
+        assert!(ok.check_cert_ttls().is_ok());
+        let short = parse_with(&["--default-cert-ttl=10m"]).expect("10m");
+        assert_eq!(short.default_cert_ttl, Duration::from_mins(10));
+        assert!(short.check_cert_ttls().is_ok());
+        let over = parse_with(&["--default-cert-ttl=2h", "--max-cert-ttl=1h"]).expect("parses");
+        let err = over.check_cert_ttls().expect_err("above the max");
+        assert!(err.contains("--default-cert-ttl"), "{err}");
     }
 
     #[test]

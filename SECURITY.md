@@ -8,8 +8,8 @@ Limen controls access to infrastructure, so a flaw in it can matter more than a 
 
 Report it through GitHub's private vulnerability reporting instead:
 
-1. Go to the repository's [**Security** tab](https://github.com/jfcmartins/limen/security).
-2. Choose **Report a vulnerability** ([direct link](https://github.com/jfcmartins/limen/security/advisories/new)).
+1. Go to the repository's [**Security** tab](https://github.com/limen-dev/limen/security).
+2. Choose **Report a vulnerability** ([direct link](https://github.com/limen-dev/limen/security/advisories/new)).
 3. Fill in the form. Only you and the maintainers can see it.
 
 A useful report says:

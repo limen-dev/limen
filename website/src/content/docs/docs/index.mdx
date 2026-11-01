@@ -19,7 +19,7 @@ Limen answers both by never handing out a long-lived credential in the first pla
 
 ## How it works
 
-1. **You sign in.** `limen login` opens your identity provider in a browser. Limen gives back a certificate that lasts 10 minutes, tied to a key that never leaves your machine.
+1. **You sign in.** `limen login` opens your identity provider in a browser. Limen gives back a certificate that lasts an hour (less if your policy says so), tied to a key that never leaves your machine.
 2. **Policy decides.** Your identity provider's groups become roles. A policy file in Git says which roles reach which resources, chosen by label. Anything no rule allows is denied, and `limen explain` tells you why.
 3. **You connect with your usual tools.** `ssh`, `psql`, `kubectl`, `redis-cli` and the rest. A Limen worker runs next to the target and signs in to it with credentials you never see. The worker dials out to Limen, so the target needs no open inbound port.
 4. **Everything is written down.** SSH sessions are recorded and can be replayed. Databases, caches, search and brokers are audited command by command. The trail is signed and chained by hash, so `limen-audit-verify` finds any event that was removed, reordered or changed.
@@ -28,7 +28,7 @@ When you need more than your roles allow, `limen request` asks an approver for t
 
 ## What you get
 
-- **No standing credentials.** Certificates last 10 minutes by default. Nothing long-lived sits on a laptop or in a CI secret.
+- **No standing credentials.** Certificates last an hour by default, and you can make them shorter per role. Nothing long-lived sits on a laptop or in a CI secret.
 - **Policy you can test.** It is YAML in Git, deny by default. You can [test it in CI](guides/policy-tooling/), see who gains access before a change lands, and ask [why a request was denied](guides/policy-tooling/#who-can-reach-this-and-what-can-they-reach).
 - **Access you ask for.** [Requests with a reason, approvals and break-glass](guides/access-requests/). A grant expires on its own and ends the sessions it allowed.
 - **An audit trail you can check.** Events go to S3 as a signed hash chain, and to Datadog. [One command verifies it](runbooks/audit-verify/). If a session can't be audited, it doesn't start.

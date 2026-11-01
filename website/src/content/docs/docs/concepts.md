@@ -4,7 +4,7 @@ description: The ideas behind Limen in one page, from certificates to the audit 
 ---
 ## Credentials are certificates that expire
 
-`limen login` creates a key pair on your machine and signs you in through your identity provider (OIDC: a browser, or a device code). The control plane checks the ID token, maps your IdP groups to roles, and returns an **X.509 client certificate valid for 10 minutes by default**. The nonce in the login binds the certificate to your exact public key, so a proxy in the middle cannot swap in its own.
+`limen login` creates a key pair on your machine and signs you in through your identity provider (OIDC: a browser, or a device code). The control plane checks the ID token, maps your IdP groups to roles, and returns an **X.509 client certificate valid for 1 hour by default** (the operator sets the default with `--default-cert-ttl`, a role can shorten it with `cert_ttl`). The nonce in the login binds the certificate to your exact public key, so a proxy in the middle cannot swap in its own.
 
 There is no refresh token on disk by default. When the certificate expires you sign in again, which is cheap while your IdP session is alive. `limen logout` ends the login everywhere, and an admin can lock a user, which ends all of their sessions within about 10 seconds. Details: [design §4](../architecture/design/#4-identity-and-credentials-adr-0006-adr-0007).
 

@@ -949,6 +949,7 @@ Options:
 - `--dry-run`: Show what would change without applying it.
 - `--source-ref <SOURCE_REF>`: Where the policy came from, recorded in the audit trail (for example a Git SHA).
 - `--require-tests`: Refuse to apply unless the policy's own `policy_test` cases pass.
+- `--source <SOURCE>`: The source these files replace. Documents other sources (and Terraform) manage are left alone; naming one is refused. Default: `default`.
 
 #### `limen admin policy`
 
@@ -1267,4 +1268,213 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why. Recorded in the audit trail.
+
+### `limen manage`
+
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant (ADR-0042)
+
+```text
+Usage: limen manage [OPTIONS] <COMMAND>
+```
+
+#### `limen manage whoami`
+
+What you may read and write: admin, or your writer grant
+
+```text
+Usage: limen manage whoami [OPTIONS]
+```
+
+#### `limen manage ls`
+
+List documents of one kind (resource, role, resource_profile, ...)
+
+```text
+Usage: limen manage ls [OPTIONS] <KIND>
+```
+
+Arguments:
+
+- `<KIND>`
+
+Options:
+
+- `--namespace <NAMESPACE>`: Only this namespace (a writer's own is implied).
+- `--source <SOURCE>`: Only documents this source manages.
+
+#### `limen manage get`
+
+Show one document, with its owner and etag
+
+```text
+Usage: limen manage get [OPTIONS] <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+#### `limen manage put-resource`
+
+Create a resource, or with --etag replace it. A writer completes a profile: --spec holds only the fields the profile lets it set
+
+```text
+Usage: limen manage put-resource [OPTIONS] --spec <SPEC> --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--profile <PROFILE>`: The profile it completes. Required for bot writers.
+- `--spec <SPEC>`: The resource spec as JSON, for example '{"postgres":{"endpoint":"db.internal:5432"}}'.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
+- `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
+- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
+- `--dry-run`: Check everything and show the impact, but change nothing.
+- `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
+
+#### `limen manage delete-resource`
+
+Delete a resource you manage
+
+```text
+Usage: limen manage delete-resource [OPTIONS] --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`: Succeed when it's already gone.
+
+#### `limen manage put`
+
+Create a document of any kind, or with --etag replace it: a role, role_mapping, policy_test, bot, discovery, resource_profile, or policy_writer. Bot writers write only the kinds their grant names
+
+```text
+Usage: limen manage put [OPTIONS] --spec <SPEC> --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--spec <SPEC>`: The spec as JSON (a list for role_mapping), or @file to read it.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`
+- `--dry-run`
+- `--reason <REASON>`: Why, shown to approvers if the write is held.
+
+#### `limen manage delete`
+
+Delete a document of any kind you manage
+
+```text
+Usage: limen manage delete [OPTIONS] --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`
+
+#### `limen manage changes`
+
+Changes held for approval because they widen standing access
+
+```text
+Usage: limen manage changes [OPTIONS] <COMMAND>
+```
+
+##### `limen manage changes ls`
+
+Held changes, newest first: pending ones unless --state
+
+```text
+Usage: limen manage changes ls [OPTIONS]
+```
+
+Options:
+
+- `--state <STATE>`: pending, applied, rejected, cancelled, expired, or superseded.
+
+##### `limen manage changes show`
+
+One change: its writes, the access it gives, and the CI run behind it
+
+```text
+Usage: limen manage changes show [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+##### `limen manage changes approve`
+
+Approve a change and apply it. Not its author, nor whoever started its CI run. If the policy moved so that it would give access you didn't see here, it is superseded instead
+
+```text
+Usage: limen manage changes approve [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`
+
+##### `limen manage changes reject`
+
+Refuse a change
+
+```text
+Usage: limen manage changes reject [OPTIONS] --note <NOTE> <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`: Why. Required.
+
+##### `limen manage changes cancel`
+
+Withdraw a change you made
+
+```text
+Usage: limen manage changes cancel [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
 

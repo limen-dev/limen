@@ -78,6 +78,8 @@ pub struct SessionConfig {
     /// When to log in to the target again (IAM only). A field so tests can shorten it.
     pub reauth_after: Duration,
     pub reauth_deadline: Duration,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    pub guard: Option<limen_policy::model::Delegated>,
 }
 
 /// A session whose target connection is open and logged in.
@@ -115,6 +117,7 @@ pub async fn prepare(
         &config.target,
         &config.redis_user,
         &config.session_id,
+        config.guard.as_ref(),
     )
     .await?;
     let specs = KeySpecs::from_command_info(&connected.command_info)
@@ -716,6 +719,7 @@ impl SessionConfig {
             target,
             reauth_after: REAUTH_AFTER,
             reauth_deadline: REAUTH_DEADLINE,
+            guard: None,
         }
     }
 }

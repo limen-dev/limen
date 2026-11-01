@@ -109,6 +109,7 @@ async fn postgres_through_limen() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: policy(&target, secrets.to_str().expect("utf8")),
             dry_run: false,
@@ -375,6 +376,7 @@ spec:
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: vec![PolicySource {
                 name: "policy.yaml".into(),

@@ -8,7 +8,7 @@ const docs = (p: string) => docsUrl(base, p);
 const steps = [
   { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. Your login is tied to a key that never leaves your machine.', c: 'limen login' },
   { n: '02', t: 'Policy decides', d: 'Your IdP groups become roles, and roles reach resources by label. Anything no rule allows is denied, and you can ask why.', c: 'limen explain orders-prod' },
-  { n: '03', t: 'Connect', d: 'You get a certificate that lasts 10 minutes. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
+  { n: '03', t: 'Connect', d: 'You get a certificate that lasts an hour, or less if you choose. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
   { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Anyone who can read the bucket can check it.', c: 'limen-audit-verify --bucket …' },
 ];
 
@@ -54,13 +54,13 @@ const protos: Proto[] = [
               <a class="btn" href={docs('')}>Read the docs</a>
             </div>
             <ul class="facts">
-              <li><b>10 min</b> certificates, no static keys</li>
+              <li><b>1 hour</b> certificates, no static keys</li>
               <li><b>0</b> inbound ports</li>
               <li><b>1</b> required store: PostgreSQL</li>
             </ul>
           </div>
 
-          <div class="threshold" aria-label="A doorway with a certificate that expires in ten minutes">
+          <div class="threshold" aria-label="A doorway with a certificate that expires in an hour">
             <svg viewBox="0 0 420 500" role="img" aria-hidden="true">
               <defs>
                 <linearGradient id="g-arch" x1="0" y1="0" x2="0" y2="1">
@@ -81,7 +81,7 @@ const protos: Proto[] = [
               <g class="ring" transform="translate(210 300)">
                 <circle r="62" fill="var(--lm-glass)" stroke="var(--lm-line-strong)" stroke-width="1.5"/>
                 <circle r="62" fill="none" stroke="var(--lm-accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="0" transform="rotate(-90)" id="ring-arc"/>
-                <text id="ttl" y="8" text-anchor="middle" class="ttl">10:00</text>
+                <text id="ttl" y="8" text-anchor="middle" class="ttl">60:00</text>
                 <text y="30" text-anchor="middle" class="ttl-sub" id="ttl-sub">expires in</text>
               </g>
               <circle cx="210" cy="438" r="6" fill="var(--lm-accent-strong)" class="beacon"/>
@@ -287,7 +287,7 @@ const protos: Proto[] = [
           <h2>From clone to a recorded session, on your laptop.</h2>
           <div class="install">
             <div class="install-bar"><span>terminal</span><button class="copy" id="copy" type="button">Copy</button></div>
-<pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/jfcmartins/limen &amp;&amp; cd limen
+<pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/limen-dev/limen &amp;&amp; cd limen
 <span class="p">$</span> deploy/compose/setup.sh
 <span class="p">$</span> scripts/install-cli.sh
 <span class="p">$</span> limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem

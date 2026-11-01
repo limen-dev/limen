@@ -35,6 +35,8 @@ pub struct SshSessionConfig {
     pub target_address: String,
     /// Pinned target host key, OpenSSH format.
     pub target_host_key: PublicKey,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    pub target_guard: Option<limen_policy::model::Delegated>,
     pub user_key: Arc<PrivateKey>,
     pub user_cert: Certificate,
     pub host_key: PrivateKey,
@@ -156,7 +158,10 @@ impl UserSide {
         }
         let tcp = tokio::time::timeout(
             Duration::from_secs(10),
-            tokio::net::TcpStream::connect(&self.config.target_address),
+            crate::dial::connect(
+                &self.config.target_address,
+                self.config.target_guard.as_ref(),
+            ),
         )
         .await??;
         tcp.set_nodelay(true)?;

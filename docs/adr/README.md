@@ -10,7 +10,7 @@ Each ADR's status line gives its approval date.
 | [0003](0003-reverse-tunnel.md) | Reverse tunnel: gRPC served by the worker over an outbound connection | Accepted |
 | [0004](0004-proxy-peering.md) | Proxy HA through tunnel registry and proxy peering | Accepted |
 | [0005](0005-single-port-ingress.md) | Single public port with ALPN and path routing behind an NLB | Accepted |
-| [0006](0006-identity-and-credentials.md) | OIDC login with key-bound nonce, 10-minute X.509 and SSH certificates | Accepted |
+| [0006](0006-identity-and-credentials.md) | OIDC login with key-bound nonce, short-lived X.509 and SSH certificates | Accepted |
 | [0007](0007-certificate-authority.md) | Three CA keys behind a Signer trait, KMS in production | Accepted |
 | [0008](0008-policy-model.md) | YAML label-based policy, push-applied, signed snapshots | Accepted |
 | [0009](0009-audit-pipeline.md) | Disk spool, at-least-once delivery, S3 hash chain, Datadog | Accepted |
@@ -46,5 +46,6 @@ Each ADR's status line gives its approval date.
 | [0039](0039-detached-connections.md) | Detached connections (`--detach`) and `limen conns` | Accepted |
 | [0040](0040-trace-export.md) | Trace export over OTLP | Accepted |
 | [0041](0041-client-tool-integration-and-doctor.md) | Tools you already use (`ssh_config`, kubeconfig) and `limen doctor` | Proposed |
+| [0042](0042-management-api.md) | One management API for the CLI, the console, and infrastructure as code (Phase 14): the `limen.manage.v1` contract, one owner per document, scoped bot writers that complete resource profiles, server-side guardrails | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

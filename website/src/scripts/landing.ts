@@ -28,8 +28,8 @@ $('#copy')?.addEventListener('click', async (e) => {
   const note = $('#ttl-note');
   const arc = document.querySelector<SVGCircleElement>('#ring-arc');
   const door = $('.threshold');
-  const TOTAL = 600;
-  const SPEED = 24; // simulated seconds per real second, so the story fits a glance
+  const TOTAL = 3600;
+  const SPEED = 144; // simulated seconds per real second, so the story fits a glance
   const C = 389.6;
   let remaining = TOTAL;
   let last = performance.now();
@@ -186,7 +186,7 @@ const scenarios: Record<string, Step[]> = {
   ssh: [
     { c: 'limen login' },
     { o: 'Opening your browser to sign in…', cls: 'dim' },
-    { o: '✔ Signed in as admin@example.com · role sre · expires in 10m', cls: 'ok' },
+    { o: '✔ Signed in as admin@example.com · role sre · expires in 1h 0m', cls: 'ok' },
     { ev: { ty: 'auth.login', who: ME, detail: 'oidc, roles=sre' } },
     { c: 'limen ssh web-staging-1' },
     { o: '✔ Allowed as ubuntu · session recorded', cls: 'ok' },

@@ -65,8 +65,8 @@ async fn pkce_login_issues_verified_short_lived_cert() {
     assert_eq!(id.username, ADMIN);
     let ttl = resp.expires_at_unix - time::OffsetDateTime::now_utc().unix_timestamp();
     assert!(
-        (540..=600).contains(&ttl),
-        "default TTL is 10 minutes, got {ttl}s"
+        (3540..=3600).contains(&ttl),
+        "default TTL is 1 hour, got {ttl}s"
     );
     let login = h
         .audit_events()
@@ -222,6 +222,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let dry = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: true,
@@ -239,6 +240,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let applied = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: false,
@@ -263,6 +265,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let again = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: false,
@@ -320,6 +323,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
     let err = admin
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: sources(),
                 dry_run: true,
@@ -353,6 +357,7 @@ async fn invalid_policy_is_rejected() {
     let err = AdminClient::new(h.channel(Some(proxy)))
         .apply_policy(forwarded(
             ApplyPolicyRequest {
+                source: String::new(),
                 require_tests: false,
                 sources: bad,
                 dry_run: false,

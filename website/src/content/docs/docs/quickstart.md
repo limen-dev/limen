@@ -17,7 +17,7 @@ The scripts are plain bash, tested on macOS and untested on Linux. On Windows us
 ## 1. Start it
 
 ```sh
-git clone https://github.com/jfcmartins/limen && cd limen
+git clone https://github.com/limen-dev/limen && cd limen
 deploy/compose/setup.sh
 ```
 
@@ -32,7 +32,7 @@ limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.p
 
 A browser opens on Dex. Sign in as `admin@example.com` with password `password`. On a machine without a browser, use `limen login --device`.
 
-Your credentials are now a 10-minute certificate in `~/.limen/`. Check them:
+Your credentials are now a certificate in `~/.limen/` that lasts an hour. Check them:
 
 ```sh
 limen status      # who you are, your roles, and the time left

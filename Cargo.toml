@@ -44,6 +44,7 @@ prost = "0.14.4"
 tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router", "server", "channel"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
+tonic-types = "0.14.6"
 hyper = { version = "1.12", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2", "service"] }
 http = "1.5"
@@ -83,7 +84,7 @@ openidconnect = { version = "4.0.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # SSH
-russh = { version = "0.64.1", default-features = false, features = ["aws-lc-rs"] }
+russh = { version = "0.65.0", default-features = false, features = ["aws-lc-rs"] }
 # Exact pin: the release candidate russh 0.64 depends on, so there is one ssh-key in the tree.
 ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["std", "ecdsa", "p256", "ed25519", "rand_core"] }
 
@@ -119,7 +120,7 @@ sqlparser = { version = "0.63", default-features = false }
 # Audit pipeline
 crc32fast = "1.5.2"
 flate2 = "1.1.10"
-aws-sdk-s3 = { version = "1.152", default-features = false, features = ["rt-tokio", "default-https-client", "sigv4a"] }
+aws-sdk-s3 = { version = "1.152", default-features = false, features = ["rt-tokio", "default-https-client"] }
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 

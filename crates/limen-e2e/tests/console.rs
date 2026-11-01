@@ -234,6 +234,7 @@ async fn console_end_to_end() {
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_cli)));
     let applied = admin
         .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
             require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key, &d.idp.issuer),
             dry_run: false,
@@ -1212,4 +1213,277 @@ async fn console_login_is_bound_to_the_browser_that_started_it() {
 /// The rows of a list page's table: the filter's suggestions above it name users and resources too.
 fn rows(body: &str) -> &str {
     body.split("<tbody>").nth(1).unwrap_or("")
+}
+
+/// Where a POST redirected to.
+fn location(page: &Page) -> String {
+    assert_eq!(page.status, 303, "{}", page.body);
+    page.headers["location"]
+        .to_str()
+        .expect("location")
+        .to_owned()
+}
+
+/// The etag of an editable document on the policy page.
+fn etag_of(body: &str, name: &str) -> String {
+    let form = body
+        .split("<form method=\"post\" action=\"/console/policy/documents\"")
+        .find(|f| f.contains(&format!("name=\"name\" value=\"{name}\"")))
+        .unwrap_or_else(|| panic!("no edit form for {name}"));
+    let marker = "name=\"etag\" value=\"";
+    let start = form.find(marker).expect("etag") + marker.len();
+    form[start..].split('"').next().expect("value").to_owned()
+}
+
+#[allow(clippy::too_many_lines)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_console_edits_what_it_owns_and_decides_held_changes() {
+    let Some(d) = Deployment::start_with_console_args(&["--widening-approval=all"]).await else {
+        return;
+    };
+    // With --widening-approval=all even the first apply waits for a second
+    // admin: it gives people access they didn't have.
+    let admin_cli = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let applied = AdminClient::new(d.proxy_channel(Some(admin_cli)))
+        .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
+            require_tests: false,
+            sources: policy(
+                "127.0.0.1:2222",
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAkWE808+SBJ5tbkLTrbcpmj4Qg2UvqRG/CYJgBwP1S",
+                &d.idp.issuer,
+            ),
+            dry_run: false,
+            source_ref: String::new(),
+        })
+        .await
+        .expect("apply")
+        .into_inner();
+    assert!(!applied.applied, "held");
+    let first = applied.pending_change_id;
+    assert_eq!(first.len(), 36, "a change id");
+    let mut admin = Browser::new(&d, true);
+    assert_eq!(admin.login(&d, ADMIN, &["admins"]).await.status, 200);
+    let mut second = Browser::new(&d, true);
+    second
+        .login(&d, "second-admin@example.com", &["admins"])
+        .await;
+    let detail = second.get(&format!("/console/changes/{first}")).await;
+    assert!(
+        detail.body.contains("replace git source"),
+        "what a held apply writes"
+    );
+    let approved = second
+        .post(
+            &format!("/console/changes/{first}/decide"),
+            &[
+                ("csrf", &Browser::csrf(&detail)),
+                ("decision", "approve"),
+                ("note", ""),
+            ],
+        )
+        .await;
+    let page = second.get(&location(&approved)).await;
+    assert!(
+        page.body.contains(">applied</span>"),
+        "the first apply, approved in the console"
+    );
+
+    // Every document shows its owner; files' documents are read-only.
+    let page = admin.get("/console/policy").await;
+    assert!(
+        page.body.contains("git source") && page.body.contains("in namespace"),
+        "owners shown"
+    );
+    assert!(
+        page.body.contains("Managed by"),
+        "read-only documents say where they live"
+    );
+    assert!(
+        !page.body.contains("value=\"web-1\""),
+        "no edit form for a file's document"
+    );
+    let csrf = Browser::csrf(&page);
+
+    // A role the console will own: it gives nobody anything, so it applies.
+    let role = "kind: role\nversion: v1\nmetadata: { name: console-viewers }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [test] } }\n      ssh: { logins: [ubuntu] }\n";
+    let saved = admin
+        .post(
+            "/console/policy/documents",
+            &[("csrf", &csrf), ("yaml", role)],
+        )
+        .await;
+    let page = admin.get(&location(&saved)).await;
+    assert!(
+        page.body.contains("Applied: policy version"),
+        "{}",
+        page.url
+    );
+    assert!(page.body.contains("<span class=\"pill ok\">console</span>"));
+    // Edited, with the etag it was read with.
+    let etag = etag_of(&page.body, "console-viewers");
+    let edited = role.replace("logins: [ubuntu]", "logins: [ubuntu, deploy]");
+    let saved = admin
+        .post(
+            "/console/policy/documents",
+            &[
+                ("csrf", &csrf),
+                ("yaml", &edited),
+                ("kind", "role"),
+                ("name", "console-viewers"),
+                ("etag", &etag),
+            ],
+        )
+        .await;
+    let page = admin.get(&location(&saved)).await;
+    assert!(page.body.contains("Applied"));
+    // A stale etag, a file's document, or two documents are refused, with
+    // what was typed kept for a new one.
+    let stale = admin
+        .post(
+            "/console/policy/documents",
+            &[
+                ("csrf", &csrf),
+                ("yaml", &edited),
+                ("kind", "role"),
+                ("name", "console-viewers"),
+                ("etag", &etag),
+            ],
+        )
+        .await;
+    assert!(
+        stale.body.contains("Not saved") && stale.body.contains("changed since it was read"),
+        "{}",
+        stale.status
+    );
+    let theirs = "kind: role\nversion: v1\nmetadata: { name: ops }\nspec: { allow: [] }\n";
+    let refused = admin
+        .post(
+            "/console/policy/documents",
+            &[("csrf", &csrf), ("yaml", theirs)],
+        )
+        .await;
+    assert!(
+        refused.body.contains("Not saved") && refused.body.contains("already exists"),
+        "creating over a file's document"
+    );
+    let two = format!("{role}---\n{theirs}");
+    let refused = admin
+        .post(
+            "/console/policy/documents",
+            &[("csrf", &csrf), ("yaml", &two)],
+        )
+        .await;
+    assert!(refused.body.contains("exactly one document"));
+    assert!(
+        refused.body.contains("console-viewers"),
+        "the draft is kept"
+    );
+    let forged = admin
+        .post_with_origin(
+            "/console/policy/documents",
+            "https://evil.example",
+            &[("csrf", &csrf), ("yaml", role)],
+        )
+        .await;
+    assert_eq!(forged.status, 403, "cross-site posts are refused");
+
+    // A mapping that gives standing access waits for a second admin.
+    let mapping = "kind: role_mapping\nversion: v1\nmetadata: { name: console-people }\nspec:\n  - { idp_group: viewers, roles: [console-viewers] }\n";
+    let saved = admin
+        .post(
+            "/console/policy/documents",
+            &[("csrf", &csrf), ("yaml", mapping)],
+        )
+        .await;
+    let page = admin.get(&location(&saved)).await;
+    let notice = page
+        .body
+        .split("Held for approval")
+        .nth(1)
+        .expect("held notice");
+    let id = notice
+        .split("change ")
+        .nth(1)
+        .and_then(|s| s.get(..36))
+        .expect("change id")
+        .to_owned();
+    assert!(
+        !page.body.contains("value=\"console-people\""),
+        "nothing applied yet"
+    );
+    // Its author sees it but can't decide it.
+    let mine = admin.get(&format!("/console/changes/{id}")).await;
+    assert_eq!(mine.status, 200);
+    assert!(
+        mine.body.contains("its author can&#39;t decide it")
+            || mine.body.contains("its author can't decide it")
+            || mine.body.contains("its author can&#x27;t decide it"),
+        "{}",
+        mine.body.len()
+    );
+    assert!(!mine.body.contains("Approve and apply"));
+    assert!(mine.body.contains("viewers"), "the access it gives");
+
+    // Someone without an approver role doesn't see the page.
+    let mut developer = Browser::new(&d, true);
+    developer.login(&d, DEVELOPER, &["ops"]).await;
+    let page = developer.get("/console/changes").await;
+    assert_eq!(page.status, 403);
+    assert!(!page.body.contains(&id));
+
+    // A second admin approves it here.
+    let mut second = Browser::new(&d, true);
+    second
+        .login(&d, "second-admin@example.com", &["admins"])
+        .await;
+    let list = second.get("/console/changes").await;
+    assert!(list.body.contains(&id), "listed as waiting");
+    assert!(list.body.contains("Policy changes"), "in the menu");
+    let detail = second.get(&format!("/console/changes/{id}")).await;
+    assert!(detail.body.contains("Approve and apply"));
+    let csrf2 = Browser::csrf(&detail);
+    let rejected = second
+        .post(
+            &format!("/console/changes/{id}/decide"),
+            &[("csrf", &csrf2), ("decision", "reject")],
+        )
+        .await;
+    assert!(
+        rejected.body.contains("a note is required"),
+        "rejecting needs a reason"
+    );
+    let approved = second
+        .post(
+            &format!("/console/changes/{id}/decide"),
+            &[
+                ("csrf", &csrf2),
+                ("decision", "approve"),
+                ("note", "viewers read test hosts"),
+            ],
+        )
+        .await;
+    let page = second.get(&location(&approved)).await;
+    assert!(page.body.contains(">applied</span>"), "{}", page.body.len());
+    let policy_page = admin.get("/console/policy").await;
+    assert!(
+        policy_page.body.contains("value=\"console-people\""),
+        "applied, and the console owns it"
+    );
+
+    // The console deletes what it owns.
+    let etag = etag_of(&policy_page.body, "console-people");
+    let deleted = admin
+        .post(
+            "/console/policy/documents/delete",
+            &[
+                ("csrf", &csrf),
+                ("kind", "role_mapping"),
+                ("name", "console-people"),
+                ("etag", &etag),
+            ],
+        )
+        .await;
+    let page = admin.get(&location(&deleted)).await;
+    assert!(page.body.contains("Applied") && !page.body.contains("value=\"console-people\""));
 }

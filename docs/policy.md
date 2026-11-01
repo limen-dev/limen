@@ -1,6 +1,8 @@
 # Policy reference
 
-Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. There are seven document kinds: `role`, `role_mapping`, `resource`, `bot`, `discovery`, and `policy_test`, and the built-in roles below. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
+Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. The document kinds are `role`, `role_mapping`, `resource`, `bot`, `discovery`, `policy_test`, and, for delegated writes (ADR-0042), `resource_profile` and `policy_writer`; plus the built-in roles below. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/).
+
+**Every document has one owner** (ADR-0042). Files you apply replace their own *source* only: without `--source`, the `default` one, which holds everything applied before Phase 14. `limen admin apply --source team-a dir/` makes team-a's documents exactly `dir/` and leaves every other source's documents alone, and so does Terraform through the management API. Naming a document another source manages is refused, with the owner in the error.
 
 The examples are grouped into `shared/` policy and `stacks/<kind>/` files.
 Applying the `examples/policy/` directory still recursively applies the full
@@ -25,6 +27,8 @@ A selector matches when:
 
 Roles come from IdP groups **at login** and are fixed into the short-lived certificate. Policy changes to role mappings take effect at the user's next login. Changes to roles and resources take effect immediately.
 
+The certificate lasts the shortest `cert_ttl` among the user's roles. When none sets one, it lasts the control plane's `--default-cert-ttl` (`LIMEN_DEFAULT_CERT_TTL`, **1 hour** unless the operator changes it). Either way it is capped by `--max-cert-ttl` (`LIMEN_MAX_CERT_TTL`, 12 hours by default), and the control plane refuses to start with a default above that cap. A shorter TTL also shortens how long a role removed in the IdP keeps working; to cut someone off at once, lock them.
+
 ## `role`
 
 ```yaml
@@ -32,7 +36,7 @@ kind: role
 version: v1
 metadata: { name: dev-readonly, description: optional }
 spec:
-  cert_ttl: 10m            # credential lifetime; the shortest across a user's roles wins (default 10m)
+  cert_ttl: 10m            # credential lifetime; the shortest across a user's roles wins (default 1h, set by the control plane's --default-cert-ttl)
   max_session_ttl: 8h      # cap on a single session; the shortest across a user's roles wins
   allow:
     - resources: { kind: [postgres, mysql], labels: { env: [staging] } }
@@ -229,3 +233,58 @@ The bot logs in as `bot:<name>`. Rules the validator enforces, so a bot can't be
 - When a token matches more than one bot the login is refused, so an overlap can't pick a winner.
 
 Default issuers: `https://token.actions.githubusercontent.com` for GitHub Actions and `https://gitlab.com` for GitLab (set `issuer` for GitHub Enterprise Server and self-managed GitLab). Examples: [`examples/policy/stacks/bots/policy.yaml`](../examples/policy/stacks/bots/policy.yaml).
+
+## Delegated writes: `resource_profile` and `policy_writer`
+
+A team's pipeline can register its own resources through the management API (ADR-0042) without `limen:admin`. It never writes a full resource. A person writes a **profile** that fixes everything sensitive, and a **writer grant** that says which bot may complete it. Both kinds are written by people only and never reach proxies or workers. Example: [`examples/policy/stacks/delegation/policy.yaml`](../examples/policy/stacks/delegation/policy.yaml).
+
+```yaml
+kind: resource_profile
+version: v1
+metadata: { name: payments-postgres }
+spec:
+  template:                       # a partial resource spec the writer can't change
+    postgres: { iam_auth: true, region: eu-west-1, tls_ca_file: /etc/limen/rds-ca.pem }
+    worker_selector: { network: payments-vpc }
+  settable:                       # the only fields a writer may set
+    postgres.endpoint:
+      hosts: ["*.c9xk2p.eu-west-1.rds.amazonaws.com"]   # exact names, or *.suffix
+      cidrs: ["10.20.0.0/16"]                           # for IP literals
+      ports: [5432]
+    postgres.default_database: {}  # text fields take no bounds
+  labels:
+    fixed: { team: payments }      # every resource from the profile has these
+    allowed: { env: [dev, staging] }
+```
+
+- **Only these fields can ever be settable:** `ssh.address`, `ssh.host_key`, the `endpoint` of `postgres`, `mysql`, `redshift`, `redis`, `mongodb`, `opensearch`, `elasticsearch`, `rabbitmq`, and `kafka`, `default_database` for the SQL kinds and MongoDB, `tcp.address`, and `web.address`. Everything else (the worker selector, credentials and files on the worker, IAM settings, TLS switches, audit settings, role bootstrap) stays in the template.
+- A settable endpoint needs `ports` and `hosts` or `cidrs`. A wildcard needs a suffix of at least two labels. CIDRs are at least `/8` (IPv4) or `/32` (IPv6). Keep both as narrow as the team's own hosts: with an IAM template, a pattern that also covers another team's database lets the worker mint tokens for it.
+- The template and the settable fields use one protocol, and a field is either in the template or settable, not both.
+- A resource built from a profile is marked `delegated`. Whatever the bounds, its worker never dials loopback, unspecified, link-local (cloud metadata), multicast, or broadcast addresses, or the AWS and Azure metadata addresses. The worker checks every address a name resolves to and connects only to one it checked, so DNS rebinding doesn't get around it. Addresses the target hands back are held to the same bounds: the brokers a Kafka cluster names, the primary a MongoDB replica set member points to. A Kafka profile whose brokers advertise names outside `hosts`, or ports outside `ports`, won't reach them. Kubernetes has no settable field, so a delegated Kubernetes resource reaches only the cluster its profile names.
+- `web.host` must be unique across resources, so a web profile can back only one resource.
+
+```yaml
+kind: policy_writer
+version: v1
+metadata: { name: payments-terraform }
+spec:
+  bot: payments-terraform    # one grant per bot
+  namespace: payments        # not default, which is policy applied from files
+  names: ["payments-*"]      # exact names, or a prefix of at least two characters and *
+  kinds: [resource]          # also role, role_mapping, policy_test; never bot, discovery, or the two above
+  profiles: [payments-postgres]
+  max_documents: 50          # 1 to 10000; 200 by default
+  approvers: { groups: [security] }   # may approve its held changes, besides admins
+```
+
+The bot keeps the roles in its `bot` document for its own sessions. The grant gives it no admin rights; it only lets it write documents in its namespace. Never give `limen:admin` to a pipeline.
+
+A writer of `role`, `role_mapping`, or `policy_test` writes them in its namespace. These rules are enforced on the server:
+- A writer's role is never built-in (`limen:*`), requestable, or break-glass. Access by request isn't standing access, so it wouldn't wait for a person, and the writer could name its own approvers.
+- A writer's mapping assigns only roles its namespace owns, never a built-in role.
+- A writer can't change or delete documents it doesn't own, so it can't remove a test that would stop it.
+- Standing access that comes from the writer's own roles and mappings is **held** for a person: an admin, or a member of `approvers.groups`. That is weighed on every write, so writing a role and mapping first and resources later still waits. Access that only people's roles give a resource the writer completes from its profile is approved by the grant. See [the management API guide](guides/management-api.md#changes-held-for-approval).
+
+Two writers in one namespace can change each other's documents; `limen apply` warns about it.
+
+**Upgrading:** finish upgrading every proxy and worker before anyone writes a resource from a profile. Such a resource carries the `delegated` field. A component from before Phase 14 parses snapshots strictly, so it refuses the whole snapshot, and after the grace period it stops serving every resource, not just that one. Profiles and writer grants themselves never leave the control plane, so writing them is safe at any point.
