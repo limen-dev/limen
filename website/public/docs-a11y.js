@@ -1,6 +1,7 @@
-// Docs pages only. Two accessibility fixes Starlight does not make on its own:
+// Docs pages only. Three accessibility fixes Starlight does not make on its own:
 //  - A table that scrolls sideways must be reachable from the keyboard, so a wrapper that
 //    overflows becomes a focusable, named region (and stops being one if it stops overflowing).
+//  - A code block that scrolls sideways must be focusable too (WebKit does not do it by itself).
 //  - The search button shows "Search" and the shortcut, but is named only "Search" (WCAG 2.5.3,
 //    label in name). Name it from the text that is actually shown; the phone layout shows only
 //    the icon, so fall back to "Search" there.
@@ -29,6 +30,14 @@ function spaceOut(el) {
     }
   }
 }
+// Code blocks that scroll sideways are keyboard-reachable in Chrome and Firefox, but not in WebKit,
+// so a block that overflows is made focusable (and stops being one if it stops overflowing).
+function wireCode() {
+  for (const el of document.querySelectorAll('pre')) {
+    if (el.scrollWidth > el.clientWidth + 1) el.tabIndex = 0;
+    else el.removeAttribute('tabindex');
+  }
+}
 function nameSearch() {
   for (const b of document.querySelectorAll('button[data-open-modal]')) {
     if (!b.dataset.spaced) {
@@ -40,6 +49,7 @@ function nameSearch() {
 }
 const wire = () => {
   wireTables();
+  wireCode();
   nameSearch();
 };
 document.addEventListener('DOMContentLoaded', wire);
