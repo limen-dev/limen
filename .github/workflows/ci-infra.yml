@@ -48,7 +48,7 @@ jobs:
       - name: Install Terraform
         uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
-          install_args: terraform helm
+          install_args: terraform helm kubeconform
 
       - name: Terraform formatting
         run: terraform fmt -check -recursive deploy/terraform
@@ -64,6 +64,10 @@ jobs:
         run: |
           helm lint deploy/helm/limen -f deploy/helm/limen/ci-values.yaml
           helm template limen deploy/helm/limen -f deploy/helm/limen/ci-values.yaml > /dev/null
+
+      # Helm renders any YAML; the Kubernetes schema says whether the API server would accept it.
+      - name: Rendered chart matches the Kubernetes schema
+        run: helm template limen deploy/helm/limen -f deploy/helm/limen/ci-values.yaml | kubeconform -strict -summary -kubernetes-version 1.35.0
 
       - name: Generated dashboards are up to date
         run: |
