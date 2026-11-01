@@ -1,0 +1,27 @@
+# Findings that were reviewed on 2026-10-29 and are not secrets: dev-stack credentials for
+# local containers, the dev sshd host key, documented example keys and test fixtures.
+# One fingerprint per line (commit:file:rule:line). A new finding fails CI: fix it, or review it
+# and add its fingerprint here with a comment saying why it is safe.
+336a5a6b3f1b3815aa51d7ad7adf8326490b88f1:crates/limen-control-plane/src/bots.rs:jwt:309
+3520634cc4621871eeb24237b1f8c3e0160c0389:deploy/compose/demo-phase2.sh:curl-auth-user:93
+3520634cc4621871eeb24237b1f8c3e0160c0389:deploy/compose/demo-phase3.sh:curl-auth-user:134
+3520634cc4621871eeb24237b1f8c3e0160c0389:deploy/compose/demo-phase3.sh:curl-auth-user:38
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:crates/limen-worker/src/search/target.rs:generic-api-key:552
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:demos/demo-phase10.sh:curl-auth-user:55
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:demos/demo-phase10.sh:curl-auth-user:61
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/config/targets/search/provision.sh:curl-auth-user:11
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/config/targets/search/provision.sh:curl-auth-user:13
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/setup.sh:curl-auth-user:158
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/setup.sh:curl-auth-user:159
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/stacks/search.yml:curl-auth-user:38
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:deploy/compose/stacks/search.yml:curl-auth-user:72
+38ec584804c38c7ef12fe2e8ad24f56a07a76b1d:docs/guides/search.md:generic-api-key:131
+5a742cfd373b79a22a360134e7895cd791f4bc6c:deploy/compose/config/targets/messaging/rabbitmq-definitions.json:generic-api-key:14
+5a742cfd373b79a22a360134e7895cd791f4bc6c:deploy/compose/config/targets/messaging/rabbitmq-definitions.json:generic-api-key:6
+7025475b267692276da21c848d56598f98756478:crates/limen-e2e/tests/common/mod.rs:generic-api-key:242
+7025475b267692276da21c848d56598f98756478:crates/limen-e2e/tests/phase8.rs:generic-api-key:135
+be8bc9977f223e65139de59ae223bae64a6e6646:deploy/compose/targets/sshd/ssh_host_ed25519_key:private-key:1
+c07a5ac9ac822f95436e03904c6f78759e984ab9:crates/limen-control-plane/src/search/mask.rs:generic-api-key:101
+c07a5ac9ac822f95436e03904c6f78759e984ab9:crates/limen-control-plane/src/search/mask.rs:private-key:145
+dc24b01845373279b42e82f73d89910f7f2ddb67:docs/guides/search.md:generic-api-key:131
+fbc66c4e1ec4f3c708ccaebe1ca38fe8fff45e4b:deploy/compose/demo-phase5.sh:curl-auth-user:54

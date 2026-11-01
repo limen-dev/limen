@@ -8,6 +8,8 @@ cargo-deny = "0.20.2"
 "cargo:cargo-audit" = "0.22.2"
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
+# Secret scan of the working tree and the whole git history (.gitleaksignore, secret-scan.yml)
+gitleaks = "8.30.1"
 # Dev stack, demos and scripts (deploy/compose/setup.sh, demos/)
 python = "3.13"
 kind = "0.33.0"

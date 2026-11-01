@@ -12,6 +12,7 @@ Each workflow has a `paths:` filter. `ci-rust.yml` lists what to leave out; the 
 |---|---|---|
 | `ci-rust.yml` | Anything except docs, `website/`, `demos/`, `assets/`, Terraform, dashboards, `*.md` and the other workflows (a new directory is tested by default; `examples/` counts because the policy tests read it) | Lint (fmt, clippy, image versions), then tests (Linux x86_64 and arm64; macOS except on pull requests) and container images |
 | `audit.yml` | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `mise.toml`, the workflow itself; and weekdays 05:17 UTC, because advisories appear without a commit | cargo-deny and cargo-audit |
+| `secret-scan.yml` | Every push to `main` and every pull request (no path filter: a secret can be in any file) | gitleaks over the whole git history. Reviewed false positives are in `.gitleaksignore` |
 | `ci-infra.yml` | `deploy/terraform/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, dashboards, dev-users check |
 | `ci-workflows.yml` | `.github/workflows/` | actionlint |
 | `website-browsers.yml` | Never on a push or pull request: Mondays 04:30 UTC, or `gh workflow run website-browsers.yml` | The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes, dark and light (`website/scripts/browser-matrix.mjs`). |
