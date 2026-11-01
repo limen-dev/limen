@@ -61,7 +61,7 @@ spec:
               podAffinityTerm:
                 topologyKey: topology.kubernetes.io/zone
                 labelSelector:
-                  matchLabels: {{ include "limen.selector" $ref | nindent 18 }}
+                  matchLabels: {{ include "limen.selector" $ref | nindent 20 }}
       containers:
         - name: {{ $name }}
           image: {{ include "limen.image" (dict "root" $ "component" "control-plane") }}
