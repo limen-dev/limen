@@ -2,25 +2,12 @@ name: ci-infra
 
 # Terraform, generated dashboards, dev users. crates/ counts: dashboards come from metric names.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
+# Started by ci.yml when Terraform, dashboards, dev users or crates/ change.
 
 on:
-  push:
-    branches: [main]
-    # Only these start it: add a path here when a check reads a new file (files the checks read).
-    paths: &paths
-      - "deploy/terraform/**"
-      - "deploy/grafana/**"
-      - "deploy/compose/config/dev-users.toml"
-      - "deploy/compose/scripts/gen-dev-users.py"
-      - "crates/**"
-      - ".github/workflows/ci-infra.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
-  # Called by release.yml, which tests the exact commit before building anything.
+  # Also called by release.yml, which tests the exact commit before building anything.
   workflow_call:
-  # A manual run ignores the path filter.
+  # A manual run runs every job.
   workflow_dispatch:
 
 permissions:

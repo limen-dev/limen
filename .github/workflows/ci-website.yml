@@ -2,22 +2,11 @@ name: ci-website
 
 # Builds the site and runs its link and rule checks (npm run build).
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
+# Started by ci.yml when the site, docs/ or the compose README change.
 
 on:
-  push:
-    branches: [main]
-    # The build publishes docs/ and the compose README into the site.
-    paths: &paths
-      - "website/**"
-      - "docs/**"
-      - "deploy/compose/README.md"
-      - "mise.toml"
-      - ".github/workflows/ci-website.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
-  # A manual run ignores the path filter.
+  workflow_call:
+  # A manual run runs every job.
   workflow_dispatch:
 
 permissions:

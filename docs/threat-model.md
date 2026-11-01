@@ -242,7 +242,7 @@ Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded a
 | E: a pull request runs code with the repository's credentials (a PR's workflow is code) | Workflows use `permissions: contents: read` and `persist-credentials: false`. No CI workflow reads a repository secret; only `release.yml` publishes, and it runs on pushes to `main` |
 | T: one job leaves state for the next | Each job gets a new VM. The Rust cache is written only from `main` (`save-if`), so a pull request cannot poison it for later runs |
 | I: the checkout token leaks into logs or onto disk | `persist-credentials: false` writes no token into `.git/config`. Nothing echoes it |
-| S: a workflow change that weakens CI | `.github/` changes run the full suite and `actionlint` |
+| S: a workflow change that weakens CI | `.github/` changes run `actionlint`, and changes to `ci.yml` or the area rules run every area. The ruleset on `main` requires the `ci` check, so nothing merges with a failing or missing result |
 | D: a job hangs or a runner is lost | Every job has a timeout. A lost job is rerun by hand |
 
 Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.

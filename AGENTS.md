@@ -10,7 +10,7 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Read `d
 - **Image versions.** Container images are pinned only in `deploy/compose/.env`; edit it and run `scripts/check-versions.sh` (CI runs it). Tool versions are in `mise.toml`.
 - **Dependencies and entry points.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
 - **Commits.** Conventional, small, focused. Stage specific files, never `git add -A`. Don't push or tag unless asked.
-- **Pull requests.** Always open them as drafts (`gh pr create --draft`). CI doesn't run on a draft; it starts when the PR is marked ready for review.
+- **Pull requests.** Always open them as drafts (`gh pr create --draft`). CI doesn't run on a draft; it starts when the PR is marked ready for review. `ci.yml` is the one entry point: it runs only the areas the change touches (`scripts/ci-changes.sh`, tested by `scripts/test-ci-changes.sh`; a check that starts reading a new file needs its pattern there) and its `ci` job is the check `main` requires. Nothing merges without it. For a bot's PR (release-please) run `gh workflow run ci.yml --ref <branch>`.
 - **Certificates.** Don't bypass browser warnings or touch trust stores. Dev CA: `deploy/compose/.state/internal-ca.pem` (use `curl --cacert`).
 
 ## Agent use (cost)
