@@ -248,7 +248,7 @@ Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded a
 Residual: a dependency or action compromised upstream runs inside CI. Actions are pinned by commit SHA and dependencies are checked by `audit.yml`.
 
 ### TB12: Public website (ADR-0021)
-A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub Pages by `deploy-website.yml` once the repository is public and `PUBLISH_SITE` is set (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
+A static site, built and checked in CI (`ci-website.yml`) and deployed to GitHub Pages by `ci-website.yml` once the repository is public and `PUBLISH_SITE` is set (#138). It holds no Limen data and talks to no Limen component, so it is not an entry point to a deployment. Its risks are to its visitors and to the build.
 | Threat | Mitigation |
 |---|---|
 | T: a compromised npm package changes the site, or runs on a developer's machine | Exact versions and a lockfile, `npm ci`, Dependabot for `website/`, `npm audit` before each push (by hand). The site holds no secrets and is never deployed from a laptop: the deploy runs in Actions with only `pages: write` and `id-token: write`, from `main`, behind the same build checks |
