@@ -129,8 +129,12 @@ if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
 // Name the button from the text that is shown (WCAG 2.5.3); the phone layout shows only the icon.
 // The shown text ("Search", "Ctrl K") comes from two elements; checkers that compare it with the name join
 // them with no space, so one is put between them (the button is a flex box, so it takes no room).
+// public/docs-a11y.js does the same for the docs' search button; keep the two in step.
 const searchButton = $('#open-palette');
-searchButton?.querySelector('span')?.after(' ');
+if (searchButton && !searchButton.dataset.spaced) {
+  searchButton.querySelector(':scope > span')?.after(' ');
+  searchButton.dataset.spaced = '1';
+}
 const nameSearch = () =>
   searchButton?.setAttribute('aria-label', searchButton.innerText.replace(/\s+/g, ' ').trim() || 'Search');
 nameSearch();

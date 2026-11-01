@@ -19,23 +19,32 @@ function wireTables() {
   }
 }
 // Text from separate elements ("Search", "Ctrl", "K") is joined with no space by the checkers that
-// compare the shown text with the name, so a space is put between them. It takes no room: the
-// parents are flex boxes, which drop whitespace-only text.
+// compare the shown text with the name, so a space is put between neighbouring elements. It takes no
+// room: the parents are flex boxes, which drop whitespace-only text. (site.ts does the same for the
+// homepage's own search button; keep the two in step.)
 function spaceOut(el) {
   for (const child of [...el.children]) {
-    if (child.tagName !== 'svg') spaceOut(child);
+    if (child.tagName === 'svg') continue;
+    spaceOut(child);
     const next = child.nextSibling;
-    if (next && !(next.nodeType === 3 && /\s/.test(next.textContent)) && child.tagName !== 'svg') {
-      child.after(' ');
-    }
+    const spaced = next && next.nodeType === 3 && /^\s/.test(next.textContent);
+    if (child.nextElementSibling && child.nextElementSibling.tagName !== 'svg' && !spaced) child.after(' ');
   }
 }
 // Code blocks that scroll sideways are keyboard-reachable in Chrome and Firefox, but not in WebKit,
-// so a block that overflows is made focusable (and stops being one if it stops overflowing).
+// so one that overflows is made focusable. It is never made unfocusable again (the renderer may have
+// set it), and a block inside a closed tab is measured when it is first shown.
+const watched = new WeakSet();
 function wireCode() {
   for (const el of document.querySelectorAll('pre')) {
-    if (el.scrollWidth > el.clientWidth + 1) el.tabIndex = 0;
-    else el.removeAttribute('tabindex');
+    const check = () => {
+      if (el.scrollWidth > el.clientWidth + 1) el.tabIndex = 0;
+    };
+    check();
+    if (!watched.has(el) && 'ResizeObserver' in window) {
+      watched.add(el);
+      new ResizeObserver(check).observe(el);
+    }
   }
 }
 function nameSearch() {
