@@ -1,4 +1,4 @@
-name: ci-workflows
+name: workflows
 
 # actionlint on the workflows.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   # (github.workflow is release.yml's name when it calls this, hence the prefix.)
-  group: ci-workflows-${{ github.workflow }}-${{ github.ref }}
+  group: workflows-${{ github.workflow }}-${{ github.ref }}
   # A new push cancels the older pull request run; a push to main always runs to the end.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.please.outputs.pr_branch }}
         run: |
-          for workflow in ci-rust audit ci-infra ci-workflows; do
+          for workflow in rust audit infra workflows; do
             gh workflow run "${workflow}.yml" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
           done
 
@@ -83,7 +83,7 @@ jobs:
     name: verify (rust)
     needs: please
     if: needs.please.outputs.release_created == 'true'
-    uses: ./.github/workflows/ci-rust.yml
+    uses: ./.github/workflows/rust.yml
     with:
       # The images job below builds the same Dockerfile targets.
       images: ${{ 'false' }}
@@ -102,7 +102,7 @@ jobs:
     name: verify (infra)
     needs: please
     if: needs.please.outputs.release_created == 'true'
-    uses: ./.github/workflows/ci-infra.yml
+    uses: ./.github/workflows/infra.yml
     permissions:
       contents: read
 
@@ -110,7 +110,7 @@ jobs:
     name: verify (workflows)
     needs: please
     if: needs.please.outputs.release_created == 'true'
-    uses: ./.github/workflows/ci-workflows.yml
+    uses: ./.github/workflows/workflows.yml
     permissions:
       contents: read
 

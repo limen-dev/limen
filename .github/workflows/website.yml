@@ -1,4 +1,4 @@
-name: ci-website
+name: website
 
 # Builds the site and runs its link and rule checks (npm run build). On main it also publishes
 # the site to GitHub Pages (https://limen-dev.github.io/limen), once the repository variable
@@ -14,7 +14,7 @@ on:
       - "docs/**"
       - "deploy/compose/README.md"
       - "mise.toml"
-      - ".github/workflows/ci-website.yml"
+      - ".github/workflows/website.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-website-${{ github.ref }}
+  group: website-${{ github.ref }}
   # A new push cancels the older pull request run; a push to main always runs to the end.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
