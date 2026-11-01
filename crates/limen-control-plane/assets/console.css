@@ -559,3 +559,13 @@ html { background: var(--bg); }
 fieldset { min-width: 0; }
 .toolbar > *, .range-row > * { min-width: 0; max-width: 100%; }
 .toolbar .tb-label { flex-wrap: wrap; }
+
+/* Pages with real data on a phone (#145): long values wrap instead of widening the page. */
+table.facts td, table.facts th { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  table.facts th, table.facts td { display: block; width: auto; }
+  table.facts th { border-bottom: 0; padding-bottom: 0; }
+}
+details > summary { overflow-wrap: anywhere; }
+details > summary .pill { white-space: normal; text-align: left; }
+.hint .mono { overflow-wrap: anywhere; }
