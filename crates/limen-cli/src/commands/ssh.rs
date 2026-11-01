@@ -210,7 +210,13 @@ pub(crate) async fn open_session_in(
         .context("reading the proxy's answer")?;
     if !response.ok {
         let hint = if response.denied {
-            super::access::denial_hint(Some(&proxy_addr), resource).await
+            // The principal's kind depends on the protocol; for SSH it is the login.
+            let principal = if alpn == limen_tunnel::alpn::SSH && !principal.is_empty() {
+                format!("login={principal}")
+            } else {
+                String::new()
+            };
+            super::access::denial_hint(Some(&proxy_addr), resource, &principal).await
         } else {
             String::new()
         };

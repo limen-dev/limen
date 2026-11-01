@@ -25,6 +25,9 @@ use crate::profile;
 use crate::{api, ui};
 
 /// Generated OpenSSH config that `~/.ssh/config` includes.
+/// The longest a login waits to refresh the generated files.
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 const SSH_CONFIG: &str = "ssh_config";
 /// Generated kubeconfig, for `KUBECONFIG`.
 const KUBECONFIG: &str = "kubeconfig";
@@ -195,6 +198,15 @@ pub fn uninstall_ssh(file: Option<&Path>) -> anyhow::Result<()> {
     if config.exists() {
         edit_config_file(&config, without_block)?;
     }
+    if file.is_some() {
+        // Another config (`~/.ssh/config`) may still include the generated file,
+        // and `--file` only said which one to edit.
+        ui::success(&format!(
+            "Removed Limen's block from {}. The generated file stays, since other configs may use it; run `limen config ssh --uninstall` to remove it.",
+            config.display()
+        ));
+        return Ok(());
+    }
     remove_generated(SSH_CONFIG, SSH_FRAGMENT)?;
     ui::success(&format!(
         "Removed Limen's entries from {}.",
@@ -289,7 +301,13 @@ pub fn ssh_installed(file: Option<&Path>) -> anyhow::Result<bool> {
         Some(f) => f.to_owned(),
         None => default_ssh_config()?,
     };
-    Ok(std::fs::read_to_string(config).is_ok_and(|t| t.contains(BLOCK_BEGIN)))
+    let generated = profile::home()?.join(SSH_CONFIG);
+    // The block must include the generated file this home really has: after
+    // LIMEN_HOME moves, or a hand edit, the Include would point at nothing and
+    // ssh would skip it without a word.
+    Ok(std::fs::read_to_string(config).is_ok_and(|t| {
+        t.contains(BLOCK_BEGIN) && t.contains(&include_line(&generated)) && generated.exists()
+    }))
 }
 
 // ---- kubectl --------------------------------------------------------------------------
@@ -521,6 +539,38 @@ async fn fetch(proxy: &str) -> anyhow::Result<Vec<Resource>> {
     super::fetch_resources(Some(proxy)).await
 }
 
+/// After a logout: drop this proxy's hosts and contexts from the generated
+/// files, so `ssh db` doesn't name a proxy that is no longer logged in. The
+/// files stay (and stay installed) with whatever other logins still list.
+/// Problems are warnings; the logout stands.
+pub fn forget_profile(proxy: &str) {
+    let Ok(home) = profile::home() else { return };
+    let Ok(dir) = profile::dir_for(proxy) else {
+        return;
+    };
+    let result = (|| {
+        remove_if_present(&dir.join(SSH_FRAGMENT))?;
+        remove_if_present(&dir.join(KUBE_FRAGMENT))?;
+        if home.join(SSH_CONFIG).exists() {
+            let others = fragments(proxy, SSH_FRAGMENT)?
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>();
+            // No current proxy any more, so no catch-all `Host *.limen` options.
+            profile::write_file(&home.join(SSH_CONFIG), &ssh_aggregate(&others, ""), false)?;
+        }
+        if home.join(KUBECONFIG).exists() {
+            rebuild_kube(proxy)?;
+        }
+        anyhow::Ok(())
+    })();
+    if let Err(e) = result {
+        ui::warn(&format!(
+            "Couldn't update the generated ssh_config/kubeconfig after logout ({e:#}). `limen login` rebuilds them."
+        ));
+    }
+}
+
 /// After a login: regenerate whichever integrations are installed, so they
 /// list what this login may reach. Problems are warnings; the login stands.
 pub async fn refresh_after_login(proxy: &str) {
@@ -530,7 +580,7 @@ pub async fn refresh_after_login(proxy: &str) {
     if !ssh && !kube {
         return;
     }
-    let result = async {
+    let result = tokio::time::timeout(REFRESH_TIMEOUT, async {
         let resources = fetch(proxy).await?;
         if ssh {
             write_ssh_fragment(proxy, &resources)?;
@@ -541,8 +591,9 @@ pub async fn refresh_after_login(proxy: &str) {
             rebuild_kube(proxy)?;
         }
         anyhow::Ok(())
-    }
-    .await;
+    })
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("the control plane did not answer in time")));
     if let Err(e) = result {
         ui::warn(&format!(
             "Couldn't refresh the generated ssh_config/kubeconfig ({e:#}). Run `limen config ssh --install` or `limen kube config` to retry."

@@ -45,6 +45,7 @@ pub async fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
         end_login(&proxy, &profile).await
     };
     Profile::delete(&proxy)?;
+    tools::forget_profile(&proxy);
     let stopped = conns::stop_all(&proxy);
     if stopped > 0 {
         ui::info(&format!("Closed {stopped} detached connection(s)."));
@@ -197,7 +198,7 @@ pub async fn kind_of(proxy: Option<&str>, name: &str) -> anyhow::Result<String> 
     {
         return Ok(r.kind);
     }
-    let hint = access::denial_hint(proxy, name).await;
+    let hint = access::denial_hint(proxy, name, "").await;
     anyhow::bail!("no resource named `{name}` is available to you; see `limen ls`{hint}")
 }
 

@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use limen_core::resource::ResourceKind;
 use serde::{Deserialize, Serialize};
 
+use crate::duration::DurationStr;
 use crate::trace::summarize_role;
 use crate::{AccessibleResource, Policy, RequestableResource};
 
@@ -557,15 +558,36 @@ impl Policy {
 
     /// The command that asks for `resource`: an ordinary request when one of
     /// `roles` takes approval, break-glass only when nothing else reaches it.
+    /// The duration never exceeds the role's own limit, so the command works as printed.
     fn request_command(&self, resource: &str, roles: &[String]) -> String {
         let break_glass = |r: &&String| self.roles.get(*r).is_some_and(|d| d.spec.break_glass);
         let ordinary: Vec<&String> = roles.iter().filter(|r| !break_glass(r)).collect();
+        let for_flag = |role: &str| {
+            let thirty = DurationStr(std::time::Duration::from_mins(30));
+            let limit = self
+                .roles
+                .get(role)
+                .and_then(|d| d.spec.request.as_ref())
+                .and_then(|r| r.max_duration);
+            format!("--for {}", limit.map_or(thirty, |l| l.min(thirty)))
+        };
         match ordinary.as_slice() {
-            [] => format!("Run: limen request {resource} --break-glass --reason \"...\""),
-            [_] => format!("Run: limen request {resource} --for 30m --reason \"...\""),
-            [first, ..] => {
-                format!("Run: limen request {resource} --role {first} --for 30m --reason \"...\"")
+            [] => {
+                // Several break-glass roles need the one to ask for named.
+                let role = match roles {
+                    [first, _, ..] => format!(" --role {first}"),
+                    _ => String::new(),
+                };
+                format!("Run: limen request {resource} --break-glass{role} --reason \"...\"")
             }
+            [only] => format!(
+                "Run: limen request {resource} {} --reason \"...\"",
+                for_flag(only)
+            ),
+            [first, ..] => format!(
+                "Run: limen request {resource} --role {first} {} --reason \"...\"",
+                for_flag(first)
+            ),
         }
     }
 }

@@ -33,7 +33,18 @@ limen() { "$LIMEN_BIN" "$@"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
-login() { local out; out="$("$here/scripts/dev-login.sh" "$1" 2>&1)" || { echo "$out"; fail "login as $1"; }; }
+# The proxy limits unauthenticated calls per client address (30 a minute, bursts of 10), and the doctor
+# and plain-ssh steps before a login spend that budget: wait for it to refill rather than fail.
+login() {
+  local out try
+  for try in 1 2 3 4 5 6; do
+    if out="$("$here/scripts/dev-login.sh" "$1" 2>&1)"; then return 0; fi
+    grep -q "too many requests" <<<"$out" || break
+    sleep 10
+  done
+  echo "$out"
+  fail "login as $1"
+}
 # Fail instead of waiting forever (macOS has no `timeout`).
 within() { local secs="$1"; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
 for tool in ssh scp rsync git curl python3 perl cargo docker; do command -v "$tool" >/dev/null || fail "$tool is required"; done
@@ -187,13 +198,31 @@ grep -q "! kubeconfig" <<<"$out" || fail "doctor should point out KUBECONFIG"
 KUBECONFIG="$LIMEN_HOME/kubeconfig" limen doctor >/dev/null || fail "doctor with KUBECONFIG set"
 pass "doctor notices when KUBECONFIG doesn't include it"
 
+step "Logout drops this proxy's hosts, and keeps what stays installed"
+grep -q "^Host web-staging-1" "$LIMEN_HOME/ssh_config" || fail "the admin's hosts should be listed before logout"
+limen logout >/dev/null
+grep -q "^Host web-staging-1" "$LIMEN_HOME/ssh_config" && fail "logout left the proxy's hosts in the generated file"
+[ -e "$LIMEN_HOME/ssh_config" ] || fail "logout removed the installed generated file"
+python3 - "$LIMEN_HOME/kubeconfig" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+assert not cfg["contexts"], cfg["contexts"]
+PY
+login "$ADMIN"
+grep -q "^Host web-staging-1" "$LIMEN_HOME/ssh_config" || fail "login after logout didn't bring the hosts back"
+pass "logout removed the hosts and contexts; the next login restored them"
+
 step "Uninstall"
 limen config ssh --uninstall --file "$sshcfg"
-limen kube config --uninstall
 grep -q ">>> limen" "$sshcfg" && fail "block left behind"
+[ -e "$LIMEN_HOME/ssh_config" ] || fail "--uninstall --file must not delete the generated file other configs may include"
+[ "$(cat "$sshcfg")" = "$(printf 'Host example-not-limen\n    User someone')" ] || fail "user's own entries changed"
+# Without --file it edits ~/.ssh/config, so point HOME at an empty directory for this call.
+mkdir -p "$state/emptyhome"
+HOME="$state/emptyhome" limen config ssh --uninstall
+limen kube config --uninstall
 [ -e "$LIMEN_HOME/ssh_config" ] && fail "generated ssh_config left behind"
 [ -e "$LIMEN_HOME/kubeconfig" ] && fail "generated kubeconfig left behind"
-[ "$(cat "$sshcfg")" = "$(printf 'Host example-not-limen\n    User someone')" ] || fail "user's own entries changed"
 pass "everything Limen added is gone; the rest is untouched"
 
 printf '\n\033[32mAll first-five-minutes checks passed.\033[0m\n'

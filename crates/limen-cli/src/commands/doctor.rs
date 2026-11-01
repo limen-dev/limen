@@ -227,13 +227,31 @@ fn check_ca(
         }
     };
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    for der in &roots {
-        if let Some((subject, not_after)) = cert_subject_and_expiry(der)
-            && not_after <= now
-        {
-            report.fail("ca", format!("the pinned CA {subject} has expired"), fix);
-            return None;
-        }
+    // A bundle can hold an old root next to its replacement during a rotation;
+    // connections work through any valid one, so only all-expired is a failure.
+    let expired: Vec<String> = roots
+        .iter()
+        .filter_map(|der| cert_subject_and_expiry(der))
+        .filter(|(_, not_after)| *not_after <= now)
+        .map(|(subject, _)| subject)
+        .collect();
+    if expired.len() == roots.len() {
+        report.fail(
+            "ca",
+            format!("the pinned CA {} has expired", expired.join(", ")),
+            fix,
+        );
+        return None;
+    }
+    if !expired.is_empty() {
+        report.warn(
+            "ca",
+            format!(
+                "the pinned bundle holds an expired CA ({}); the others still work",
+                expired.join(", ")
+            ),
+            "`limen login` after the proxy's CA rotation drops the old one",
+        );
     }
     let n = roots.len();
     report.pass(
@@ -616,11 +634,16 @@ async fn check_resource(report: &mut Report, proxy: &str, name: &str) {
         }
     };
     // The server's own words (ADR-0028); older control planes have none.
-    let explained =
-        tokio::time::timeout(STEP_TIMEOUT, super::access::explain_for(Some(proxy), name))
-            .await
-            .ok()
-            .and_then(Result::ok);
+    let (explained, explain_error) = match tokio::time::timeout(
+        STEP_TIMEOUT,
+        super::access::explain_for(Some(proxy), name, ""),
+    )
+    .await
+    {
+        Ok(Ok(r)) => (Some(r), None),
+        Ok(Err(e)) => (None, Some(format!("{e:#}"))),
+        Err(_) => (None, Some("timed out".to_owned())),
+    };
     let Some(r) = listed.resources.iter().find(|r| r.name == name) else {
         access_denied(report, &listed, explained.as_ref(), name);
         return;
@@ -637,7 +660,11 @@ async fn check_resource(report: &mut Report, proxy: &str, name: &str) {
             format!("no worker that can reach {name} is connected"),
             "sessions fail until one is; tell an admin (the worker is down, or no worker's labels match the resource's worker_selector)",
         ),
-        None => report.skip("worker", "the control plane doesn't report it"),
+        None => match &explain_error {
+            // Say what went wrong; an old control plane that doesn't report it is the other case.
+            Some(why) => report.skip("worker", &format!("couldn't ask the control plane: {why}")),
+            None => report.skip("worker", "the control plane doesn't report it"),
+        },
     }
     match r.kind.as_str() {
         "ssh" => {

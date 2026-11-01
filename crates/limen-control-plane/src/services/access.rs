@@ -241,15 +241,22 @@ pub async fn explain(
         && grants.is_empty()
         && let Some(g) = store::recently_ended_grant(&state.db, subject, resource).await?
     {
-        // Their own grant: nothing they didn't know is revealed.
+        // The subject's own grant: nothing they didn't know is revealed. In an
+        // admin's view of another user it is that user's, so it is named so.
         let ended = g.revoked_at.unwrap_or(g.expires_at);
         let how = if g.revoked_at.is_some() {
             "was revoked"
         } else {
             "expired"
         };
+        // "Your" for the person asking; the user's name in an admin's view.
+        let whose = if full_trace {
+            format!("{subject}'s grant")
+        } else {
+            "Your grant".to_owned()
+        };
         lines.push(format!(
-            "Your grant ({}) of {} on `{resource}` {how} {} minutes ago. Ask again to get it back.",
+            "{whose} ({}) of {} on `{resource}` {how} {} minutes ago. Ask again to get it back.",
             g.request_id,
             g.role,
             (now - ended).whole_minutes().max(0)
