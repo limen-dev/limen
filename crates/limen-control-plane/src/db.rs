@@ -83,22 +83,32 @@ pub struct PolicyRow {
     pub created_at: OffsetDateTime,
 }
 
-/// Takes a pool, or a transaction's connection to read inside it.
-pub async fn latest_policy_version<'e>(
+/// The newest version and its digest. Takes a pool, or a transaction's
+/// connection to read inside it.
+pub async fn latest_policy_head<'e>(
     db: impl sqlx::PgExecutor<'e>,
-) -> Result<Option<i64>, sqlx::Error> {
-    sqlx::query_scalar("SELECT max(version) FROM policy_versions")
-        .fetch_one(db)
+) -> Result<Option<(i64, String)>, sqlx::Error> {
+    sqlx::query_as("SELECT version, digest FROM policy_versions ORDER BY version DESC LIMIT 1")
+        .fetch_optional(db)
         .await
 }
 
+/// The newest version, with its documents. Versions written since #183 keep
+/// a manifest of document digests; older ones keep the documents inline.
 /// Takes a pool, or a transaction's connection to read inside it.
 pub async fn latest_policy<'e>(
     db: impl sqlx::PgExecutor<'e>,
 ) -> Result<Option<PolicyRow>, sqlx::Error> {
-    let row = sqlx::query("SELECT version, digest, documents, author, created_at FROM policy_versions ORDER BY version DESC LIMIT 1")
-        .fetch_optional(db)
-        .await?;
+    let row = sqlx::query(
+        "SELECT v.version, v.digest, v.author, v.created_at,
+                COALESCE(v.documents, (
+                    SELECT COALESCE(jsonb_agg(d.body ORDER BY m.position), '[]'::jsonb)
+                    FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest
+                    WHERE m.version = v.version)) AS documents
+         FROM policy_versions v ORDER BY v.version DESC LIMIT 1",
+    )
+    .fetch_optional(db)
+    .await?;
     row.map(|r| {
         Ok(PolicyRow {
             version: r.try_get("version")?,
@@ -121,20 +131,45 @@ pub async fn lock_policy_writes(tx: &mut Transaction<'_, Postgres>) -> Result<()
         .map(|_| ())
 }
 
+/// Stores a version: its documents once each, by digest, and a manifest of
+/// which ones (#183). A version that changes one document stores one new body.
 pub async fn insert_policy(
     tx: &mut Transaction<'_, Postgres>,
     digest: &str,
-    documents: &serde_json::Value,
+    documents: &[serde_json::Value],
     author: &str,
     source_ref: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("INSERT INTO policy_versions (digest, documents, author, source_ref) VALUES ($1, $2, $3, $4) RETURNING version")
+    let version: i64 = sqlx::query_scalar("INSERT INTO policy_versions (digest, author, source_ref) VALUES ($1, $2, $3) RETURNING version")
         .bind(digest)
-        .bind(documents)
         .bind(author)
         .bind(source_ref)
         .fetch_one(&mut **tx)
-        .await
+        .await?;
+    let digests: Vec<String> = documents.iter().map(document_digest).collect();
+    sqlx::query("INSERT INTO policy_documents (digest, body) SELECT * FROM unnest($1::text[], $2::jsonb[]) ON CONFLICT (digest) DO NOTHING")
+        .bind(&digests)
+        .bind(documents)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("INSERT INTO policy_manifest (version, position, document_digest) SELECT $1, ord - 1, d FROM unnest($2::text[]) WITH ORDINALITY AS t(d, ord)")
+        .bind(version)
+        .bind(&digests)
+        .execute(&mut **tx)
+        .await?;
+    Ok(version)
+}
+
+/// SHA-256 over the document's JSON, as a key. Equal documents share a body.
+fn document_digest(doc: &serde_json::Value) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(doc.to_string().as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 // ---- Join tokens -----------------------------------------------------------
