@@ -356,3 +356,4 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .nf-suggest li a:hover { border-color: var(--lm-accent); }
 .nf [hidden] { display: none; }
 @media (max-width: 980px) { .nf-inner { grid-template-columns: 1fr; } .nf-door svg { width: min(55%, 220px); } .nf { padding-top: 6rem; } }
+.logo-note { margin-top: 2rem; text-align: left; }
