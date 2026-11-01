@@ -102,7 +102,19 @@ header.header {
 
 /* Code and tables */
 .expressive-code .frame { border-radius: 12px; box-shadow: var(--lm-shadow); }
-.expressive-code .frame pre { background: var(--lm-bg-raised); }
+.expressive-code .frame pre {
+  background-color: var(--lm-bg-raised);
+  /* Shadows at the edges that appear only while there is more to scroll to. */
+  background-image:
+    linear-gradient(to right, var(--lm-bg-raised) 30%, transparent),
+    linear-gradient(to left, var(--lm-bg-raised) 30%, transparent),
+    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.22), transparent),
+    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.22), transparent);
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-repeat: no-repeat;
+  background-size: 2.5rem 100%, 2.5rem 100%, 0.9rem 100%, 0.9rem 100%;
+  background-attachment: local, local, scroll, scroll;
+}
 :not(pre) > code { border: 1px solid var(--lm-line); border-radius: 6px; padding: 0.1em 0.35em; }
 .table-scroll { overflow-x: auto; border: 1px solid var(--lm-line); border-radius: 12px; margin-block: 1rem; -webkit-overflow-scrolling: touch; }
 .sl-markdown-content .table-scroll table { display: table; width: 100%; margin: 0; border: 0; }
