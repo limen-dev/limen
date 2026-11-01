@@ -10,7 +10,6 @@
     ".": {
       "package-name": "limen",
       "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0-rc.1",
       "extra-files": [
         { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" }
       ]
