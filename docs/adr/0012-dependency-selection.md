@@ -30,6 +30,7 @@ A dependency is adopted only if all of these hold:
 | SQL state | sqlx | 0.9.0 | 2026-05 | Adopt |
 | CLI | clap | 4.6.7 | 2026-09 | Adopt |
 | CLI completions | clap_complete 4.6.11 | | 2026-10 | Adopt. Same maintainers and release train as clap; generates `limen completions <shell>`. No advisories; MIT/Apache-2.0 |
+| Docs diagrams | @mermaid-js/mermaid-cli 12.0.0 (MIT) | | 2026-09-24 | Adopt as a **maintainer tool only**: `website/scripts/render-mermaid.mjs` runs it with `npx` to draw the Mermaid blocks in `docs/` as light and dark SVGs (committed under `docs/diagrams/mermaid/`). It is not in `website/package.json`, not in the site's build or CI, and nothing from it runs in the reader's browser. The build only checks that each block has its pictures (#139) |
 | Telemetry | tracing 0.1.44, tracing-subscriber 0.3.23, opentelemetry(-otlp) 0.33.1, tracing-opentelemetry 0.34 | OTLP over HTTP/protobuf with the blocking reqwest client (shares reqwest and prost; no second tonic). ADR-0040 | 2025-12 → 2026-10 | Adopt |
 | Metrics | metrics 0.24.6 + metrics-exporter-prometheus 0.18.3, cadence 1.8.0 | | 2026-04/05 | Adopt |
 | SSH | russh 0.64.1 | | 2026-10-05 | Adopt, at ≥ 0.60.3 (RUSTSEC-2026-0154 fixed). Fuzz our usage |

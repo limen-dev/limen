@@ -4,6 +4,7 @@
 // This copies them into src/content/docs/docs/ (git-ignored) with the frontmatter
 // Starlight needs, and rewrites relative links to site-relative ones, so the site
 // works under any base path. Links to files that are not published become GitHub links.
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +75,29 @@ function rewriteTarget(target, srcPath, fromRoute) {
   return `${GITHUB}/${isDir ? 'tree' : 'blob'}/main/${abs.replace(/\/$/, '')}${hash}`;
 }
 
+// Mermaid diagrams are drawn ahead of time (website/scripts/render-mermaid.mjs) into docs/diagrams/mermaid/,
+// one light and one dark SVG per diagram, named by a hash of its source. GitHub still renders the source in
+// the repository; the site shows the pictures, so no script runs in the reader's browser. A diagram whose
+// pictures are missing or stale fails the build.
+const mermaidDir = join(root, 'docs', 'diagrams', 'mermaid');
+const mermaidUsed = new Set();
+const mermaidId = (source) => createHash('sha256').update(source).digest('hex').slice(0, 12);
+
+function mermaidImages(source, srcPath) {
+  const id = mermaidId(source);
+  const files = ['light', 'dark'].map((theme) => `mermaid-${id}.${theme}.svg`);
+  for (const f of files) {
+    if (!existsSync(join(mermaidDir, f))) {
+      console.error(`${srcPath}: a mermaid diagram has no rendered picture (${f}). Run: node website/scripts/render-mermaid.mjs`);
+      process.exit(1);
+    }
+    mermaidUsed.add(f);
+  }
+  const first = source.split('\n').find((l) => l.trim()) ?? 'diagram';
+  const alt = `Diagram (${first.trim()}); the source is in the repository`;
+  return files.map((f) => `![${alt}](./${f})`);
+}
+
 function describe(body) {
   const para = body
     .split(/\n\s*\n/)
@@ -94,8 +118,24 @@ function transform(srcPath, page) {
   const lines = raw.split('\n');
   let title = '';
   let fence = false;
+  let mermaid = null;
   const kept = [];
   for (const line of lines) {
+    if (!fence && /^```mermaid\s*$/.test(line)) {
+      mermaid = [];
+      fence = true;
+      continue;
+    }
+    if (mermaid && /^```\s*$/.test(line)) {
+      kept.push(...mermaidImages(mermaid.join('\n') + '\n', srcPath));
+      mermaid = null;
+      fence = false;
+      continue;
+    }
+    if (mermaid) {
+      mermaid.push(line);
+      continue;
+    }
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
     if (!fence && !title && /^# /.test(line)) {
       title = line.slice(2).trim();
@@ -146,6 +186,8 @@ for (const f of readdirSync(join(root, 'docs/diagrams')).filter((f) => f.endsWit
   cpSync(join(root, 'docs/diagrams', f), join(out, 'architecture', f));
   cpSync(join(root, 'docs/diagrams', f), join(full, f));
 }
+
+for (const f of mermaidUsed) cpSync(join(mermaidDir, f), join(out, 'architecture', f));
 
 console.log(`synced ${pages.size} documents into ${relative(root, out)}`);
 if (!existsSync(join(out, 'index.mdx'))) console.warn('warning: website/src/content/docs/docs/index.mdx is missing');
