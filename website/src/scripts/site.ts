@@ -127,8 +127,12 @@ if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
   document.querySelectorAll('.kbd-btn kbd').forEach((k) => (k.textContent = 'Ctrl K'));
 }
 // Name the button from the text that is shown (WCAG 2.5.3); the phone layout shows only the icon.
+// The shown text ("Search", "Ctrl K") comes from two elements; checkers that compare it with the name join
+// them with no space, so one is put between them (the button is a flex box, so it takes no room).
+const searchButton = $('#open-palette');
+searchButton?.querySelector('span')?.after(' ');
 const nameSearch = () =>
-  $('#open-palette')?.setAttribute('aria-label', $('#open-palette')!.innerText.replace(/\s+/g, ' ').trim() || 'Search');
+  searchButton?.setAttribute('aria-label', searchButton.innerText.replace(/\s+/g, ' ').trim() || 'Search');
 nameSearch();
 addEventListener('resize', nameSearch);
 

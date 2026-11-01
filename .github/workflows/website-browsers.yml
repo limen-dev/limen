@@ -51,7 +51,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/browsers" && cd "$RUNNER_TEMP/browsers"
           npm init -y >/dev/null
           npm i playwright-core axe-core
-          npx playwright-core install chromium webkit firefox
+          npx playwright-core install --with-deps chromium webkit firefox
 
       - name: Serve the site
         working-directory: website

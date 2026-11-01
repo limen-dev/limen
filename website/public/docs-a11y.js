@@ -17,8 +17,24 @@ function wireTables() {
     }
   }
 }
+// Text from separate elements ("Search", "Ctrl", "K") is joined with no space by the checkers that
+// compare the shown text with the name, so a space is put between them. It takes no room: the
+// parents are flex boxes, which drop whitespace-only text.
+function spaceOut(el) {
+  for (const child of [...el.children]) {
+    if (child.tagName !== 'svg') spaceOut(child);
+    const next = child.nextSibling;
+    if (next && !(next.nodeType === 3 && /\s/.test(next.textContent)) && child.tagName !== 'svg') {
+      child.after(' ');
+    }
+  }
+}
 function nameSearch() {
   for (const b of document.querySelectorAll('button[data-open-modal]')) {
+    if (!b.dataset.spaced) {
+      spaceOut(b);
+      b.dataset.spaced = '1';
+    }
     b.setAttribute('aria-label', b.innerText.replace(/\s+/g, ' ').trim() || 'Search');
   }
 }
