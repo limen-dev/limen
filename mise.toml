@@ -17,6 +17,9 @@ kubectl = "1.35.4"
 # Releases and infrastructure
 gh = "2.102.0"
 terraform = "1.16.6"
+helm = "4.2.0"
+# Strict schema check of the rendered Helm chart (infra.yml)
+kubeconform = "0.8.0"
 # Protobuf lint and breaking-change check for the management API (proto/buf.yaml)
 buf = "1.74.0"
 # Documentation site and homepage (website/)

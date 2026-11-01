@@ -1,0 +1,32 @@
+# Copy to my.tfvars. Every map entry adds a service; the keys are yours.
+image_registry = "ghcr.io/your-org"
+image_tag      = "0.1.0"
+
+oidc = {
+  issuer    = "https://idp.example.com"
+  client_id = "limen"
+}
+
+control_planes = {
+  core = {} # 3 tasks; raise desired_count to scale
+}
+
+proxies = {
+  public = { dns_name = "limen.example.com" }
+}
+
+# Workers live in the VPCs of the hosts and databases they reach.
+workers = {
+  prod-db = {
+    vpc_id     = "vpc-0123456789abcdef0"
+    subnet_ids = ["subnet-0aaa", "subnet-0bbb"]
+    proxy      = "public"
+    discovery  = true # also finds EC2, RDS, ... in this account
+  }
+  staging = {
+    vpc_id           = "vpc-0fedcba9876543210"
+    subnet_ids       = ["subnet-0ccc", "subnet-0ddd"]
+    proxy            = "public"
+    desired_capacity = 2
+  }
+}

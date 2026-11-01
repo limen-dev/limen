@@ -1,0 +1,26 @@
+# Renders the chart with several groups of each component (used by `helm lint`
+# and `helm template` in CI).
+image: { registry: example.com/limen, tag: test }
+
+controlPlaneDefaults:
+  oidc: { issuer: "https://idp.example.com", clientId: limen }
+  auditS3Bucket: limen-audit
+  kms: { internalCaKey: a, userCaKey: b, sshUserCaKey: c, sshHostCaKey: d }
+controlPlanes:
+  core: {}
+
+proxyDefaults: { namePrefix: prod }
+proxies:
+  public: { dnsNames: limen.example.com }
+  partner: { dnsNames: partner.example.com, replicas: 2, joinSecret: partner-proxy-join }
+
+workerDefaults: { namePrefix: prod }
+workers:
+  prod-db: { proxy: public }
+  staging:
+    proxy: public
+    replicas: 2
+    joinSecret: staging-worker-join
+    discovery: true
+    serviceAccount: { annotations: { eks.amazonaws.com/role-arn: "arn:aws:iam::111122223333:role/limen-worker" } }
+  partner: { proxy: partner, maxSessions: 50 }

@@ -1,0 +1,155 @@
+module "security_group" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "~> 6.0"
+
+  for_each = local.groups
+
+  name            = "${var.name}-${each.key}"
+  description     = "Limen ${each.value.component}"
+  vpc_id          = each.value.vpc_id
+  use_name_prefix = true
+
+  ingress_rules = {
+    for k, rule in lookup(local.ingress_rules, each.key, {}) : k => merge(rule, {
+      from_port   = each.value.port.main
+      to_port     = each.value.port.main
+      ip_protocol = "tcp"
+    })
+  }
+  # Every component dials out; inbound is only the service port.
+  egress_rules = {
+    all = { ip_protocol = "-1", cidr_ipv4 = "0.0.0.0/0" }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "this" {
+  for_each = local.groups
+
+  name              = "/limen/${var.name}/${each.key}"
+  retention_in_days = var.log_retention_days
+  tags              = var.tags
+}
+
+module "asg" {
+  source  = "terraform-aws-modules/autoscaling/aws"
+  version = "~> 9.3"
+
+  for_each = local.groups
+
+  name                = "${var.name}-${each.key}"
+  vpc_zone_identifier = each.value.subnet_ids
+  min_size            = each.value.min_size
+  max_size            = each.value.max_size
+  desired_capacity    = each.value.desired_capacity
+  # Scale with your own policies without Terraform resetting the count.
+  ignore_desired_capacity_changes = true
+
+  health_check_type = length(each.value.target_group_arns) > 0 ? "ELB" : "EC2"
+  traffic_source_attachments = {
+    for i, arn in each.value.target_group_arns : "tg-${i}" => {
+      traffic_source_identifier = arn
+      traffic_source_type       = "elbv2"
+    }
+  }
+
+  image_id      = data.aws_ssm_parameter.ami.value
+  instance_type = each.value.instance_type
+  network_interfaces = [{
+    device_index                = 0
+    associate_public_ip_address = each.value.associate_public_ip
+    delete_on_termination       = true
+    security_groups             = [module.security_group[each.key].id]
+  }]
+
+  block_device_mappings = [{
+    device_name = "/dev/xvda"
+    ebs = {
+      volume_size = each.value.volume_size_gb
+      volume_type = "gp3"
+      encrypted   = true
+    }
+  }]
+
+  # IMDSv2 only, one hop: containers cannot reach the instance role.
+  metadata_options = {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  create_iam_instance_profile = true
+  iam_role_name               = "${var.name}-${each.key}"
+  iam_role_policies = merge(
+    { ssm = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" },
+    each.value.role_policy_arns,
+  )
+
+  user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
+    image        = each.value.image
+    component    = each.value.component
+    region       = data.aws_region.current.region
+    log_group    = aws_cloudwatch_log_group.this[each.key].name
+    stop_timeout = each.value.stop_timeout
+    publish      = local.publish[each.key]
+    environment  = each.value.environment
+    secrets      = each.value.secrets
+    ca_secret    = var.internal_ca.secret_arn
+    publishes    = each.value.publishes
+    consumes     = each.value.consumes
+  }))
+
+  instance_refresh = {
+    strategy = "Rolling"
+    preferences = {
+      min_healthy_percentage = 66
+    }
+  }
+
+  tags = var.tags
+}
+
+# Secrets Manager access: the secrets a group lists, the CA secret (read by
+# proxies and workers, written by control planes).
+data "aws_iam_policy_document" "read_secrets" {
+  for_each = { for k, g in local.groups : k => g if length(g.secrets) > 0 || g.publishes || g.consumes }
+
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = concat(values(each.value.secrets), each.value.consumes ? [var.internal_ca.secret_arn] : [])
+  }
+
+  dynamic "statement" {
+    for_each = each.value.publishes ? [1] : []
+    content {
+      actions   = ["secretsmanager:PutSecretValue"]
+      resources = [var.internal_ca.secret_arn]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "read_secrets" {
+  for_each = data.aws_iam_policy_document.read_secrets
+
+  name   = "read-secrets"
+  role   = module.asg[each.key].iam_role_name
+  policy = each.value.json
+}
+
+# The Docker daemon writes the container's logs with the instance role.
+data "aws_iam_policy_document" "write_logs" {
+  for_each = local.groups
+
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.this[each.key].arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "write_logs" {
+  for_each = data.aws_iam_policy_document.write_logs
+
+  name   = "write-logs"
+  role   = module.asg[each.key].iam_role_name
+  policy = each.value.json
+}

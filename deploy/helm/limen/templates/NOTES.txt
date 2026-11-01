@@ -1,0 +1,7 @@
+Limen {{ .Chart.AppVersion }} installed as {{ .Release.Name }}.
+
+Before the pods become ready, these must exist in {{ .Release.Namespace }}:
+  Secret/{{ .Values.existingSecrets.database }} (url), Secret/{{ .Values.existingSecrets.proxyJoin }} and
+  Secret/{{ .Values.existingSecrets.workerJoin }} (token), ConfigMap/{{ .Values.internalCA.configMap }} (internal-ca.pem).
+
+Find the proxy address with:  kubectl get svc -n {{ .Release.Namespace }} -l app.kubernetes.io/name=limen-proxy   # one Service per proxy group (proxy-<key>)

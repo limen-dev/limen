@@ -311,6 +311,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 7. Until IAM join exists (Phase 15), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
 9. (Phase 14, stage 2) A person whose IdP and CI account names differ can approve a pending policy change that their own CI run produced (TB13).
+10. The Terraform deployment (`deploy/terraform`, docs/guides/deploy.md) distributes the internal CA certificate through a Secrets Manager secret that the control plane's role can write and proxies' and workers' roles can read. The certificate is public, but whoever can write the secret can make new components trust a different CA, so restrict `secretsmanager:PutSecretValue` on it to the control plane. The same deployment keeps the database password and the static join tokens in Terraform state and Secrets Manager; protect both.
 
 ## 7. Review log
 | Date | Phase | Change |
