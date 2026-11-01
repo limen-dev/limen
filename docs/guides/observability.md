@@ -26,14 +26,14 @@ Jaeger v2 accepts OTLP/HTTP on port 4318 with no configuration.
 
 ```sh
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:2.22.0
-LIMEN_OTLP_ENDPOINT=http://localhost:4318   # on each component
+LIMEN_OTLP_ENDPOINT=http://<jaeger-host>:4318   # on each component; a name they can reach (localhost only if they run on the same host)
 ```
 
 Open `http://localhost:16686`, pick the service `limen-proxy`, and open a trace. The development stack does this for you: `deploy/compose/setup.sh --yes --stacks ssh,tracing`. Use the image tag pinned in `deploy/compose/.env` (`JAEGER_IMAGE`) rather than the tag above if they differ.
 
 ## Grafana Tempo
 
-Tempo's distributor takes OTLP/HTTP on 4318 once the receiver is enabled:
+**Unverified.** Tempo's distributor takes OTLP/HTTP on 4318 once the receiver is enabled:
 
 ```yaml
 distributor:
@@ -48,7 +48,7 @@ Point Limen at `http://<tempo>:4318`. On Grafana Cloud, use the OTLP gateway URL
 
 ## Datadog
 
-Enable the Agent's OTLP receiver and point Limen at it:
+**Unverified.** Enable the Agent's OTLP receiver and point Limen at it. In a container or Kubernetes the Agent must also expose the port, and APM must be on; check the Agent's own documentation for your setup.
 
 ```yaml
 # datadog.yaml
@@ -63,7 +63,7 @@ otlp_config:
 LIMEN_OTLP_ENDPOINT=http://<agent-host>:4318   # on each component
 ```
 
-Traces appear under the services `limen-proxy`, `limen-worker` and `limen-control-plane`, with the `env` from `--trace-environment`. For metrics, use the Agent's OpenMetrics check against each admin port, not DogStatsD:
+Traces appear under the services `limen-proxy`, `limen-worker` and `limen-control-plane`. Limen sets `deployment.environment` from `--trace-environment`; whether the Agent turns it into the `env` tag depends on its OTLP mapping, so check it in the Datadog UI. For metrics, use the Agent's OpenMetrics check against each admin port, not DogStatsD:
 
 ```yaml
 # conf.d/openmetrics.d/conf.yaml
@@ -71,13 +71,15 @@ instances:
   - openmetrics_endpoint: http://<component>:<admin-port>/metrics
     namespace: limen
     metrics: [".*"]
+    tags:
+      - env:<environment>   # the control plane's --environment: the Terraform monitors filter on it
 ```
 
-The admin port is plain HTTP with no authentication; keep it on the monitoring network. Monitors for these metrics are in `deploy/terraform/modules/datadog`. Unverified in a real Datadog account (issue #63).
+The admin port is plain HTTP with no authentication; keep it on the monitoring network. Monitors for these metrics are in `deploy/terraform/modules/datadog`: set its `metrics_namespace` to the `namespace` above, and its `environment` to the `env` tag. Unverified in a real Datadog account (issue #63).
 
 ## OpenTelemetry Collector
 
-A collector in the middle lets you add authentication, batching, sampling and several backends without touching Limen:
+**Unverified.** A collector in the middle lets you add authentication, batching, sampling and several backends without touching Limen:
 
 ```yaml
 receivers:

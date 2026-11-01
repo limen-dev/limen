@@ -47,12 +47,6 @@ Steady background calls (policy refresh, pings) show up as their own short `api.
 
 ## Datadog and other collectors
 
-Point `--otlp-endpoint` at the Datadog Agent's OTLP receiver (port 4318) or at any OpenTelemetry collector. Verified against Jaeger 1.76 and 2.22. **Unverified against a Datadog Agent** (needs an account, issue #63). To check yours:
+Point `--otlp-endpoint` at the Datadog Agent's OTLP receiver or any OpenTelemetry collector. Verified against Jaeger 1.76 and 2.22; **unverified against a Datadog Agent** (needs an account, issue #63). Setup for Jaeger, Tempo, Datadog and a collector, and how to check that spans arrive, is in the [observability recipes](observability.md).
 
-```sh
-LIMEN_TEST_OTLP_ENDPOINT=http://localhost:4318 cargo test -p limen-core --test otlp_collector
-```
-
-then look for service `limen-collector-test`.
-
-CI runs this test against a Jaeger service container (the `jaeger` service in `.github/workflows/ci-rust.yml`, whose image must match `JAEGER_IMAGE` in `deploy/compose/.env`).
+CI runs the exporter's test against a Jaeger service container (the `jaeger` service in `.github/workflows/ci-rust.yml`, whose image must match `JAEGER_IMAGE` in `deploy/compose/.env`).
