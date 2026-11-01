@@ -2,15 +2,27 @@ name: audit
 
 # cargo-deny and cargo-audit. Also runs on weekdays: advisories appear without a commit.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
-# Started by ci.yml when manifests, the lock file or the deny config change.
 
 on:
-  # Also called by release.yml, which tests the exact commit before building anything.
-  workflow_call:
-  # Weekdays too: advisories appear without a commit.
+  push:
+    branches: [main]
+    # Only these start it: add a path here when a check reads a new file (manifests, lock file, deny config).
+    paths: &paths
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "deny.toml"
+      - "mise.toml"
+      - ".github/workflows/audit.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
   schedule:
     - cron: "17 5 * * 1-5"
-  # A manual run runs every job.
+  # Called by release.yml, which tests the exact commit before building anything.
+  workflow_call:
+  # A manual run ignores the path filter.
   workflow_dispatch:
 
 permissions:

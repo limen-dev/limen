@@ -1,13 +1,33 @@
 name: ci-rust
 
 # Lint, tests on three platforms, container images. Tests and images wait for lint.
+# Starts for any change except docs, the website, demos, Terraform and dashboards.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
-# Started by ci.yml for any change except docs, the website, demos, Terraform and dashboards.
 
 on:
-  # Also called by release.yml, which tests the exact commit before building anything.
+  push:
+    branches: [main]
+    # Everything runs the tests except what is listed here, so a new directory
+    # is tested by default. (examples/ stays in: the policy tests read it.)
+    paths: &paths
+      - "**"
+      - "!docs/**"
+      - "!website/**"
+      - "!demos/**"
+      - "!assets/**"
+      - "!deploy/terraform/**"
+      - "!deploy/grafana/**"
+      - "!**.md"
+      - "!LICENSE"
+      - "!.github/**"
+      - ".github/workflows/ci-rust.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
+  # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
-  # A manual run runs every job.
+  # A manual run ignores the path filter.
   workflow_dispatch:
 
 permissions:
