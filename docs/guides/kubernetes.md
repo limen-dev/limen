@@ -14,6 +14,16 @@ kubectl exec -it deploy/web -- sh        # recorded
 kubectl port-forward svc/db 5432:5432    # audited
 ```
 
+For every cluster at once, use `limen kube config` instead: it writes `~/.limen/kubeconfig` with a `limen-<cluster>` context per cluster you can reach (through every proxy you use), rewritten on every `limen login`. Add it to kubectl's list once, in your shell profile:
+
+```sh
+limen kube config
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}:$HOME/.limen/kubeconfig"
+kubectl --context limen-eks-staging get pods
+```
+
+It sets no current context, so your own stays in charge; `kubectl config use-context limen-eks-staging` switches. `--print` shows it without writing, `--uninstall` deletes it.
+
 - The kubeconfig holds **no secret**. Its only credential is an exec plugin that runs `limen kube credentials`, which prints the certificate `limen login` gave you. When that expires, `kubectl` says so; run `limen login` again.
 - `--kubeconfig FILE` writes somewhere else (to merge into your own, set `KUBECONFIG=a:b`), and `--print` writes to standard output.
 - Who you are inside the cluster: `kubectl auth whoami` shows your Limen user name, the groups policy gave you (such as `limen:edit`), and the Limen session ID under `limen-session`. What you may do there is the cluster's RBAC for those groups, so `Forbidden` errors come from the cluster, not from Limen.

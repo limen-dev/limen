@@ -1,4 +1,4 @@
-name: ci-infra
+name: infra
 
 # Terraform, generated dashboards, dev users. crates/ counts: dashboards come from metric names.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
@@ -14,7 +14,7 @@ on:
       - "deploy/compose/config/dev-users.toml"
       - "deploy/compose/scripts/gen-dev-users.py"
       - "crates/**"
-      - ".github/workflows/ci-infra.yml"
+      - ".github/workflows/infra.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -29,7 +29,7 @@ permissions:
 
 concurrency:
   # (github.workflow is release.yml's name when it calls this, hence the prefix.)
-  group: ci-infra-${{ github.workflow }}-${{ github.ref }}
+  group: infra-${{ github.workflow }}-${{ github.ref }}
   # A new push cancels the older pull request run; a push to main always runs to the end.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

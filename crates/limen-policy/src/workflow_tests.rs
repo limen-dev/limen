@@ -494,7 +494,77 @@ fn explaining_to_a_user_does_not_reveal_hidden_resources() {
     assert!(ok.join("\n").contains("But not as login root"));
     // And what they could ask for.
     let ask = policy.explain_for_user(&held, &strings(&["prod-db-readonly"]), "orders-prod", None);
-    assert!(ask.join("\n").contains("limen request orders-prod"));
+    let ask = ask.join("\n");
+    assert!(ask.contains("limen request orders-prod --for 30m"), "{ask}");
+    // ... and who approves (#120).
+    assert!(
+        ask.contains("`prod-db-readonly`: approved by members of sre-leads"),
+        "{ask}"
+    );
+    // Break-glass alone: the break-glass command, and no approver to wait for.
+    let glass = policy
+        .explain_for_user(&held, &strings(&["prod-ssh-emergency"]), "web-prod", None)
+        .join("\n");
+    assert!(glass.contains("break-glass: granted at once"), "{glass}");
+    assert!(
+        glass.contains("limen request web-prod --break-glass"),
+        "{glass}"
+    );
+}
+
+/// The suggested request command works as printed: its duration never exceeds
+/// the role's own limit, and several break-glass roles name the one to ask for.
+#[test]
+fn the_suggested_request_command_respects_the_role() {
+    let held = strings(&["dev"]);
+    // A role that allows only 15 minutes: `--for 30m` would be refused.
+    let short = with(
+        r"
+kind: role
+version: v1
+metadata: { name: quick }
+spec:
+  allow:
+    - resources: { kind: [postgres], labels: { env: [prod] } }
+      db: { roles: [limen_read], databases: ['*'] }
+  request:
+    who: [developers]
+    approvers: [sre-leads]
+    max_duration: 15m
+",
+    );
+    let ask = short
+        .explain_for_user(&held, &strings(&["quick"]), "orders-prod", None)
+        .join("\n");
+    assert!(ask.contains("limen request orders-prod --for 15m"), "{ask}");
+
+    // Two break-glass roles and nothing else: the command says which.
+    let two = with(
+        r"
+kind: role
+version: v1
+metadata: { name: prod-ssh-emergency-2 }
+spec:
+  break_glass: true
+  allow:
+    - resources: { kind: [ssh], labels: { env: [prod] } }
+      ssh: { logins: [ubuntu] }
+  request:
+    who: [developers]
+",
+    );
+    let glass = two
+        .explain_for_user(
+            &held,
+            &strings(&["prod-ssh-emergency", "prod-ssh-emergency-2"]),
+            "web-prod",
+            None,
+        )
+        .join("\n");
+    assert!(
+        glass.contains("limen request web-prod --break-glass --role prod-ssh-emergency "),
+        "{glass}"
+    );
 }
 
 // ---------------------------------------------------------------------------

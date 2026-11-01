@@ -26,10 +26,11 @@ A dependency is adopted only if all of these hold:
 | Kubernetes | kube 4.2.0, k8s-openapi 0.28.0 | | 2026-07 / 2026-06 | Adopt in principle; **not used in Phase 8 (ADR-0038)**. The kube worker forwards the user's request to the API server and must pass `exec`/`port-forward` upgrades through byte for byte, which a typed client does not do. It uses hyper directly, the same as the rest of the HTTP code. Revisit for discovery of clusters (ADR-0027) |
 | Kubernetes streams (WebSocket) | tokio-tungstenite, tungstenite | | | **Reject for Phase 8.** We never terminate a WebSocket: the worker copies the bytes and decodes a copy to record them. A frame reader is ~150 lines (`limen-kube::ws`), fuzzable and tested, and cannot alter what it reads |
 | Kubernetes streams (SPDY/3.1) | none exists in Rust | | | **Write our own** (`limen-kube::spdy`), as ADR-0001 anticipated. Header blocks are zlib streams with a preset dictionary, inflated with `flate2` 1.1.10 (already in the tree for the audit pipeline) on its `zlib-rs` backend, which supports dictionaries. The 1423-byte dictionary is fixed by the SPDY/3 specification and copied from `moby/spdystream` (BSD-3-Clause, Copyright 2013 The Go Authors), noted in the source file |
-| OIDC | openidconnect | 4.0.1 | 2025-07 (repo active 2025-11) | Adopt. Stable and widely used. Watch maintenance; a fallback is `openidconnect` minus discovery plus `jsonwebtoken` |
+| OIDC | openidconnect | 4.1.0 | 2026-10-31 | Adopt. Stable and widely used. Watch maintenance; a fallback is `openidconnect` minus discovery plus `jsonwebtoken` |
 | SQL state | sqlx | 0.9.0 | 2026-05 | Adopt |
 | CLI | clap | 4.6.7 | 2026-09 | Adopt |
 | CLI completions | clap_complete 4.6.11 | | 2026-10 | Adopt. Same maintainers and release train as clap; generates `limen completions <shell>`. No advisories; MIT/Apache-2.0 |
+| Docs diagrams | @mermaid-js/mermaid-cli 12.0.0 (MIT) | | 2026-09-24 | Adopt as a **maintainer tool only**: `website/scripts/render-mermaid.mjs` runs it with `npx` to draw the Mermaid blocks in `docs/` as light and dark SVGs (committed under `docs/diagrams/mermaid/`). It is not in `website/package.json`, not in the site's build or CI, and nothing from it runs in the reader's browser. The build only checks that each block has its pictures (#139) |
 | Telemetry | tracing 0.1.44, tracing-subscriber 0.3.23, opentelemetry(-otlp) 0.33.1, tracing-opentelemetry 0.34 | OTLP over HTTP/protobuf with the blocking reqwest client (shares reqwest and prost; no second tonic). ADR-0040 | 2025-12 → 2026-10 | Adopt |
 | Metrics | metrics 0.24.6 + metrics-exporter-prometheus 0.18.3, cadence 1.8.0 | | 2026-04/05 | Adopt |
 | SSH | russh 0.64.1 | | 2026-10-05 | Adopt, at ≥ 0.60.3 (RUSTSEC-2026-0154 fixed). Fuzz our usage |
@@ -74,7 +75,6 @@ A dependency is adopted only if all of these hold:
 | Advisory | Crate (path) | Why it's accepted |
 |---|---|---|
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
-| RUSTSEC-2026-0387 (`crypto-bigint` timing variability) | `crypto-bigint` 0.5.5 (via `openidconnect` 4.0.1, `p256`/`p384` 0.13, `elliptic-curve` 0.13) | The advisory covers operations on secret integers. Limen only verifies IdP ES256/ES384 ID token signatures with public keys, so none are processed. The other path, `aws-sigv4`, is cleared: 1.6.4 uses `crypto-bigint` 0.7. The fix is on `openidconnect` master (4.1.0, `p256`/`p384` 0.14) but not on crates.io yet; upstream tracks it in [openidconnect-rs#244](https://github.com/ramosbugs/openidconnect-rs/issues/244). Remove the `deny.toml` ignore and this row when 4.1.0 ships and we bump. |
 
 ## Terraform registry modules (2026-10-25)
 

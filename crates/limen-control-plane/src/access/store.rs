@@ -279,6 +279,31 @@ pub async fn active_grants(db: &Db) -> Result<Vec<GrantRow>, sqlx::Error> {
     .collect()
 }
 
+/// The user's latest grant on `resource` that ended (expired or revoked) in
+/// the last day.
+pub async fn recently_ended_grant(
+    db: &Db,
+    username: &str,
+    resource: &str,
+) -> Result<Option<GrantRow>, sqlx::Error> {
+    sqlx::query(concat!(
+        "SELECT ",
+        grant_cols!(),
+        " FROM access_grants
+          WHERE username = $1 AND resource = $2
+            AND COALESCE(revoked_at, expires_at) <= now()
+            AND COALESCE(revoked_at, expires_at) > now() - interval '1 day'
+          ORDER BY COALESCE(revoked_at, expires_at) DESC LIMIT 1"
+    ))
+    .bind(username)
+    .bind(resource)
+    .fetch_optional(db)
+    .await?
+    .as_ref()
+    .map(grant_from)
+    .transpose()
+}
+
 pub async fn grant(db: &Db, id: Uuid) -> Result<Option<GrantRow>, sqlx::Error> {
     sqlx::query(concat!(
         "SELECT ",

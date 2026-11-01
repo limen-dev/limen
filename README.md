@@ -8,7 +8,7 @@
 <p align="center"><b>Identity-aware access to your infrastructure. Short-lived, audited, self-hosted.</b></p>
 
 <p align="center">
-  <a href="https://github.com/limen-dev/limen/actions/workflows/ci-rust.yml"><img alt="CI" src="https://github.com/limen-dev/limen/actions/workflows/ci-rust.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/limen-dev/limen/actions/workflows/rust.yml"><img alt="CI" src="https://github.com/limen-dev/limen/actions/workflows/rust.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-14B8A6"></a>
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-DEA584?logo=rust&logoColor=white">
   <a href="https://github.com/limen-dev/limen/milestones"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-milestones-5319e7"></a>
@@ -95,7 +95,7 @@ The [quickstart](website/src/content/docs/docs/quickstart.md) walks through the 
 
 ## How it works
 
-[![How Limen works: people and bots sign in through your identity provider, connect through one public load balancer to proxies, and reach targets through workers that only dial out; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+[![How Limen works: people and bots sign in through your identity provider, connect through one public load balancer to proxies, and reach targets through workers that only dial out; every session is audited](docs/diagrams/architecture.png)](docs/diagrams/README.md)
 
 Limen is three programs:
 
@@ -187,7 +187,8 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
         <li><b><code>limen login</code></b> through your identity provider, in a browser or with <code>--device</code>; <b><code>limen status</code></b> shows who you are and the time left</li>
         <li><b><code>limen ls</code></b> shows what you can reach, as a table or as JSON; <b><code>limen show &lt;name&gt;</code></b> says how to connect to one</li>
         <li><b><code>limen ssh</code></b>, <b><code>limen db connect</code></b>, <b><code>limen kube login</code></b> and the rest, one per protocol, or <b><code>limen connect &lt;name&gt;</code></b> to pick for you</li>
-        <li><b><code>limen config ssh</code></b> lets plain <code>ssh</code> work through Limen</li>
+        <li><b><code>limen config ssh --install</code></b> lets plain <code>ssh</code>, <code>scp</code>, <code>rsync</code> and <code>git</code> work through Limen</li>
+        <li><b><code>limen doctor</code></b> says why access doesn't work, and how to fix it</li>
         <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
         <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen approve</code></b> and <b><code>deny</code></b> answer one</li>
         <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>

@@ -293,6 +293,7 @@ impl Harness {
             .policy
             .set(limen_control_plane::state::LoadedPolicy {
                 version: 1,
+                digest: policy.digest(),
                 policy: std::sync::Arc::new(policy),
                 author: "test".into(),
                 created_at: None,

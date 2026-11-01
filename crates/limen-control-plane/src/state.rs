@@ -57,6 +57,9 @@ impl AppState {
 #[derive(Debug, Clone)]
 pub struct LoadedPolicy {
     pub version: i64,
+    /// Digest of the documents, so a refresh notices a changed set under a
+    /// reused version number (a restored backup, #188).
+    pub digest: String,
     pub policy: Arc<Policy>,
     pub author: String,
     pub created_at: Option<OffsetDateTime>,
@@ -87,6 +90,7 @@ impl Layers {
             }
             Arc::new(LoadedPolicy {
                 version: base.version,
+                digest: base.digest.clone(),
                 policy: Arc::new(policy),
                 author: base.author.clone(),
                 created_at: base.created_at,
@@ -105,6 +109,7 @@ impl PolicyStore {
     pub fn empty() -> Self {
         let base = Arc::new(LoadedPolicy {
             version: 0,
+            digest: String::new(),
             policy: Arc::new(Policy::default()),
             author: String::new(),
             created_at: None,
@@ -171,8 +176,10 @@ impl PolicyStore {
     /// at the next refresh (#182).
     pub async fn latest(&self, conn: &mut sqlx::PgConnection) -> anyhow::Result<Arc<LoadedPolicy>> {
         let known = self.base();
-        let latest = db::latest_policy_version(&mut *conn).await?.unwrap_or(0);
-        if latest == known.version {
+        let (latest, latest_digest) = db::latest_policy_head(&mut *conn)
+            .await?
+            .unwrap_or((0, String::new()));
+        if latest == known.version && latest_digest == known.digest {
             return Ok(known);
         }
         let Some(row) = db::latest_policy(&mut *conn).await? else {
@@ -183,6 +190,7 @@ impl PolicyStore {
         tracing::info!(version = row.version, digest = %row.digest, "loaded policy");
         let loaded = LoadedPolicy {
             version: row.version,
+            digest: row.digest.clone(),
             policy: Arc::new(policy),
             author: row.author,
             created_at: Some(row.created_at),

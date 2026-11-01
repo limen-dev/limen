@@ -293,17 +293,15 @@ async fn a_version_written_without_heads_is_respected() {
             .map(|s| (s.name.as_str(), s.content.as_str())),
     )
     .expect("small");
-    let mut tx = a.state.db.begin().await.expect("tx");
-    limen_control_plane::db::insert_policy(
-        &mut tx,
-        &old.digest(),
-        &serde_json::to_value(old.documents()).expect("json"),
-        "old-replica",
-        None,
+    // It keeps the whole document set inline in `policy_versions`.
+    sqlx::query(
+        "INSERT INTO policy_versions (digest, documents, author) VALUES ($1, $2, 'old-replica')",
     )
+    .bind(old.digest())
+    .bind(serde_json::to_value(old.documents()).expect("json"))
+    .execute(&a.state.db)
     .await
     .expect("insert");
-    tx.commit().await.expect("commit");
     // team-a applies again: its resource comes back, and nothing `small`
     // dropped does.
     let after = apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
@@ -322,4 +320,145 @@ async fn a_version_written_without_heads_is_respected() {
         .await
         .expect("heads");
     assert_eq!(heads.len(), policy.policy.documents().len());
+}
+
+async fn bodies(h: &Harness) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM policy_documents")
+        .fetch_one(&h.state.db)
+        .await
+        .expect("count")
+}
+
+async fn manifest_rows(h: &Harness, version: i64) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM policy_manifest WHERE version = $1")
+        .bind(version)
+        .fetch_one(&h.state.db)
+        .await
+        .expect("count")
+}
+
+/// A version stores a manifest, and a bodies table holds each distinct
+/// document once (#183): adding one resource stores one new body, not the
+/// whole set again.
+#[tokio::test]
+async fn a_change_stores_only_the_documents_that_changed() {
+    let Some((a, _b, admin)) = Box::pin(pair()).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let first = apply(&a, &admin, large()).await;
+    assert!(first.applied);
+    let before = bodies(&a).await;
+    let documents = i64::try_from(a.state.policy.base().policy.documents().len()).expect("len");
+    assert_eq!(manifest_rows(&a, first.version).await, documents);
+
+    let second = apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+        .await
+        .expect("a");
+    assert!(second.applied);
+    assert_eq!(
+        bodies(&a).await,
+        before + 1,
+        "one new document, one new body"
+    );
+    assert_eq!(
+        manifest_rows(&a, second.version).await,
+        documents + 1,
+        "the manifest lists every document of the version"
+    );
+    // What two versions would have cost with the whole set in each.
+    let (stored, if_inline): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT sum(pg_column_size(body)) FROM policy_documents)::bigint,
+                sum(pg_column_size(d.body))::bigint
+         FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest",
+    )
+    .fetch_one(&a.state.db)
+    .await
+    .expect("sizes");
+    eprintln!("two versions: {stored} bytes of bodies, {if_inline} bytes if each kept its set");
+    assert!(stored < if_inline, "the second version repeats nothing");
+    let inline: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT documents FROM policy_versions WHERE version = $1")
+            .bind(second.version)
+            .fetch_one(&a.state.db)
+            .await
+            .expect("row");
+    assert!(inline.is_none(), "new versions keep no inline copy");
+
+    // A replica that starts later reads the same policy back from the manifest.
+    let c = a.start_peer(&["--id=cp-c".into()]).await;
+    c.state.policy.refresh(&c.state.db).await.expect("refresh");
+    assert_eq!(c.state.policy.base().version, second.version);
+    assert_eq!(c.state.policy.base().digest, a.state.policy.base().digest);
+    assert!(c.state.policy.base().policy.resource("a-db").is_some());
+}
+
+/// A database restored from a backup can reuse a version number with other
+/// content: a refresh compares digests, not only version numbers (#188).
+#[tokio::test]
+async fn refresh_notices_a_different_digest_under_the_same_version() {
+    let Some((a, b, admin)) = Box::pin(pair()).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let first = apply(&a, &admin, small()).await;
+    b.state.policy.refresh(&b.state.db).await.expect("refresh");
+    assert_eq!(b.state.policy.base().version, first.version);
+    let before = b.state.policy.base().digest.clone();
+
+    // The same version number, now holding `large` (written inline, the way a
+    // version from before this change is stored).
+    let other = limen_policy::Policy::parse_yaml(
+        large()
+            .iter()
+            .map(|s| (s.name.as_str(), s.content.as_str())),
+    )
+    .expect("large");
+    sqlx::query("UPDATE policy_versions SET digest = $2, documents = $3 WHERE version = $1")
+        .bind(first.version)
+        .bind(other.digest())
+        .bind(serde_json::to_value(other.documents()).expect("json"))
+        .execute(&a.state.db)
+        .await
+        .expect("update");
+    b.state.policy.refresh(&b.state.db).await.expect("refresh");
+    assert_eq!(b.state.policy.base().version, first.version);
+    assert_ne!(b.state.policy.base().digest, before, "B kept its old copy");
+    assert_eq!(b.state.policy.base().digest, other.digest());
+    assert!(
+        b.state
+            .policy
+            .base()
+            .policy
+            .resource("orders-staging")
+            .is_some()
+    );
+}
+
+/// A version whose manifest is short (a partial restore) is refused, and the
+/// replica keeps the policy it has: never a smaller one.
+#[tokio::test]
+async fn a_short_manifest_is_refused_and_the_old_policy_kept() {
+    let Some((a, b, admin)) = Box::pin(pair()).await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let first = apply(&a, &admin, small()).await;
+    b.state.policy.refresh(&b.state.db).await.expect("refresh");
+    let kept = b.state.policy.base();
+    assert_eq!(kept.version, first.version);
+
+    let second = apply_as(&a, &admin, "team-a", vec![tcp("a-db")])
+        .await
+        .expect("a");
+    assert!(second.applied);
+    sqlx::query("DELETE FROM policy_manifest WHERE version = $1 AND position = 0")
+        .bind(second.version)
+        .execute(&a.state.db)
+        .await
+        .expect("delete");
+    let refreshed = b.state.policy.refresh(&b.state.db).await;
+    assert!(refreshed.is_err(), "a short manifest must be an error");
+    assert_eq!(b.state.policy.base().version, first.version);
+    assert_eq!(b.state.policy.base().digest, kept.digest);
 }

@@ -876,6 +876,68 @@ async fn explain_tells_users_their_own_story_and_admins_the_trace() {
     assert!(text.contains("requestable"), "{text}");
 }
 
+#[tokio::test]
+async fn explain_reports_missing_workers_and_ended_grants() {
+    let Some(r) = Rig::start().await else { return };
+    let ask = |who: &CertificateDer<'static>, resource: &str| {
+        let mut access = r.access();
+        let req = forwarded(
+            ExplainRequest {
+                resource: resource.into(),
+                ..Default::default()
+            },
+            Some(who),
+        );
+        async move {
+            access
+                .explain(req)
+                .await
+                .map(tonic::Response::into_inner)
+                .expect("explain")
+        }
+    };
+    // No worker has a tunnel in this rig.
+    let staging = ask(&r.dev, "web-staging").await;
+    assert_eq!(staging.worker_connected, Some(false));
+    assert!(
+        staging
+            .lines
+            .join("\n")
+            .contains("No worker that can reach `web-staging`"),
+        "{:?}",
+        staging.lines
+    );
+    // Said only about resources they can reach.
+    assert_eq!(ask(&r.dev, "web-prod").await.worker_connected, None);
+    assert_eq!(ask(&r.dev, "ghost").await.worker_connected, None);
+
+    // A grant that was revoked is named, so they know to ask again.
+    let asked = r.request(&r.dev, "web-prod", "INC-1 x").await.expect("ask");
+    r.decide(&r.lead, &asked.id, true).await.expect("approve");
+    assert!(ask(&r.dev, "web-prod").await.worker_connected.is_some());
+    r.access()
+        .revoke_access_grant(forwarded(
+            RevokeAccessGrantRequest {
+                request_id: asked.id.clone(),
+                reason: "done".into(),
+            },
+            Some(&r.admin),
+        ))
+        .await
+        .expect("revoke");
+    let after = ask(&r.dev, "web-prod").await.lines.join("\n");
+    assert!(
+        after.contains(&format!(
+            "Your grant ({}) of prod-ssh on `web-prod` was revoked",
+            asked.id
+        )),
+        "{after}"
+    );
+    // Nobody else's grant shows up in their answer.
+    let other = ask(&r.lead, "web-prod").await.lines.join("\n");
+    assert!(!other.contains("Your grant"), "{other}");
+}
+
 /// A server that records every POST it gets and says 200.
 async fn capture() -> (
     String,

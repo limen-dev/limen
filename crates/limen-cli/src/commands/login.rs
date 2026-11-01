@@ -62,12 +62,13 @@ pub async fn run(
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
-    finish(&proxy, &key, resp)
+    finish(&proxy, &key, resp).await
 }
 
-/// Save the credentials a login returned, and show who we are now. Shared by
+/// Save the credentials a login returned, refresh the ssh_config and
+/// kubeconfig if they are installed, and show who we are now. Shared by
 /// people's logins and bots'.
-pub fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::Result<()> {
+pub async fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::Result<()> {
     let meta = ProfileMeta {
         proxy: proxy.to_owned(),
         username: resp.username.clone(),
@@ -90,6 +91,7 @@ pub fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::Result
         ui::bold(proxy),
         ui::accent(&resp.username)
     ));
+    commands::tools::refresh_after_login(proxy).await;
     commands::status(Some(proxy), false)
 }
 
