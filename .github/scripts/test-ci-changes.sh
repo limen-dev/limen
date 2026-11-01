@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks scripts/ci-changes.sh against changes whose areas are known. Run by ci-workflows.yml.
+# Checks .github/scripts/ci-changes.sh against changes whose areas are known. Run by ci-workflows.yml.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -50,7 +50,8 @@ crates/limen-core/src/lib.rs" "rust infra website"
 expect "" ""
 # the entry point runs everything
 expect ".github/workflows/ci.yml" "rust audit infra workflows website"
-expect "scripts/ci-changes.sh" "rust audit infra workflows website"
+expect ".github/scripts/ci-changes.sh" "rust audit infra workflows website"
+expect ".github/scripts/test-ci-changes.sh" "workflows"
 
 # no base, or a base that is not a commit (a new branch): everything
 for base in "" 0000000000000000000000000000000000000000; do

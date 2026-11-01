@@ -1,6 +1,6 @@
 name: ci
 
-# The one entry point of CI. It works out which areas a change touches (scripts/ci-changes.sh,
+# The one entry point of CI. It works out which areas a change touches (.github/scripts/ci-changes.sh,
 # the rules the per-area workflows used to have as `paths:`) and calls only those workflows, so a
 # website change never builds the Rust code and a Rust change never builds the site.
 #
@@ -56,7 +56,7 @@ jobs:
         run: |
           base=""
           if [ "$EVENT" = pull_request ]; then base="HEAD^1"; elif [ "$EVENT" = push ]; then base="$BEFORE"; fi
-          scripts/ci-changes.sh "$base" | tee -a "$GITHUB_OUTPUT"
+          .github/scripts/ci-changes.sh "$base" | tee -a "$GITHUB_OUTPUT"
 
   rust:
     name: rust

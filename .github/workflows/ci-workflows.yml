@@ -41,7 +41,7 @@ jobs:
         run: actionlint
 
       # The rules that decide which areas ci.yml runs for a change.
-      - name: Test the area rules (scripts/ci-changes.sh)
+      - name: Test the area rules (.github/scripts/ci-changes.sh)
         run: |
-          shellcheck scripts/ci-changes.sh scripts/test-ci-changes.sh
-          scripts/test-ci-changes.sh
+          shellcheck .github/scripts/ci-changes.sh .github/scripts/test-ci-changes.sh
+          .github/scripts/test-ci-changes.sh

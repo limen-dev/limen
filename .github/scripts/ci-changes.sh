@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Which areas of CI a change touches. ci.yml runs only those; these are the rules the per-area
 # workflows used to have as `paths:` filters. A check that starts reading a new file needs its
-# pattern here (and a case in scripts/test-ci-changes.sh).
+# pattern here (and a case in .github/scripts/test-ci-changes.sh).
 #
-#   scripts/ci-changes.sh [<base>]   # files changed between <base> and HEAD; no base, or one that
-#                                    # is not a commit (a new branch): every area
-#   scripts/ci-changes.sh --files    # the changed file names on stdin, one per line (tests)
+#   .github/scripts/ci-changes.sh [<base>]   # files changed between <base> and HEAD; no base, or one that
+#                                            # is not a commit (a new branch): every area
+#   .github/scripts/ci-changes.sh --files    # the changed file names on stdin, one per line (tests)
 #
 # Prints rust=, audit=, infra=, workflows= and website= as true or false, ready for $GITHUB_OUTPUT.
 # The secret scan has no entry: it always runs.
@@ -36,7 +36,7 @@ is_infra() {
 }
 is_workflows() {
   case "$1" in
-    .github/workflows/*) return 0 ;;
+    .github/workflows/*|.github/scripts/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -50,7 +50,7 @@ is_website() {
 # A change to the entry point itself runs everything.
 is_everything() {
   case "$1" in
-    .github/workflows/ci.yml|scripts/ci-changes.sh) return 0 ;;
+    .github/workflows/ci.yml|.github/scripts/ci-changes.sh) return 0 ;;
     *) return 1 ;;
   esac
 }

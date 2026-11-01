@@ -4,11 +4,11 @@ CI for `limen-dev/limen` runs on GitHub-hosted runners. `.github/workflows/ci.ym
 
 ## What runs for a change
 
-**`ci.yml` decides what runs.** On every pull request and push to `main` it works out which areas the change touches (`scripts/ci-changes.sh`) and calls only those workflows, so a website change never builds the Rust code and a Rust change never builds the site. Its last job, `ci`, passes when everything that ran passed (an area that was skipped counts as passed). `ci` is the one check the ruleset on `main` requires. The per-area workflows have no triggers of their own, so a path filter can't leave a required check that never reports.
+**`ci.yml` decides what runs.** On every pull request and push to `main` it works out which areas the change touches (`.github/scripts/ci-changes.sh`) and calls only those workflows, so a website change never builds the Rust code and a Rust change never builds the site. Its last job, `ci`, passes when everything that ran passed (an area that was skipped counts as passed). `ci` is the one check the ruleset on `main` requires. The per-area workflows have no triggers of their own, so a path filter can't leave a required check that never reports.
 
 **Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review (and again on every push after that). Pushes to `main`, releases and manual runs are unaffected.
 
-**Changing what starts an area:** edit the patterns in `scripts/ci-changes.sh` when a check starts reading a new file, and add a case to `scripts/test-ci-changes.sh` (it runs in `ci-workflows.yml`). A change to `ci.yml` or to the script itself runs every area.
+**Changing what starts an area:** edit the patterns in `.github/scripts/ci-changes.sh` when a check starts reading a new file, and add a case to `.github/scripts/test-ci-changes.sh` (it runs in `ci-workflows.yml`). A change to `ci.yml` or to the script itself runs every area.
 
 | Workflow | Called when these change | Jobs |
 |---|---|---|
