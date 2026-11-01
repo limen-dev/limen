@@ -196,7 +196,7 @@ pub fn sign(
     restrictions: &Restrictions,
     issued_at: OffsetDateTime,
 ) -> Result<Signed, SessionError> {
-    let documents_json = serde_json::to_string(&policy.documents())
+    let documents_json = serde_json::to_string(&policy.snapshot_documents())
         .map_err(|e| SessionError::Malformed(e.to_string()))?;
     let snapshot = PolicySnapshot {
         version,

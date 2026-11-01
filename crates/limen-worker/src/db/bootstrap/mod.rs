@@ -40,6 +40,13 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// The same plan, dialing only where `guard` allows (ADR-0042).
+    #[must_use]
+    pub fn guarded(mut self, guard: Option<limen_policy::model::Delegated>) -> Self {
+        self.target = self.target.guarded(guard);
+        self
+    }
+
     /// Build a plan from a resource, or say why it can't be reconciled.
     pub async fn from_spec(
         resource: &str,

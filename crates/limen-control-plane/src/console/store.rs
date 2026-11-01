@@ -1835,7 +1835,9 @@ pub async fn kube_filter_options(db: &Db) -> Result<(Vec<String>, Vec<String>), 
 /// Which of Access and Reviews are worth a place in this person's menu: Access
 /// if they can ask for or approve a role, or have asked; Reviews if an item
 /// is, or was, assigned to them. A failure shows both, so nothing hides.
-pub async fn menu_pages(state: &crate::state::AppState, username: &str) -> (bool, bool) {
+/// Whether a person sees the Access, Reviews, and Policy changes pages: they
+/// take part in requests or reviews, or approve a writer grant's changes.
+pub async fn menu_pages(state: &crate::state::AppState, username: &str) -> (bool, bool, bool) {
     let groups = crate::access::store::user_groups(&state.db, username)
         .await
         .ok()
@@ -1857,9 +1859,14 @@ pub async fn menu_pages(state: &crate::state::AppState, username: &str) -> (bool
     .bind(username)
     .fetch_one(&state.db)
     .await;
+    let approves = state.policy.current().policy.documents().iter().any(|d| {
+        matches!(d, limen_policy::Document::PolicyWriter(w)
+            if w.spec.approvers.groups.iter().any(|g| groups.contains(g)))
+    });
     (
         takes_part || asked.unwrap_or(true),
         reviewing.unwrap_or(true),
+        approves,
     )
 }
 

@@ -22,6 +22,7 @@ pub struct Chrome {
     pub reads_record: bool,
     pub sees_access: bool,
     pub sees_reviews: bool,
+    pub sees_changes: bool,
     pub csrf: String,
     pub active: &'static str,
     pub version: &'static str,
@@ -45,6 +46,7 @@ impl Chrome {
             reads_record: auth.reads_record(),
             sees_access: auth.sees_access,
             sees_reviews: auth.sees_reviews,
+            sees_changes: auth.sees_changes,
             csrf: auth.csrf.clone(),
             active,
             version: limen_core::VERSION,
@@ -1027,9 +1029,15 @@ pub struct TokenPage {
 }
 
 pub struct PolicyDoc {
+    pub kind: &'static str,
     pub name: String,
     pub summary: String,
     pub yaml: String,
+    /// Who manages it, in words.
+    pub owner: String,
+    /// The console manages it, so it can be edited here.
+    pub editable: bool,
+    pub etag: String,
 }
 
 pub struct PolicyGroup {
@@ -1079,6 +1087,9 @@ pub struct PolicyPage {
     pub pasted: String,
     pub result: Option<DryRun>,
     pub simulation: Option<Simulation>,
+    pub draft: String,
+    pub error: Option<String>,
+    pub notice: Option<String>,
 }
 
 pub struct RoleAccess {

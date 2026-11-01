@@ -8,10 +8,10 @@
 <p align="center"><b>Identity-aware access to your infrastructure. Short-lived, audited, self-hosted.</b></p>
 
 <p align="center">
-  <a href="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml"><img alt="CI" src="https://github.com/jfcmartins/limen/actions/workflows/ci-rust.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/limen-dev/limen/actions/workflows/ci-rust.yml"><img alt="CI" src="https://github.com/limen-dev/limen/actions/workflows/ci-rust.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-14B8A6"></a>
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-DEA584?logo=rust&logoColor=white">
-  <a href="https://github.com/jfcmartins/limen/milestones"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-milestones-5319e7"></a>
+  <a href="https://github.com/limen-dev/limen/milestones"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-milestones-5319e7"></a>
 </p>
 
 <p align="center">
@@ -67,7 +67,7 @@ If a resource isn't in your list, `limen explain` tells you which rule stopped y
 There is no release to download yet, so this builds Limen from source and runs the whole system on your machine, with a test identity provider and test users. You need Docker (on macOS, OrbStack or Docker Desktop) and the tools pinned in `mise.toml` (run `mise install`). The first build takes several minutes.
 
 ```sh
-git clone https://github.com/jfcmartins/limen && cd limen
+git clone https://github.com/limen-dev/limen && cd limen
 
 # 1. Start everything. The script checks your tools, asks what to enable (an SSH host,
 #    databases, Redis, Kubernetes, observability...), applies an example policy, and
@@ -139,7 +139,7 @@ Each target works with ordinary self-hosted servers and with the managed service
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/openid" height="48" alt=""><br><br><b>Any OIDC provider</b><br><sub>Okta, Entra ID, Keycloak, Auth0, Dex<br>your groups map to Limen roles</sub><br><br><sub>✅ tested with Dex<br>⚠️ Okta and the others</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/githubactions" height="48" alt=""><br><br><b>GitHub Actions</b><br><sub>the job's OIDC token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitHub tokens</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/gitlab" height="48" alt=""><br><br><b>GitLab CI</b><br><sub>the job's ID token<br>becomes a bot login</sub><br><br><sub>✅ tested with a stand-in issuer<br>⚠️ real GitLab tokens</sub><br><br></td>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt=""><br><br><b>Other automation</b><br><sub>any OIDC token, including<br>Kubernetes service accounts</sub><br><br><sub>✅ tested with a stand-in issuer<br>⏳ AWS IAM: <a href="https://github.com/jfcmartins/limen/milestone/16">Phase 15</a></sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/bot.svg" height="48" alt=""><br><br><b>Other automation</b><br><sub>any OIDC token, including<br>Kubernetes service accounts</sub><br><br><sub>✅ tested with a stand-in issuer<br>⏳ AWS IAM: <a href="https://github.com/limen-dev/limen/milestone/16">Phase 15</a></sub><br><br></td>
   </tr>
 </table>
 
@@ -204,11 +204,11 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
 | **Docker Compose**, the full stack on one machine | ✅ works; this is the local dev stack |
 | **Kubernetes**, several copies of each program | ✅ example manifests; ⚠️ not yet run on a real cluster |
 | **Terraform** for the audit store (S3, Glue, Athena) and the Datadog monitors | ✅ works |
-| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 15](https://github.com/jfcmartins/limen/milestone/16) |
+| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 15](https://github.com/limen-dev/limen/milestone/16) |
 
 ## What is not verified yet
 
-Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/jfcmartins/limen/milestone/21).
+Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/limen-dev/limen/milestone/21).
 
 Production hardening (a Helm chart, cloud deployment modules, a penetration test) comes after the next phase, and there is no tagged release yet. Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
 
@@ -218,12 +218,12 @@ Phases 0 to 13 are done: login and tunnels, SSH with recording, the audit pipeli
 
 Next:
 
-- **Phase 14, one management API (proposed):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/jfcmartins/limen/milestone/23))
-- **Phase 15, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/jfcmartins/limen/milestone/16))
-- **Verification against real services** ([milestone](https://github.com/jfcmartins/limen/milestone/21))
-- **The documentation site**, already built in [`website/`](website/), is published when the repository goes public ([milestone](https://github.com/jfcmartins/limen/milestone/8))
+- **Phase 14, one management API (in progress):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/limen-dev/limen/milestone/23))
+- **Phase 15, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/limen-dev/limen/milestone/16))
+- **Verification against real services** ([milestone](https://github.com/limen-dev/limen/milestone/21))
+- **The documentation site**, already built in [`website/`](website/), is published when the repository goes public ([milestone](https://github.com/limen-dev/limen/milestone/8))
 
-Every phase is a [GitHub milestone](https://github.com/jfcmartins/limen/milestones) with its checklist in an epic issue. What "done" means for each one is in [`docs/design.md` §13](docs/design.md#13-phases-and-exit-criteria).
+Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestones) with its checklist in an epic issue. What "done" means for each one is in [`docs/design.md` §13](docs/design.md#13-phases-and-exit-criteria).
 
 ## Documentation
 
@@ -235,7 +235,7 @@ Every phase is a [GitHub milestone](https://github.com/jfcmartins/limen/mileston
 - [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md)
 
 **Control access**
-- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [resource discovery](docs/guides/discovery.md)
+- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API (Terraform)](docs/guides/management-api.md) · [resource discovery](docs/guides/discovery.md)
 
 **Audit and operate**
 - [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [watching a live session](docs/guides/watching-sessions.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)

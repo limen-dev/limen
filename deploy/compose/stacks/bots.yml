@@ -17,4 +17,5 @@ services:
     profiles: ["bots"]
     build: { <<: *limen-build, target: fake-ci-issuer }
     image: limen-fake-ci-issuer:dev
-    ports: ["127.0.0.1:8130:8130"]
+    # Another stack beside this one sets its own (demos/demo-phase14.sh does).
+    ports: ["127.0.0.1:${LIMEN_PORT_CI_ISSUER:-8130}:8130"]

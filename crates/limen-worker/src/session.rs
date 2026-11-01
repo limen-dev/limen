@@ -447,6 +447,16 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
     }
 }
 
+/// The marker of a resource built from a profile: where the worker may dial
+/// for it (ADR-0042).
+fn delegated(checked: &Checked) -> Option<limen_policy::model::Delegated> {
+    checked
+        .snapshot
+        .policy
+        .resource(&checked.verified.grant.resource)
+        .and_then(|r| r.spec.delegated.clone())
+}
+
 async fn admit_tcp(
     worker: &Worker,
     checked: &Checked,
@@ -460,9 +470,10 @@ async fn admit_tcp(
         .and_then(|resource| resource.spec.tcp.as_ref())
         .map(|target| target.address.clone())
         .ok_or_else(|| Status::failed_precondition("resource is not a TCP resource"))?;
+    let guard = delegated(checked);
     let stream = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        tokio::net::TcpStream::connect(&address),
+        crate::dial::connect(&address, guard.as_ref()),
     )
     .await
     .map_err(|_| Status::unavailable("timed out connecting to the TCP service"))?
@@ -485,9 +496,10 @@ async fn admit_web(worker: &Worker, checked: &Checked) -> Result<BoxedWebIo, Sta
         .resource(&grant.resource)
         .and_then(|resource| resource.spec.web.as_ref())
         .ok_or_else(|| Status::failed_precondition("resource is not a web app"))?;
+    let guard = delegated(checked);
     let tcp = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        tokio::net::TcpStream::connect(&target.address),
+        crate::dial::connect(&target.address, guard.as_ref()),
     )
     .await
     .map_err(|_| Status::unavailable("timed out connecting to the web app"))?
@@ -621,7 +633,7 @@ fn admit_kafka(
             .snapshot
             .policy
             .kafka_grants(&checked.roles, &grant.resource, &grant.principal);
-    let config = kafka::SessionConfig::new(
+    let mut config = kafka::SessionConfig::new(
         grant.session_id.clone(),
         grant.username.clone(),
         grant.principal.clone(),
@@ -629,6 +641,7 @@ fn admit_kafka(
         target,
         slot,
     );
+    config.guard = delegated(checked);
     kafka::prepare(&worker.broker, grants, config).map_err(|e| {
         // The detail names the account: it stays in the log.
         tracing::warn!(error = %e, resource = %grant.resource, "couldn't prepare the Kafka session");
@@ -658,6 +671,7 @@ fn admit_mq(worker: &Worker, checked: &Checked) -> Result<amqp::Prepared, Status
         mq_user: grant.principal.clone(),
         resource: grant.resource.clone(),
         target,
+        guard: delegated(checked),
     };
     amqp::prepare(&worker.broker, grants, config).map_err(|e| {
         // The detail names the account: it stays in the log.
@@ -689,13 +703,14 @@ async fn admit_redis(worker: &Worker, checked: &Checked) -> Result<redis::Prepar
             .snapshot
             .policy
             .redis_grants(&checked.roles, &grant.resource, &grant.principal);
-    let config = redis::SessionConfig::new(
+    let mut config = redis::SessionConfig::new(
         grant.session_id.clone(),
         grant.username.clone(),
         grant.principal.clone(),
         grant.resource.clone(),
         target,
     );
+    config.guard = delegated(checked);
     // Connect, TLS, login, and the command table each have their own limit;
     // this one bounds them together so the proxy isn't kept waiting.
     tokio::time::timeout(
@@ -754,6 +769,7 @@ async fn admit_search(
         engine_role: grant.principal.clone(),
         engine,
         target: target.clone(),
+        guard: delegated(checked),
     };
     let aws: Option<crate::search::target::AwsSource> = target.aws.then(|| {
         let worker = worker.clone();
@@ -829,7 +845,8 @@ async fn admit_mongo(worker: &Worker, checked: &Checked) -> Result<crate::mongo:
         })?;
     let target = crate::db::Target::from_mongo(&spec, worker.allow_insecure_db_targets(), identity)
         .await
-        .map_err(Status::failed_precondition)?;
+        .map_err(Status::failed_precondition)?
+        .guarded(delegated(checked));
     let auth_source = spec.auth_source.clone().unwrap_or_else(|| {
         match spec.auth {
             MongoAuth::Scram | MongoAuth::ScramSha1 => "admin",
@@ -893,7 +910,8 @@ async fn admit_db(
     }
     let target = Target::from_spec(spec, worker.allow_insecure_db_targets())
         .await
-        .map_err(Status::failed_precondition)?;
+        .map_err(Status::failed_precondition)?
+        .guarded(delegated(checked));
     let (login_user, password) = if spec.iam_auth {
         iam_login(worker, engine, spec, grant).await?
     } else {
@@ -1075,6 +1093,7 @@ async fn admit_ssh(
         resource: grant.resource.clone(),
         target_address: target.address,
         target_host_key: pinned,
+        target_guard: delegated(checked),
         user_key: Arc::new(user_key),
         user_cert,
         host_key,

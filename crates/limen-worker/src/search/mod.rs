@@ -113,6 +113,8 @@ pub struct SessionConfig {
     /// `opensearch` or `elasticsearch`.
     pub engine: &'static str,
     pub target: SearchTarget,
+    /// What the worker may dial, for a resource from a profile (ADR-0042).
+    pub guard: Option<limen_policy::model::Delegated>,
 }
 
 /// A session whose target connection is open.
@@ -147,13 +149,14 @@ pub async fn prepare(
     config: SessionConfig,
     aws: Option<target::AwsSource>,
 ) -> anyhow::Result<Prepared> {
-    let plan = target::plan(
+    let mut plan = target::plan(
         settings,
         &config.resource,
         &config.target,
         &config.engine_role,
         aws,
     )?;
+    plan.guard.clone_from(&config.guard);
     let mut upstream = plan.connect().await?;
     let status = probe(&plan, &mut upstream).await?;
     // 401 is the engine saying it doesn't know the worker. 403 can be a role

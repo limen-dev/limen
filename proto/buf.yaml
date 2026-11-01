@@ -1,0 +1,19 @@
+# buf (https://buf.build) checks the management API contract (ADR-0042).
+# Only limen/manage is held to it; the internal limen/v1 protocols change
+# freely between components of one release (ADR-0024).
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+    - COMMENTS
+  ignore:
+    - limen/v1
+breaking:
+  use:
+    # FILE, the strictest set: the Go provider compiles against the generated
+    # names, so a rename breaks it even when the wire format doesn't change.
+    - FILE
+  ignore:
+    - limen/v1

@@ -159,23 +159,36 @@ impl PolicyStore {
 
     /// Reload from the database if another replica applied a newer version.
     pub async fn refresh(&self, db: &Db) -> anyhow::Result<()> {
-        let latest = db::latest_policy_version(db).await?.unwrap_or(0);
-        if latest == self.base().version {
-            return Ok(());
+        let mut conn = db.acquire().await?;
+        self.latest(&mut conn).await.map(|_| ())
+    }
+
+    /// The applied policy as the database has it now, read on `conn` (inside a
+    /// transaction, when the caller is about to write). Installs it when its
+    /// version differs from this replica's copy, older included, so a database
+    /// restored from a backup takes effect. A write must start from this, never
+    /// from [`PolicyStore::base`], which another replica's apply reaches only
+    /// at the next refresh (#182).
+    pub async fn latest(&self, conn: &mut sqlx::PgConnection) -> anyhow::Result<Arc<LoadedPolicy>> {
+        let known = self.base();
+        let latest = db::latest_policy_version(&mut *conn).await?.unwrap_or(0);
+        if latest == known.version {
+            return Ok(known);
         }
-        let Some(row) = db::latest_policy(db).await? else {
-            return Ok(());
+        let Some(row) = db::latest_policy(&mut *conn).await? else {
+            return Ok(known);
         };
         let docs: Vec<limen_policy::Document> = serde_json::from_value(row.documents)?;
         let policy = Policy::from_documents(docs)?;
         tracing::info!(version = row.version, digest = %row.digest, "loaded policy");
-        self.set(LoadedPolicy {
+        let loaded = LoadedPolicy {
             version: row.version,
             policy: Arc::new(policy),
             author: row.author,
             created_at: Some(row.created_at),
-        });
-        Ok(())
+        };
+        self.set(loaded.clone());
+        Ok(Arc::new(loaded))
     }
 }
 
@@ -189,6 +202,11 @@ pub struct Limits {
     /// Searches of the audit trail, per person (ADR-0026): search is also a
     /// way to read a lot at once.
     pub search: DefaultKeyedRateLimiter<String>,
+    /// Policy writes through the management API, per principal (ADR-0042 §10).
+    pub policy_writes: DefaultKeyedRateLimiter<String>,
+    /// Dry runs: more of them (a plan checks every resource), still bounded,
+    /// since each computes the whole policy.
+    pub policy_dry_runs: DefaultKeyedRateLimiter<String>,
 }
 
 impl Default for Limits {
@@ -213,6 +231,10 @@ impl Limits {
             console_login: RateLimiter::keyed(console),
             // Thirty a minute, bursts of ten, whatever the sign-in limits are.
             search: RateLimiter::keyed(Quota::per_minute(nz(30)).allow_burst(nz(10))),
+            // Sixty a minute, bursts of twenty: a Terraform apply of a few
+            // dozen resources goes through; a loop doesn't.
+            policy_writes: RateLimiter::keyed(Quota::per_minute(nz(60)).allow_burst(nz(20))),
+            policy_dry_runs: RateLimiter::keyed(Quota::per_minute(nz(600)).allow_burst(nz(100))),
         }
     }
 }
@@ -238,8 +260,21 @@ impl Limits {
             .map_err(|_| Status::resource_exhausted("too many searches; slow down"))
     }
 
+    /// Whether `principal` may write policy now.
+    #[must_use]
+    pub fn allow_policy_write(&self, principal: &str, dry_run: bool) -> bool {
+        let limiter = if dry_run {
+            &self.policy_dry_runs
+        } else {
+            &self.policy_writes
+        };
+        limiter.check_key(&principal.to_owned()).is_ok()
+    }
+
     /// Drop state for idle keys. Call periodically.
     pub fn shrink(&self) {
+        self.policy_writes.retain_recent();
+        self.policy_dry_runs.retain_recent();
         self.search.retain_recent();
         self.unauthenticated.retain_recent();
         self.console_login.retain_recent();
