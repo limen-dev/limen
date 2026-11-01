@@ -14,6 +14,16 @@ CREATE TABLE policy_manifest (
     document_digest TEXT   NOT NULL REFERENCES policy_documents (digest),
     PRIMARY KEY (version, position)
 );
-CREATE INDEX policy_manifest_document ON policy_manifest (document_digest);
 
+-- A version written since this migration has no inline `documents`; it has
+-- `document_count` manifest rows instead, which a reader checks, so a
+-- version whose manifest is missing or short (a partial restore) is refused
+-- and the replica keeps the policy it has instead of loading a partial one.
+--
+-- UPGRADE ORDER: a replica from before this migration reads `documents` and
+-- cannot decode a version without it. Its refresh then fails and it keeps
+-- serving the policy it had, until it is upgraded. Upgrade every control
+-- plane replica before the first policy write through a new one, and do not
+-- roll the binary back after one.
 ALTER TABLE policy_versions ALTER COLUMN documents DROP NOT NULL;
+ALTER TABLE policy_versions ADD COLUMN document_count INT;

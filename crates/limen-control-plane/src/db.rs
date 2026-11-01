@@ -95,25 +95,47 @@ pub async fn latest_policy_head<'e>(
 
 /// The newest version, with its documents. Versions written since #183 keep
 /// a manifest of document digests; older ones keep the documents inline.
+/// A manifest that is missing or short is an error, never a smaller policy.
 /// Takes a pool, or a transaction's connection to read inside it.
 pub async fn latest_policy<'e>(
     db: impl sqlx::PgExecutor<'e>,
 ) -> Result<Option<PolicyRow>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT v.version, v.digest, v.author, v.created_at,
-                COALESCE(v.documents, (
-                    SELECT COALESCE(jsonb_agg(d.body ORDER BY m.position), '[]'::jsonb)
-                    FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest
-                    WHERE m.version = v.version)) AS documents
+        "SELECT v.version, v.digest, v.author, v.created_at, v.document_count,
+                v.documents,
+                (SELECT jsonb_agg(d.body ORDER BY m.position)
+                 FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest
+                 WHERE m.version = v.version) AS manifest_documents,
+                (SELECT count(*) FROM policy_manifest m WHERE m.version = v.version) AS manifest_rows
          FROM policy_versions v ORDER BY v.version DESC LIMIT 1",
     )
     .fetch_optional(db)
     .await?;
     row.map(|r| {
+        let version: i64 = r.try_get("version")?;
+        let inline: Option<serde_json::Value> = r.try_get("documents")?;
+        let documents = match inline {
+            Some(documents) => documents,
+            None => {
+                let count: Option<i32> = r.try_get("document_count")?;
+                let rows: i64 = r.try_get("manifest_rows")?;
+                let documents: Option<serde_json::Value> = r.try_get("manifest_documents")?;
+                match (count, documents) {
+                    (Some(count), Some(documents)) if i64::from(count) == rows => documents,
+                    (Some(0), None) => serde_json::Value::Array(Vec::new()),
+                    _ => {
+                        return Err(sqlx::Error::Decode(
+                            format!("policy version {version} has no documents and an incomplete manifest")
+                                .into(),
+                        ));
+                    }
+                }
+            }
+        };
         Ok(PolicyRow {
-            version: r.try_get("version")?,
+            version,
             digest: r.try_get("digest")?,
-            documents: r.try_get("documents")?,
+            documents,
             author: r.try_get("author")?,
             created_at: r.try_get("created_at")?,
         })
@@ -132,7 +154,8 @@ pub async fn lock_policy_writes(tx: &mut Transaction<'_, Postgres>) -> Result<()
 }
 
 /// Stores a version: its documents once each, by digest, and a manifest of
-/// which ones (#183). A version that changes one document stores one new body.
+/// which ones (#183). A version that changes one document stores one new body:
+/// only the bodies the table does not have yet are sent.
 pub async fn insert_policy(
     tx: &mut Transaction<'_, Postgres>,
     digest: &str,
@@ -140,17 +163,32 @@ pub async fn insert_policy(
     author: &str,
     source_ref: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
-    let version: i64 = sqlx::query_scalar("INSERT INTO policy_versions (digest, author, source_ref) VALUES ($1, $2, $3) RETURNING version")
+    let digests: Vec<String> = documents.iter().map(document_digest).collect();
+    let known: Vec<String> =
+        sqlx::query_scalar("SELECT digest FROM policy_documents WHERE digest = ANY($1)")
+            .bind(&digests)
+            .fetch_all(&mut **tx)
+            .await?;
+    let (new_digests, new_bodies): (Vec<&String>, Vec<&serde_json::Value>) = digests
+        .iter()
+        .zip(documents)
+        .filter(|(d, _)| !known.contains(d))
+        .unzip();
+    let new_digests: Vec<String> = new_digests.into_iter().cloned().collect();
+    let new_bodies: Vec<serde_json::Value> = new_bodies.into_iter().cloned().collect();
+    // Under the policy write lock (#182) nobody else inserts between the two
+    // statements; ON CONFLICT covers a writer that doesn't take the lock.
+    sqlx::query("INSERT INTO policy_documents (digest, body) SELECT * FROM unnest($1::text[], $2::jsonb[]) ON CONFLICT (digest) DO NOTHING")
+        .bind(&new_digests)
+        .bind(&new_bodies)
+        .execute(&mut **tx)
+        .await?;
+    let version: i64 = sqlx::query_scalar("INSERT INTO policy_versions (digest, author, source_ref, document_count) VALUES ($1, $2, $3, $4) RETURNING version")
         .bind(digest)
         .bind(author)
         .bind(source_ref)
+        .bind(i32::try_from(digests.len()).unwrap_or(i32::MAX))
         .fetch_one(&mut **tx)
-        .await?;
-    let digests: Vec<String> = documents.iter().map(document_digest).collect();
-    sqlx::query("INSERT INTO policy_documents (digest, body) SELECT * FROM unnest($1::text[], $2::jsonb[]) ON CONFLICT (digest) DO NOTHING")
-        .bind(&digests)
-        .bind(documents)
-        .execute(&mut **tx)
         .await?;
     sqlx::query("INSERT INTO policy_manifest (version, position, document_digest) SELECT $1, ord - 1, d FROM unnest($2::text[]) WITH ORDINALITY AS t(d, ord)")
         .bind(version)
@@ -161,6 +199,8 @@ pub async fn insert_policy(
 }
 
 /// SHA-256 over the document's JSON, as a key. Equal documents share a body.
+/// Only a storage key: a different serialization after an upgrade makes a
+/// duplicate body, never a wrong policy (the version's own digest is separate).
 fn document_digest(doc: &serde_json::Value) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write;
