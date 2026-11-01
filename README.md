@@ -95,7 +95,7 @@ The [quickstart](website/src/content/docs/docs/quickstart.md) walks through the 
 
 ## How it works
 
-[![How Limen works: people and bots sign in through your identity provider, connect through one public load balancer to proxies, and reach targets through workers that only dial out; every session is audited](docs/diagrams/architecture.svg)](docs/diagrams/README.md)
+[![How Limen works: people and bots sign in through your identity provider, connect through one public load balancer to proxies, and reach targets through workers that only dial out; every session is audited](docs/diagrams/architecture.png)](docs/diagrams/README.md)
 
 Limen is three programs:
 
