@@ -1,9 +1,9 @@
-name: website-browsers
+name: website-browser-tests
 
 # The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes:
 # overflow, JS errors, third-party requests, axe WCAG A/AA, touch targets.
 # Slow, so it never runs on a push or pull request: only weekly, or by hand
-# (gh workflow run website-browsers.yml).
+# (gh workflow run website-browser-tests.yml).
 
 on:
   schedule:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: website-browsers
+  group: website-browser-tests
   cancel-in-progress: false
 
 jobs:
@@ -50,8 +50,8 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/browsers" && cd "$RUNNER_TEMP/browsers"
           npm init -y >/dev/null
-          npm i playwright-core axe-core
-          npx playwright-core install chromium webkit firefox
+          npm i playwright-core@1.64.1 axe-core@4.14.0
+          npx playwright-core install --with-deps chromium webkit firefox
 
       - name: Serve the site
         working-directory: website

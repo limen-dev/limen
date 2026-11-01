@@ -22,6 +22,8 @@ The logins you grant in policy must exist on the host. Accounts may be locked fo
 
 Optional hardening, if the host is only reached through Limen: `AuthorizedKeysFile none`, `PasswordAuthentication no`, `AllowAgentForwarding no`, `AllowTcpForwarding no`.
 
+For `scp` and `sftp`, sshd needs an SFTP subsystem (`Subsystem sftp internal-sftp`, or the distribution's `sftp-server`); most distributions configure one. `rsync` and `git` over SSH need those programs on the host.
+
 ## 2. Pin the host key in policy
 
 ```sh
@@ -56,3 +58,4 @@ sudo journalctl -u sshd | grep 'Accepted certificate ID "limen:'
 | `target host key doesn't match the pinned key` (worker log) | Host key changed or the address points elsewhere. Investigate before re-pinning |
 | `no worker is connected that can reach web-1` | No worker carries labels matching `worker_selector` |
 | `access denied to root@web-1` | Policy doesn't grant that login. Check `limen ls` |
+| `subsystem request failed` from `scp` or `sftp` | The host has no SFTP subsystem. Configure one (above), or use `scp -O` |

@@ -21,6 +21,48 @@ fn client(
     Ok(AccessClient::new(channel))
 }
 
+/// `Explain` for the caller on `resource`, as a whole.
+///
+/// `principal` is `kind=value` (`login=ubuntu`), or empty to explain the resource
+/// as a whole.
+pub(crate) async fn explain_for(
+    proxy: Option<&str>,
+    resource: &str,
+    principal: &str,
+) -> anyhow::Result<limen_proto::v1::ExplainResponse> {
+    Ok(client(proxy)?
+        .explain(ExplainRequest {
+            resource: resource.to_owned(),
+            principal: principal.to_owned(),
+            ..Default::default()
+        })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner())
+}
+
+/// Why access to `resource` was refused and how to get it (#120), as lines
+/// to add under the refusal. Empty if the proxy can't say within a few
+/// seconds: the refusal itself still stands.
+pub(crate) async fn denial_hint(proxy: Option<&str>, resource: &str, principal: &str) -> String {
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        explain_for(proxy, resource, principal),
+    )
+    .await
+    {
+        Ok(Ok(r)) if !r.lines.is_empty() => {
+            let mut hint = String::new();
+            for line in &r.lines {
+                hint.push_str("\n  ");
+                hint.push_str(line);
+            }
+            hint
+        }
+        _ => String::new(),
+    }
+}
+
 fn when(unix: i64) -> String {
     OffsetDateTime::from_unix_timestamp(unix)
         .ok()

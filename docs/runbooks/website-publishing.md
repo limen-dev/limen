@@ -1,16 +1,16 @@
 # Publishing the website
 
-The site in `website/` is published to GitHub Pages at <https://limen-dev.github.io/limen> by `.github/workflows/deploy-website.yml`. It builds on every push to `main` that touches `website/`, `docs/`, `deploy/compose/README.md` or `mise.toml`, with the same checks as `ci-website.yml` (links, third-party requests, ADR-0031 claims), and deploys only if they pass. A manual run (`gh workflow run deploy-website.yml`) ignores the path filter.
+The site in `website/` is published to GitHub Pages at <https://limen-dev.github.io/limen> by the `deploy` job of `.github/workflows/ci-website.yml`. That workflow builds and checks the site (links, third-party requests, ADR-0031 claims) on every pull request and every push to `main` that touches `website/`, `docs/`, `deploy/compose/README.md` or `mise.toml`. On `main` the deploy job runs after the checks pass. A manual run (`gh workflow run ci-website.yml`) ignores the path filter.
 
 ## Turning it on
 
-Pages from a private repository needs a paid GitHub plan, and the published site is public either way. Until the repository is public the workflow does nothing: both jobs are skipped unless the repository variable `PUBLISH_SITE` is `true`.
+Pages from a private repository needs a paid GitHub plan, and the published site is public either way. Until the repository is public the site is built and checked but not published: the deploy job is skipped unless the repository variable `PUBLISH_SITE` is `true`.
 
 When `limen-dev/limen` goes public:
 
 1. Settings, Pages, Source: **GitHub Actions** (or `gh api -X POST repos/limen-dev/limen/pages -f build_type=workflow`).
 2. `gh variable set PUBLISH_SITE --body true --repo limen-dev/limen`
-3. `gh workflow run deploy-website.yml --repo limen-dev/limen`, then open the URL the deploy job prints.
+3. `gh workflow run ci-website.yml --repo limen-dev/limen`, then open the URL the deploy job prints.
 
 To stop publishing, delete the variable (`gh variable delete PUBLISH_SITE --repo limen-dev/limen`). The last deployed site stays up; to take it down, disable Pages in Settings.
 

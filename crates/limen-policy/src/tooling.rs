@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use limen_core::resource::ResourceKind;
 use serde::{Deserialize, Serialize};
 
+use crate::duration::DurationStr;
 use crate::trace::summarize_role;
 use crate::{AccessibleResource, Policy, RequestableResource};
 
@@ -495,10 +496,15 @@ impl Policy {
             lines.push(format!(
                 "You can't reach `{resource}` yet, but you can ask for it."
             ));
-            lines.push(format!(
-                "Request one of: {}.   limen request {resource} --for 30m --reason \"...\"",
-                req.roles.join(", ")
-            ));
+            lines.push(format!("Request one of: {}.", req.roles.join(", ")));
+            // Who approves: the requester is eligible for these roles, and
+            // knowing whom to ping is the point (ADR-0025).
+            for name in &req.roles {
+                if let Some(line) = self.how_granted(name) {
+                    lines.push(format!("  - `{name}`: {line}"));
+                }
+            }
+            lines.push(self.request_command(resource, &req.roles));
             return lines;
         }
         // The same words whether the resource is missing or hidden.
@@ -523,5 +529,65 @@ impl Policy {
             lines.push(format!("Roles you may request: {}.", eligible.join(", ")));
         }
         lines
+    }
+
+    /// How a requestable role is granted, for its requester: who approves, or
+    /// that it is break-glass.
+    fn how_granted(&self, role: &str) -> Option<String> {
+        let doc = self.roles.get(role)?;
+        let spec = doc.spec.request.as_ref()?;
+        if doc.spec.break_glass {
+            return Some(
+                "break-glass: granted at once with a reason, and reviewed afterwards".to_owned(),
+            );
+        }
+        let mut who: Vec<String> = spec
+            .approvers
+            .iter()
+            .map(|g| format!("members of {g}"))
+            .collect();
+        who.extend(spec.approver_users.iter().cloned());
+        // Validation requires an approver for every role that isn't break-glass.
+        let who = who.join(" or ");
+        Some(if spec.approvals_required > 1 {
+            format!("{} approvals from {who}", spec.approvals_required)
+        } else {
+            format!("approved by {who}")
+        })
+    }
+
+    /// The command that asks for `resource`: an ordinary request when one of
+    /// `roles` takes approval, break-glass only when nothing else reaches it.
+    /// The duration never exceeds the role's own limit, so the command works as printed.
+    fn request_command(&self, resource: &str, roles: &[String]) -> String {
+        let break_glass = |r: &&String| self.roles.get(*r).is_some_and(|d| d.spec.break_glass);
+        let ordinary: Vec<&String> = roles.iter().filter(|r| !break_glass(r)).collect();
+        let for_flag = |role: &str| {
+            let thirty = DurationStr(std::time::Duration::from_mins(30));
+            let limit = self
+                .roles
+                .get(role)
+                .and_then(|d| d.spec.request.as_ref())
+                .and_then(|r| r.max_duration);
+            format!("--for {}", limit.map_or(thirty, |l| l.min(thirty)))
+        };
+        match ordinary.as_slice() {
+            [] => {
+                // Several break-glass roles need the one to ask for named.
+                let role = match roles {
+                    [first, _, ..] => format!(" --role {first}"),
+                    _ => String::new(),
+                };
+                format!("Run: limen request {resource} --break-glass{role} --reason \"...\"")
+            }
+            [only] => format!(
+                "Run: limen request {resource} {} --reason \"...\"",
+                for_flag(only)
+            ),
+            [first, ..] => format!(
+                "Run: limen request {resource} --role {first} {} --reason \"...\"",
+                for_flag(first)
+            ),
+        }
     }
 }

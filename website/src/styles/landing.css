@@ -140,7 +140,8 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .tabs button { background: none; border: 0; padding: 0.35rem 0.75rem; border-radius: 8px; font-size: 0.85rem; color: var(--lm-muted); cursor: pointer; white-space: nowrap; font-family: var(--lm-mono); }
 .tabs button:hover { color: var(--lm-text); }
 .tabs button[aria-selected='true'] { background: var(--sl-color-accent-low, rgb(45 212 191 / 0.14)); color: var(--lm-accent-strong); }
-.replay { margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--lm-muted); font-family: var(--lm-mono); font-size: 0.8rem; white-space: nowrap; }
+/* 24px: the smallest touch target WCAG 2.2 (2.5.8) allows. */
+.replay { min-height: 24px; padding: 2px 6px; margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--lm-muted); font-family: var(--lm-mono); font-size: 0.8rem; white-space: nowrap; }
 .replay:hover { color: var(--lm-accent-strong); }
 @media (pointer: coarse) { .replay { min-height: 32px; padding-inline: 0.5rem; } }
 .term-body { margin: 0; padding: 1.1rem 1.2rem; font-size: 0.86rem; line-height: 1.7; min-height: 0; overflow: auto; color: var(--lm-text-dim); white-space: pre-wrap; word-break: break-word; flex: 1; }
@@ -226,7 +227,18 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .who-tag { align-self: flex-start; font-family: var(--lm-mono); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 0.25rem 0.65rem; border-radius: 999px; color: var(--lm-accent-strong); background: var(--sl-color-accent-low, rgb(45 212 191 / 0.14)); }
 
 /* PROTOCOLS */
-.protos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; margin-top: 3rem; }
+.pgroup { margin-top: 2.6rem; }
+.pgroup-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1rem; margin-bottom: 0.9rem; }
+.pgroup-head h3 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--lm-text); }
+.pgroup-head p { margin: 0; font-size: 0.88rem; color: var(--lm-muted); }
+.protos { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 0.85rem; }
+.logos { display: flex; gap: 0.5rem; }
+.logo { width: 2.8rem; height: 2.8rem; padding: 0.55rem; display: grid; place-items: center; border-radius: 12px; background: #fff; border: 1px solid var(--lm-line-strong); color: var(--brand); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.logo svg { width: 100%; height: 100%; display: block; }
+.logo svg:not([fill]) { fill: currentColor; }
+.logo.sm { width: 2.1rem; height: 2.1rem; padding: 0.4rem; border-radius: 9px; }
+.strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 1.6rem; }
+.strip > span:first-child { font: 600 0.72rem/1 var(--lm-mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--lm-muted); margin-right: 0.4rem; }
 .proto { display: flex; flex-direction: column; gap: 0.3rem; padding: 1.2rem 1.2rem 1.1rem; border-radius: 16px; background: var(--lm-surface); border: 1px solid var(--lm-line); text-decoration: none; transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
 .proto:hover { border-color: var(--lm-accent); transform: translateY(-3px); box-shadow: 0 18px 40px -22px var(--lm-glow); }
 .proto-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.7rem; }
@@ -345,3 +357,4 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .nf-suggest li a:hover { border-color: var(--lm-accent); }
 .nf [hidden] { display: none; }
 @media (max-width: 980px) { .nf-inner { grid-template-columns: 1fr; } .nf-door svg { width: min(55%, 220px); } .nf { padding-top: 6rem; } }
+.logo-note { margin-top: 2rem; text-align: left; }
