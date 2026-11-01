@@ -49,4 +49,4 @@ Steady background calls (policy refresh, pings) show up as their own short `api.
 
 Point `--otlp-endpoint` at the Datadog Agent's OTLP receiver or any OpenTelemetry collector. Verified against Jaeger 1.76 and 2.22; **unverified against a Datadog Agent** (needs an account, issue #63). Setup for Jaeger, Tempo, Datadog and a collector, and how to check that spans arrive, is in the [observability recipes](observability.md).
 
-CI runs the exporter's test against a Jaeger service container (the `jaeger` service in `.github/workflows/ci-rust.yml`, whose image must match `JAEGER_IMAGE` in `deploy/compose/.env`).
+CI runs the exporter's test against a Jaeger service container (the `jaeger` service in `.github/workflows/rust.yml`, whose image must match `JAEGER_IMAGE` in `deploy/compose/.env`).

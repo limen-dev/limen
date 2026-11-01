@@ -145,7 +145,7 @@ Writes are audited before commit, and a write whose event can't be recorded is n
 Reads and successful dry runs are not audited, as today. A dry run refused by the writer's grant is audited as `policy.write_denied`, like a real write, so a pipeline can't probe its limits without a trace.
 
 ### 12. Compatibility
-`limen.manage.v1` is a promise: additive changes only, field numbers and names never reused or renamed. CI runs `buf lint` (the STANDARD and COMMENTS rules: every message, field, and RPC is documented) and `buf breaking` with the strictest `FILE` rules against the base of each pull request (`proto/buf.yaml`, `ci-rust.yml`). The Go provider compiles against generated names, so a rename breaks it even when the wire format doesn't. Before 1.0, a break the owner accepts goes through with the `api-breaking-approved` label and an upgrade note in the release (ADR-0024). The internal `limen.v1` package is not held to this.
+`limen.manage.v1` is a promise: additive changes only, field numbers and names never reused or renamed. CI runs `buf lint` (the STANDARD and COMMENTS rules: every message, field, and RPC is documented) and `buf breaking` with the strictest `FILE` rules against the base of each pull request (`proto/buf.yaml`, `rust.yml`). The Go provider compiles against generated names, so a rename breaks it even when the wire format doesn't. Before 1.0, a break the owner accepts goes through with the `api-breaking-approved` label and an upgrade note in the release (ADR-0024). The internal `limen.v1` package is not held to this.
 
 ### 13. Clients
 - **CLI.** `limen admin apply --source <name>` (`ReplaceSource`) and `limen policy get|ls|create|update|delete|transfer`; `limen policy changes ls|show|approve|reject`.
