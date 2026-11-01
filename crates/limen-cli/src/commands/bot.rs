@@ -161,7 +161,7 @@ pub async fn run(args: BotLogin<'_>) -> anyhow::Result<()> {
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
-    finish(&proxy, &key, resp)
+    finish(&proxy, &key, resp).await
 }
 
 #[cfg(test)]

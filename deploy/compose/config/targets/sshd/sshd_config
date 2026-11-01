@@ -16,5 +16,8 @@ AllowAgentForwarding no
 AllowTcpForwarding no
 X11Forwarding no
 
+# scp and sftp (rsync and git are installed in the image).
+Subsystem sftp internal-sftp
+
 # VERBOSE logs the certificate key ID, which names the Limen session and user.
 LogLevel VERBOSE

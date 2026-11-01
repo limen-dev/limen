@@ -572,6 +572,10 @@ message ExplainResponse {
   repeated string lines = 1;
   // Whether the answer is the full trace (admin) or the user-safe one.
   bool full_trace = 2;
+  // Whether a worker that may serve the resource holds a live tunnel to a
+  // proxy. Set only when the subject can reach the resource; unset otherwise
+  // and by older control planes.
+  optional bool worker_connected = 3;
 }
 
 message SearchRequest {

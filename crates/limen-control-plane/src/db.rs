@@ -526,6 +526,26 @@ pub struct PeerTunnelRow {
     pub max_sessions: u32,
 }
 
+/// The labels of every worker with a live tunnel to some proxy.
+pub async fn live_worker_labels(
+    db: &Db,
+) -> Result<Vec<std::collections::BTreeMap<String, String>>, sqlx::Error> {
+    sqlx::query(
+        "SELECT DISTINCT w.labels
+         FROM tunnels t
+         JOIN components w ON w.id = t.worker_id AND w.revoked_at IS NULL
+         WHERE t.lease_expires_at > now()",
+    )
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(|r| {
+        let labels: serde_json::Value = r.try_get("labels")?;
+        Ok(serde_json::from_value(labels).unwrap_or_default())
+    })
+    .collect()
+}
+
 pub async fn live_peer_tunnels(db: &Db) -> Result<Vec<PeerTunnelRow>, sqlx::Error> {
     sqlx::query(
         "SELECT t.worker_id, w.name AS worker_name, w.labels AS worker_labels, t.proxy_id, p.name AS proxy_name, p.peer_address,
