@@ -121,7 +121,7 @@ kind: PodDisruptionBudget
 metadata:
   name: {{ $name }}
 spec:
-  minAvailable: {{ $c.pdb.minAvailable }}
+  minAvailable: {{ include "limen.minAvailable" $c }}
   selector:
     matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
 {{- end }}

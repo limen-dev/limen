@@ -2,7 +2,10 @@
 {{- $c := include "limen.merged" (dict "defaults" $.Values.proxyDefaults "over" $over) | fromYaml }}
 {{- $ref := dict "component" "proxy" "key" $key }}
 {{- $name := printf "proxy-%s" $key }}
-{{- $cpAddr := $c.controlPlaneAddr | default (printf "control-plane-%s:3080" ($c.controlPlane | default (include "limen.firstKey" $.Values.controlPlanes))) }}
+{{- $cpAddr := $c.controlPlaneAddr }}
+{{- if not $cpAddr }}
+{{- $cpAddr = printf "control-plane-%s:3080" ($c.controlPlane | default (include "limen.firstKey" $.Values.controlPlanes)) }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -89,7 +92,7 @@ kind: PodDisruptionBudget
 metadata:
   name: {{ $name }}
 spec:
-  minAvailable: {{ $c.pdb.minAvailable }}
+  minAvailable: {{ include "limen.minAvailable" $c }}
   selector:
     matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
 {{- end }}

@@ -2,9 +2,14 @@
 {{- $c := include "limen.merged" (dict "defaults" $.Values.workerDefaults "over" $over) | fromYaml }}
 {{- $ref := dict "component" "worker" "key" $key }}
 {{- $name := printf "worker-%s" $key }}
+{{- $dns := "" }}
+{{- $pxPort := 443 }}
+{{- if or (not $c.proxyAddr) (not $c.proxyName) }}
 {{- $px := index $.Values.proxies ($c.proxy | default (include "limen.firstKey" $.Values.proxies)) }}
 {{- $pxc := include "limen.merged" (dict "defaults" $.Values.proxyDefaults "over" $px) | fromYaml }}
-{{- $dns := first (splitList "," $pxc.dnsNames) }}
+{{- $dns = first (splitList "," $pxc.dnsNames) }}
+{{- $pxPort = $pxc.service.port }}
+{{- end }}
 ---
 {{- if $c.serviceAccount.annotations }}
 apiVersion: v1
@@ -55,7 +60,7 @@ spec:
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - { name: LIMEN_NAME, value: "{{ required "workers.<key>.namePrefix is required" $c.namePrefix }}-$(POD_NAME)" }
-            - { name: LIMEN_PROXY_ADDR, value: {{ $c.proxyAddr | default (printf "%s:%v" $dns $pxc.service.port) | quote }} }
+            - { name: LIMEN_PROXY_ADDR, value: {{ $c.proxyAddr | default (printf "%s:%v" $dns $pxPort) | quote }} }
             - { name: LIMEN_PROXY_NAME, value: {{ $c.proxyName | default $dns | quote }} }
             - { name: LIMEN_CA_FILE, value: /etc/limen/internal-ca.pem }
             - { name: LIMEN_MAX_SESSIONS, value: {{ $c.maxSessions | quote }} }

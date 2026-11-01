@@ -31,7 +31,7 @@ terraform apply -var-file=my.tfvars
 
 It creates the VPC, the database, keys, audit store and secrets (foundation), an internal Network Load Balancer for the control planes, a public one per proxy, control planes and proxies on ECS Fargate, and worker groups on EC2 in the VPCs you name. Then point each proxy's public name at the load balancer (`terraform output proxy_dns_names`).
 
-Scale by editing the maps: `desired_count` or `desired_capacity` to resize, a new entry to add a group, such as another worker group in another VPC.
+Scale by editing the maps: `desired_count` resizes an ECS service, and a new entry adds a group, such as another worker group in another VPC. On EC2, `desired_capacity` only sets the size at the first apply (Terraform then leaves the live count to your scaling policies); resize later with a scaling policy or `aws autoscaling set-desired-capacity`, and change `min_size` and `max_size` in the map.
 
 **The internal CA.** Proxies and workers must trust the internal CA before they enroll, and only the control plane creates it. The control plane task runs a small sidecar (the AWS CLI image) that copies the exported `internal-ca.pem` into the `.../internal-ca` secret; proxy and worker tasks wait for it (an init container on ECS, a boot loop on EC2) and fail and retry until it is there. So the first apply brings up control planes first and the others settle within a few minutes. Helper image defaults are in `modules/ecs/variables.tf` (`helper_images`).
 
@@ -73,7 +73,7 @@ Terraform creates what is not Kubernetes; the chart installs Limen. You bring th
      --set-json 'proxies={}' --set-json 'workers={}'
    kubectl -n limen rollout status statefulset/control-plane-core
    # The image has no shell: read the file through an ephemeral debug container.
-   kubectl -n limen debug control-plane-core-0 --image=busybox:1.37.0 --target=control-plane -q -- \
+   kubectl -n limen debug control-plane-core-0 --image=busybox:1.37.0 --target=control-plane-core -q -- \
      cat /proc/1/root/var/lib/limen/ca-public/internal-ca.pem > internal-ca.pem
    kubectl -n limen create configmap limen-internal-ca --from-file=internal-ca.pem
    helm upgrade limen deploy/helm/limen -n limen -f limen-values.yaml -f my-values.yaml

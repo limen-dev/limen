@@ -95,7 +95,20 @@ module "proxy_lb" {
   subnets            = module.vpc.public_subnets
 
   enable_deletion_protection = false
-  create_security_group      = false
+
+  # `client_cidrs` is enforced here: the tasks admit the VPC, since the load balancer
+  # reaches them from its own addresses.
+  security_group_ingress_rules = {
+    for i, cidr in each.value.client_cidrs : "client-${i}" => {
+      from_port   = 443
+      to_port     = 443
+      ip_protocol = "tcp"
+      cidr_ipv4   = cidr
+    }
+  }
+  security_group_egress_rules = {
+    vpc = { ip_protocol = "-1", cidr_ipv4 = var.core_vpc.cidr }
+  }
 
   listeners = {
     public = {
@@ -138,6 +151,7 @@ locals {
       secrets               = module.foundation.control_plane_secrets
       task_role_policy_arns = module.foundation.control_plane_policy_arns
       ingress_cidrs         = [var.core_vpc.cidr]
+      admin_ingress_cidrs   = [var.core_vpc.cidr] # the load balancer's health checks
     }
   }
 
@@ -149,7 +163,11 @@ locals {
       subnet_ids       = module.vpc.private_subnets
       desired_count    = v.desired_count
       target_group_arn = module.proxy_lb[k].target_groups["proxy"].arn
-      ingress_cidrs    = v.client_cidrs
+      # Traffic reaches the tasks from the load balancer's addresses in this VPC, not from the
+      # clients (the target group uses IP targets), so the tasks admit the VPC and `client_cidrs`
+      # is enforced by the load balancer's own security group above.
+      ingress_cidrs       = [var.core_vpc.cidr]
+      admin_ingress_cidrs = [var.core_vpc.cidr] # the load balancer's health checks
       environment = {
         LIMEN_CONTROL_PLANE_ADDR = "${local.control_plane_dns}:3080"
         LIMEN_CONTROL_PLANE_NAME = local.control_plane_dns

@@ -60,10 +60,22 @@ jobs:
             terraform -chdir="$dir" validate
           done
 
+      # Plans the ECS and EC2 modules with a mocked AWS provider: `validate` cannot see an
+      # expression that fails only for one component (a worker has no service port).
+      - name: Terraform plan tests (mocked provider)
+        run: |
+          for dir in deploy/terraform/modules/ecs deploy/terraform/modules/ec2; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" test
+          done
+
       - name: Helm lint and template
         run: |
           helm lint deploy/helm/limen -f deploy/helm/limen/ci-values.yaml
           helm template limen deploy/helm/limen -f deploy/helm/limen/ci-values.yaml > /dev/null
+
+      - name: Chart render checks
+        run: deploy/helm/limen/tests/render.sh
 
       # Helm renders any YAML; the Kubernetes schema says whether the API server would accept it.
       - name: Rendered chart matches the Kubernetes schema

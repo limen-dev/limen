@@ -29,6 +29,7 @@ variable "services" {
     secrets                    = optional(map(string), {})
     ingress_cidrs              = optional(list(string), [])
     ingress_security_group_ids = optional(list(string), [])
+    admin_ingress_cidrs        = optional(list(string), [])
     target_group_arn           = optional(string)
     task_role_policy_arns      = optional(map(string), {})
   }))

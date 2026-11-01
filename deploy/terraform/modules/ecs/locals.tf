@@ -67,4 +67,14 @@ locals {
       },
     ) if s.port.main != null
   }
+
+  # The admin port (/readyz, /metrics) has no authentication: only the sources
+  # named here reach it, typically the load balancer's health checks.
+  admin_ingress_rules = {
+    for key, s in local.services : key => {
+      for i, cidr in s.admin_ingress_cidrs : "admin-cidr-${i}" => {
+        cidr_ipv4 = cidr
+      }
+    }
+  }
 }
