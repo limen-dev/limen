@@ -21,12 +21,27 @@ imagePullSecrets: {{ toYaml . | nindent 2 }}
 {{- end }}
 {{- end -}}
 
-{{/* limen.merged: dict "defaults" map "over" map; returns YAML of defaults overridden by over. */}}
+{{/* limen.merged: dict "defaults" map "over" map; returns YAML of defaults overridden by over, key by key
+     and down through nested maps. A zero value in "over" (false, 0, "") wins, which Sprig's merge functions skip. */}}
 {{- define "limen.merged" -}}
-{{- toYaml (mustMergeOverwrite (deepCopy .defaults) (deepCopy (.over | default dict))) -}}
+{{- $out := deepCopy .defaults -}}
+{{- range $k, $v := (.over | default dict) -}}
+{{- if and (kindIs "map" $v) (kindIs "map" (get $out $k)) -}}
+{{- $_ := set $out $k (include "limen.merged" (dict "defaults" (get $out $k) "over" $v) | fromYaml) -}}
+{{- else -}}
+{{- $_ := set $out $k (deepCopy $v) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
 {{- end -}}
 
 {{/* limen.firstKey: the alphabetically first key of a map. */}}
 {{- define "limen.firstKey" -}}
 {{- required "define at least one group of the component this one dials" (keys . | sortAlpha | first) -}}
+{{- end -}}
+
+{{/* limen.minAvailable: the group's PodDisruptionBudget, never so high that a node cannot be drained.
+     With n replicas at most n-1 can be required; one replica has no budget to give. */}}
+{{- define "limen.minAvailable" -}}
+{{- max 0 (min (int .pdb.minAvailable) (sub (int .replicas) 1)) -}}
 {{- end -}}

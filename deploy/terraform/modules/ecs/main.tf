@@ -98,7 +98,11 @@ module "service" {
 
   # The task execution role reads the secrets; values never enter the task
   # definition or the state.
-  task_exec_secret_arns   = values(each.value.secrets)
+  # The CA secret is read by the ca-writer sidecar at task start, so the execution role needs it too.
+  task_exec_secret_arns = concat(
+    values(each.value.secrets),
+    each.value.consumes ? [var.internal_ca.secret_arn] : [],
+  )
   tasks_iam_role_policies = each.value.task_role_policy_arns
   tasks_iam_role_statements = each.value.publishes ? [{
     actions   = ["secretsmanager:PutSecretValue"]
@@ -107,13 +111,22 @@ module "service" {
 
   # Every component dials out (control plane to its database and KMS, proxy to
   # the control plane, worker to the proxy); inbound is only the service port.
-  security_group_ingress_rules = {
-    for k, rule in local.ingress_rules[each.key] : k => merge(rule, {
-      from_port   = each.value.port.main
-      to_port     = each.value.port.main
-      ip_protocol = "tcp"
-    })
-  }
+  security_group_ingress_rules = merge(
+    {
+      for k, rule in lookup(local.ingress_rules, each.key, {}) : k => merge(rule, {
+        from_port   = each.value.port.main
+        to_port     = each.value.port.main
+        ip_protocol = "tcp"
+      })
+    },
+    {
+      for k, rule in local.admin_ingress_rules[each.key] : k => merge(rule, {
+        from_port   = each.value.port.admin
+        to_port     = each.value.port.admin
+        ip_protocol = "tcp"
+      })
+    },
+  )
   security_group_egress_rules = {
     all = { ip_protocol = "-1", cidr_ipv4 = "0.0.0.0/0" }
   }

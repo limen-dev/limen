@@ -10,7 +10,7 @@ module "security_group" {
   use_name_prefix = true
 
   ingress_rules = {
-    for k, rule in local.ingress_rules[each.key] : k => merge(rule, {
+    for k, rule in lookup(local.ingress_rules, each.key, {}) : k => merge(rule, {
       from_port   = each.value.port.main
       to_port     = each.value.port.main
       ip_protocol = "tcp"
@@ -132,6 +132,24 @@ resource "aws_iam_role_policy" "read_secrets" {
   for_each = data.aws_iam_policy_document.read_secrets
 
   name   = "read-secrets"
+  role   = module.asg[each.key].iam_role_name
+  policy = each.value.json
+}
+
+# The Docker daemon writes the container's logs with the instance role.
+data "aws_iam_policy_document" "write_logs" {
+  for_each = local.groups
+
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.this[each.key].arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "write_logs" {
+  for_each = data.aws_iam_policy_document.write_logs
+
+  name   = "write-logs"
   role   = module.asg[each.key].iam_role_name
   policy = each.value.json
 }
