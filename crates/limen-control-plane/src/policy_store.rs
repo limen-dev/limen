@@ -412,7 +412,11 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         // version applied without them): no new policy version.
         current.version
     } else {
-        let documents = serde_json::to_value(next.documents())
+        let documents: Vec<serde_json::Value> = next
+            .documents()
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
             .map_err(|e| StoreError::Internal(e.to_string()))?;
         db::insert_policy(
             &mut tx,
@@ -467,6 +471,7 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
     if version != current.version {
         state.policy.set(LoadedPolicy {
             version,
+            digest: outcome.digest.clone(),
             policy: Arc::new(next),
             author: request.actor.clone(),
             created_at: Some(now),
