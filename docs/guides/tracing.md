@@ -1,6 +1,6 @@
 # Tracing
 
-Limen can export traces over OpenTelemetry (OTLP). One session is one trace: the proxy's `session` span, the worker's `session` span and the control plane's `api.request` span for the session's certificate call sit under the same trace id. A slow `limen ssh` can then be traced to the step that took the time. Decisions and limits: [ADR-0040](../adr/0040-trace-export.md). Metrics and alerts are in the [metrics guide](metrics.md).
+Limen can export traces over OpenTelemetry (OTLP). One session is one trace: the proxy's `session` span, the worker's `session` span and the control plane's `api.request` span for the session's certificate call sit under the same trace id. A slow `limen ssh` can then be traced to the step that took the time. Decisions and limits: [ADR-0040](../adr/0040-trace-export.md). Metrics and alerts are in the [metrics guide](metrics.md); setup for Jaeger, Tempo, Datadog and a collector is in the [observability recipes](observability.md).
 
 Tracing is **off by default**. Nothing is exported until a component is given a collector.
 

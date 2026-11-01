@@ -96,6 +96,7 @@ export default defineConfig({
             { slug: 'docs/guides/watching-sessions' },
             { slug: 'docs/guides/metrics' },
             { slug: 'docs/guides/tracing' },
+            { slug: 'docs/guides/observability' },
             { slug: 'docs/runbooks/audit-verify' },
           ],
         },
