@@ -128,6 +128,13 @@ header.header {
 .sl-markdown-content a:has(> img[src$='.svg']):hover::after, .sl-markdown-content a:has(> img[src$='.svg']):focus-visible::after { opacity: 1; }
 .sl-markdown-content a > img[src$='.svg'] { display: block; width: 100%; height: auto; margin: 0; }
 
+/* Mermaid diagrams are drawn in both themes ahead of time, each linked to its full-size copy; show the
+   pair that matches the theme (#139). Astro adds a hash after the theme in the file name, so match on the parts.
+   The picture is transparent, so it sits on the page, not on the white sheet the other diagrams use. */
+.sl-markdown-content a:has(> img[src*='mermaid-']) { background: transparent; border-color: transparent; box-shadow: none; padding: 0; margin-block: 1rem; }
+:root[data-theme='dark'] .sl-markdown-content a:has(> img[src*='mermaid-'][src*='.light.']),
+:root:not([data-theme='dark']) .sl-markdown-content a:has(> img[src*='mermaid-'][src*='.dark.']) { display: none; }
+
 /* Diagram frames */
 .diagram { background: #fff; border: 1px solid var(--lm-line); border-radius: 14px; padding: 1rem; box-shadow: var(--lm-shadow); }
 .diagram img { width: 100%; height: auto; display: block; }
