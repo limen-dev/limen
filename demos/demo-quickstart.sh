@@ -90,12 +90,15 @@ grep -q "$ADMIN" <<<"$status" || fail "limen status does not show $ADMIN"
 pass "signed in as $ADMIN"
 
 step "limen ls matches the page"
-# The page shows what an admin sees with the ssh and db stacks; compare name and kind of each row.
-want="$(awk '/^```text$/{on=1; next} /^```$/{on=0} on' "$page" | awk 'NR>1 && $3 ~ /^(ssh|postgres|mysql|redshift)$/ {print $1, $3}' | sort)"
+# The page's first text block is the sample output of `limen ls`: every resource it shows (name and
+# kind) must be in the real output. Extra real rows are fine, so adding a resource to a stack does
+# not break the page.
+want="$(awk '/^```text$/{on=1; next} /^```$/{if (on) exit} on' "$page" | awk 'NR>1 && $3 ~ /^(ssh|postgres|mysql|redshift)$/ {print $1, $3}' | sort)"
 got="$(limen ls | awk 'NR>1 && $3 ~ /^(ssh|postgres|mysql|redshift)$/ {print $1, $3}' | sort)"
 [ -n "$want" ] || fail "no sample rows found on the page"
-[ "$want" = "$got" ] || { printf 'page:\n%s\nactual:\n%s\n' "$want" "$got"; fail "limen ls differs from the page's sample"; }
-pass "limen ls lists what the page says it does"
+missing="$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$got"))"
+[ -z "$missing" ] || { printf 'the page shows, limen ls does not:\n%s\nactual:\n%s\n' "$missing" "$got"; fail "limen ls differs from the page's sample"; }
+pass "limen ls lists every resource the page shows"
 
 step "3. Use it"
 # shellcheck disable=SC2016 # the command is for the remote shell
@@ -103,7 +106,8 @@ out="$(limen ssh ubuntu@web-staging-1 -- 'echo ok-from-$(hostname)')"
 grep -q '^ok-from-' <<<"$out" || fail "limen ssh: $out"
 pass "limen ssh ran a command on web-staging-1"
 
-limen db connect orders-staging --db-role limen_read >"$state/db-connect.log" 2>&1 &
+# The binary itself, so the PID is the listener's and kill stops it.
+LIMEN_HOME="$state/home" "$LIMEN_BIN" db connect orders-staging --db-role limen_read >"$state/db-connect.log" 2>&1 &
 db_pid=$!
 wait_for "limen db connect to print its address" grep -Eq 'host=127\.0\.0\.1 port=[0-9]+ user=limen_read' "$state/db-connect.log"
 kill "$db_pid" 2>/dev/null || true
@@ -118,9 +122,10 @@ step "4. The other users"
 for u in "$DEVELOPER" "$AUDITOR"; do
   LIMEN_HOME="$state/home-$u" LIMEN_DEV_CA="$state/internal-ca.pem" "$here/scripts/dev-login.sh" "$u" >/dev/null || fail "$u could not sign in"
 done
-if LIMEN_HOME="$state/home-guest" LIMEN_DEV_CA="$state/internal-ca.pem" "$here/scripts/dev-login.sh" "$GUEST" >/dev/null 2>&1; then
+if out="$(LIMEN_HOME="$state/home-guest" LIMEN_DEV_CA="$state/internal-ca.pem" "$here/scripts/dev-login.sh" "$GUEST" 2>&1)"; then
   fail "$GUEST must be denied, as the page says"
 fi
+grep -q "no roles are mapped" <<<"$out" || fail "the guest was refused for another reason: $out"
 pass "developer and auditor sign in, guest is denied"
 
 if ! $keep; then

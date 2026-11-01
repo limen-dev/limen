@@ -5,19 +5,32 @@ name: ci-quickstart
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
+  # On main, any change to what the stack builds; on a pull request, what the page itself depends on
+  # (a full stack build is long, and the Rust CI covers the rest of the code).
   push:
     branches: [main]
-    paths: &paths
+    paths:
+      - "website/src/content/docs/docs/quickstart.md"
+      - "demos/demo-quickstart.sh"
+      - "deploy/compose/**"
+      - "deploy/docker/**"
+      - "scripts/install-cli.sh"
+      - "crates/**"
+      - "proto/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "mise.toml"
+      - ".github/workflows/ci-quickstart.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
       - "website/src/content/docs/docs/quickstart.md"
       - "demos/demo-quickstart.sh"
       - "deploy/compose/**"
       - "scripts/install-cli.sh"
       - "crates/limen-cli/**"
       - ".github/workflows/ci-quickstart.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -56,7 +69,15 @@ jobs:
       - name: Run the quickstart
         run: demos/demo-quickstart.sh
 
-      # What the stack logged, when a step failed.
-      - name: Stack logs
+      # What the stack and the script logged, when a step failed.
+      - name: Logs
         if: failure()
-        run: docker compose -p limen-quickstart logs --no-color --tail 200 || true
+        run: |
+          for f in setup.log install.log db-connect.log; do
+            echo "::group::$f"
+            tail -n 120 "deploy/compose/.state/limen-quickstart/$f" 2>/dev/null || echo "(none)"
+            echo "::endgroup::"
+          done
+          echo "::group::compose logs"
+          docker compose -p limen-quickstart logs --no-color --tail 200 2>&1 || true
+          echo "::endgroup::"

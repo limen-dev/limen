@@ -61,6 +61,8 @@ limen db connect orders-staging --db-role limen_read   # a local address for psq
 limen explain orders-prod           # why you can or can't reach something
 ```
 
+`ubuntu` is the login and `limen_read` the database role: the **ACCESS AS** column of `limen ls` lists the ones you may use, and Limen asks you to pick when there is more than one.
+
 Then open the console at `https://localhost:3443/console/`, sign in as the same user, find the session, and replay its recording.
 
 :::note
