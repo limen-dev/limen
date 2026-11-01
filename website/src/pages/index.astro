@@ -12,21 +12,63 @@ const steps = [
   { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Anyone who can read the bucket can check it.', c: 'limen-audit-verify --bucket …' },
 ];
 
-type Proto = { g: string; name: string; sub: string; warn?: string; href: string };
-const protos: Proto[] = [
-  { g: 'SSH', name: 'SSH', sub: 'Per-session certificates, recorded and replayable', href: 'guides/cli/' },
-  { g: 'PG', name: 'PostgreSQL', sub: 'RDS, Aurora, Redshift. Every statement audited', warn: 'IAM and Redshift on AWS', href: 'guides/databases/' },
-  { g: 'My', name: 'MySQL', sub: 'RDS and Aurora. Every statement audited', warn: 'IAM on AWS', href: 'guides/databases/' },
-  { g: 'Rd', name: 'Redis and Valkey', sub: 'Values redacted in audit', warn: 'ElastiCache IAM', href: 'guides/redis/' },
-  { g: 'K8', name: 'Kubernetes', sub: 'Impersonation, recorded exec', warn: 'EKS. Works on kind', href: 'guides/kubernetes/' },
-  { g: 'Mg', name: 'MongoDB', sub: 'Any server, Atlas, DocumentDB', warn: 'Atlas and DocumentDB', href: 'guides/mongodb/' },
-  { g: 'Os', name: 'OpenSearch and Elasticsearch', sub: 'Policy by index pattern', warn: 'Amazon OpenSearch and Elastic Cloud', href: 'guides/search/' },
-  { g: 'Rb', name: 'RabbitMQ', sub: 'No message bodies in audit', warn: 'Amazon MQ', href: 'guides/messaging/' },
-  { g: 'Kf', name: 'Kafka', sub: 'Record values never audited', warn: 'MSK and IAM', href: 'guides/messaging/' },
-  { g: 'Wb', name: 'Internal web apps', sub: 'SSO in front of any web UI, every request audited', href: 'guides/web-apps/' },
-  { g: 'Tc', name: 'Raw TCP', sub: 'Anything else, through a local port', href: 'guides/tcp/' },
-  { g: 'Bt', name: 'CI bots', sub: 'GitHub Actions, GitLab CI, any OIDC. No long-lived secrets', warn: 'Real CI tokens. Tested with a stand-in', href: 'guides/bots/' },
+import postgresql from '../assets/logos/postgresql.svg?raw';
+import mysql from '../assets/logos/mysql.svg?raw';
+import redis from '../assets/logos/redis.svg?raw';
+import kubernetes from '../assets/logos/kubernetes.svg?raw';
+import mongodb from '../assets/logos/mongodb.svg?raw';
+import opensearch from '../assets/logos/opensearch.svg?raw';
+import elasticsearch from '../assets/logos/elasticsearch.svg?raw';
+import rabbitmq from '../assets/logos/rabbitmq.svg?raw';
+import kafka from '../assets/logos/apachekafka.svg?raw';
+import githubactions from '../assets/logos/githubactions.svg?raw';
+import gitlab from '../assets/logos/gitlab.svg?raw';
+
+// Brand logos are Simple Icons (CC0). The icons without a brand are drawn as strokes.
+type Logo = { svg: string; color: string; label: string };
+const brand = (svg: string, color: string, label: string): Logo => ({ svg: svg.replace(/<title>.*?<\/title>/, ''), color, label });
+const line = (d: string, label: string): Logo => ({ svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`, color: 'var(--lm-accent-strong)', label });
+const terminal = line('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/>', 'Terminal');
+const globe = line('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>', 'Web');
+const plug = line('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4"/>', 'TCP');
+
+type Proto = { logos: Logo[]; name: string; sub: string; warn?: string; href: string };
+type Group = { id: string; title: string; blurb: string; items: Proto[] };
+const groups: Group[] = [
+  {
+    id: 'servers', title: 'Servers and clusters', blurb: 'Log in to machines and run commands.',
+    items: [
+      { logos: [terminal], name: 'SSH', sub: 'Per-session certificates, recorded and replayable', href: 'guides/cli/' },
+      { logos: [brand(kubernetes, '#326CE5', 'Kubernetes')], name: 'Kubernetes', sub: 'Impersonation, recorded exec', warn: 'EKS. Works on kind', href: 'guides/kubernetes/' },
+    ],
+  },
+  {
+    id: 'databases', title: 'Databases', blurb: 'Every statement is audited.',
+    items: [
+      { logos: [brand(postgresql, '#4169E1', 'PostgreSQL')], name: 'PostgreSQL', sub: 'RDS, Aurora, Redshift. Every statement audited', warn: 'IAM and Redshift on AWS', href: 'guides/databases/' },
+      { logos: [brand(mysql, '#4479A1', 'MySQL')], name: 'MySQL', sub: 'RDS and Aurora. Every statement audited', warn: 'IAM on AWS', href: 'guides/databases/' },
+      { logos: [brand(mongodb, '#47A248', 'MongoDB')], name: 'MongoDB', sub: 'Any server, Atlas, DocumentDB', warn: 'Atlas and DocumentDB', href: 'guides/mongodb/' },
+      { logos: [brand(redis, '#FF4438', 'Redis')], name: 'Redis and Valkey', sub: 'Values redacted in audit', warn: 'ElastiCache IAM', href: 'guides/redis/' },
+      { logos: [brand(opensearch, '#005EB8', 'OpenSearch'), brand(elasticsearch, '#005571', 'Elasticsearch')], name: 'OpenSearch and Elasticsearch', sub: 'Policy by index pattern', warn: 'Amazon OpenSearch and Elastic Cloud', href: 'guides/search/' },
+    ],
+  },
+  {
+    id: 'messaging', title: 'Message brokers', blurb: 'Message bodies never reach the audit log.',
+    items: [
+      { logos: [brand(kafka, '#231F20', 'Kafka')], name: 'Kafka', sub: 'Record values never audited', warn: 'MSK and IAM', href: 'guides/messaging/' },
+      { logos: [brand(rabbitmq, '#FF6600', 'RabbitMQ')], name: 'RabbitMQ', sub: 'No message bodies in audit', warn: 'Amazon MQ', href: 'guides/messaging/' },
+    ],
+  },
+  {
+    id: 'apps', title: 'Apps, networks and automation', blurb: 'Everything else, and your pipelines.',
+    items: [
+      { logos: [globe], name: 'Internal web apps', sub: 'SSO in front of any web UI, every request audited', href: 'guides/web-apps/' },
+      { logos: [plug], name: 'Raw TCP', sub: 'Anything else, through a local port', href: 'guides/tcp/' },
+      { logos: [brand(githubactions, '#2088FF', 'GitHub Actions'), brand(gitlab, '#FC6D26', 'GitLab')], name: 'CI bots', sub: 'GitHub Actions, GitLab CI, any OIDC. No long-lived secrets', warn: 'Real CI tokens. Tested with a stand-in', href: 'guides/bots/' },
+    ],
+  },
 ];
+const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos)).filter((l) => l.color.startsWith('#'));
 
 // The ⌘K palette. Plain data, no third-party search.
 ---
@@ -52,6 +94,10 @@ const protos: Proto[] = [
               <a class="btn primary" href={docs('quickstart/')}>Try it on your laptop
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
               <a class="btn" href={docs('')}>Read the docs</a>
+            </div>
+            <div class="strip" aria-label="Works with">
+              <span>Works with</span>
+              {logoStrip.map((l) => <span class="logo sm" style={`--brand:${l.color}`} role="img" aria-label={l.label} title={l.label} set:html={l.svg} />)}
             </div>
             <ul class="facts">
               <li><b>1 hour</b> certificates, no static keys</li>
@@ -241,19 +287,26 @@ const protos: Proto[] = [
           <div class="eyebrow">What it connects to</div>
           <h2>One policy and one audit trail for all of it.</h2>
           <p class="sub">Each tile says where it stands. <span class="chip ok">built</span> means it works and is tested against a local copy of the software. <span class="chip warn">unverified</span> marks a cloud-specific path that is written but has not yet run against the real service.</p>
-          <div class="protos">
-            {protos.map((p) => (
-              <a class="proto reveal" href={docs(p.href)}>
-                <span class="proto-top">
-                  <span class="glyph" aria-hidden="true">{p.g}</span>
-                  <span class="chip ok">built</span>
-                </span>
-                <span class="pname">{p.name}</span>
-                <span class="psub">{p.sub}</span>
-                {p.warn && <span class="pwarn"><i aria-hidden="true"></i><span><b>Unverified:</b> {p.warn}</span></span>}
-              </a>
-            ))}
-          </div>
+          {groups.map((g) => (
+            <div class="pgroup">
+              <div class="pgroup-head"><h3>{g.title}</h3><p>{g.blurb}</p></div>
+              <div class="protos">
+                {g.items.map((p) => (
+                  <a class="proto reveal" href={docs(p.href)}>
+                    <span class="proto-top">
+                      <span class="logos">
+                        {p.logos.map((l) => <span class="logo" style={`--brand:${l.color}`} role="img" aria-label={l.label} set:html={l.svg} />)}
+                      </span>
+                      <span class="chip ok">built</span>
+                    </span>
+                    <span class="pname">{p.name}</span>
+                    <span class="psub">{p.sub}</span>
+                    {p.warn && <span class="pwarn"><i aria-hidden="true"></i><span><b>Unverified:</b> {p.warn}</span></span>}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
