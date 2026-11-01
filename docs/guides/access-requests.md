@@ -51,6 +51,8 @@ limen request web-prod --break-glass --for 20m --reason "prod is down"
 limen explain orders-prod                  # why you can't reach it, and what to do
 ```
 
+You rarely need to run `limen explain` yourself: when a connection is refused, `limen` (and plain `ssh` through `limen config ssh --install`) prints the same answer under the error, with who approves the role and the command to ask, and `limen doctor <resource>` does too. When a grant ends, `explain` names it for a day, so you know to ask again.
+
 In the console, **Access** has the same: *Ask for access*, *My requests*, *Waiting for me* (the approvals queue), and for admins and auditors *Active grants* and *Everyone's requests*. Resources you can ask for have a **Request access** button on their page. An approver sees the reason, the duration, and **what the requester did on that resource in the past 30 days**.
 
 The grant starts within about 20 seconds of approval: proxies and workers refresh their signed policy snapshot every 10 seconds each.

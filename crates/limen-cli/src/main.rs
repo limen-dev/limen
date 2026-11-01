@@ -129,6 +129,14 @@ enum Command {
     },
     /// Delete local credentials.
     Logout,
+    /// Find out why access doesn't work: proxy, CA, network, clock, login, and (with a name) one resource.
+    Doctor {
+        /// Also check access to this resource.
+        resource: Option<String>,
+        /// Output JSON, for a support ticket. It holds no secrets.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the current identity, roles, and when the credentials expire.
     Status {
         /// Output JSON instead of text.
@@ -372,8 +380,19 @@ enum ConnsCommand {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
-    /// An ~/.ssh/config block so `ssh <login>@<resource>.limen` works directly.
-    Ssh,
+    /// Print an ~/.ssh/config block for `ssh <login>@<resource>.limen`, or
+    /// `--install` one that makes plain `ssh <resource>`, scp, rsync and git work.
+    Ssh {
+        /// Include Limen's generated ssh_config from ~/.ssh/config, kept up to date on every login.
+        #[arg(long, conflicts_with = "uninstall")]
+        install: bool,
+        /// Remove the Include from ~/.ssh/config and delete the generated ssh_config.
+        #[arg(long)]
+        uninstall: bool,
+        /// The OpenSSH config to change, instead of ~/.ssh/config.
+        #[arg(long, value_name = "FILE")]
+        file: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -431,6 +450,15 @@ enum KubeCommand {
         /// Print the kubeconfig instead of writing it.
         #[arg(long, conflicts_with = "kubeconfig")]
         print: bool,
+    },
+    /// Write one kubeconfig with a context for every cluster you can reach, refreshed on every login.
+    Config {
+        /// Print it instead of writing it.
+        #[arg(long, conflicts_with = "uninstall")]
+        print: bool,
+        /// Delete the generated kubeconfig.
+        #[arg(long)]
+        uninstall: bool,
     },
     /// The kubectl exec credential plugin: prints your short-lived certificate.
     Credentials,
@@ -666,6 +694,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await
         }
         Command::Logout => commands::logout(proxy).await,
+        Command::Doctor { resource, json } => {
+            commands::doctor::run(proxy, resource.as_deref(), json).await
+        }
         Command::Status { json } => commands::status(proxy, json),
         Command::Ls { args, kind } => {
             commands::ls(proxy, &args.into(), kind.as_deref().as_slice()).await
@@ -787,8 +818,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
-            command: ConfigCommand::Ssh,
-        } => commands::ssh::config(proxy),
+            command:
+                ConfigCommand::Ssh {
+                    install,
+                    uninstall,
+                    file,
+                },
+        } => {
+            if install {
+                commands::tools::install_ssh(proxy, file.as_deref()).await
+            } else if uninstall {
+                commands::tools::uninstall_ssh(file.as_deref())
+            } else {
+                anyhow::ensure!(file.is_none(), "--file goes with --install or --uninstall");
+                commands::ssh::config(proxy)
+            }
+        }
         Command::Db {
             command:
                 DbCommand::Connect {
@@ -835,6 +880,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 kubeconfig,
                 print,
             } => commands::kube::login(proxy, &cluster, kubeconfig.as_deref(), print).await,
+            KubeCommand::Config { print, uninstall } => {
+                if uninstall {
+                    commands::tools::uninstall_kube()
+                } else {
+                    commands::tools::install_kube(proxy, print).await
+                }
+            }
             KubeCommand::Credentials => commands::kube::credentials(proxy),
             KubeCommand::Ls(args) => commands::ls(proxy, &args.into(), &["kubernetes"]).await,
         },
@@ -981,6 +1033,9 @@ mod tests {
             &["kube", "login", "c", "--kubeconfig", "/tmp/k"],
             &["kube", "login", "c", "--print"],
             &["--proxy", "p:1", "kube", "credentials"],
+            &["kube", "config"],
+            &["kube", "config", "--print"],
+            &["kube", "config", "--uninstall"],
         ] {
             let mut full = vec!["limen"];
             full.extend_from_slice(args);
@@ -998,6 +1053,23 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn doctor_and_tool_config_parse() {
+        let ok = |args: &[&str]| {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        assert!(ok(&["doctor"]).is_ok());
+        assert!(ok(&["doctor", "web-1", "--json"]).is_ok());
+        assert!(ok(&["config", "ssh"]).is_ok());
+        assert!(ok(&["config", "ssh", "--install"]).is_ok());
+        assert!(ok(&["config", "ssh", "--install", "--file", "/tmp/c"]).is_ok());
+        assert!(ok(&["config", "ssh", "--uninstall"]).is_ok());
+        assert!(ok(&["config", "ssh", "--install", "--uninstall"]).is_err());
+        assert!(ok(&["kube", "config", "--print", "--uninstall"]).is_err());
     }
 
     #[test]

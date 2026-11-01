@@ -6,6 +6,7 @@ pub mod audit;
 pub mod bot;
 pub mod conns;
 pub mod db;
+pub mod doctor;
 pub mod kafka;
 pub mod kube;
 pub mod login;
@@ -18,6 +19,7 @@ pub mod review;
 pub mod search;
 pub mod ssh;
 pub mod tcp;
+pub mod tools;
 pub mod web;
 
 use limen_proto::v1::resources_client::ResourcesClient;
@@ -25,7 +27,6 @@ use limen_proto::v1::{ListResourcesRequest, Resource};
 
 use crate::profile::Profile;
 use crate::{api, ui};
-use anyhow::Context as _;
 
 /// End the login at the proxy, then delete the local credentials. The proxy
 /// and workers refuse the certificate from then on, wherever a copy of it is.
@@ -44,6 +45,7 @@ pub async fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
         end_login(&proxy, &profile).await
     };
     Profile::delete(&proxy)?;
+    tools::forget_profile(&proxy);
     let stopped = conns::stop_all(&proxy);
     if stopped > 0 {
         ui::info(&format!("Closed {stopped} detached connection(s)."));
@@ -189,19 +191,24 @@ fn connect_command(kind: &str, name: &str) -> String {
 
 /// The type of a resource the caller can access.
 pub async fn kind_of(proxy: Option<&str>, name: &str) -> anyhow::Result<String> {
-    fetch_resources(proxy)
+    if let Some(r) = fetch_resources(proxy)
         .await?
         .into_iter()
         .find(|r| r.name == name)
-        .map(|r| r.kind)
-        .with_context(|| format!("no resource named `{name}` is available to you; see `limen ls`"))
+    {
+        return Ok(r.kind);
+    }
+    let hint = access::denial_hint(proxy, name, "").await;
+    anyhow::bail!("no resource named `{name}` is available to you; see `limen ls`{hint}")
 }
 
-async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
+pub(crate) async fn fetch_resources(proxy: Option<&str>) -> anyhow::Result<Vec<Resource>> {
     Ok(fetch_all(proxy).await?.resources)
 }
 
-async fn fetch_all(proxy: Option<&str>) -> anyhow::Result<limen_proto::v1::ListResourcesResponse> {
+pub(crate) async fn fetch_all(
+    proxy: Option<&str>,
+) -> anyhow::Result<limen_proto::v1::ListResourcesResponse> {
     let (_, channel) = api::authenticated(proxy)?;
     Ok(ResourcesClient::new(channel)
         .list_resources(ListResourcesRequest {})

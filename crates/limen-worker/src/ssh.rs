@@ -213,7 +213,7 @@ impl russh::server::Handler for UserSide {
         &mut self,
         channel: Channel<Msg>,
         reply: ChannelOpenHandle,
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         let target = match self.target().await {
             Ok(t) => t,
@@ -235,6 +235,7 @@ impl russh::server::Handler for UserSide {
         tokio::spawn(bridge(
             channel,
             target_channel,
+            session.handle(),
             self.config.clone(),
             self.audit.clone(),
             Arc::clone(&self.recorder),
@@ -243,7 +244,8 @@ impl russh::server::Handler for UserSide {
     }
 
     // Requests are acknowledged here and forwarded by the bridge, which sees
-    // the same messages on the channel.
+    // the same messages on the channel. A subsystem is the exception: the
+    // bridge relays the target's answer (see `bridge`).
     async fn pty_request(
         &mut self,
         channel: ChannelId,
@@ -280,11 +282,10 @@ impl russh::server::Handler for UserSide {
 
     async fn subsystem_request(
         &mut self,
-        channel: ChannelId,
+        _channel: ChannelId,
         _name: &str,
-        session: &mut Session,
+        _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        session.channel_success(channel)?;
         Ok(())
     }
 
@@ -349,6 +350,8 @@ impl client::Handler for TargetSide {
 async fn bridge(
     mut user: Channel<Msg>,
     mut target: Channel<client::Msg>,
+    // Answers the user's requests that wait on the target's answer.
+    replies: russh::server::Handle,
     config: SshSessionConfig,
     audit: Emitter,
     recorder: SharedRecorder,
@@ -420,7 +423,9 @@ async fn bridge(
                             let _ = user.close().await;
                             break;
                         }
-                        target.request_subsystem(false, name).await
+                        // With the target's answer relayed, a missing subsystem
+                        // (no sftp-server: scp) fails at once instead of hanging.
+                        target.request_subsystem(true, name).await
                     }
                     Some(ChannelMsg::WindowChange { col_width, row_height, pix_width, pix_height }) => {
                         record(&mut |r| r.resize(col_width, row_height));
@@ -462,6 +467,15 @@ async fn bridge(
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         record(&mut |r| r.exit(exit_status));
                         user.exit_status(exit_status).await
+                    }
+                    // Only a subsystem request asks for an answer.
+                    Some(ChannelMsg::Success) => {
+                        let _ = replies.channel_success(user.id()).await;
+                        Ok(())
+                    }
+                    Some(ChannelMsg::Failure) => {
+                        let _ = replies.channel_failure(user.id()).await;
+                        Ok(())
                     }
                     Some(ChannelMsg::Close) | None => {
                         let _ = user.close().await;

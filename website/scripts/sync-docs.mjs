@@ -7,6 +7,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mermaidFiles } from './mermaid.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const out = resolve(root, 'website', 'src', 'content', 'docs', 'docs');
@@ -74,6 +75,33 @@ function rewriteTarget(target, srcPath, fromRoute) {
   return `${GITHUB}/${isDir ? 'tree' : 'blob'}/main/${abs.replace(/\/$/, '')}${hash}`;
 }
 
+// Mermaid diagrams are drawn ahead of time (website/scripts/render-mermaid.mjs) into docs/diagrams/mermaid/,
+// one light and one dark SVG per diagram, named by a hash of its source. GitHub still renders the source in
+// the repository; the site shows the pictures, so no script runs in the reader's browser. A diagram whose
+// pictures are missing or stale fails the build.
+const mermaidDir = join(root, 'docs', 'diagrams', 'mermaid');
+const mermaidUsed = new Set();
+let pagePictures = []; // the pictures of the page being written
+
+/** The two pictures of a block as images (each linked to its full-size copy; the first carries the alt text). */
+function mermaidImages(source, srcPath) {
+  const files = mermaidFiles(source);
+  for (const f of files) {
+    if (!existsSync(join(mermaidDir, f))) {
+      console.error(`${srcPath}: a mermaid diagram has no rendered picture (${f}). Run: node website/scripts/render-mermaid.mjs`);
+      process.exit(1);
+    }
+    mermaidUsed.add(f);
+    pagePictures.push(f);
+  }
+  const first = (source.split('\n').find((l) => l.trim()) ?? 'diagram').trim().replace(/[^\w .,:-]/g, '');
+  const alt = `Diagram (${first}); the source is in the repository`;
+  // The dark copy is the same picture: an empty alt keeps a screen reader from reading it twice.
+  // Paths as they are written from the document's own folder, like any other link to docs/diagrams.
+  const from = (f) => posix.relative(posix.dirname(srcPath), `docs/diagrams/mermaid/${f}`);
+  return files.map((f, i) => `[![${i === 0 ? alt : ''}](${from(f)})](${from(f)})`);
+}
+
 function describe(body) {
   const para = body
     .split(/\n\s*\n/)
@@ -89,13 +117,37 @@ function describe(body) {
 }
 
 function transform(srcPath, page) {
+  pagePictures = [];
   const raw = readFileSync(join(root, srcPath), 'utf8');
   const fromRoute = routeOf(page.slug);
   const lines = raw.split('\n');
   let title = '';
   let fence = false;
+  let mermaid = null;
   const kept = [];
+  const rewrite = (line) =>
+    line
+      // A diagram wrapped in a link to itself: the image is bundled beside the page, the
+      // link opens the full-size copy in public/diagrams (it is unreadable at column width).
+      .replace(/\[(!\[[^\]]*\]\([^)]*\.svg\))\]\(([^)]*\.svg)\)/g, (_, img, t) => `[${img}](${'../'.repeat(fromRoute.split('/').length)}diagrams/${posix.basename(t)})`)
+      .replace(/(\]\()([^)\s]+)(\s+"[^"]*")?(\))/g, (_, a, t, ttl = '', z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${ttl}${z}`)
+      .replace(/(href=")([^"]+)(")/g, (_, a, t, z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${z}`);
   for (const line of lines) {
+    if (!fence && /^```mermaid\s*$/.test(line)) {
+      mermaid = [];
+      fence = true;
+      continue;
+    }
+    if (mermaid && /^```\s*$/.test(line)) {
+      kept.push(...mermaidImages(mermaid.join('\n') + '\n', srcPath).map(rewrite));
+      mermaid = null;
+      fence = false;
+      continue;
+    }
+    if (mermaid) {
+      mermaid.push(line.replace(/\r$/, ''));
+      continue;
+    }
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
     if (!fence && !title && /^# /.test(line)) {
       title = line.slice(2).trim();
@@ -107,14 +159,7 @@ function transform(srcPath, page) {
       kept.push(line);
       continue;
     }
-    kept.push(
-      line
-        // A diagram wrapped in a link to itself: the image is bundled beside the page, the
-        // link opens the full-size copy in public/diagrams (it is unreadable at column width).
-        .replace(/\[(!\[[^\]]*\]\([^)]*\.svg\))\]\(([^)]*\.svg)\)/g, (_, img, t) => `[${img}](${'../'.repeat(fromRoute.split('/').length)}diagrams/${posix.basename(t)})`)
-        .replace(/(\]\()([^)\s]+)(\s+"[^"]*")?(\))/g, (_, a, t, ttl = '', z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${ttl}${z}`)
-        .replace(/(href=")([^"]+)(")/g, (_, a, t, z) => `${a}${rewriteTarget(t, srcPath, fromRoute)}${z}`),
-    );
+    kept.push(rewrite(line));
   }
   const body = kept.join('\n').replace(/^\s+/, '');
   const adr = /^ADR-(\d+): (.*)$/.exec(title);
@@ -132,6 +177,8 @@ function transform(srcPath, page) {
   const dest = join(out, `${page.slug}.md`);
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, `${fm}${body}\n`);
+  // The pictures sit beside the page that shows them, so the relative links resolve whichever section it is in.
+  for (const f of pagePictures) cpSync(join(mermaidDir, f), join(dirname(dest), f));
 }
 
 for (const dir of generated) rmSync(join(out, dir), { recursive: true, force: true });
@@ -146,6 +193,9 @@ for (const f of readdirSync(join(root, 'docs/diagrams')).filter((f) => f.endsWit
   cpSync(join(root, 'docs/diagrams', f), join(out, 'architecture', f));
   cpSync(join(root, 'docs/diagrams', f), join(full, f));
 }
+// The full-size copies the mermaid pictures link to.
+for (const f of mermaidUsed) cpSync(join(mermaidDir, f), join(full, f));
+
 
 console.log(`synced ${pages.size} documents into ${relative(root, out)}`);
 if (!existsSync(join(out, 'index.mdx'))) console.warn('warning: website/src/content/docs/docs/index.mdx is missing');

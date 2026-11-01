@@ -234,6 +234,7 @@ fn a_writer_resource_is_built_from_its_profile_which_cant_go_while_used() {
 fn loaded(policy: Policy, version: i64) -> LoadedPolicy {
     LoadedPolicy {
         version,
+        digest: policy.digest(),
         policy: Arc::new(policy),
         author: "old-replica".into(),
         created_at: Some(OffsetDateTime::now_utc()),

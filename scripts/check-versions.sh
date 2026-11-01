@@ -36,7 +36,7 @@ while IFS= read -r line; do
 done < <(grep -rnE '^[[:space:]]*(-[[:space:]]*)?image:' deploy/compose/docker-compose.yml deploy/compose/stacks deploy/compose/config/targets/redis/tls-overlay.yml)
 
 # 2. literals elsewhere
-allowed_re='^(deploy/compose/\.env|\.github/workflows/ci-rust\.yml|scripts/check-versions\.sh)$'
+allowed_re='^(deploy/compose/\.env|\.github/workflows/rust\.yml|scripts/check-versions\.sh)$'
 for var in POSTGRES_IMAGE DEX_IMAGE SEAWEEDFS_IMAGE KMS_IMAGE MYSQL_IMAGE MONGO_IMAGE ELASTICSEARCH_IMAGE OPENSEARCH_IMAGE REDIS_IMAGE VALKEY_IMAGE RABBITMQ_IMAGE KAFKA_IMAGE K3S_IMAGE TRINO_IMAGE GRAFANA_IMAGE JAEGER_IMAGE ALPINE_IMAGE PYTHON_IMAGE SSHD_BASE_IMAGE RUST_IMAGE DISTROLESS_IMAGE; do
   ref="${!var}"
   while IFS= read -r file; do
@@ -67,7 +67,7 @@ done < <(git grep -lF 'deploy/docker/Dockerfile' -- . ':!docs' ':!*.md' ':!scrip
 grep -q 'SSHD_BASE_IMAGE' deploy/compose/stacks/ssh.yml || fail "deploy/compose/stacks/ssh.yml: the sshd build does not pass SSHD_BASE_IMAGE"
 # CI service containers cannot read a file: their image strings must equal the ones here.
 for var in POSTGRES_IMAGE KMS_IMAGE JAEGER_IMAGE; do
-  grep -qE "^[[:space:]]+image: ${!var}$" .github/workflows/ci-rust.yml || fail ".github/workflows/ci-rust.yml: the service image for $var is not ${!var}"
+  grep -qE "^[[:space:]]+image: ${!var}$" .github/workflows/rust.yml || fail ".github/workflows/rust.yml: the service image for $var is not ${!var}"
 done
 
 # 4. Rust

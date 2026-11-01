@@ -59,3 +59,7 @@ THEME=light SITE_URL=http://localhost:4341 node <repo>/website/scripts/firefox-m
 ## Publishing
 
 Nothing is published until the repository is public, so there is **no workflow yet** (#138). Run `npm run build` before you push a change to the site or to a document in `docs/`: it is the whole check. When publishing arrives, `SITE_URL` and `SITE_BASE` set the address (for GitHub Pages `/limen/`; for a custom domain `/`).
+
+## Mermaid diagrams
+
+The site shows the Mermaid blocks in `docs/` as pictures drawn ahead of time (light and dark), so no script runs in the browser. After changing a block, run `node website/scripts/render-mermaid.mjs` and commit `docs/diagrams/mermaid/`. The build fails for a block with no picture. The renderer is a pinned maintainer tool, not a dependency of the site (ADR-0012).

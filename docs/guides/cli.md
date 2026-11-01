@@ -19,6 +19,10 @@ limen redis connect cache-staging --detach   # run in the background; limen conn
 limen status --json          # identity and expiry for scripts (local only, no admin needed)
 limen request orders-prod --for 30m --reason "INC-123" --wait   # ask for access that expires; see access-requests.md
 limen explain orders-prod    # why you can or can't reach it
+limen doctor                 # something doesn't work? checks proxy, CA, network, clock, login, in order
+limen doctor web-staging-1   # ... and whether you can reach this resource
+limen config ssh --install   # plain `ssh web-staging-1`, scp, rsync and git work from now on
+limen kube config            # one kubeconfig with a context per cluster you can reach
 limen completions zsh        # shell completions (bash, zsh, fish, elvish, powershell)
 limen logout                 # end this login and delete local credentials
 ```
@@ -54,7 +58,10 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | `limen redis connect <resource> [--user U] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `redis-cli` or any Redis or Valkey client; each connection is an audited session (see [the Redis guide](redis.md)) |
 | `limen mongo connect <resource> [--role R] [--database D] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `mongosh` or any MongoDB driver; each connection is an audited session (see [the MongoDB guide](mongodb.md)) |
 | `limen search connect <resource> [--role R] [--listen ADDR \| --socket PATH] [--idle-timeout 1h]` | Open a loopback listener for `curl` or any Elasticsearch or OpenSearch client; each connection is an audited session (see [the search guide](search.md)) |
+| `limen doctor [resource] [--json]` | Check, in order, what access depends on: proxy address, pinned CA, network, TLS, clock skew against the proxy, client and server versions, the local login, whether the proxy accepts it, and with a resource name whether policy gives it to you (and if not, why and how to get it), whether your grant is about to end, whether a worker serves it, and whether the client tool is installed. Each failure says how to fix it; the exit code is 1 if one failed. `--json` is for support tickets and holds no secret. See [Troubleshooting](#troubleshooting) |
 | `limen config ssh` | Print an `~/.ssh/config` block so plain `ssh <login>@web-staging-1.limen` works |
+| `limen config ssh --install [--file F]`, `--uninstall` | Keep one `Include` at the top of `~/.ssh/config` (or `F`) pointing at a generated `~/.limen/ssh_config`, so plain `ssh web-staging-1`, `scp`, `rsync`, and `git` over SSH work. Refreshed on every `limen login`. See [Plain ssh, scp, rsync, git](#plain-ssh-scp-rsync-git) |
+| `limen kube config [--print]`, `--uninstall` | Write `~/.limen/kubeconfig` with a `limen-<cluster>` context for every cluster you can reach, refreshed on every `limen login`. Add it to `KUBECONFIG` once. See [the Kubernetes guide](kubernetes.md) |
 | `limen admin apply <files or dirs> [--dry-run] [--source-ref SHA]` | Validate and apply policy YAML; shows a coloured diff |
 | `limen admin policy` | Show the active policy version, digest, and author |
 | `limen admin components` | List enrolled proxies and workers and their tunnels |
@@ -94,6 +101,63 @@ Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the firs
 
 ### Good to know
 - **Credentials are short-lived on purpose.** They live in `~/.limen/` (override with `LIMEN_HOME`) and expire in minutes. When they do, the CLI tells you to run `limen login`.
-- **Plain `ssh` works too.** Run `limen config ssh >> ~/.ssh/config`, then `ssh <login>@<resource>.limen`.
+- **Plain `ssh` works too.** See [below](#plain-ssh-scp-rsync-git).
 - **Scripting.** Output is plain text when piped; `limen ls --json` is stable for tools; `NO_COLOR=1` or `--color never` turns colour off everywhere. The logo shown by `limen --help` and `limen login` goes to stderr and only on a terminal; `LIMEN_NO_BANNER=1` hides it.
 - **Admin commands need the `limen:admin` role** and are audited like everything else.
+
+### Plain ssh, scp, rsync, git
+
+```sh
+limen config ssh --install
+ssh web-staging-1                       # the login is filled in when policy allows only one
+ssh ec2-user@bastion-staging            # name it when there are several
+scp build.tar.gz web-staging-1:/tmp/
+rsync -a ./site/ web-staging-1:/srv/site/
+git clone web-staging-1:/srv/repo.git
+```
+
+`--install` adds this to the top of `~/.ssh/config` (following a symlink, keeping its permissions):
+
+```text
+# >>> limen >>> added by `limen config ssh --install`; `--uninstall` removes it
+Include /Users/you/.limen/ssh_config
+# <<< limen <<<
+```
+
+The included file is generated from `limen ls`, one `Host` entry per SSH resource (`web-staging-1` and `web-staging-1.limen`), and rewritten on every `limen login`, so it follows your roles. It holds no key or certificate: each entry runs `limen ssh-proxy`, which needs a current login, so when yours expires `ssh` tells you to run `limen login`. If you use several proxies, each one's resources are listed, the current one first.
+
+Good to know:
+- Because the `Include` comes first, a Limen resource with the same name as one of your own `Host` entries takes its place. `limen config ssh --uninstall` takes everything out again.
+- IDE remotes that tunnel over SSH port forwarding (VS Code Remote-SSH, JetBrains Gateway) don't work yet: Limen refuses SSH port forwarding.
+- `scp` uses SFTP unless you pass `-O`, so the target needs an SFTP subsystem (most distributions configure one). Without it, `scp` stops with `subsystem request failed`; use `scp -O`. `rsync` and `git` need those programs on the target.
+- Names that OpenSSH can't take as host aliases (spaces, wildcards, quotes) are skipped with a warning; `limen ssh <name>` still works for them.
+- Prefer not to touch `~/.ssh/config`? `limen config ssh` prints a `Host *.limen` block to paste instead, for `ssh <login>@<resource>.limen`.
+- Database GUIs (DBeaver, DataGrip) want a fixed port: `limen db connect orders-staging --listen 127.0.0.1:5433 --detach`, then point the GUI at `127.0.0.1:5433`.
+
+### Troubleshooting
+
+`limen doctor` checks what access depends on, in the order it usually breaks, and says how to fix what it finds:
+
+```text
+✔ proxy    localhost:3443 (from the last login)
+✔ ca       1 CA certificate pinned
+✔ network  [::1]:3443 accepts connections
+✔ tls      the proxy's certificate is signed by the pinned CA
+✔ clock    in step with the proxy
+✖ login    the login for developer@example.com expired 12m ago
+           → `limen login`
+– session  skipped: no valid login
+```
+
+Add a resource name (`limen doctor orders-staging`) to check that policy gives it to you, that a worker that can reach it is connected, that a grant you hold isn't about to end, and that the client it needs (`ssh`, `kubectl`) is installed. When policy doesn't give it to you, the fix is [`limen explain`](access-requests.md)'s answer: your roles, or the role you can ask for, who approves it, and the command. `limen doctor --json` prints the same as JSON for a support ticket; it never includes your key, certificate or a token.
+
+A refused connection says the same under the error, plain `ssh` included:
+
+```text
+$ ssh ubuntu@orders-prod.limen
+✖ access denied to ubuntu@orders-prod
+  You can't reach `orders-prod` yet, but you can ask for it.
+  Request one of: prod-ssh.
+    - `prod-ssh`: approved by members of sre-leads
+  Run: limen request orders-prod --for 30m --reason "..."
+```

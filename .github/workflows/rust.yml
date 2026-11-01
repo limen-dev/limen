@@ -1,4 +1,4 @@
-name: ci-rust
+name: rust
 
 # Lint, tests on three platforms, container images. Tests and images wait for lint.
 # Starts for any change except docs, the website, demos, Terraform and dashboards.
@@ -20,13 +20,18 @@ on:
       - "!**.md"
       - "!LICENSE"
       - "!.github/**"
-      - ".github/workflows/ci-rust.yml"
+      - ".github/workflows/rust.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
+    inputs:
+      images:
+        description: Build the container images ("false" when release.yml builds them itself)
+        type: string
+        default: "true"
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -35,7 +40,7 @@ permissions:
 
 concurrency:
   # (github.workflow is release.yml's name when it calls this, hence the prefix.)
-  group: ci-rust-${{ github.workflow }}-${{ github.ref }}
+  group: rust-${{ github.workflow }}-${{ github.ref }}
   # A new push cancels the older pull request run; a push to main always runs to the end.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -234,6 +239,7 @@ jobs:
   images:
     name: Container images
     needs: lint
+    if: inputs.images != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
