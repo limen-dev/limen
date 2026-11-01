@@ -1,13 +1,18 @@
 # The management API, for client authors
 
-`limen.manage.v1.ManagementService` ([ADR-0042](../adr/0042-management-api.md)) is how the CLI, the console, and the Terraform provider ([`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen)) read policy and write resources. This page is for whoever writes a client. The contract is [`proto/limen/manage/v1/manage.proto`](../../proto/limen/manage/v1/manage.proto): every message and field is documented there, and CI refuses breaking changes to it.
+`limen.manage.v1.ManagementService` ([ADR-0042](../adr/0042-management-api.md)) is how the CLI, the console, and the Terraform provider ([`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen)) read and write policy. This page is for whoever writes a client. The contract is [`proto/limen/manage/v1/manage.proto`](../../proto/limen/manage/v1/manage.proto): every message and field is documented there, and CI refuses breaking changes to it.
 
-**What is served now:** reads of every document kind; writes of **resources**: create, update, delete, batch, replace a source, and transfer; and **changes held for approval** (get, list, approve, reject, cancel). `GetSchema` is `UNIMPLEMENTED` until a later stage, and so is writing roles, mappings, and bots through the API (apply them from files).
+**What is served now:** reads and writes of **every document kind** (create, update, delete, batch, replace a source, and transfer), and **changes held for approval** (get, list, approve, reject, cancel). `GetSchema` is `UNIMPLEMENTED` until a later stage; [`docs/policy.md`](../policy.md) describes each kind's `spec`.
 
 ## Who can call it
 
-- A person with `limen:admin`: any document, in any namespace.
-- A **bot** with a `policy_writer` grant ([policy reference](../policy.md#delegated-writes-resource_profile-and-policy_writer)): only resources, only in its namespace, only with names its patterns allow, and only by completing a profile its grant names. This is what a pipeline uses. It never needs `limen:admin`.
+- A **person** with `limen:admin`: any kind, in any namespace. `bot`, `discovery`, `resource_profile`, and `policy_writer` are written only by people, so a client that manages them logs in as a person (`limen login`), not as a bot.
+- A **bot** with a `policy_writer` grant ([policy reference](../policy.md#delegated-writes-resource_profile-and-policy_writer)): only the kinds its grant names (`resource`, `role`, `role_mapping`, `policy_test`), only in its namespace, only with names its patterns allow. This is what a pipeline uses. It never needs `limen:admin`.
+  - A resource completes a profile the grant names.
+  - A role is never built-in, requestable, or break-glass.
+  - A mapping assigns only roles the writer's namespace owns, never a built-in role.
+  - A writer can't touch documents it doesn't own, tests included.
+  - Standing access that comes from the writer's own roles and mappings waits for a person (below), whatever order they were written in.
 
 Anyone else gets `PERMISSION_DENIED`.
 
@@ -25,13 +30,13 @@ Anyone else gets `PERMISSION_DENIED`.
 
 ## Mapping a Terraform resource
 
-A `limen_resource` is one resource document. Keep `name`, `etag`, and the `ownership` you wrote with in state.
+Each Terraform resource is one document: `limen_resource`, `limen_role`, `limen_role_mapping`, `limen_policy_test`, `limen_bot`, `limen_discovery`, `limen_resource_profile`, `limen_policy_writer`. Keep `kind`, `name`, `etag`, and the `ownership` you wrote with in state. `spec_json` is the document's `spec` as JSON, the same fields as in YAML: an object for every kind except `role_mapping`, whose spec is a list of `{idp_group, roles}`. `profile` is for resources only.
 
 | Terraform | Call | Notes |
 |---|---|---|
 | plan (create or update) | the same write with `WriteOptions.validate_only = true` | Runs every check and returns the impact (who gains access); changes nothing. A refused plan is audited. |
 | create | `CreateDocument { document, ownership: { source, namespace }, options: { request_id } }` | `document.profile` is required for a bot; `spec_json` holds only the profile's settable fields, in the resource's shape, such as `{"postgres":{"endpoint":"db.internal:5432"}}`. |
-| read / refresh | `GetDocument { kind: RESOURCE, name }` | `NOT_FOUND` means it's gone (or was never yours to see): remove it from state. |
+| read / refresh | `GetDocument { kind, name }` | `NOT_FOUND` means it's gone (or was never yours to see): remove it from state. |
 | update | `UpdateDocument { document, etag, ownership }` | The whole desired state; no partial updates. A stale etag is `ETAG_MISMATCH`: read again and re-plan. |
 | delete | `DeleteDocument { kind, name, etag, ownership }` | `allow_missing: true` for a retry. Deleting ends the resource's open sessions and grants. |
 | import | `GetDocument`, then keep its `ownership` | A document another owner manages can't be written; `TransferDocument` moves one between a writer's own sources. |
@@ -50,7 +55,7 @@ A write that widens **standing** access (someone reaches something they couldn't
 
 A held write returns `WRITE_OUTCOME_PENDING_APPROVAL` and the change in `pending_change`. Nothing is applied. A client that can't wait, such as a Terraform plan, sets `fail_if_approval_needed` (with `validate_only` in a plan) and gets `APPROVAL_REQUIRED` instead. Without it, a dry run returns `VALIDATED` with a warning that applying it waits for approval.
 
-People decide changes, with `ApproveChange` or `RejectChange` (a note is required), or `limen manage changes approve|reject <id>`. That is an admin, or a member of the writer grant's `approvers.groups`. Bots never decide. Neither the author nor the person who started the CI run (`actor` on GitHub, `user_login` on GitLab) can decide it. The author withdraws a change with `CancelChange`.
+People decide changes, with `ApproveChange` or `RejectChange` (a note is required), `limen manage changes approve|reject <id>`, or the console's **Policy changes** page. That is an admin, or a member of the writer grant's `approvers.groups`. Bots never decide. Neither the author nor the person who started the CI run (`actor` on GitHub, `user_login` on GitLab) can decide it. The author withdraws a change with `CancelChange`.
 
 Approval writes again on the **current** policy, as the author, with the author's grant checked again. The change becomes `SUPERSEDED` instead when:
 - a document it touches changed;
@@ -67,7 +72,7 @@ Every refusal has a gRPC code and a `google.rpc.ErrorInfo` detail (domain `manag
 
 | Reason | Code | What to do |
 |---|---|---|
-| `OUTSIDE_GRANT` | `PERMISSION_DENIED` | `metadata.rule` says which: `namespace`, `name_pattern`, `kind`, `profile`, `field` (a field the profile doesn't make settable, or a value outside its bounds), `label`, `grant` (the grant is gone). Not retryable. |
+| `OUTSIDE_GRANT` | `PERMISSION_DENIED` | `metadata.rule` says which: `namespace`, `name_pattern`, `kind`, `profile`, `field` (a field the profile doesn't make settable, a value outside its bounds, or a requestable or break-glass role), `label`, `builtin_role` (a `limen:*` role), `role` (a mapping to a role the writer's namespace doesn't own), `grant` (the grant is gone). Not retryable. |
 | `ETAG_MISMATCH` | `FAILED_PRECONDITION` | `metadata.current_etag`. Read and re-plan. |
 | `OWNED_ELSEWHERE` | `FAILED_PRECONDITION` | `metadata.channel`, `source`, `namespace` name the owner. |
 | `INVALID_DOCUMENT` | `INVALID_ARGUMENT` | The document doesn't validate. |

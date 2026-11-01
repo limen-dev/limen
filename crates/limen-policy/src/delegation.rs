@@ -135,14 +135,15 @@ pub struct WriterSpec {
     pub namespace: String,
     /// Patterns every document name must match: exact, or `prefix*`.
     pub names: Vec<String>,
-    /// What it may write. Stage 1: `resource`.
+    /// What it may write. Never `bot`, `discovery`, `resource_profile`, or
+    /// `policy_writer`: those are for people (ADR-0042 §4).
     pub kinds: Vec<WriterKind>,
     /// The profiles its resources may complete.
     #[serde(default)]
     pub profiles: Vec<String>,
     #[serde(default = "default_max_documents")]
     pub max_documents: u32,
-    /// Who may approve its held changes, besides admins (stage 2).
+    /// Who may approve its held changes, besides admins.
     #[serde(default)]
     pub approvers: Approvers,
 }
@@ -155,6 +156,26 @@ fn default_max_documents() -> u32 {
 #[serde(rename_all = "snake_case")]
 pub enum WriterKind {
     Resource,
+    /// Roles in its namespace. Never requestable or break-glass, and any
+    /// standing access they give waits for a person.
+    Role,
+    /// Mappings of IdP groups to roles its namespace owns. Never to a
+    /// built-in role.
+    RoleMapping,
+    PolicyTest,
+}
+
+impl WriterKind {
+    /// The document kind, as in YAML.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WriterKind::Resource => "resource",
+            WriterKind::Role => "role",
+            WriterKind::RoleMapping => "role_mapping",
+            WriterKind::PolicyTest => "policy_test",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -58,7 +58,7 @@ spec:
   bot: payments-terraform          # an existing bot (ADR-0019)
   namespace: payments              # exactly one
   names: ["payments-*"]            # every document it writes must match
-  kinds: [resource, policy_test]   # stage 2 may add role, role_mapping
+  kinds: [resource, policy_test]   # also role, role_mapping
   profiles: [payments-postgres, payments-ssh]
   max_documents: 200
   approvers: { groups: [security] }   # who may approve its held changes, besides admins
@@ -66,11 +66,11 @@ spec:
 
 A pipeline logs in as that bot with the existing workload-identity join and gets a certificate of at most an hour, with no admin role. Every write is checked against the grant, and refusals say which rule failed (`OUTSIDE_GRANT`, `rule = namespace | name_pattern | kind | profile | label | field`).
 
-**People-only kinds.** `bot`, `discovery`, `resource_profile`, and `policy_writer` are written only by people with `limen:admin`, through `git` or `console`. No grant can name them. This closes the loops: a writer can't widen its own grant, mint a bot, or point discovery at an account.
+**People-only kinds.** `bot`, `discovery`, `resource_profile`, and `policy_writer` are written only by people with `limen:admin`, through `git`, `console`, or the API with a person's login. No grant can name them. This closes the loops: a writer can't widen its own grant, mint a bot, or point discovery at an account.
 
 **Escalation rules**, enforced in `policy_store`, not by convention:
 - No writer assigns or names a built-in role (`limen:admin`, `limen:auditor`), in a mapping or a role.
-- In stage 2, a writer may write roles and mappings only in its namespace, and any widening of standing access they cause is held for approval (section 6), always, whatever its grant says.
+- A writer may write roles and mappings only in its namespace, and any widening of standing access they cause is held for approval (section 6), always, whatever its grant says. "They cause" is weighed on every write by comparing the access diff with and without the writer's own roles and mappings, so a role and mapping written before the resources they reach still wait. A writer's role is never requestable or break-glass, since access by request isn't standing and its approvers would be the writer's to name; a writer's mapping assigns only roles its namespace owns.
 - Namespaces of different writers are disjoint unless an admin overlaps them on purpose (a validation warning).
 - `policy_test` documents a writer owns run like anyone's, but a writer can't delete tests it doesn't own, so it can't remove the test that would stop it.
 

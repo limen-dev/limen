@@ -160,6 +160,13 @@ impl Deployment {
         Self::start_inner(true, &[], false, &[]).await
     }
 
+    /// [`start_with_console`](Self::start_with_console), with extra flags for
+    /// the control plane.
+    pub async fn start_with_console_args(cp_args: &[&str]) -> Option<Self> {
+        let extra: Vec<String> = cp_args.iter().map(|&a| a.to_owned()).collect();
+        Self::start_inner(true, &extra, false, &[]).await
+    }
+
     async fn start_inner(
         console: bool,
         extra_cp_args: &[String],

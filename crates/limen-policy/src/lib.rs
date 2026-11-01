@@ -880,6 +880,19 @@ impl Policy {
                 }
             }
         }
+        let mut namespaces: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for writer in self.writers.values() {
+            namespaces
+                .entry(writer.spec.namespace.as_str())
+                .or_default()
+                .push(writer.metadata.name.as_str());
+        }
+        for (namespace, writers) in namespaces.iter().filter(|(_, w)| w.len() > 1) {
+            out.push(format!(
+                "policy_writer {}: share namespace {namespace:?}, so each can change the other's documents; give each writer its own unless that is meant",
+                writers.join(", ")
+            ));
+        }
         for profile in self.profiles.values() {
             for (path, bound) in &profile.spec.settable {
                 for warning in bound

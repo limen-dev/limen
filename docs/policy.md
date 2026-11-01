@@ -271,12 +271,20 @@ spec:
   bot: payments-terraform    # one grant per bot
   namespace: payments        # not default, which is policy applied from files
   names: ["payments-*"]      # exact names, or a prefix of at least two characters and *
-  kinds: [resource]
+  kinds: [resource]          # also role, role_mapping, policy_test; never bot, discovery, or the two above
   profiles: [payments-postgres]
   max_documents: 50          # 1 to 10000; 200 by default
   approvers: { groups: [security] }   # may approve its held changes, besides admins
 ```
 
 The bot keeps the roles in its `bot` document for its own sessions. The grant gives it no admin rights; it only lets it write documents in its namespace. Never give `limen:admin` to a pipeline.
+
+A writer of `role`, `role_mapping`, or `policy_test` writes them in its namespace. These rules are enforced on the server:
+- A writer's role is never built-in (`limen:*`), requestable, or break-glass. Access by request isn't standing access, so it wouldn't wait for a person, and the writer could name its own approvers.
+- A writer's mapping assigns only roles its namespace owns, never a built-in role.
+- A writer can't change or delete documents it doesn't own, so it can't remove a test that would stop it.
+- Standing access that comes from the writer's own roles and mappings is **held** for a person: an admin, or a member of `approvers.groups`. That is weighed on every write, so writing a role and mapping first and resources later still waits. Access that only people's roles give a resource the writer completes from its profile is approved by the grant. See [the management API guide](guides/management-api.md#changes-held-for-approval).
+
+Two writers in one namespace can change each other's documents; `limen apply` warns about it.
 
 **Upgrading:** finish upgrading every proxy and worker before anyone writes a resource from a profile. Such a resource carries the `delegated` field. A component from before Phase 14 parses snapshots strictly, so it refuses the whole snapshot, and after the grace period it stops serving every resource, not just that one. Profiles and writer grants themselves never leave the control plane, so writing them is safe at any point.

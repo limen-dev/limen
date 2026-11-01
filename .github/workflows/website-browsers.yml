@@ -3,7 +3,7 @@ name: website-browsers
 # The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes:
 # overflow, JS errors, third-party requests, axe WCAG A/AA, touch targets.
 # Slow, so it never runs on a push or pull request: only weekly, or by hand
-# (gh workflow run website-browsers.yml). Self-hosted, so it costs no hosted minutes.
+# (gh workflow run website-browsers.yml).
 
 on:
   schedule:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   matrix:
     name: Browser matrix (${{ matrix.theme }} theme)
-    runs-on: ${{ vars.CI_RUNNERS == 'github-hosted' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","ARM64"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install_args: node
 
@@ -66,7 +66,3 @@ jobs:
           SITE_URL: http://localhost:4341
           THEME: ${{ matrix.theme }}
         run: node "$GITHUB_WORKSPACE/website/scripts/browser-matrix.mjs"
-
-      - name: Stop the site server
-        if: always()
-        run: pkill -f "astro preview" || true

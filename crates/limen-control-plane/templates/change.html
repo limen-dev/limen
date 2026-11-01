@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Policy change{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Policy change <span class="pill{% if change.state == "applied" %} ok{% else if change.state == "pending" %} warn{% else %}{% endif %} v-mid">{{ change.state }}</span></h1>
+    <p class="sub mono">{{ change.id }}</p>
+  </div>
+  <a class="button secondary" href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All changes</a>
+</div>
+{% if let Some(e) = error %}<div class="notice warn" role="alert"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-alert"/></svg>{{ e }}</div>{% endif %}
+<div class="card facts-card"><table class="facts">
+  <tr><th>By</th><td>{{ change.author }}</td></tr>
+  {% if !change.reason.is_empty() %}<tr><th>Why</th><td>{{ change.reason }}</td></tr>{% endif %}
+  <tr><th>Made</th><td>{{ change.created }}</td></tr>
+  {% if change.state == "pending" %}<tr><th>Expires</th><td>{{ change.expires }}</td></tr>{% else %}
+  <tr><th>Decided by</th><td>{{ change.decided_by }}</td></tr>
+  {% if !change.decision_note.is_empty() %}<tr><th>Note</th><td>{{ change.decision_note }}</td></tr>{% endif %}
+  {% endif %}
+</table></div>
+
+{% if !ci.is_empty() %}
+<h2>The CI run behind it</h2>
+<div class="card facts-card"><table class="facts">
+{% for (k, v) in ci %}<tr><th>{{ k }}</th><td class="mono">{{ v }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<h2>Who gains standing access</h2>
+{% if change.gains.is_empty() %}<div class="card empty"><div>Nothing listed.</div></div>{% else %}
+<ul class="diff">{% for g in change.gains %}<li class="chg">+ {{ g }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if !writes.is_empty() %}
+<h2>What it writes</h2>
+<ul class="plain mono">{% for w in writes %}<li>{{ w }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if change.state == "pending" %}
+<h2>Decide</h2>
+{% if cant_decide.is_empty() %}
+<div class="card">
+<form method="post" action="/console/changes/{{ change.id }}/decide" class="stack wide">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <label><span>Note (required to reject)</span> <input type="text" name="note" maxlength="1000" class="w-360"></label>
+  <div class="row">
+    <button type="submit" name="decision" value="approve"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Approve and apply</button>
+    <button type="submit" name="decision" value="reject" class="secondary danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Reject</button>
+  </div>
+</form>
+</div>
+{% else %}
+<p class="hint">{{ cant_decide }}</p>
+{% endif %}
+{% if is_author %}
+<form method="post" action="/console/changes/{{ change.id }}/decide" class="row">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <button type="submit" name="decision" value="cancel" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg>Withdraw it</button>
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

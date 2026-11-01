@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Phase 14 demo, stage 1: one management API (ADR-0042). A CI job logs in as a
-# bot with a policy_writer grant and registers its own SSH host in Limen from
-# a profile a person wrote, the way the Terraform provider does, and a
-# developer reaches the host through Limen. It runs in its own compose
-# project and ports, so a dev stack already running is left alone.
+# Phase 14 demo: one management API (ADR-0042). A CI job logs in as a bot with
+# a policy_writer grant and registers its own SSH host in Limen from a profile
+# a person wrote, the way the Terraform provider does, and a developer reaches
+# the host through Limen. Then the pipeline writes its own role and mapping:
+# the access they give waits for a person, who approves it from the CLI. It
+# runs in its own compose project and ports, so a dev stack already running is
+# left alone.
 #
 #   demos/demo-phase14.sh          # resets this demo's own stack first
 #   demos/demo-phase14.sh --keep   # reuse it
@@ -61,7 +63,7 @@ wait_for "proxy readiness" curl -sf "http://localhost:$LIMEN_PORT_HEALTH/readyz"
 wait_for "the fake CI issuer" curl -sf "$issuer_url/.well-known/openid-configuration"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$ca" >/dev/null
 export LIMEN_DEV_CA="$ca"
-rm -rf "$state/home-admin" "$state/home-developer" "$state/home-bot" "$state/work"
+rm -rf "$state/home-admin" "$state/home-developer" "$state/home-bot" "$state/home-oncall" "$state/work"
 mkdir -p "$state/work"
 LIMEN_HOME="$state/home-admin" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
 
@@ -108,9 +110,10 @@ spec:
   bot: demo-terraform
   namespace: demo-team
   names: ["demo-*"]
-  kinds: [resource]
+  kinds: [resource, role, role_mapping, policy_test]
   profiles: [demo-ssh]
   max_documents: 10
+  approvers: { groups: [sre-oncall] }
 YAML
 apply_files() { as_admin admin apply "$root/examples/policy" "$state/work/delegation.yaml" --source-ref demo-phase14 >/dev/null; }
 apply_files
@@ -179,6 +182,49 @@ sleep 11
 if as_developer ssh demo-web -- true >/dev/null 2>&1; then fail "the deleted resource is still reachable"; fi
 pass "deleted; a second delete is a no-op; the host is no longer reachable"
 
+step "The pipeline writes its own role and mapping; the access they give waits for a person"
+as_bot manage put role demo-web-readers --source terraform/demo \
+  --spec '{"allow":[{"resources":{"kind":["ssh"],"labels":{"team":["demo"]}},"ssh":{"logins":["ubuntu"]}}]}' \
+  | json 'd["outcome"]' | grep -q applied || fail "the writer's role"
+as_bot manage put role_mapping demo-viewers --source terraform/demo \
+  --spec '[{"idp_group":"viewers","roles":["demo-web-readers"]}]' \
+  | json 'd["outcome"]' | grep -q applied || fail "the writer's mapping (it reaches nothing yet)"
+refuse "built-in role" put role_mapping demo-admins --source terraform/demo \
+  --spec '[{"idp_group":"viewers","roles":["limen:admin"]}]'
+refuse "requestable" put role demo-ask --source terraform/demo \
+  --spec '{"allow":[],"request":{"who":{"groups":["viewers"]},"approvers":{"groups":["viewers"]},"max_duration":"1h"}}'
+refuse "can't write bot" put bot demo-sneaky --source terraform/demo --spec '{}'
+as_bot manage put-resource demo-api --profile demo-ssh --spec "$spec" --label env=staging \
+  --source terraform/demo > "$state/work/held.json"
+[ "$(json 'd["outcome"]' < "$state/work/held.json")" = pending_approval ] \
+  || { cat "$state/work/held.json"; fail "access from the writer's own mapping went through"; }
+change="$(json 'd["pending_change"]["id"]' < "$state/work/held.json")"
+json '"\n".join("  waits: " + c for c in d["pending_change"]["access_changes"] if "viewers" in c)' < "$state/work/held.json"
+if as_admin manage get resource demo-api >/dev/null 2>&1; then fail "a held resource exists"; fi
+if as_bot manage changes approve "$change" >/dev/null 2>"$state/work/refused.err"; then fail "the bot approved its own change"; fi
+grep -q "bots never do" "$state/work/refused.err" || { cat "$state/work/refused.err"; fail "the bot was refused for the wrong reason"; }
+pass "held as change $change; bots never decide"
+
+step "Someone on call reviews it in the CLI and approves it"
+LIMEN_HOME="$state/home-oncall" "$here/scripts/dev-login.sh" "$ONCALL" >/dev/null
+as_oncall() { LIMEN_HOME="$state/home-oncall" "$LIMEN_BIN" "$@"; }
+as_oncall manage changes ls | json '"\n".join("  pending: " + c["id"] + " by " + c["author"] + " (run by " + c["author_ci"].get("actor", "?") + ")" for c in d)'
+as_oncall manage changes approve "$change" --note "viewers may read the demo hosts" > "$state/work/approved.json"
+[ "$(json 'd["state"]' < "$state/work/approved.json")" = applied ] || { cat "$state/work/approved.json"; fail "approval"; }
+[ "$(as_admin manage get resource demo-api | json 'd["updated_by"]')" = bot:demo-terraform ] || fail "not written as its author"
+pass "approved by $ONCALL; demo-api is in policy, written as the bot"
+
+step "Admins write the people-only kinds through the API too"
+as_admin manage put role demo-auditors --source console/demo \
+  --spec '{"allow":[{"resources":{"kind":["ssh"],"labels":{"team":["demo"]}},"ssh":{"logins":["ubuntu"]}}]}' \
+  | json 'd["outcome"]' | grep -q applied || fail "an admin's role"
+etag="$(as_admin manage get bot demo-terraform | json 'd["etag"]')"
+if as_admin manage delete bot demo-terraform --source console/demo --etag "$etag" >/dev/null 2>"$state/work/refused.err"; then
+  fail "the API deleted a bot that files own"
+fi
+grep -q 'managed by git source "default"' "$state/work/refused.err" || { cat "$state/work/refused.err"; fail "wrong refusal for a bot files own"; }
+pass "an admin's role went through; what files own stays theirs"
+
 step "The audit trail tells the story"
 "${compose[@]}" cp control-plane:/var/lib/limen/audit/control-plane.jsonl "$state/work/audit.jsonl" >/dev/null
 python3 - "$state/work/audit.jsonl" <<'PY'
@@ -191,9 +237,15 @@ changes = [e for e in events if e["kind"] == "policy.change" and e.get("user") =
 assert len(changes) >= 2, "the bot's create and delete are policy changes"
 owners = changes[0]["data"]["owners"][0]
 assert owners == {"channel": "api", "source": "terraform/demo", "namespace": "demo-team"}, owners
-print(f"  {len(changes)} policy changes by the bot, {len(denied)} refused writes, all attributed")
+pending = [e for e in events if e["kind"] == "policy.change_pending"]
+decided = [e for e in events if e["kind"] == "policy.change_decided" and e["data"]["state"] == "applied"]
+assert pending and decided, "the held change and its approval are in the trail"
+approved = [e for e in changes if (e["data"].get("approval") or {}).get("approved_by")]
+assert approved, "the applied change names its approver"
+print(f"  {len(changes)} policy changes by the bot, {len(denied)} refused writes, all attributed;")
+print(f"  {len(pending)} held, approved by {approved[0]['data']['approval']['approved_by']}")
 PY
 pass "every write and refusal is in the trail, with its owner"
 
-printf '\n\033[32mPhase 14 (stage 1) demo passed.\033[0m\n'
+printf '\n\033[32mPhase 14 demo passed.\033[0m\n'
 echo "This stack: project $project, proxy $LIMEN_PROXY. Stop it: LIMEN_PROJECT=$project docker compose -p $project down -v"

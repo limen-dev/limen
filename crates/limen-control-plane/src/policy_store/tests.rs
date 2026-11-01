@@ -216,6 +216,7 @@ fn a_writer_resource_is_built_from_its_profile_which_cant_go_while_used() {
 
     // Files that drop the profile (and the writer grant) are refused while
     // the resource still completes it.
+    let before = heads.clone();
     let mut heads = heads;
     let without: Vec<Input> = Policy::parse_yaml_documents([("p.yaml", PROFILE)])
         .expect("parse")
@@ -224,8 +225,10 @@ fn a_writer_resource_is_built_from_its_profile_which_cant_go_while_used() {
         .map(|d| Input::document(d).expect("input"))
         .collect();
     run(&mut heads, &replace(&Owner::default_git(), without)).expect("apply");
-    let err = check_profiles_in_use(&heads).expect_err("in use");
+    let err = check_in_use(&before, &heads).expect_err("in use");
     assert!(err.to_string().contains("payments-orders-db"), "{err}");
+    // A profile that never existed isn't in use: that's an invalid document.
+    check_in_use(&BTreeMap::new(), &heads).expect("nothing was removed");
 }
 
 fn loaded(policy: Policy, version: i64) -> LoadedPolicy {

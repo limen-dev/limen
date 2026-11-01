@@ -15,7 +15,7 @@ use limen_proto::manage::v1::management_service_client::ManagementServiceClient;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::{ApplyPolicyRequest, PolicySource};
 use limen_testkit::idp::WorkloadToken;
-use limen_testkit::users::{ADMIN, ONCALL};
+use limen_testkit::users::{ADMIN, DEVELOPER, ONCALL};
 use rustls_pki_types::CertificateDer;
 use tonic::Code;
 use tonic_types::StatusExt;
@@ -29,17 +29,28 @@ struct Fixture {
     proxy: limen_tunnel::tls::Identity,
     admin: CertificateDer<'static>,
     bot: CertificateDer<'static>,
+    /// The writer grant's `kinds`, as YAML.
+    kinds: &'static str,
 }
 
-/// The example stack, with the mock issuer and a quota of two.
-fn stack(issuer: &str) -> String {
+/// The example stack, with the mock issuer, a quota of two, and `kinds`.
+fn stack(issuer: &str, kinds: &str) -> String {
     STACK
+        .replace("kinds: [resource]", &format!("kinds: {kinds}"))
         .replace(
             "    method: github_actions\n",
             &format!("    method: github_actions\n    issuer: {issuer}\n"),
         )
-        .replace("max_documents: 50", "max_documents: 2")
-        + "---\nkind: role_mapping\nversion: v1\nmetadata: { name: people }\nspec:\n  - { idp_group: developers, roles: [payments-ci] }\n"
+        // Two for the quota test; room for roles, mappings, and tests.
+        .replace(
+            "max_documents: 50",
+            if kinds == "[resource]" {
+                "max_documents: 2"
+            } else {
+                "max_documents: 10"
+            },
+        )
+        + "---\nkind: role_mapping\nversion: v1\nmetadata: { name: people }\nspec:\n  - { idp_group: developers, roles: [payments-ci] }\n  - { idp_group: security, roles: [payments-ci] }\n"
 }
 
 async fn start() -> Option<Fixture> {
@@ -47,6 +58,11 @@ async fn start() -> Option<Fixture> {
 }
 
 async fn start_with(extra: &[&str]) -> Option<Fixture> {
+    start_writing(extra, "[resource]").await
+}
+
+/// A fixture whose bot writer may write `kinds`.
+async fn start_writing(extra: &[&str], kinds: &'static str) -> Option<Fixture> {
     let args: Vec<String> = std::iter::once("--bot-allow-insecure-issuers")
         .chain(extra.iter().copied())
         .map(str::to_owned)
@@ -59,6 +75,7 @@ async fn start_with(extra: &[&str]) -> Option<Fixture> {
         h,
         proxy,
         admin,
+        kinds,
     };
     f.apply_files().await;
     let token = f.h.idp.workload_token(&WorkloadToken::github(
@@ -87,7 +104,7 @@ impl Fixture {
                     source: String::new(),
                     sources: vec![PolicySource {
                         name: "delegation.yaml".into(),
-                        content: stack(&self.h.idp.issuer),
+                        content: stack(&self.h.idp.issuer, self.kinds),
                     }],
                     dry_run: false,
                     source_ref: String::new(),
@@ -211,6 +228,51 @@ impl Fixture {
             ))
             .await
             .is_ok()
+    }
+}
+
+impl Fixture {
+    /// Create any document as `who`, from `source`.
+    async fn put(
+        &self,
+        who: &CertificateDer<'static>,
+        kind: pb::DocumentKind,
+        name: &str,
+        spec: &str,
+        options: pb::WriteOptions,
+    ) -> Result<pb::WriteResult, tonic::Status> {
+        let request = pb::CreateDocumentRequest {
+            document: Some(pb::Document {
+                kind: kind.into(),
+                name: name.into(),
+                spec_json: spec.into(),
+                ..pb::Document::default()
+            }),
+            ownership: Some(pb::Ownership {
+                source: "terraform/test".into(),
+                ..pb::Ownership::default()
+            }),
+            options: Some(options),
+        };
+        self.api()
+            .create_document(forwarded(request, Some(who)))
+            .await
+            .map(|r| r.into_inner().result.expect("result"))
+    }
+
+    async fn get(&self, kind: pb::DocumentKind, name: &str) -> Option<pb::Document> {
+        self.api()
+            .get_document(forwarded(
+                pb::GetDocumentRequest {
+                    kind: kind.into(),
+                    name: name.into(),
+                    policy_version: 0,
+                },
+                Some(&self.admin),
+            ))
+            .await
+            .ok()
+            .and_then(|r| r.into_inner().document)
     }
 }
 
@@ -548,7 +610,7 @@ async fn a_bot_writer_is_refused_outside_its_grant_and_audited() {
                 sources: vec![
                     PolicySource {
                         name: "delegation.yaml".into(),
-                        content: stack(&f.h.idp.issuer),
+                        content: stack(&f.h.idp.issuer, f.kinds),
                     },
                     PolicySource {
                         name: "steal.yaml".into(),
@@ -1088,4 +1150,341 @@ async fn held_changes_expire() {
             .any(|e| e.kind == EventKind::PolicyChangeDecided && e.data["state"] == "expired")
     );
     assert!(!f.exists("payments-ledger").await);
+}
+
+#[tokio::test]
+async fn admins_write_every_kind_through_the_api() {
+    use pb::DocumentKind as K;
+    let Some(f) = start().await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let none = pb::WriteOptions::default;
+    let admin = &f.admin;
+    f.put(
+        admin,
+        K::Role,
+        "sre",
+        r#"{"allow":[{"resources":{"kind":["ssh"],"labels":{"team":["sre"]}},"ssh":{"logins":["ubuntu"]}}]}"#,
+        none(),
+    )
+    .await
+    .expect("role");
+    f.put(
+        admin,
+        K::RoleMapping,
+        "sre-people",
+        r#"[{"idp_group":"sre","roles":["sre"]}]"#,
+        none(),
+    )
+    .await
+    .expect("mapping");
+    f.person_creates(admin, "sre-ledger", "sre", none())
+        .await
+        .expect("resource");
+    let tested = f
+        .put(admin, K::PolicyTest, "sre-only", r#"{"cases":[{"name":"guests never reach the ledger","who":{"groups":["guests"]},"resource":"sre-ledger","principal":{"db_role":"limen_read","database":"ledger"},"expect":"deny"}]}"#, none())
+        .await
+        .expect("test");
+    assert!(
+        tested
+            .impact
+            .expect("impact")
+            .tests
+            .iter()
+            .any(|t| t.test == "sre-only" && t.passed),
+        "its result comes back with the write"
+    );
+    f.put(admin, K::Bot, "nightly", r#"{"join":{"method":"github_actions","match":{"repository":"acme/nightly","ref":"refs/heads/main"}},"roles":["sre"]}"#, none())
+        .await
+        .expect("bot");
+    let profile = f
+        .get(K::ResourceProfile, "payments-postgres")
+        .await
+        .expect("profile from files");
+    f.put(
+        admin,
+        K::ResourceProfile,
+        "sre-postgres",
+        &profile.spec_json,
+        none(),
+    )
+    .await
+    .expect("profile");
+    f.put(admin, K::PolicyWriter, "nightly", r#"{"bot":"nightly","namespace":"sre","names":["sre-*"],"kinds":["resource","role"],"profiles":["sre-postgres"]}"#, none())
+        .await
+        .expect("writer grant");
+    let mapping = f.get(K::RoleMapping, "sre-people").await.expect("mapping");
+    assert_eq!(mapping.ownership.expect("owner").source, "terraform/test");
+    assert!(
+        mapping.spec_json.starts_with('['),
+        "a mapping's spec is a list"
+    );
+
+    // A mapping's spec is a list, everything else an object.
+    let err = f
+        .put(admin, K::RoleMapping, "bad", r#"{"idp_group":"x"}"#, none())
+        .await
+        .expect_err("shape");
+    assert_eq!(err.code(), Code::InvalidArgument);
+    let err = f
+        .put(admin, K::Role, "bad", "[]", none())
+        .await
+        .expect_err("shape");
+    assert_eq!(err.code(), Code::InvalidArgument);
+
+    // What a writer grant names can't go while it does.
+    let bot = f.get(K::Bot, "nightly").await.expect("bot");
+    let err = f
+        .api()
+        .delete_document(forwarded(
+            pb::DeleteDocumentRequest {
+                kind: K::Bot.into(),
+                name: "nightly".into(),
+                etag: bot.etag,
+                allow_missing: false,
+                options: None,
+                ownership: Some(pb::Ownership {
+                    source: "terraform/test".into(),
+                    ..pb::Ownership::default()
+                }),
+            },
+            Some(admin),
+        ))
+        .await
+        .expect_err("in use");
+    assert_eq!(reason(&err), "IN_USE", "{err:?}");
+    let used_by = err
+        .get_details_error_info()
+        .and_then(|i| i.metadata.get("used_by").cloned())
+        .unwrap_or_default();
+    assert!(used_by.contains("policy_writer/nightly"), "{used_by}");
+    // A grant naming a bot that never existed is an invalid document.
+    let err = f
+        .put(
+            admin,
+            K::PolicyWriter,
+            "ghost",
+            r#"{"bot":"ghost","namespace":"ghosts","names":["gh-*"],"kinds":["role"]}"#,
+            none(),
+        )
+        .await
+        .expect_err("unknown bot");
+    assert_eq!(reason(&err), "INVALID_DOCUMENT", "{err:?}");
+
+    // People-only kinds stay people-only.
+    let err = f
+        .put(&f.bot, K::Bot, "payments-sneaky", "{}", none())
+        .await
+        .expect_err("a bot never writes bots");
+    assert_eq!(rule(&err), ("OUTSIDE_GRANT".to_owned(), "kind".to_owned()));
+}
+
+#[tokio::test]
+async fn a_bot_writer_writes_roles_and_its_widening_waits_for_a_person() {
+    use pb::DocumentKind as K;
+    let Some(f) = start_writing(&[], "[resource, role, role_mapping, policy_test]").await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let none = pb::WriteOptions::default;
+    let bot = &f.bot;
+    let me = f
+        .api()
+        .describe_caller(forwarded(pb::DescribeCallerRequest {}, Some(bot)))
+        .await
+        .expect("describe")
+        .into_inner();
+    assert_eq!(
+        me.grant.expect("grant").kinds.len(),
+        4,
+        "the grant's kinds, not only resources"
+    );
+
+    // A role alone gives nobody anything: applied.
+    let role = r#"{"allow":[{"resources":{"kind":["postgres"],"labels":{"team":["payments"],"env":["staging"]}},"db":{"roles":["limen_read"]}}]}"#;
+    let made = f
+        .put(bot, K::Role, "payments-readers", role, none())
+        .await
+        .expect("role");
+    assert_eq!(made.outcome, i32::from(pb::WriteOutcome::Applied));
+
+    // The escalation rules, before anything is held.
+    for (kind, name, spec, want) in [
+        (
+            K::RoleMapping,
+            "payments-admins",
+            r#"[{"idp_group":"payments","roles":["limen:admin"]}]"#,
+            "builtin_role",
+        ),
+        (
+            K::RoleMapping,
+            "payments-borrow",
+            r#"[{"idp_group":"payments","roles":["payments-ci"]}]"#,
+            "role",
+        ),
+        (
+            K::Role,
+            "payments-ask",
+            r#"{"allow":[],"request":{"who":{"groups":["payments"]},"approvers":{"groups":["payments"]},"max_duration":"1h"}}"#,
+            "field",
+        ),
+        (K::Role, "sre-readers", role, "name_pattern"),
+        (K::Discovery, "payments-aws", "{}", "kind"),
+    ] {
+        let err = f.put(bot, kind, name, spec, none()).await.expect_err(name);
+        assert_eq!(
+            rule(&err),
+            ("OUTSIDE_GRANT".to_owned(), want.to_owned()),
+            "{name}: {err:?}"
+        );
+    }
+
+    // A mapping to a role that reaches nothing yet gives nobody anything...
+    let mapping = r#"[{"idp_group":"payments","roles":["payments-readers"]}]"#;
+    let mapped = f
+        .put(bot, K::RoleMapping, "payments-people", mapping, none())
+        .await
+        .expect("mapping");
+    assert_eq!(mapped.outcome, i32::from(pb::WriteOutcome::Applied));
+    // ...but the resource it would reach then waits: the access comes from
+    // the writer's own mapping, not from roles people wrote, so a person
+    // decides it, whatever order the writer built things in.
+    let err = f
+        .create(
+            "payments-orders-db",
+            &endpoint(ENDPOINT),
+            &[("env", "staging")],
+            pb::WriteOptions {
+                validate_only: true,
+                fail_if_approval_needed: true,
+                ..pb::WriteOptions::default()
+            },
+        )
+        .await
+        .expect_err("a plan learns it would wait");
+    assert_eq!(reason(&err), "APPROVAL_REQUIRED");
+    let held = f
+        .create(
+            "payments-orders-db",
+            &endpoint(ENDPOINT),
+            &[("env", "staging")],
+            pb::WriteOptions {
+                reason: "the payments team reads its databases".into(),
+                ..pb::WriteOptions::default()
+            },
+        )
+        .await
+        .expect("held");
+    assert_eq!(held.outcome, i32::from(pb::WriteOutcome::PendingApproval));
+    let change = held.pending_change.expect("change");
+    assert_eq!(change.author, "bot:payments-terraform");
+    assert_eq!(
+        change.author_ci.get("actor").map(String::as_str),
+        Some("octocat")
+    );
+    assert!(f.get(K::Resource, "payments-orders-db").await.is_none());
+    // One the writer's role doesn't reach goes through (one only people's
+    // roles reach does too: a_bot_writer_registers_a_resource_from_its_profile).
+    let approved = f
+        .create(
+            "payments-other-db",
+            &endpoint(ENDPOINT),
+            &[("env", "dev")],
+            none(),
+        )
+        .await
+        .expect("create");
+    assert_eq!(
+        approved.outcome,
+        i32::from(pb::WriteOutcome::Applied),
+        "env=dev: nothing the writer wrote reaches it"
+    );
+
+    // The bot sees its own change but never decides it.
+    let mine = f
+        .api()
+        .list_changes(forwarded(pb::ListChangesRequest::default(), Some(bot)))
+        .await
+        .expect("list")
+        .into_inner()
+        .changes;
+    assert_eq!(mine.len(), 1);
+    let err = f
+        .approve(bot, &change.id)
+        .await
+        .expect_err("bots never decide");
+    assert_eq!(err.code(), Code::PermissionDenied);
+    // Whoever pushed the run can't approve it, even in the approver group.
+    let (_, pusher) =
+        f.h.login("octocat@example.com", &["security"])
+            .await
+            .expect("pusher");
+    let err = f
+        .approve(&pusher, &change.id)
+        .await
+        .expect_err("started the run");
+    assert_eq!(reason(&err), "CHANGE_NOT_DECIDABLE");
+    // Someone in neither the approver groups nor admins doesn't see it.
+    let (_, developer) =
+        f.h.login(DEVELOPER, &["developers"])
+            .await
+            .expect("developer");
+    let err = f
+        .approve(&developer, &change.id)
+        .await
+        .expect_err("not an approver");
+    assert_eq!(err.code(), Code::NotFound);
+    // A member of the grant's approver group decides.
+    let (_, security) = f.h.login(ONCALL, &["security"]).await.expect("security");
+    let applied = f.approve(&security, &change.id).await.expect("approve");
+    assert_eq!(
+        applied.state,
+        i32::from(pb::policy_change::State::Applied),
+        "{}",
+        applied.decision_note
+    );
+    let doc = f
+        .get(K::RoleMapping, "payments-people")
+        .await
+        .expect("applied");
+    assert_eq!(
+        doc.updated_by, "bot:payments-terraform",
+        "written as its author"
+    );
+
+    // Tests: a writer writes its own, and can't delete anyone else's.
+    let test = r#"{"cases":[{"name":"guests never read payments","who":{"groups":["guests"]},"resource":"payments-orders-db","principal":{"db_role":"limen_read","database":"orders"},"expect":"deny"}]}"#;
+    let written = f
+        .put(bot, K::PolicyTest, "payments-guests", test, none())
+        .await
+        .expect("test");
+    assert_eq!(written.outcome, i32::from(pb::WriteOutcome::Applied));
+    f.put(&f.admin, K::PolicyTest, "payments-guarded", test, none())
+        .await
+        .expect("admin test");
+    // The admin's lives in default, outside the writer's namespace.
+    let theirs = f
+        .get(K::PolicyTest, "payments-guarded")
+        .await
+        .expect("theirs");
+    let err = f
+        .api()
+        .delete_document(forwarded(
+            pb::DeleteDocumentRequest {
+                kind: K::PolicyTest.into(),
+                name: "payments-guarded".into(),
+                etag: theirs.etag,
+                allow_missing: false,
+                options: None,
+                ownership: Some(pb::Ownership {
+                    source: "terraform/test".into(),
+                    ..pb::Ownership::default()
+                }),
+            },
+            Some(bot),
+        ))
+        .await
+        .expect_err("not its test");
+    assert_eq!(reason(&err), "OWNED_ELSEWHERE", "{err:?}");
 }

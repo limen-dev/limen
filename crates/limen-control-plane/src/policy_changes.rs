@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use limen_audit::{Context, EventKind};
-use limen_policy::tooling::{ChangeKind, Via};
+use limen_policy::tooling::{AccessChange, AccessDiff, ChangeKind, Subject, Via};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::config::WideningApproval;
 use crate::db::Db;
-use crate::policy_store::{Change, Hold, Key, Outcome};
+use crate::policy_store::{Change, Head, Hold, Key, Outcome, policy_without};
 use crate::state::AppState;
 
 /// The warning a dry run of a write that would be held carries.
@@ -130,6 +130,15 @@ pub enum Error {
 
 // ---- What needs approval ----------------------------------------------------
 
+/// Whether `c` gives someone standing access they didn't have: a group or a
+/// bot. A role that reaches more ("role `x` gains ...") is access nobody
+/// holds until a mapping or a bot gives it to someone, and that shows as
+/// their gain in the same diff.
+#[must_use]
+pub fn gives_standing(c: &AccessChange) -> bool {
+    c.change == ChangeKind::Gain && c.via == Via::Standing && !matches!(c.subject, Subject::Role(_))
+}
+
 /// The standing access a write gives that nobody had, one line each.
 #[must_use]
 pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
@@ -137,36 +146,68 @@ pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
         .access
         .changes
         .iter()
-        .filter(|c| c.change == ChangeKind::Gain && c.via == Via::Standing)
-        .map(limen_policy::tooling::AccessChange::text)
+        .filter(|c| gives_standing(c))
+        .map(AccessChange::text)
         .collect()
 }
 
-/// Whether `changes` can widen standing access in a way a grant doesn't
-/// already approve: anything but resources a writer completes from a
-/// profile, whose bounds are the approval (ADR-0042 §5).
-#[must_use]
-pub fn beyond_profiles(changes: &[Change]) -> bool {
-    changes.iter().any(|c| match c {
-        Change::Create { input, .. } | Change::Update { input, .. } => {
-            input.kind != "resource" || input.profile.is_none()
-        }
-        Change::Delete { key, .. } => key.0 != "resource",
-        Change::ReplaceSource { .. } => true,
-        Change::Transfer { .. } => false,
-    })
+fn gains_of(access: &AccessDiff) -> BTreeSet<String> {
+    access
+        .changes
+        .iter()
+        .filter(|c| gives_standing(c))
+        .map(AccessChange::text)
+        .collect()
 }
 
-/// The hold for a write by `author`: a bot's widening beyond its profiles
-/// always waits; a person's waits with `--widening-approval=all`.
-#[must_use]
-pub fn hold_for(bot: bool, mode: WideningApproval, changes: &[Change]) -> Option<Hold> {
-    let held = if bot {
-        beyond_profiles(changes)
-    } else {
-        mode == WideningApproval::All
+/// The standing access a bot writer's write gives that no person approved.
+///
+/// Access through roles and mappings people wrote is theirs to have
+/// approved: a resource from a profile that their roles reach is approved by
+/// the grant (ADR-0042 §5). So the write is weighed twice, once on the whole
+/// policy and once without the writer's own roles and mappings; what only
+/// the first shows came from the writer, and waits for a person. That holds
+/// whatever order the writer built things in: a role and mapping first and
+/// resources later is still the writer's doing.
+fn unapproved(
+    namespace: &str,
+    outcome: &Outcome,
+    before: &BTreeMap<Key, Head>,
+    after: &BTreeMap<Key, Head>,
+) -> bool {
+    let all = gains_of(&outcome.access);
+    if all.is_empty() {
+        return false;
+    }
+    let writers = |h: &Head| {
+        h.owner.namespace == namespace && matches!(h.kind.as_str(), "role" | "role_mapping")
     };
-    held.then(|| -> Hold { Arc::new(|outcome| !widening_gains(outcome).is_empty()) })
+    let (Ok(was), Ok(now)) = (
+        policy_without(before, writers),
+        policy_without(after, writers),
+    ) else {
+        // If it can't be weighed, a person weighs it.
+        return true;
+    };
+    let approved = gains_of(&was.access_diff(&now));
+    !all.is_subset(&approved)
+}
+
+/// The hold for a write: a bot writer's (in `namespace`) waits when it gives
+/// standing access no person approved; a person's waits for any, with
+/// `--widening-approval=all`.
+#[must_use]
+pub fn hold_for(writer: Option<&str>, mode: WideningApproval) -> Option<Hold> {
+    match writer {
+        Some(namespace) => {
+            let namespace = namespace.to_owned();
+            Some(Arc::new(move |outcome, before, after| {
+                unapproved(&namespace, outcome, before, after)
+            }))
+        }
+        None => (mode == WideningApproval::All)
+            .then(|| -> Hold { Arc::new(|outcome, _, _| !widening_gains(outcome).is_empty()) }),
+    }
 }
 
 /// The hold an approval writes with: it stops (and the change is superseded)
@@ -174,7 +215,7 @@ pub fn hold_for(bot: bool, mode: WideningApproval, changes: &[Change]) -> Option
 #[must_use]
 pub fn unreviewed(reviewed: &[String]) -> Hold {
     let reviewed: BTreeSet<String> = reviewed.iter().cloned().collect();
-    Arc::new(move |outcome| {
+    Arc::new(move |outcome, _, _| {
         widening_gains(outcome)
             .iter()
             .any(|g| !reviewed.contains(g))
