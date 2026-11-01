@@ -40,18 +40,24 @@ limen ls          # what you can reach
 ```
 
 ```text
-NAME             KIND        ACCESS AS                LABELS
-bastion-staging  ● ssh       ec2-user, ubuntu         env=staging tier=bastion
-orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
-web-staging-1    ● ssh       ec2-user, ubuntu         env=staging
-  3 resources · `limen show <name>` tells you how to connect to one
+NAME                   KIND        ACCESS AS                                          LABELS
+bastion-staging        ● ssh       ec2-user, ubuntu                                   env=staging tier=bastion
+billing-mysql-staging  ● mysql     limen_read, limen_readonly, limen_rw, limen_write  env=staging team=payments
+orders-mysql-staging   ● mysql     limen_read, limen_readonly, limen_rw, limen_write  env=staging team=payments
+orders-prod            ● postgres  limen_read, limen_write                            env=prod team=payments
+orders-staging         ● postgres  limen_read, limen_write                            env=staging team=payments
+warehouse-prod         ● redshift  limen_read, limen_readonly, limen_rw, limen_write  env=prod team=data
+web-staging-1          ● ssh       ec2-user, ubuntu                                   env=staging
+  7 resources · `limen show <name>` tells you how to connect to one
 ```
+
+That is what you see with the SSH and database stacks enabled; each other stack you enable adds its own resources. These are stand-ins: nothing here is a real bastion or database.
 
 ## 3. Use it
 
 ```sh
-limen ssh web-staging-1             # a recorded SSH session
-limen db connect orders-staging     # a local address for psql, with no password
+limen ssh ubuntu@web-staging-1      # a recorded SSH session
+limen db connect orders-staging --db-role limen_read   # a local address for psql, with no password
 limen explain orders-prod           # why you can or can't reach something
 ```
 

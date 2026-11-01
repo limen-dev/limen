@@ -1,0 +1,62 @@
+name: ci-quickstart
+
+# Runs every command of the published quickstart against the compose stack, so the
+# page cannot rot (#135). The same script runs on a laptop: demos/demo-quickstart.sh.
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "website/src/content/docs/docs/quickstart.md"
+      - "demos/demo-quickstart.sh"
+      - "deploy/compose/**"
+      - "scripts/install-cli.sh"
+      - "crates/limen-cli/**"
+      - ".github/workflows/ci-quickstart.yml"
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *paths
+  # A manual run ignores the path filter.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-quickstart-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quickstart:
+    name: Quickstart commands run
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain and protoc
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: rust protoc python
+
+      - name: Restore the build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run the quickstart
+        run: demos/demo-quickstart.sh
+
+      # What the stack logged, when a step failed.
+      - name: Stack logs
+        if: failure()
+        run: docker compose -p limen-quickstart logs --no-color --tail 200 || true
