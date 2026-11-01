@@ -287,12 +287,18 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
           <div class="eyebrow">What it connects to</div>
           <h2>One policy and one audit trail for all of it.</h2>
           <p class="sub">Each tile says where it stands. <span class="chip ok">built</span> means it works and is tested against a local copy of the software. <span class="chip warn">unverified</span> marks a cloud-specific path that is written but has not yet run against the real service.</p>
+          <div class="pfilter" role="group" aria-label="Filter integrations by what has been verified">
+            <button type="button" aria-pressed="true" data-f="all">All</button>
+            <button type="button" aria-pressed="false" data-f="verified">Tested, nothing unverified</button>
+            <button type="button" aria-pressed="false" data-f="unverified">Has an unverified cloud path</button>
+            <span class="pcount" id="pcount" aria-live="polite"></span>
+          </div>
           {groups.map((g) => (
             <div class="pgroup">
               <div class="pgroup-head"><h3>{g.title}</h3><p>{g.blurb}</p></div>
               <div class="protos">
                 {g.items.map((p) => (
-                  <a class="proto reveal" href={docs(p.href)}>
+                  <a class="proto reveal" href={docs(p.href)} data-status={p.warn ? 'unverified' : 'verified'}>
                     <span class="proto-top">
                       <span class="logos">
                         {p.logos.map((l) => <span class="logo" style={`--brand:${l.color}`} role="img" aria-label={l.label} set:html={l.svg} />)}
