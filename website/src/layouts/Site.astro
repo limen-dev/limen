@@ -3,6 +3,8 @@ import '@fontsource-variable/geist/index.css';
 import '@fontsource-variable/geist-mono/index.css';
 import '../styles/tokens.css';
 import '../styles/landing.css';
+import geistFont from '@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url';
+import geistMonoFont from '@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2?url';
 import { GH, ghPath, docsUrl, paletteFor } from '../data/site';
 
 interface Props {
@@ -27,6 +29,8 @@ const palette = paletteFor(base);
     {noindex && <meta name="robots" content="noindex" />}
     {!noindex && <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />}
     {!noindex && <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href} />}
+    <link rel="preload" as="font" type="font/woff2" href={geistFont} crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href={geistMonoFont} crossorigin />
     <meta name="theme-color" content="#05080f" />
     <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
     <meta property="og:title" content={title} />
