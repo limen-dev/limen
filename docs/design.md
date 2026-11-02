@@ -405,7 +405,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
 - **Deferred to Phase 15:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
 - **Deferred and not yet scheduled in §13:**
   - Port forwarding through Limen (from Phase 2).
-  - Phase 6: listed in the [databases guide](guides/databases.md#not-in-this-release).
+  - Phase 6: listed in the [databases guide](guides/databases.md#limits).
   - Phase 9: `mongodb+srv://` and sharded clusters, a MongoDB role bootstrap, replica-set presentation for transactions, SASLprep, per-collection policy; see the [MongoDB guide](guides/mongodb.md#operating-it).
   - Fuzzing the MySQL codec, the PostgreSQL frame splitter (promised in ADR-0012), and the BSON reader and wire framing with `cargo-fuzz`.
   - Grafana panels and typed columns for the `db.*` and `mongo.*` events. The audit table (`deploy/compose/config/trino/init.sql` and `deploy/terraform/modules/audit/glue.tf`) ignores fields it doesn't list, so events reach S3 and Datadog in full but aren't queryable as columns yet. Add the fields to both table definitions together, and verify the Athena DDL.
