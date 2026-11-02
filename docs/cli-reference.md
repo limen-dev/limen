@@ -1285,6 +1285,18 @@ What you may read and write: admin, or your writer grant
 Usage: limen manage whoami [OPTIONS]
 ```
 
+#### `limen manage schema`
+
+The JSON Schema of one kind's spec, as this server parses it
+
+```text
+Usage: limen manage schema [OPTIONS] <KIND>
+```
+
+Arguments:
+
+- `<KIND>`
+
 #### `limen manage ls`
 
 List documents of one kind (resource, role, resource_profile, ...)
@@ -1314,6 +1326,10 @@ Arguments:
 
 - `<KIND>`
 - `<NAME>`
+
+Options:
+
+- `--policy-version <POLICY_VERSION>`: Read it from this past policy version. A revision that is no longer current comes without its owner and etag (admins only).
 
 #### `limen manage put-resource`
 

@@ -1,0 +1,731 @@
+{
+  "$defs": {
+    "BrokerTarget": {
+      "additionalProperties": false,
+      "description": "`RabbitMQ` or `Kafka`.",
+      "properties": {
+        "aws": {
+          "default": false,
+          "description": "Amazon MQ or `MSK`.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "description": "`host:port` of one broker or bootstrap address.",
+          "type": "string"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sasl": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KafkaSasl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the worker logs in to a `Kafka` cluster. Absent: `aws-msk-iam`\nfor `aws: true`, else `plain`."
+        },
+        "tls": {
+          "description": "TLS toward the broker. On by default; `false` is for local brokers only.\nLeft out of the snapshot when default, so components from before\nPhase 11 (which reject unknown fields) still read it during an upgrade.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "DbAccess": {
+      "enum": [
+        "read",
+        "write"
+      ],
+      "type": "string"
+    },
+    "DbGrantSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/DbAccess",
+          "description": "`read` (SELECT) or `write` (SELECT, INSERT, UPDATE, DELETE), on every\ntable in the listed schemas (default `public` for PostgreSQL)."
+        },
+        "database": {
+          "type": "string"
+        },
+        "schemas": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "database",
+        "access"
+      ],
+      "type": "object"
+    },
+    "DbRoleSpec": {
+      "additionalProperties": false,
+      "description": "A database login role Limen creates and maintains (ADR-0015).",
+      "properties": {
+        "grants": {
+          "default": [],
+          "description": "Each entry is a database and the privileges the role gets in it.",
+          "items": {
+            "$ref": "#/$defs/DbGrantSpec"
+          },
+          "type": "array"
+        },
+        "role": {
+          "description": "Must start with `limen_`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "type": "object"
+    },
+    "DbTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "admin_password_file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "admin_secret_arn": {
+          "description": "Secrets Manager ARN holding the admin credentials used for role bootstrap.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "admin_user": {
+          "description": "Role bootstrap (ADR-0015, ADR-0033): a dedicated admin login and the\nfile on the worker that holds its password.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bootstrap": {
+          "description": "Roles to create and the grants they get (bootstrap).",
+          "items": {
+            "$ref": "#/$defs/DbRoleSpec"
+          },
+          "type": "array"
+        },
+        "cluster_identifier": {
+          "description": "Redshift (provisioned): the cluster to ask for temporary credentials\n(`GetClusterCredentials`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_database": {
+          "description": "The database to use when the user doesn't name one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "description": "`host:port`.",
+          "type": "string"
+        },
+        "iam_auth": {
+          "default": true,
+          "type": "boolean"
+        },
+        "insecure_dev": {
+          "default": false,
+          "description": "Talk to the target without TLS. Refused unless the worker was started\nwith `--allow-insecure-db-targets` (the local compose profile).",
+          "type": "boolean"
+        },
+        "normalize_literals": {
+          "default": false,
+          "description": "Replace literals in logged statement text with `?` (`audit.normalize_literals`).",
+          "type": "boolean"
+        },
+        "password_dir": {
+          "description": "Secret mode (ADR-0033): a directory on the worker with one file per DB\nrole, named for the role, holding its password. Used when `iam_auth` is false.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_ca_file": {
+          "description": "PEM bundle on the worker that signs the target's certificate (for\nexample the RDS bundle). Without it the system roots are used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_server_name": {
+          "description": "The name the target's certificate must carry, when it differs from the\nhost in `endpoint` (an IP address, a `PrivateLink` name, a tunnel).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workgroup": {
+          "description": "Redshift Serverless: the workgroup to ask for credentials.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "Delegated": {
+      "additionalProperties": false,
+      "description": "Marks a resource a bot writer completed from a profile. The worker refuses\nthe addresses `delegation::forbidden_address` names for it, and, when\nthese bounds are set, any address outside them.",
+      "properties": {
+        "cidrs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ports": {
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "description": "The profile it was built from.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "type": "object"
+    },
+    "KafkaSasl": {
+      "description": "The SASL mechanism the worker uses toward a Kafka cluster (ADR-0037).",
+      "oneOf": [
+        {
+          "enum": [
+            "plain",
+            "scram-sha-256",
+            "scram-sha-512"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "No SASL: an open listener, or mutual TLS alone.",
+          "type": "string"
+        },
+        {
+          "const": "aws-msk-iam",
+          "description": "Amazon MSK IAM (`AWS_MSK_IAM`).",
+          "type": "string"
+        }
+      ]
+    },
+    "KubeTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "cluster_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cluster_name"
+      ],
+      "type": "object"
+    },
+    "Labels": {
+      "additionalProperties": {
+        "pattern": "^[ -~]{0,255}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9._/-]{1,63}$"
+      },
+      "type": "object"
+    },
+    "MongoAuth": {
+      "description": "How the worker logs in to a MongoDB-compatible server (ADR-0035).",
+      "oneOf": [
+        {
+          "const": "scram",
+          "description": "`SCRAM-SHA-256` with the role's password from `credentials_dir`.",
+          "type": "string"
+        },
+        {
+          "const": "scram_sha1",
+          "description": "`SCRAM-SHA-1`, for servers without SHA-256 (`DocumentDB` 4.0).",
+          "type": "string"
+        },
+        {
+          "const": "x509",
+          "description": "`MONGODB-X509`: a client certificate and key per role in `credentials_dir`.",
+          "type": "string"
+        },
+        {
+          "const": "aws",
+          "description": "`MONGODB-AWS`: the worker's IAM identity (Atlas and `DocumentDB`).\nUnverified against the real services.",
+          "type": "string"
+        }
+      ]
+    },
+    "MongoFlavor": {
+      "description": "Where a MongoDB-compatible server runs, which decides how the worker will\nauthenticate (ADR-0018).",
+      "enum": [
+        "standard",
+        "atlas",
+        "documentdb"
+      ],
+      "type": "string"
+    },
+    "MongoTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/MongoAuth",
+          "default": "scram"
+        },
+        "auth_source": {
+          "description": "Where the users are defined (`authSource`). Default `admin`, or\n`$external` for `x509` and `aws`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentials_dir": {
+          "description": "A directory on the worker: `<role>` holds that role's password\n(`scram`, `scram_sha1`) and `<role>.pem` its client certificate and\nkey (`x509`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_database": {
+          "description": "The database to use when the user doesn't name one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "description": "`host:port`. A replica set member is enough: the worker follows the\nprimary the member names (no `mongodb+srv` resolution yet).",
+          "type": "string"
+        },
+        "flavor": {
+          "$ref": "#/$defs/MongoFlavor",
+          "default": "standard"
+        },
+        "full_commands": {
+          "default": false,
+          "description": "Keep the values of commands in the audit trail (`audit.full_commands`).\nThe default replaces every value in a filter, document, or pipeline\nwith `?` and keeps the shape.",
+          "type": "boolean"
+        },
+        "insecure_dev": {
+          "default": false,
+          "description": "Talk to the server without TLS. Only for `standard` servers, and refused\nunless the worker runs with `--allow-insecure-db-targets`.",
+          "type": "boolean"
+        },
+        "max_commands_per_second": {
+          "default": 500,
+          "description": "Most commands per second one session may send. Over it, commands wait\ntheir turn (a burst of 100 passes at once), so a client in a loop can't\nflood the audit trail. 0 is no limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls_ca_file": {
+          "description": "PEM bundle that signs the server's certificate. Required: for Atlas\nuse the system bundle, for `DocumentDB` the AWS global bundle.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_server_name": {
+          "description": "The name the server's certificate must carry, when it differs from\nthe host in `endpoint`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "RedisAudit": {
+      "additionalProperties": false,
+      "description": "What a `redis.command` event may contain (ADR-0034). Values are never\nlogged unless `log_values` is set, and credential commands never are.",
+      "properties": {
+        "log_values": {
+          "default": false,
+          "type": "boolean"
+        },
+        "redact_keys": {
+          "default": false,
+          "description": "Replace key names with a hash, so the trail holds no ids or emails.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "RedisTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "$ref": "#/$defs/RedisAudit",
+          "description": "Left out of the snapshot when default, so components from before\nPhase 7 (which reject unknown fields) still read it during an upgrade."
+        },
+        "cache_name": {
+          "description": "The `ElastiCache` replication group ID, which names the IAM token's host.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "iam_auth": {
+          "default": true,
+          "type": "boolean"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls": {
+          "description": "TLS toward the target. On by default; `false` is for local servers only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "SearchAudit": {
+      "additionalProperties": false,
+      "description": "What a `search.request` event may contain (ADR-0036). Request bodies are\nnever logged unless `log_bodies` is set, and never for security APIs.",
+      "properties": {
+        "log_bodies": {
+          "default": false,
+          "type": "boolean"
+        },
+        "log_query": {
+          "default": false,
+          "description": "Log query-string values, not only the parameter names.",
+          "type": "boolean"
+        },
+        "redact_ids": {
+          "default": false,
+          "description": "Replace document ids in the path with a hash.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SearchTarget": {
+      "additionalProperties": false,
+      "description": "`OpenSearch` or `Elasticsearch` over HTTP(S).",
+      "properties": {
+        "audit": {
+          "$ref": "#/$defs/SearchAudit",
+          "description": "Left out of the snapshot when default, so components from before\nPhase 10 (which reject unknown fields) still read it during an upgrade."
+        },
+        "aws": {
+          "default": false,
+          "description": "An AWS-managed domain (`OpenSearch` Service), reached with `SigV4`.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "description": "`host:port`.",
+          "type": "string"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverless": {
+          "description": "`OpenSearch` Serverless: `SigV4` service `aoss` instead of `es`. Unverified.",
+          "type": "boolean"
+        },
+        "tls": {
+          "description": "TLS toward the target. On by default; `false` is for local servers only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
+    "SshTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "`host:port`.",
+          "type": "string"
+        },
+        "host_key": {
+          "description": "Pinned host public key in OpenSSH format, if the target has no host certificate.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "type": "object"
+    },
+    "TcpTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "`host:port`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "type": "object"
+    },
+    "WebTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "`host:port` of the app, as the worker reaches it.",
+          "type": "string"
+        },
+        "health_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "The public host name users open, such as `grafana.apps.example.com`.",
+          "type": "string"
+        },
+        "identity_headers": {
+          "default": false,
+          "description": "Explicitly enable trusted identity headers for an app that consumes\nLimen's signed identity assertion. Disabled by default.",
+          "type": "boolean"
+        },
+        "insecure_dev": {
+          "default": false,
+          "description": "Permit plain HTTP only for a development target, and only when the\nworker is started with its insecure web-target opt-in.",
+          "type": "boolean"
+        },
+        "tls_ca_file": {
+          "description": "CA bundle on the worker used to verify the HTTPS upstream.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_server_name": {
+          "description": "TLS certificate name when it differs from the address host.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "host"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Exactly one of the protocol sections must be set.",
+  "properties": {
+    "delegated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Delegated"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Set by the control plane on a resource built from a profile (ADR-0042\n§5). Left out otherwise, so components from before Phase 14 still read\nevery other resource."
+    },
+    "elasticsearch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SearchTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kafka": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BrokerTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kubernetes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KubeTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mongodb": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MongoTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mysql": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DbTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opensearch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SearchTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "postgres": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DbTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rabbitmq": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BrokerTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "redis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RedisTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "redshift": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DbTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ssh": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SshTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tcp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TcpTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "web": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WebTarget"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "worker_selector": {
+      "$ref": "#/$defs/Labels",
+      "default": {},
+      "description": "Labels a worker must carry to serve this resource."
+    }
+  },
+  "title": "resource spec",
+  "type": "object"
+}

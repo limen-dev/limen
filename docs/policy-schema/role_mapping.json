@@ -1,0 +1,29 @@
+{
+  "$defs": {
+    "GroupMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "idp_group": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "idp_group",
+        "roles"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "items": {
+    "$ref": "#/$defs/GroupMapping"
+  },
+  "title": "role_mapping spec",
+  "type": "array"
+}

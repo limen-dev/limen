@@ -42,7 +42,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | Search the audit trail | `audit search` | [Audit search](audit-search.md) |
 | Review access, export evidence | `review …`, `admin evidence` | [Access reviews](access-reviews.md) |
 | Review discovered resources | `admin discovery` | [Discovery](discovery.md) |
-| Administer | `admin apply`, `policy`, `components`, `token create`, `lock`, `kill-session`, `revoke` | [Management API](management-api.md), [Runbooks](../runbooks/README.md) |
+| Administer | `admin apply`, `policy`, `components`, `token create`, `lock`, `kill-session`, `revoke`, `manage` (schema, get, changes) | [Management API](management-api.md), [Runbooks](../runbooks/README.md) |
 | Run connections in the background | `--detach`, `conns ls`, `conns stop` | [ADR-0039](../adr/0039-detached-connections.md) |
 
 Admin commands need the `limen:admin` role and are audited like everything else.

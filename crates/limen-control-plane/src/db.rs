@@ -143,6 +143,63 @@ pub async fn latest_policy<'e>(
     .transpose()
 }
 
+/// Whether policy version `version` exists.
+pub async fn policy_version_exists(db: &Db, version: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM policy_versions WHERE version = $1)")
+        .bind(version)
+        .fetch_one(db)
+        .await
+}
+
+/// One document as version `version` stored it, and the version that body
+/// first appeared in: the earliest version from which every version up to
+/// `version` holds the same body. `None` when `version` doesn't hold it.
+/// Reads a manifest or inline documents, whichever each version has.
+pub async fn policy_document_at(
+    db: &Db,
+    version: i64,
+    kind: &str,
+    name: &str,
+) -> Result<Option<(serde_json::Value, i64)>, sqlx::Error> {
+    let found: Option<(serde_json::Value, Option<String>)> = sqlx::query_as(
+        "SELECT d.body, m.document_digest
+         FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest
+         WHERE m.version = $1 AND d.body->>'kind' = $2 AND d.body->'metadata'->>'name' = $3
+         UNION ALL
+         SELECT e, NULL FROM policy_versions v, jsonb_array_elements(v.documents) e
+         WHERE v.version = $1 AND e->>'kind' = $2 AND e->'metadata'->>'name' = $3
+         LIMIT 1",
+    )
+    .bind(version)
+    .bind(kind)
+    .bind(name)
+    .fetch_optional(db)
+    .await?;
+    let Some((body, digest)) = found else {
+        return Ok(None);
+    };
+    // The body appeared in the first version after the newest earlier one
+    // without it. Manifests compare digests, inline documents bodies.
+    // Version numbers can skip (a rolled-back write), so it's the next
+    // version that exists, not the gap plus one.
+    let first: i64 = sqlx::query_scalar(
+        "SELECT min(w.version) FROM policy_versions w
+         WHERE w.version <= $1 AND w.version > coalesce((
+             SELECT v.version FROM policy_versions v
+             WHERE v.version < $1
+               AND NOT EXISTS (SELECT 1 FROM policy_manifest m
+                               WHERE m.version = v.version AND m.document_digest = $2)
+               AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v.documents) e WHERE e = $3)
+             ORDER BY v.version DESC LIMIT 1), 0)",
+    )
+    .bind(version)
+    .bind(digest)
+    .bind(&body)
+    .fetch_one(db)
+    .await?;
+    Ok(Some((body, first)))
+}
+
 /// Serializes policy writes across replicas until the transaction ends, so
 /// each write is computed against the version it replaces (#182).
 pub async fn lock_policy_writes(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {

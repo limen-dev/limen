@@ -6,6 +6,7 @@ pub mod delegation;
 pub mod discovery;
 pub mod duration;
 pub mod model;
+pub mod schema;
 pub mod testing;
 pub mod tooling;
 pub mod trace;

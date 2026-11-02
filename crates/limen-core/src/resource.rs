@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The protocol family of a resource. Determines which worker type serves it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     Ssh,

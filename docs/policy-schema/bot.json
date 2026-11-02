@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "BotJoin": {
+      "additionalProperties": false,
+      "properties": {
+        "issuer": {
+          "description": "The token issuer. Defaults per method; required for `oidc`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ClaimValue"
+          },
+          "description": "Every entry must match a claim exactly; a list means \"any of these\".",
+          "type": "object"
+        },
+        "method": {
+          "$ref": "#/$defs/JoinMethod"
+        }
+      },
+      "required": [
+        "method",
+        "match"
+      ],
+      "type": "object"
+    },
+    "ClaimValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "One value or a list of acceptable values for a claim."
+    },
+    "Duration": {
+      "description": "A positive duration: a whole number and a unit, s, m, h, or d, such as `90s` or `8h`.",
+      "pattern": "^\\s*[0-9]+[smhd]\\s*$",
+      "type": "string"
+    },
+    "JoinMethod": {
+      "description": "Where the bot's token comes from. Decides the default issuer and which\nclaims a rule must name.",
+      "oneOf": [
+        {
+          "enum": [
+            "github_actions",
+            "gitlab"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "oidc",
+          "description": "Any OIDC provider (`CircleCI`, `Buildkite`, Bitbucket, Argo, Tekton, and so on).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "join": {
+      "$ref": "#/$defs/BotJoin"
+    },
+    "max_ttl": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Credential lifetime: at most one hour, 15 minutes by default."
+    },
+    "roles": {
+      "description": "Roles the bot's logins get, exactly as for people.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "join",
+    "roles"
+  ],
+  "title": "bot spec",
+  "type": "object"
+}

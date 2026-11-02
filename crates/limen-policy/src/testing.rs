@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::{Metadata, Version};
 use crate::{AccessRequest, Decision, Policy, PolicyError, Principal, invalid, validate_name};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyTestDoc {
     pub version: Version,
@@ -18,13 +18,13 @@ pub struct PolicyTestDoc {
     pub spec: PolicyTestSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyTestSpec {
     pub cases: Vec<TestCase>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TestCase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +40,7 @@ pub struct TestCase {
 
 /// The identity a case speaks for, written by what policy sees, never by user
 /// name: cases don't depend on who is in the user table.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Who {
     /// IdP groups. The roles come from the role mappings.
@@ -54,7 +54,7 @@ pub struct Who {
     pub roles: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Expect {
     /// Standing access: the identity holds a role that grants it.
@@ -76,7 +76,7 @@ impl Expect {
 }
 
 /// Exactly one field (or `database` with its role) names the principal.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TestPrincipal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -191,7 +191,7 @@ pub(crate) fn validate_test(doc: &PolicyTestDoc) -> Result<(), PolicyError> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CaseResult {
     pub test: String,
     pub case: usize,
@@ -203,7 +203,7 @@ pub struct CaseResult {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Coverage {
     pub untested_resources: Vec<String>,
     pub untested_roles: Vec<String>,
@@ -213,7 +213,7 @@ pub struct Coverage {
     pub deny_cases: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub results: Vec<CaseResult>,
     pub coverage: Coverage,

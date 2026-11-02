@@ -37,6 +37,8 @@ A `Document` is a typed envelope (`kind`, `name`, `description`, `labels`, `owne
 
 The spec is deliberately *not* mirrored in protobuf. There are thirteen target types and every phase adds fields; a second schema would drift from the first, and the two would disagree about defaults (proto3 zero values against `serde` defaults), which is a bug class, not a style choice. Instead the Rust types are the single source: `GetSchema` returns a JSON Schema generated from them (`schemars`, assessed in ADR-0012 in stage 1), published with each release, and the Terraform provider generates its schema from that file. The server returns `spec_json` **normalized** (keys sorted, defaults omitted), so clients compare bytes and Terraform shows no phantom diffs.
 
+**As built.** `limen_policy::schema::spec_schema` derives each kind's schema with `schemars` from the parser's types, honoring their `serde` attributes (strict fields, defaults, tags); durations and labels have schemas written by hand to match their parsers. `GetSchema` serves it to any authenticated caller, and `docs/policy-schema/<kind>.json` holds the same files, checked by a test that fails when they are stale (`UPDATE_SCHEMA=1 cargo test -p limen-policy committed_schemas_are_current`). Rules the types can't express, such as exactly one protocol section per resource, are enforced by the parser only.
+
 ### 3. One owner per document
 Each document has an owner, `{channel, source, namespace}`.
 - `channel` is set by the control plane from how the write arrived: `git` (`limen admin apply`), `console`, or `api`.

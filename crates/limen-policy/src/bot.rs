@@ -21,7 +21,19 @@ pub const DEFAULT_BOT_TTL: Duration = Duration::from_mins(15);
 
 /// Where the bot's token comes from. Decides the default issuer and which
 /// claims a rule must name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum JoinMethod {
     GithubActions,
@@ -62,7 +74,7 @@ impl JoinMethod {
 }
 
 /// One value or a list of acceptable values for a claim.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ClaimValue {
     One(String),
@@ -79,7 +91,7 @@ impl ClaimValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BotDoc {
     pub version: Version,
@@ -87,7 +99,7 @@ pub struct BotDoc {
     pub spec: BotSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BotSpec {
     pub join: BotJoin,
@@ -98,7 +110,7 @@ pub struct BotSpec {
     pub max_ttl: Option<DurationStr>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BotJoin {
     pub method: JoinMethod,
