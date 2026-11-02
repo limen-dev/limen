@@ -27,7 +27,14 @@ pub enum ManageCommand {
         source: Option<String>,
     },
     /// Show one document, with its owner and etag.
-    Get { kind: String, name: String },
+    Get {
+        kind: String,
+        name: String,
+        /// Read it from this past policy version. A revision that is no
+        /// longer current comes without its owner and etag (admins only).
+        #[arg(long)]
+        policy_version: Option<i64>,
+    },
     /// Create a resource, or with --etag replace it. A writer completes a
     /// profile: --spec holds only the fields the profile lets it set.
     PutResource {
@@ -158,12 +165,16 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
             namespace,
             source,
         } => ls(&mut api, &kind, namespace, source).await?,
-        ManageCommand::Get { kind, name } => {
+        ManageCommand::Get {
+            kind,
+            name,
+            policy_version,
+        } => {
             let doc = api
                 .get_document(pb::GetDocumentRequest {
                     kind: kind_value(&kind)?,
                     name,
-                    policy_version: 0,
+                    policy_version: policy_version.unwrap_or(0),
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?

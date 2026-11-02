@@ -1315,6 +1315,10 @@ Arguments:
 - `<KIND>`
 - `<NAME>`
 
+Options:
+
+- `--policy-version <POLICY_VERSION>`: Read it from this past policy version. A revision that is no longer current comes without its owner and etag (admins only).
+
 #### `limen manage put-resource`
 
 Create a resource, or with --etag replace it. A writer completes a profile: --spec holds only the fields the profile lets it set

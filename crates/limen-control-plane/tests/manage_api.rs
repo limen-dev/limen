@@ -1488,3 +1488,124 @@ async fn a_bot_writer_writes_roles_and_its_widening_waits_for_a_person() {
         .expect_err("not its test");
     assert_eq!(reason(&err), "OWNED_ELSEWHERE", "{err:?}");
 }
+
+#[tokio::test]
+async fn past_policy_versions_read_back_as_they_were() {
+    use pb::DocumentKind as K;
+    let Some(f) = start().await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    let none = pb::WriteOptions::default;
+    let first = f
+        .create("payments-orders-db", &endpoint(ENDPOINT), &[], none())
+        .await
+        .expect("create");
+    let orders = first.documents[0].clone();
+    let ledger = f
+        .create("payments-ledger-db", &endpoint(ENDPOINT), &[], none())
+        .await
+        .expect("create")
+        .policy_version;
+    let mut changed = orders.clone();
+    changed.spec_json =
+        format!(r#"{{"postgres":{{"default_database":"orders","endpoint":"{ENDPOINT}"}}}}"#);
+    f.api()
+        .update_document(forwarded(
+            pb::UpdateDocumentRequest {
+                document: Some(changed),
+                etag: orders.etag.clone(),
+                options: None,
+                ownership: orders.ownership.clone(),
+            },
+            Some(&f.bot),
+        ))
+        .await
+        .expect("update");
+    let at = |who: &CertificateDer<'static>, name: &str, version: i64| {
+        let mut api = f.api();
+        let request = forwarded(
+            pb::GetDocumentRequest {
+                kind: K::Resource.into(),
+                name: name.into(),
+                policy_version: version,
+            },
+            Some(who),
+        );
+        async move {
+            api.get_document(request)
+                .await
+                .map(|r| r.into_inner().document.expect("document"))
+        }
+    };
+
+    // The revision a past version held, though it's been replaced since: as
+    // stored, from the version it first appeared in, without its owner.
+    let old = at(&f.admin, "payments-orders-db", ledger)
+        .await
+        .expect("an admin reads the old revision");
+    assert_eq!(old.policy_version, first.policy_version);
+    assert!(
+        !old.effective_spec_json.contains("default_database"),
+        "{old:?}"
+    );
+    assert!(old.effective_spec_json.contains("iam_auth"), "{old:?}");
+    assert_eq!(old.spec_json, old.effective_spec_json);
+    assert!(old.ownership.is_none() && old.etag.is_empty(), "{old:?}");
+    // A writer isn't shown a revision whose owner isn't known.
+    let hidden = at(&f.bot, "payments-orders-db", ledger)
+        .await
+        .expect_err("not to a writer");
+    assert_eq!(hidden.code(), Code::NotFound);
+
+    // A revision that is still current reads in full, to its writer too.
+    let current = at(&f.bot, "payments-ledger-db", ledger)
+        .await
+        .expect("the writer reads its current revision");
+    assert_eq!(current.policy_version, ledger);
+    assert_eq!(current.spec_json, endpoint(ENDPOINT));
+    assert_eq!(
+        current.ownership.expect("owner").namespace,
+        "payments",
+        "with its owner"
+    );
+    assert!(!current.etag.is_empty());
+
+    // Not yet there, no such version, a negative one.
+    let missing = at(&f.admin, "payments-ledger-db", first.policy_version)
+        .await
+        .expect_err("created later");
+    assert_eq!(missing.code(), Code::NotFound);
+    let future = at(&f.admin, "payments-ledger-db", ledger + 1000)
+        .await
+        .expect_err("no such version");
+    assert_eq!(future.code(), Code::NotFound);
+    assert!(future.message().contains("policy version"), "{future:?}");
+    let negative = at(&f.admin, "payments-ledger-db", -1)
+        .await
+        .expect_err("negative");
+    assert_eq!(negative.code(), Code::InvalidArgument);
+
+    // Versions written before #183 keep their documents inline; they read
+    // the same.
+    sqlx::query(
+        "UPDATE policy_versions v SET document_count = NULL, documents = (
+             SELECT coalesce(jsonb_agg(d.body ORDER BY m.position), '[]')
+             FROM policy_manifest m JOIN policy_documents d ON d.digest = m.document_digest
+             WHERE m.version = v.version)
+         WHERE v.version <= $1",
+    )
+    .bind(ledger)
+    .execute(&f.h.state.db)
+    .await
+    .expect("inline");
+    sqlx::query("DELETE FROM policy_manifest WHERE version <= $1")
+        .bind(ledger)
+        .execute(&f.h.state.db)
+        .await
+        .expect("no manifest");
+    let inline = at(&f.admin, "payments-orders-db", ledger)
+        .await
+        .expect("from inline documents");
+    assert_eq!(inline, old);
+}

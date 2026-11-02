@@ -231,7 +231,13 @@ message GetDocumentRequest {
   DocumentKind kind = 1;
   // The document's name.
   string name = 2;
-  // A past policy version to read from; 0 means the active one.
+  // A past policy version to read from; 0 means the active one. When the
+  // document's current revision was already there, it comes in full. An
+  // older revision comes as that version stored it, to admins only:
+  // `spec_json` equals `effective_spec_json`, `policy_version` is the version
+  // it first appeared in, and ownership, etag, profile, times, and
+  // `updated_by` are empty, since those are kept for current revisions only.
+  // A version that doesn't exist is NOT_FOUND.
   int64 policy_version = 3;
 }
 
