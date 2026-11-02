@@ -1,0 +1,608 @@
+{
+  "$defs": {
+    "DbGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "databases": {
+          "default": [
+            "*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "type": "object"
+    },
+    "Duration": {
+      "description": "A positive duration: a whole number and a unit, s, m, h, or d, such as `90s` or `8h`.",
+      "pattern": "^\\s*[0-9]+[smhd]\\s*$",
+      "type": "string"
+    },
+    "KafkaClass": {
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Fetch, offsets, consumer groups, metadata.",
+          "type": "string"
+        },
+        {
+          "const": "write",
+          "description": "Produce.",
+          "type": "string"
+        },
+        {
+          "const": "admin",
+          "description": "Create and delete topics.",
+          "type": "string"
+        }
+      ]
+    },
+    "KafkaGrant": {
+      "additionalProperties": false,
+      "description": "What a `Kafka` session may do (ADR-0037), in the shape of Kafka's ACLs.",
+      "properties": {
+        "classes": {
+          "description": "Empty means `read`.",
+          "items": {
+            "$ref": "#/$defs/KafkaClass"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "description": "Consumer group patterns (`*` only). Empty means any group.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "topics": {
+          "description": "Topic patterns (`*` only). Empty means any topic that is not internal.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "users": {
+          "description": "Broker users the session may act as (the credential selector).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "type": "object"
+    },
+    "KubeGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "type": "object"
+    },
+    "MongoGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "databases": {
+          "default": [
+            "*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny_commands": {
+          "description": "Command names (case-insensitive) a session on this grant may not run,\nfor example `drop`, `dropDatabase`, `createIndexes`. A session may do\nwhatever any one grant that covers its database permits.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "roles": {
+          "description": "Names the worker has a credential for (`credentials_dir` on the\nresource). With `x509` or `aws` they are labels for the identity the\nworker holds (ADR-0035).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "type": "object"
+    },
+    "MqClass": {
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Consume, get, acknowledge.",
+          "type": "string"
+        },
+        {
+          "const": "write",
+          "description": "Publish.",
+          "type": "string"
+        },
+        {
+          "const": "configure",
+          "description": "Declare, delete, bind, and purge exchanges and queues.",
+          "type": "string"
+        }
+      ]
+    },
+    "MqGrant": {
+      "additionalProperties": false,
+      "description": "What a `RabbitMQ` session may do (ADR-0037), in the shape of the broker's\nown permissions: configure, write, read.",
+      "properties": {
+        "classes": {
+          "description": "Empty means `read` and `write`.",
+          "items": {
+            "$ref": "#/$defs/MqClass"
+          },
+          "type": "array"
+        },
+        "names": {
+          "description": "Exchange and queue name patterns (`*` only). Empty means any name\nexcept the reserved `amq.*` ones.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "users": {
+          "description": "Broker users the session may act as (the credential selector).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vhosts": {
+          "description": "Virtual hosts (`*` patterns). Empty means only `/`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "type": "object"
+    },
+    "OpenGrant": {
+      "additionalProperties": false,
+      "description": "TCP services have no upstream identity to choose: the grant is access\nitself, written `tcp: {}`.",
+      "type": "object"
+    },
+    "RedisGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_commands": {
+          "description": "Commands from the built-in deny list this grant opens up again.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "databases": {
+          "description": "Logical databases the session may `SELECT`. Empty means only 0.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "deny_commands": {
+          "description": "Commands refused for this grant on top of the built-in deny list\n(ADR-0034). `NAME` or `NAME SUBCOMMAND`, case-insensitive.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "keys": {
+          "description": "Key patterns (`*` and `?`) the session may touch. Empty means any key.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "users": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "type": "object"
+    },
+    "RequestSpec": {
+      "additionalProperties": false,
+      "description": "Who may ask for a role, who may approve, and the limits (ADR-0025).",
+      "properties": {
+        "approvals_required": {
+          "description": "Different approvers needed. Default 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "approver_users": {
+          "description": "Individual approvers, by user name.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "approvers": {
+          "description": "IdP groups whose members may approve.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_duration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The longest grant. Default 2h (1h for break-glass)."
+        },
+        "require_reason": {
+          "description": "The request must carry a reason. Always on for break-glass.",
+          "type": "boolean"
+        },
+        "ticket_pattern": {
+          "description": "The reason must match this regular expression (a ticket id, say).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "who": {
+          "description": "IdP groups whose members may ask for the role.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "who"
+      ],
+      "type": "object"
+    },
+    "ResourceKind": {
+      "description": "The protocol family of a resource. Determines which worker type serves it.",
+      "enum": [
+        "ssh",
+        "postgres",
+        "mysql",
+        "redshift",
+        "redis",
+        "kubernetes",
+        "mongodb",
+        "opensearch",
+        "elasticsearch",
+        "rabbitmq",
+        "kafka",
+        "web",
+        "tcp"
+      ],
+      "type": "string"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "description": "Selects resources and, optionally, the principals that may be used on them.",
+      "properties": {
+        "db": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kafka": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KafkaGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kube": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KubeGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mongo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MongoGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mq": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MqGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RedisGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resources": {
+          "$ref": "#/$defs/Selector"
+        },
+        "search": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SearchGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SshGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tcp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "web": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WebGrant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "resources"
+      ],
+      "type": "object"
+    },
+    "SearchClass": {
+      "description": "What a search request does (ADR-0036). `Admin` is also what the worker\ncalls any API it doesn't recognise, so new APIs start closed.",
+      "enum": [
+        "read",
+        "write",
+        "admin"
+      ],
+      "type": "string"
+    },
+    "SearchGrant": {
+      "additionalProperties": false,
+      "description": "`OpenSearch` or `Elasticsearch` roles the session may act as, and what it\nmay do as them (ADR-0036).",
+      "properties": {
+        "classes": {
+          "description": "Request classes this grant allows. Empty means `read` only.",
+          "items": {
+            "$ref": "#/$defs/SearchClass"
+          },
+          "type": "array"
+        },
+        "indices": {
+          "description": "Index patterns (`*` only) a request may name. Empty means any index\nthat isn't hidden (a name starting with `.` needs a pattern that does).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "type": "object"
+    },
+    "Selector": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "items": {
+            "$ref": "#/$defs/ResourceKind"
+          },
+          "type": "array"
+        },
+        "labels": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Every key must match. Any value within a key may match. `\"*\"` as the only\nvalue means \"the key is present with any value\". The key `\"*\"` with\nvalue `[\"*\"]` matches every resource.",
+          "type": "object"
+        },
+        "names": {
+          "description": "Optional explicit resource names. Both the names and the labels must match.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "SshGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "logins": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "port_forwarding": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "logins"
+      ],
+      "type": "object"
+    },
+    "WebGrant": {
+      "additionalProperties": false,
+      "description": "Request-level restrictions for a browser web app. Empty lists leave that\ndimension unrestricted; deny rules still take precedence.",
+      "properties": {
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path_prefixes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allow": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Rule"
+      },
+      "type": "array"
+    },
+    "break_glass": {
+      "description": "A break-glass role is granted at once, with a reason, for at most an\nhour, and always reviewed (ADR-0025). Needs `request.who`.",
+      "type": "boolean"
+    },
+    "cert_ttl": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Lifetime of credentials issued at login. The shortest across a user's roles wins."
+    },
+    "deny": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Rule"
+      },
+      "type": "array"
+    },
+    "max_session_ttl": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "notify_observed": {
+      "description": "Tell people on sessions this role grants that an administrator may\nwatch them (ADR-0030). Watching is audited whether or not this is set.",
+      "type": "boolean"
+    },
+    "request": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RequestSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Makes the role *requestable*: people in `request.who` can ask for it\nfor a limited time (ADR-0025)."
+    }
+  },
+  "title": "role spec",
+  "type": "object"
+}

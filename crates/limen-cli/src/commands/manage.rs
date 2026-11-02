@@ -16,6 +16,8 @@ use crate::api;
 pub enum ManageCommand {
     /// What you may read and write: admin, or your writer grant.
     Whoami,
+    /// The JSON Schema of one kind's spec, as this server parses it.
+    Schema { kind: String },
     /// List documents of one kind (resource, role, resource_profile, ...).
     Ls {
         kind: String,
@@ -160,6 +162,16 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
     let mut api = ManagementServiceClient::new(channel);
     let out = match command {
         ManageCommand::Whoami => whoami(&mut api).await?,
+        ManageCommand::Schema { kind } => {
+            let schema = api
+                .get_schema(pb::GetSchemaRequest {
+                    kind: kind_value(&kind)?,
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner();
+            serde_json::from_str(&schema.json_schema).context("the server sent a bad schema")?
+        }
         ManageCommand::Ls {
             kind,
             namespace,

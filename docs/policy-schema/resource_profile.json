@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "Bound": {
+      "additionalProperties": false,
+      "description": "Where a settable endpoint may point. Empty for a text field.",
+      "properties": {
+        "cidrs": {
+          "description": "IP ranges, such as `10.20.0.0/16`, for IP literals and resolved names.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hosts": {
+          "description": "Exact host names, or `*.suffix` for any name under `suffix`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ports": {
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Labels": {
+      "additionalProperties": {
+        "pattern": "^[ -~]{0,255}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9._/-]{1,63}$"
+      },
+      "type": "object"
+    },
+    "ProfileLabels": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Labels a writer may set, and the values it may choose from.",
+          "type": "object"
+        },
+        "fixed": {
+          "$ref": "#/$defs/Labels",
+          "default": {},
+          "description": "Labels every resource from the profile carries. Writers can't change them."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "labels": {
+      "$ref": "#/$defs/ProfileLabels",
+      "default": {
+        "allowed": {},
+        "fixed": {}
+      }
+    },
+    "settable": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Bound"
+      },
+      "default": {},
+      "description": "The fields a writer may set, as `protocol.field`, with their bounds.",
+      "type": "object"
+    },
+    "template": {
+      "additionalProperties": true,
+      "description": "A partial resource `spec`: everything the writer can't change.",
+      "type": "object"
+    }
+  },
+  "required": [
+    "template"
+  ],
+  "title": "resource_profile spec",
+  "type": "object"
+}

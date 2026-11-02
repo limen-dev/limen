@@ -11,7 +11,7 @@ use crate::duration::DurationStr;
 /// One YAML document. The `kind` field selects the variant.
 // Documents are parsed rarely and held in maps, so variant size doesn't matter.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Document {
     Role(RoleDoc),
@@ -57,13 +57,13 @@ impl Document {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Version {
     #[serde(rename = "v1")]
     V1,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
     pub name: String,
@@ -73,7 +73,7 @@ pub struct Metadata {
     pub labels: Labels,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDoc {
     pub version: Version,
@@ -81,7 +81,7 @@ pub struct RoleDoc {
     pub spec: RoleSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleSpec {
     /// Lifetime of credentials issued at login. The shortest across a user's roles wins.
@@ -108,7 +108,7 @@ pub struct RoleSpec {
 }
 
 /// Who may ask for a role, who may approve, and the limits (ADR-0025).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestSpec {
     /// IdP groups whose members may ask for the role.
@@ -167,7 +167,7 @@ impl RequestSpec {
 }
 
 /// Selects resources and, optionally, the principals that may be used on them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub resources: Selector,
@@ -196,7 +196,7 @@ pub struct Rule {
     pub tcp: Option<OpenGrant>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Selector {
     pub kind: Vec<ResourceKind>,
@@ -210,7 +210,7 @@ pub struct Selector {
     pub names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SshGrant {
     pub logins: Vec<String>,
@@ -218,7 +218,7 @@ pub struct SshGrant {
     pub port_forwarding: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DbGrant {
     pub roles: Vec<String>,
@@ -226,13 +226,13 @@ pub struct DbGrant {
     pub databases: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KubeGrant {
     pub groups: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RedisGrant {
     pub users: Vec<String>,
@@ -251,7 +251,7 @@ pub struct RedisGrant {
     pub databases: Vec<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MongoGrant {
     /// Names the worker has a credential for (`credentials_dir` on the
@@ -269,7 +269,19 @@ pub struct MongoGrant {
 
 /// What a search request does (ADR-0036). `Admin` is also what the worker
 /// calls any API it doesn't recognise, so new APIs start closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchClass {
     Read,
@@ -290,7 +302,7 @@ impl SearchClass {
 
 /// `OpenSearch` or `Elasticsearch` roles the session may act as, and what it
 /// may do as them (ADR-0036).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchGrant {
     pub roles: Vec<String>,
@@ -317,7 +329,7 @@ impl SearchGrant {
 
 /// What a `RabbitMQ` session may do (ADR-0037), in the shape of the broker's
 /// own permissions: configure, write, read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MqGrant {
     /// Broker users the session may act as (the credential selector).
@@ -356,7 +368,7 @@ impl MqGrant {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MqClass {
     /// Consume, get, acknowledge.
@@ -368,7 +380,7 @@ pub enum MqClass {
 }
 
 /// What a `Kafka` session may do (ADR-0037), in the shape of Kafka's ACLs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KafkaGrant {
     /// Broker users the session may act as (the credential selector).
@@ -396,7 +408,7 @@ impl KafkaGrant {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum KafkaClass {
     /// Fetch, offsets, consumer groups, metadata.
@@ -409,13 +421,13 @@ pub enum KafkaClass {
 
 /// TCP services have no upstream identity to choose: the grant is access
 /// itself, written `tcp: {}`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenGrant {}
 
 /// Request-level restrictions for a browser web app. Empty lists leave that
 /// dimension unrestricted; deny rules still take precedence.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WebGrant {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -428,7 +440,7 @@ fn all() -> Vec<String> {
     vec!["*".to_owned()]
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoleMappingDoc {
     pub version: Version,
@@ -436,14 +448,14 @@ pub struct RoleMappingDoc {
     pub spec: Vec<GroupMapping>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GroupMapping {
     pub idp_group: String,
     pub roles: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceDoc {
     pub version: Version,
@@ -452,7 +464,7 @@ pub struct ResourceDoc {
 }
 
 /// Exactly one of the protocol sections must be set.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -494,7 +506,7 @@ pub struct ResourceSpec {
 /// Marks a resource a bot writer completed from a profile. The worker refuses
 /// the addresses `delegation::forbidden_address` names for it, and, when
 /// these bounds are set, any address outside them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Delegated {
     /// The profile it was built from.
@@ -580,7 +592,7 @@ impl ResourceSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SshTarget {
     /// `host:port`.
@@ -590,7 +602,7 @@ pub struct SshTarget {
     pub host_key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DbTarget {
     /// `host:port`.
@@ -643,7 +655,7 @@ pub struct DbTarget {
 }
 
 /// A database login role Limen creates and maintains (ADR-0015).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DbRoleSpec {
     /// Must start with `limen_`.
@@ -653,7 +665,7 @@ pub struct DbRoleSpec {
     pub grants: Vec<DbGrantSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DbGrantSpec {
     pub database: String,
@@ -664,14 +676,14 @@ pub struct DbGrantSpec {
     pub schemas: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DbAccess {
     Read,
     Write,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RedisTarget {
     pub endpoint: String,
@@ -708,7 +720,7 @@ fn is_false(b: &bool) -> bool {
 
 /// What a `redis.command` event may contain (ADR-0034). Values are never
 /// logged unless `log_values` is set, and credential commands never are.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RedisAudit {
     #[serde(default)]
@@ -718,7 +730,7 @@ pub struct RedisAudit {
     pub redact_keys: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KubeTarget {
     pub cluster_name: String,
@@ -726,7 +738,9 @@ pub struct KubeTarget {
 
 /// Where a MongoDB-compatible server runs, which decides how the worker will
 /// authenticate (ADR-0018).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MongoFlavor {
     #[default]
@@ -736,7 +750,9 @@ pub enum MongoFlavor {
 }
 
 /// How the worker logs in to a MongoDB-compatible server (ADR-0035).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MongoAuth {
     /// `SCRAM-SHA-256` with the role's password from `credentials_dir`.
@@ -751,7 +767,7 @@ pub enum MongoAuth {
     Aws,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MongoTarget {
     /// `host:port`. A replica set member is enough: the worker follows the
@@ -802,7 +818,7 @@ fn default_commands_per_second() -> u32 {
 }
 
 /// `OpenSearch` or `Elasticsearch` over HTTP(S).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchTarget {
     /// `host:port`.
@@ -826,7 +842,7 @@ pub struct SearchTarget {
 
 /// What a `search.request` event may contain (ADR-0036). Request bodies are
 /// never logged unless `log_bodies` is set, and never for security APIs.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchAudit {
     #[serde(default)]
@@ -846,7 +862,7 @@ impl SearchAudit {
 }
 
 /// `RabbitMQ` or `Kafka`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BrokerTarget {
     /// `host:port` of one broker or bootstrap address.
@@ -868,7 +884,7 @@ pub struct BrokerTarget {
 }
 
 /// The SASL mechanism the worker uses toward a Kafka cluster (ADR-0037).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum KafkaSasl {
     /// No SASL: an open listener, or mutual TLS alone.
@@ -882,7 +898,7 @@ pub enum KafkaSasl {
     AwsMskIam,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WebTarget {
     /// `host:port` of the app, as the worker reaches it.
@@ -907,7 +923,7 @@ pub struct WebTarget {
     pub identity_headers: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TcpTarget {
     /// `host:port`.

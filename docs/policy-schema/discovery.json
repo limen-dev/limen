@@ -1,0 +1,219 @@
+{
+  "$defs": {
+    "DiscoveryAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "role_arn": {
+          "description": "The describe-only role to assume (`arn:aws:iam::<account>:role/...`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role_arn"
+      ],
+      "type": "object"
+    },
+    "DiscoveryMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "$ref": "#/$defs/Labels",
+          "default": {},
+          "description": "Labels added to everything this matcher finds."
+        },
+        "labels_from_tags": {
+          "description": "Only these tags become labels (lower-cased keys).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name_template": {
+          "description": "The resource name. `{{ tag.Name }}`, `{{ id }}`, `{{ region }}`,\n`{{ account }}`. Default: `{{ tag.Name }}` for EC2, else `{{ id }}`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiscoverySsh"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "EC2 only: how to reach the instance."
+        },
+        "tags": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Every key must be present with one of the listed values (`\"*\"` means\nany value). Empty matches everything the source lists.",
+          "type": "object"
+        },
+        "type": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "DiscoverySsh": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/SshAddress",
+          "default": "private_ip",
+          "description": "Which address to dial. Default `private_ip`."
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Duration": {
+      "description": "A positive duration: a whole number and a unit, s, m, h, or d, such as `90s` or `8h`.",
+      "pattern": "^\\s*[0-9]+[smhd]\\s*$",
+      "type": "string"
+    },
+    "Labels": {
+      "additionalProperties": {
+        "pattern": "^[ -~]{0,255}$",
+        "type": "string"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9._/-]{1,63}$"
+      },
+      "type": "object"
+    },
+    "Provider": {
+      "enum": [
+        "aws"
+      ],
+      "type": "string"
+    },
+    "Source": {
+      "description": "What a matcher looks for. Each lands as its protocol did (ADR-0027).",
+      "oneOf": [
+        {
+          "const": "ec2",
+          "description": "EC2 instances, as SSH resources.",
+          "type": "string"
+        },
+        {
+          "const": "rds",
+          "description": "RDS and Aurora instances and clusters (PostgreSQL, MySQL).",
+          "type": "string"
+        },
+        {
+          "const": "redshift",
+          "description": "Redshift clusters.",
+          "type": "string"
+        },
+        {
+          "const": "elasticache",
+          "description": "ElastiCache replication groups and clusters (Redis, Valkey).",
+          "type": "string"
+        },
+        {
+          "const": "eks",
+          "description": "EKS clusters.",
+          "type": "string"
+        }
+      ]
+    },
+    "SshAddress": {
+      "enum": [
+        "private_ip",
+        "private_dns"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accounts": {
+      "description": "Accounts to assume a describe-only role in. Empty means the worker's own.",
+      "items": {
+        "$ref": "#/$defs/DiscoveryAccount"
+      },
+      "type": "array"
+    },
+    "auto_accept": {
+      "description": "Label keys whose *changes* on a known resource are accepted without an\nadmin. A new resource always waits.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "interval": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "match": {
+      "items": {
+        "$ref": "#/$defs/DiscoveryMatch"
+      },
+      "type": "array"
+    },
+    "provider": {
+      "$ref": "#/$defs/Provider"
+    },
+    "regions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "remove_after": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How long a stale resource is kept before it is removed."
+    },
+    "stale_after_cycles": {
+      "description": "Cycles a resource may go unseen before new sessions are refused.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "worker_selector": {
+      "$ref": "#/$defs/Labels",
+      "default": {},
+      "description": "Workers that run this document: every label must match the worker's.\nEmpty means every worker that has a discovery role configured."
+    }
+  },
+  "required": [
+    "provider",
+    "regions",
+    "match"
+  ],
+  "title": "discovery spec",
+  "type": "object"
+}
