@@ -2,12 +2,9 @@
 
 Policy is YAML, applied with `limen admin apply <files or dirs> [--dry-run] [--source-ref <git sha>]`. The document kinds are `role`, `role_mapping`, `resource`, `bot`, `discovery`, `policy_test`, and, for delegated writes (ADR-0042), `resource_profile` and `policy_writer`; plus the built-in roles below. Parsing is strict: unknown fields, wildcard logins, and `system:` Kubernetes groups are rejected. Every apply creates a numbered version and a `policy.change` audit event with a diff. Working examples are in [`examples/policy/`](../examples/policy/). The JSON Schema of each kind's `spec`, generated from the parser, is in [`policy-schema/`](policy-schema/) and served by the management API's `GetSchema`.
 
-**Every document has one owner** (ADR-0042). Files you apply replace their own *source* only: without `--source`, the `default` one, which holds everything applied before Phase 14. `limen admin apply --source team-a dir/` makes team-a's documents exactly `dir/` and leaves every other source's documents alone, and so does Terraform through the management API. Naming a document another source manages is refused, with the owner in the error.
+**Every document has one owner** (ADR-0042). An apply replaces only its own *source*: `default` unless you pass `--source`. `limen admin apply --source team-a dir/` makes team-a's documents exactly `dir/` and leaves other sources alone, as does Terraform through the management API. Naming a document another source manages is refused, with the owner in the error.
 
-The examples are grouped into `shared/` policy and `stacks/<kind>/` files.
-Applying the `examples/policy/` directory still recursively applies the full
-example policy. To apply one stack's examples, include the shared policy and
-that stack's directory, for example:
+Examples are grouped into `shared/` policy and `stacks/<kind>/` files. Applying `examples/policy/` applies the full set; to apply one stack, include the shared policy and that stack's directory:
 
 ```sh
 limen admin apply examples/policy/shared examples/policy/stacks/redis
@@ -49,7 +46,6 @@ spec:
       redis: { users: [read], keys: ["app:*"], deny_commands: [KEYS] }
     - resources: { kind: [opensearch, elasticsearch], labels: { env: [staging] } }
       search: { roles: [read], indices: ["app-*"] }
-    # Planned integrations (nothing serves them yet; see below):
     - resources: { kind: [mongodb], labels: { env: [staging] } }
       mongo: { roles: [read], databases: ["*"] }
     - resources: { kind: [rabbitmq], labels: { env: [staging] } }
@@ -94,7 +90,7 @@ spec:
   worker_selector: { pool: payments-vpc }   # which workers may serve it
 ```
 
-`worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, and the labels are signed into their certificate. An empty selector lets any worker serve the resource.
+`worker_selector` labels must match a worker's labels exactly. Workers get their labels from their join token at enrollment, signed into their certificate. An empty selector lets any worker serve the resource.
 
 Exactly one target must be set: `ssh` (`address`, and `host_key`: the target's public host key, which is required to connect, since the worker refuses unpinned hosts), `postgres` / `mysql` / `redshift` (`endpoint`, `iam_auth`, `region`, `default_database`, `password_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `normalize_literals`, `cluster_identifier`, `workgroup`, `admin_user`, `admin_password_file`, `bootstrap`; see [the databases guide](guides/databases.md)), `redis` (`endpoint`, `region`, `iam_auth`, `cache_name`, `tls`, and `audit` with `log_values` and `redact_keys`), `mongodb` (`endpoint`, `flavor: standard | atlas | documentdb`, `auth: scram | scram_sha1 | x509 | aws`, `default_database`, `auth_source`, `credentials_dir`, `tls_ca_file`, `tls_server_name`, `insecure_dev`, `full_commands`; see [the MongoDB guide](guides/mongodb.md)), `opensearch` / `elasticsearch` (`endpoint`, `region`, `aws`, `serverless`, `tls`, and `audit` with `log_bodies`, `log_query` and `redact_ids`), `kubernetes` (`cluster_name`), `web` (`address`, `host`, optional `tls_ca_file`, `tls_server_name`, `health_path`, `insecure_dev`, and `identity_headers`; see [the web apps guide](guides/web-apps.md)), or `tcp` (`address`; see [the TCP guide](guides/tcp.md)). Names and label keys use lowercase `[a-z0-9._-]`.
 
@@ -128,20 +124,11 @@ With several roles granting the same engine role, the session may do whatever an
 
 ### Web app grants
 
-`web: {}` allows access to the selected web resource. Optional `methods` and
-`path_prefixes` restrict each request; an empty list leaves that dimension
-unrestricted. Deny rules still take precedence. Browser sign-in uses OIDC, and
-Limen checks the current policy and user lock on every request.
-`limen web open <resource>` opens only an app already returned by the
-authorized resource list. See the [web apps guide](guides/web-apps.md).
+`web: {}` allows access to the selected web resource. Optional `methods` and `path_prefixes` restrict each request; an empty list leaves that dimension unrestricted, and deny rules win. Limen checks the current policy and user lock on every request. See the [web apps guide](guides/web-apps.md).
 
-### Planned integrations
+### Cloud variants and raw TCP
 
-Some kinds are accepted by policy before their integration is implemented, so
-policy can be reviewed ahead of time. Web apps and raw TCP are served today
-alongside SSH, SQL databases, Redis, Kubernetes, MongoDB, search, RabbitMQ, and
-Kafka. Stack-specific examples are organized under [`examples/policy/stacks/`](../examples/policy/stacks/), including deployment variants that remain unverified against their real cloud services.
-Aurora (like Redshift for the SQL side), DocumentDB, Atlas, Amazon MQ, and MSK are not separate kinds: they are the same kind with the fields above. Web and TCP grants are access itself (`web: {}` and `tcp: {}`); neither lets a client choose an upstream identity or destination.
+Aurora, DocumentDB, Atlas, Amazon MQ and MSK aren't separate kinds: they're the same kind with the fields above. Stack examples live under [`examples/policy/stacks/`](../examples/policy/stacks/); the cloud variants remain unverified against the real services (see Status). `tcp: {}` and `web: {}` are access itself: neither lets a client choose an upstream identity or destination.
 
 ## Requestable roles and break-glass
 

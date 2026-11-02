@@ -1,6 +1,6 @@
 # Access requests and break-glass
 
-Standing access means anyone whose group maps to a role can reach its resources at any hour. A *requestable* role is the opposite: it grants nothing until somebody asks, gives a reason, and an approver agrees. The access then exists for a limited time, and every session it allows points back to the request ([ADR-0025](../adr/0025-access-requests.md)).
+Standing access means anyone whose group maps to a role can reach its resources at any hour. A *requestable* role is the opposite: it grants nothing until someone asks, gives a reason, and an approver agrees. The access then lasts a limited time, and every session it allows points back to the request ([ADR-0025](../adr/0025-access-requests.md)).
 
 ## What you write
 
@@ -19,12 +19,12 @@ spec:
     approvers: [sre-leads]         # IdP groups that may approve ...
     approver_users: [alice@example.com]   # ... and/or named people
     approvals_required: 2          # different people; default 1
-    max_duration: 2h               # the longest grant; default 2h, at most 7d
+    max_duration: 2h               # longest grant; default 2h, at most 7d
     require_reason: true           # default true
     ticket_pattern: '^(INC|OPS)-[0-9]+'   # the reason must match; linear-time matcher
 ```
 
-`break_glass: true` makes a role an emergency one: it is granted at once, requires a reason, lasts at most an hour, and has no approvers.
+`break_glass: true` makes an emergency role: granted at once, reason required, at most an hour, no approvers.
 
 ```yaml
 kind: role
@@ -36,7 +36,7 @@ spec:
   request: { who: [developers] }
 ```
 
-`notify_observed: true` on any role tells people on its SSH sessions that an administrator may watch them ([watching a live session](watching-sessions.md)).
+`notify_observed: true` on any role tells people on its SSH sessions that an administrator may watch ([watching a live session](watching-sessions.md)).
 
 ## Asking, approving, using
 
@@ -51,26 +51,26 @@ limen request web-prod --break-glass --for 20m --reason "prod is down"
 limen explain orders-prod                  # why you can't reach it, and what to do
 ```
 
-You rarely need to run `limen explain` yourself: when a connection is refused, `limen` (and plain `ssh` through `limen config ssh --install`) prints the same answer under the error, with who approves the role and the command to ask, and `limen doctor <resource>` does too. When a grant ends, `explain` names it for a day, so you know to ask again.
+You rarely need `limen explain`: a refused connection prints the same answer under the error (plain `ssh` too, after `limen config ssh --install`), with who approves the role and the command to ask. `limen doctor <resource>` does too. After a grant ends, `explain` names it for a day.
 
-In the console, **Access** has the same: *Ask for access*, *My requests*, *Waiting for me* (the approvals queue), and for admins and auditors *Active grants* and *Everyone's requests*. Resources you can ask for have a **Request access** button on their page. An approver sees the reason, the duration, and **what the requester did on that resource in the past 30 days**.
+In the console, **Access** has *Ask for access*, *My requests*, *Waiting for me* (the approvals queue) and, for admins and auditors, *Active grants* and *Everyone's requests*. A resource you can ask for has a **Request access** button. Approvers see the reason, the duration and **what the requester did on that resource in the past 30 days**.
 
-The grant starts within about 20 seconds of approval: proxies and workers refresh their signed policy snapshot every 10 seconds each.
+A grant starts within about 20 seconds of approval: proxies and workers refresh their signed policy snapshot every 10 seconds.
 
-## The rules that make it safe
+## What keeps it safe
 
 - **Eligible is not granted.** Every enforcement point still denies; a request is a row, not a session.
-- **A grant is scoped to one resource** and to the role asked for. Approving "orders-prod for 30 minutes" cannot open other databases that the same role selects.
+- **A grant covers one resource** and the role asked for. Approving "orders-prod for 30 minutes" can't open other databases the same role selects.
 - **Approval happens only in a signed-in Limen session.** Webhooks and Slack notify and link to the console; they never carry an approval.
-- **Separation of duties.** You can never decide your own request (the code refuses, and so does a database trigger). Two approvals need two different people. Approver group membership is checked when they decide, using the groups the IdP reported at their latest login, not when the request was made. The requester must still be allowed to ask.
-- **A lock always wins** over a grant. So does a [deny override](access-reviews.md).
-- **Expiry is enforced three times:** the signed snapshot drops expired grants, the proxy and worker check the deadline on every decision, and a session started under a grant is capped to the grant's remaining time and ends when the grant is revoked.
-- **Revoking ends the sessions the grant allowed:** `limen admin revoke-grant <id> --reason ...` (admins). They end within about 10 seconds.
-- **Pending requests lapse** after 24 hours. One person can have 20 pending requests and make 100 in a day.
-- **Bots cannot request.** Give a bot the role in its `bot` document.
-- **People who only take part in requests can sign in with no roles**: if their groups appear in `request.who` or `request.approvers`, they log in holding nothing and reach nothing until a request is approved.
+- **Separation of duties.** You can never decide your own request (the code refuses, and so does a database trigger). Two approvals need two different people. Approver group membership is checked when they decide, using the groups from their latest login. The requester must still be allowed to ask.
+- **A lock always wins** over a grant, and so does a [deny override](access-reviews.md#deny-overrides).
+- **Expiry is enforced three times:** the signed snapshot drops expired grants, the proxy and worker check the deadline on every decision, and a session under a grant is capped to its remaining time and ends when the grant is revoked.
+- **Revoking ends the sessions the grant allowed**, within about 10 seconds: `limen admin revoke-grant <id> --reason ...` (admins).
+- **Pending requests lapse** after 24 hours. One person can have 20 pending and make 100 a day.
+- **Bots can't request.** Give a bot the role in its `bot` document.
+- **Requesters and approvers can sign in with no roles.** If their groups appear in `request.who` or `request.approvers`, they log in holding nothing until a request is approved.
 
-The reason is plain text: it is escaped everywhere it is shown and never reaches a shell or a query.
+The reason is plain text, escaped everywhere it is shown, and never reaches a shell or query.
 
 ## Notifications
 
@@ -81,16 +81,16 @@ Configure one or more on the control plane:
 | `--notify-webhook-url` and `--notify-webhook-secret` | a JSON POST signed with `X-Limen-Signature: sha256=HMAC(secret, timestamp "." body)` and `X-Limen-Timestamp` |
 | `--notify-slack-url` | a Slack incoming-webhook message |
 | `--break-glass-slack-url`, `--break-glass-webhook-url` | break-glass grants only, in addition to the above, flagged critical |
-| `--notify-include-details` | add the requester, role, resource, and reason (off by default) |
+| `--notify-include-details` | add requester, role, resource and reason (off by default) |
 
-By default a message names the request id and a console link only, so resource names do not leave Limen. URLs must be `https` (or `http` to localhost for development); redirects are not followed; delivery is best effort with retries and never blocks the request.
+By default a message carries only the request id and a console link, so resource names don't leave Limen. URLs must be `https` (or `http` to localhost for development). Redirects aren't followed. Delivery is best effort with retries and never blocks the request. **Unverified** against real Slack and webhook endpoints.
 
 ## Audit
 
-`access.request`, `access.approve`, `access.deny`, `access.grant`, `access.revoke`, `access.expire`, `access.cancel`, and `access.break_glass`. Every session started under a grant carries `request_ids` in `session.start`, and the session page links to the request.
+Events: `access.request`, `access.approve`, `access.deny`, `access.grant`, `access.revoke`, `access.expire`, `access.cancel`, `access.break_glass`. Every session started under a grant carries `request_ids` in `session.start`, and its page links to the request.
 
-Metrics: `limen_access_requests_total`, `limen_access_decisions_total`, `limen_access_grants_total`, `limen_notifications_total`. The console dashboards show requests by outcome, time to approve, and grants by role.
+Metrics: `limen_access_requests_total`, `limen_access_decisions_total`, `limen_access_grants_total`, `limen_notifications_total`. Console dashboards show requests by outcome, time to approve and grants by role.
 
 ## Not built
 
-Automatic approval from an open incident, the on-call rota, or a ticket's state (the approver interface is shaped to allow it); a signed Slack approval button.
+Automatic approval from an open incident, the on-call rota or a ticket's state (the approver interface is shaped to allow it), and a signed Slack approval button.

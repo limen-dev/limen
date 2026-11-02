@@ -13,10 +13,10 @@ In the console, a live SSH session's page has **Watch it**. You see the terminal
 - **Bounded:** five watchers per session, five sessions per watcher; the stream re-checks every few seconds that you are still signed in, not locked, and that the session is still running, and ends if not.
 - **Only what the recording holds.** The stream is the same bytes the worker records; masking rules that apply to recordings apply to it.
 
-## How it works (and what changed from the ADR)
+## How it works
 
-The ADR expected the proxy to copy the stream. It cannot: an SSH session is encrypted between the user's client and the worker, so a proxy only carries ciphertext. The **worker**, which holds the plaintext it records, publishes. It asks the control plane every two seconds which of its sessions are being watched, and while one is, sends the output in small chunks. Chunks go through the shared database, so the control plane replica serving your browser need not be the one the worker talked to, and the browser reads them as a server-sent stream from the same origin (the console's CSP is unchanged). A late watcher starts with the last few kilobytes so the screen has context.
+The **worker** publishes the stream, not the proxy: an SSH session is encrypted between the user's client and the worker, so a proxy only carries ciphertext (the ADR expected otherwise). Every two seconds the worker asks the control plane which of its sessions are watched, and while one is, sends output in small chunks through the shared database. Any control plane replica can therefore serve your browser, which reads the chunks as a same-origin server-sent stream (the console's CSP is unchanged). A late watcher starts with the last few kilobytes for context.
 
-Only SSH sessions can be watched. Other protocols have no terminal to render.
+Only SSH sessions can be watched; other protocols have no terminal to render.
 
 Metrics: `limen_session_watchers`.

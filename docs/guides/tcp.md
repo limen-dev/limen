@@ -1,28 +1,13 @@
 # Raw TCP access
 
-`limen tcp <resource>` opens a local loopback listener and forwards each
-accepted connection to the single address configured for that `tcp` resource.
-It does not expose a general-purpose proxy: the client cannot choose a target
-host or port.
+`limen tcp <resource>` opens a loopback listener and forwards each accepted connection to the one address configured on that `tcp` resource. It isn't a general-purpose proxy: the client can't choose a host or port.
 
 ```sh
 limen tcp cache-admin --listen 127.0.0.1:9000
 nc 127.0.0.1 9000
 ```
 
-Omit `--listen` to let the OS choose a free loopback port; the command prints
-the address to connect to. Press Ctrl-C to stop the listener. Each local
-connection is a separate Limen session authenticated with the current Limen
-login. The role needs an explicit `tcp: {}` grant for that resource, and deny
-rules and worker selectors still apply.
-
-The worker connects only to `address` in the resource definition. Configure a
-worker that can reach the target and apply a least-privilege network policy to
-its egress. Limen does not inspect or record raw payloads; it audits the actor,
-resource, session duration, byte counts, and end reason. Audit failure prevents
-new sessions, and lock, revoke, and session expiry end existing ones.
-
-Example policy:
+Without `--listen` the OS picks a free loopback port and the command prints it. Ctrl-C stops the listener. Each local connection is its own Limen session under your current login. The role needs an explicit `tcp: {}` grant for the resource; deny rules and worker selectors still apply.
 
 ```yaml
 kind: resource
@@ -41,21 +26,11 @@ spec:
       tcp: {}
 ```
 
-Raw TCP is an opaque stream, so Limen enforces access at connection setup, not
-per command or operation. Use a protocol-aware resource kind when operation-
-level policy is required.
+- The worker connects only to `address`. Run a worker that can reach the target and apply a least-privilege network policy to its egress.
+- Limen neither inspects nor records raw payloads. It audits the actor, resource, session duration, byte counts and end reason.
+- Audit failure prevents new sessions; lock, revoke and session expiry end existing ones.
+- A raw TCP stream is opaque, so access is enforced at connection setup, not per command. Use a protocol-aware resource kind when you need operation-level policy.
 
-To exercise TCP against the Compose echo fixture alongside browser SSO, web
-requests, WebSockets, and audit checks, run the combined Phase 12 demo:
+## Demo
 
-```sh
-demos/demo-phase12.sh
-```
-
-It builds the CLI and starts its own Compose project. By default it resets that
-project and its volumes before running; pass `--keep` to reuse the existing
-stack:
-
-```sh
-demos/demo-phase12.sh --keep
-```
+`demos/demo-phase12.sh` exercises TCP against the Compose echo fixture together with browser SSO, web requests, WebSockets and audit checks. It builds the CLI and starts its own Compose project, resetting the project and its volumes first; pass `--keep` to reuse the existing stack.
