@@ -705,7 +705,10 @@ message GetSchemaRequest {
 
 // Response for `GetSchema`.
 message GetSchemaResponse {
-  // JSON Schema (draft 2020-12) of the kind's `spec`.
+  // JSON Schema (draft 2020-12) of the kind's `spec`. A writer's half of a
+  // resource from a profile is only part of one and may lack fields this
+  // requires: validate `effective_spec_json`. The same files are in
+  // `docs/policy-schema/`.
   string json_schema = 1;
   // The server version the schema came from.
   string server_version = 2;
