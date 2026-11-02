@@ -118,16 +118,30 @@ function mermaidImages(source, srcPath) {
 }
 
 function describe(body) {
-  const para = body
+  // A paragraph may sit directly under a heading (no blank line): drop the heading lines first.
+  const paras = body
     .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .find((p) => p && !/^(#|[|>`<\-*]|\d+\.)/.test(p));
-  if (!para) return '';
-  const plain = para
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .map((p) => p.replace(/^(?:#.*\n)+/, '').trim())
+    .filter((p) => p && !/^(#|[|>`<\-*]|\d+\.)/.test(p));
+  // Pages that are only lists (some ADRs): use the first substantial bullet that is not metadata.
+  if (!paras.length) {
+    const bullet = body
+      .split('\n')
+      .filter((l) => /^\s*[-*]\s+/.test(l))
+      .map((l) => l.replace(/^\s*[-*]\s+/, ''))
+      .find((l) => l.length > 40 && !/^(Status|Date):/.test(l));
+    if (!bullet) return '';
+    paras.push(bullet);
+  }
+  const clean = (t) =>
+    t
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[`*_]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // A very short first paragraph says too little for a search result: add the next one.
+  let plain = clean(paras[0]);
+  for (let i = 1; plain.length < 90 && i < paras.length; i++) plain = `${plain} ${clean(paras[i])}`;
   return plain.length > 180 ? `${plain.slice(0, 177).replace(/\s+\S*$/, '')}…` : plain;
 }
 

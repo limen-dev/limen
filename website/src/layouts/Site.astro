@@ -25,6 +25,8 @@ const palette = paletteFor(base);
     <title>{title}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
+    {!noindex && <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href} />}
+    {!noindex && <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href} />}
     <meta name="theme-color" content="#05080f" />
     <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
     <meta property="og:title" content={title} />

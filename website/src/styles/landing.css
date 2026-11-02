@@ -371,3 +371,8 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .pgroup[hidden], .proto[hidden] { display: none; }
 .protos > .proto:only-child { max-width: 26rem; }
 @media (pointer: coarse) { .logo.sm { width: 2.75rem; height: 2.75rem; padding: 0.6rem; } .pfilter button { padding: 0.75rem 1rem; } }
+
+/* A wide mark (MySQL) is limited by the tile's width, so it gets less padding to be as legible as the square ones. */
+.logo.wide { padding: 0.25rem; }
+.logo.sm.wide { padding: 0.15rem; }
+@media (pointer: coarse) { .logo.sm.wide { padding: 0.2rem; } }
