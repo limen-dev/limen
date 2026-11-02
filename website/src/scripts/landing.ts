@@ -109,11 +109,19 @@ $('#copy')?.addEventListener('click', async (e) => {
       const u = 1 - t;
       return [u * u * p.sx + 2 * u * t * p.cx + t * t * tx, u * u * p.sy + 2 * u * t * p.cy + t * t * ty] as const;
     };
+    // Read the theme colours once, and again only when the theme changes: a style lookup on every
+    // frame forced a recalculation 60 times a second.
+    let hot = '#5eead4';
+    let cold = '#7f8ea9';
+    const readColors = () => {
+      const style = getComputedStyle(root);
+      hot = style.getPropertyValue('--lm-accent-strong').trim() || hot;
+      cold = style.getPropertyValue('--lm-muted').trim() || cold;
+    };
+    readColors();
+    new MutationObserver(readColors).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
     const frame = () => {
       if (visible) {
-        const style = getComputedStyle(root);
-        const hot = style.getPropertyValue('--lm-accent-strong').trim() || '#5eead4';
-        const cold = style.getPropertyValue('--lm-muted').trim() || '#7f8ea9';
         ctx.clearRect(0, 0, W, H);
         for (const p of ps) {
           p.t += p.v;
@@ -141,13 +149,18 @@ $('#copy')?.addEventListener('click', async (e) => {
 }
 
 /* ---------- the live session and its hash chain ---------- */
-function sha256(text: string): string {
-  const msg = new TextEncoder().encode(text);
+// The round constants depend on nothing, so derive them once.
+const SHA = (() => {
   const primes: number[] = [];
   for (let n = 2; primes.length < 64; n++) if (primes.every((p) => n % p)) primes.push(n);
   const frac = (x: number) => Math.floor((x - Math.floor(x)) * 2 ** 32) >>> 0;
-  const K = primes.map((p) => frac(Math.cbrt(p)));
-  const H = primes.slice(0, 8).map((p) => frac(Math.sqrt(p)));
+  return { K: primes.map((p) => frac(Math.cbrt(p))), H: primes.slice(0, 8).map((p) => frac(Math.sqrt(p))) };
+})();
+
+function sha256(text: string): string {
+  const msg = new TextEncoder().encode(text);
+  const { K } = SHA;
+  const H = [...SHA.H];
   const len = msg.length;
   const padded = new Uint8Array(((len + 9 + 63) >> 6) << 6);
   padded.set(msg);
