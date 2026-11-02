@@ -1,16 +1,10 @@
-This guide is for **teams that manage infrastructure with Terraform or OpenTofu** and want Limen to follow it. The provider is [`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen); it is a client of the [management API](management-api.md) ([ADR-0042](../adr/0042-management-api.md)). The provider is **not released yet**, and it has only run against a stand-in for the control plane, **not** against a real one.
+This guide is for **teams that manage infrastructure with Terraform or OpenTofu**. The provider, [`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen), is a client of the [management API](management-api.md) ([ADR-0042](../adr/0042-management-api.md)). **Unverified:** it isn't released, and it has only run against a stand-in for the control plane, not a real one.
 
 # Terraform and OpenTofu: register what you create
 
-A team's module creates a database and registers it in Limen **in the same apply, in its own state**, while the security team keeps roles and mappings in theirs. The pipeline logs in as a [bot](bots.md) with its CI token: no admin rights, and no secret stored anywhere.
+A team's module creates a database and registers it in Limen in the same apply, in its own state. The security team keeps roles and mappings in theirs. The pipeline logs in as a [bot](bots.md) with its CI token: no admin rights, no stored secret.
 
 ```hcl
-resource "aws_db_instance" "orders" {
-  identifier = "payments-orders"
-  engine     = "postgres"
-  # ...
-}
-
 resource "limen_resource" "orders_db" {
   name    = "payments-orders-db"
   profile = "payments-postgres" # written by a person: credentials, worker, IAM, and audit are fixed there
@@ -21,17 +15,7 @@ resource "limen_resource" "orders_db" {
 }
 ```
 
-`terraform plan` asks Limen to check the change and shows who would gain access next to the diff:
-
-```text
-Warning: Access changes: resource/payments-orders-db
-
-+ group:payments-eng gains standing access to payments-orders-db as db role app_rw (via role payments-read)
-```
-
-## 1. A person grants the pipeline what it may write
-
-In the policy repository, a `policy_writer` names the bot, the namespace, the names it may use, the kinds, and the resource profiles it may complete. Only people write it, so no pipeline can widen its own grant. The bot document it names is written by a person too.
+## 1. A person grants the bot what it may write
 
 ```yaml
 kind: policy_writer
@@ -45,7 +29,7 @@ spec:
   profiles: [payments-postgres]
 ```
 
-Delegated writes are described in the [policy reference](../policy.md#delegated-writes-resource_profile-and-policy_writer).
+Only people write `policy_writer`, `resource_profile`, and `bot` documents, so a pipeline can't widen its own grant ([policy reference](../policy.md#delegated-writes-resource_profile-and-policy_writer)).
 
 ## 2. Configure the provider
 
@@ -64,44 +48,16 @@ provider "limen" {
 }
 ```
 
-From a laptop, `limen login` is enough: without a `bot` block, the provider reuses the CLI's login, address, and CA. The Terraform Registry and OpenTofu Registry listings come with the first release.
+`method` is `github_actions`, `gitlab`, or `oidc` (with a `token_file`). The apply job needs `id-token: write` on GitHub. From a laptop, leave out `bot`: the provider reuses `limen login`.
 
-## 3. Run it from CI
-
-The apply job needs `permissions: id-token: write` on GitHub Actions. A pull request run never matches a bot ([ADR-0019](../adr/0019-machine-identities.md)), so plan pull requests offline with `LIMEN_OFFLINE=true` and plan online on the protected branch.
+A pull request run never matches a bot ([ADR-0019](../adr/0019-machine-identities.md)), so plan pull requests with `LIMEN_OFFLINE=true` and plan online on the protected branch.
 
 ## What it manages
 
-| Resource | What it is |
-|---|---|
-| `limen_resource` | Something people connect to: a database, SSH host, cluster, or web app. Bots complete a person's resource profile. |
-| `limen_role` | Allow and deny rules over resources. |
-| `limen_role_mapping` | Which IdP groups get which roles. |
-| `limen_policy_test` | Cases stating who must or must not reach what. |
+`limen_resource`, `limen_role`, `limen_role_mapping`, and `limen_policy_test` are resources. Every other kind is a data source. A `spec` has the shape of the YAML spec, so `yamldecode(file("role.yaml"))` works.
 
-Bots, resource profiles, policy writers, and discovery are **data sources only**. A `spec` has exactly the shape of the document's YAML spec, so `spec = yamldecode(file("role.yaml"))` works.
+- **Plans are dry runs.** Limen checks the grant, validation, profile bounds, and tests, and the plan shows who gains access. A refusal fails the plan.
+- **Nothing is overwritten.** Writes carry the etag. A document that Git, the console, or another state owns is never written; the error names the owner.
+- **Widening waits for a person.** A bot's change that adds standing access is [held for approval](management-api.md#changes-held-for-approval). Apply names the change, or waits for it with `approval_timeout`.
 
-## How it behaves
-
-- **Plans are dry runs.** Limen checks every change during plan (grant, validation, profile bounds, tests). A refusal fails the plan, not the apply.
-- **Nothing is overwritten.** A write carries the document's etag, so a change made between plan and apply is refused. A document that Git, the console, or another state owns is never written; the error names its owner.
-- **Approval when access widens.** A bot's change that widens standing access waits for a person ([changes held for approval](management-api.md#changes-held-for-approval)). The plan warns, and apply names the change or waits for it with `approval_timeout`.
-- **Safe retries.** Every write has a request id, so a retry never applies twice.
-
-## Authentication
-
-| Method | When |
-|---|---|
-| Bot, GitHub Actions | `bot = { method = "github_actions" }` |
-| Bot, GitLab CI | `bot = { method = "gitlab" }` |
-| Bot, any OIDC issuer | `bot = { method = "oidc", token_file = "..." }` |
-| Client certificate | `client_certificate = { cert_pem, key_pem }` |
-| The Limen CLI's login | Nothing to configure: run `limen login` first |
-
-Bot certificates last at most an hour, and the provider logs in again before one expires when the platform can mint another token.
-
-## Compatibility
-
-Provider 0.x needs a control plane that serves `limen.manage.v1`, and Terraform 1.5 or later, or OpenTofu 1.6 or later.
-
-The provider's own documentation has every attribute: [`limen-dev/terraform-provider-limen`](https://github.com/limen-dev/terraform-provider-limen).
+Provider 0.x needs Terraform 1.5 or OpenTofu 1.6, and a control plane that serves `limen.manage.v1`. Every attribute is in the provider's repository.
