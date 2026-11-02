@@ -65,6 +65,21 @@ fn validate(key: &str, value: &str) -> Result<(), LabelError> {
     Ok(())
 }
 
+/// A string map with the same key and value rules as [`validate`].
+impl schemars::JsonSchema for Labels {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Labels".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "propertyNames": { "pattern": "^[a-z0-9._/-]{1,63}$" },
+            "additionalProperties": { "type": "string", "pattern": "^[ -~]{0,255}$" }
+        })
+    }
+}
+
 impl TryFrom<BTreeMap<String, String>> for Labels {
     type Error = LabelError;
 

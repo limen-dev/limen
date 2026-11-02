@@ -46,6 +46,21 @@ impl fmt::Display for DurationStr {
     }
 }
 
+/// A string such as `90s`, `10m`, `8h`, or `1d`, as [`DurationStr::parse`] reads.
+impl schemars::JsonSchema for DurationStr {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Duration".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^\\s*[0-9]+[smhd]\\s*$",
+            "description": "A positive duration: a whole number and a unit, s, m, h, or d, such as `90s` or `8h`."
+        })
+    }
+}
+
 impl Serialize for DurationStr {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.collect_str(self)

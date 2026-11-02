@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "Approvers": {
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "default": [],
+          "description": "IdP groups.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "WriterKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "resource",
+            "policy_test"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "role",
+          "description": "Roles in its namespace. Never requestable or break-glass, and any\nstanding access they give waits for a person.",
+          "type": "string"
+        },
+        {
+          "const": "role_mapping",
+          "description": "Mappings of IdP groups to roles its namespace owns. Never to a\nbuilt-in role.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approvers": {
+      "$ref": "#/$defs/Approvers",
+      "default": {
+        "groups": []
+      },
+      "description": "Who may approve its held changes, besides admins."
+    },
+    "bot": {
+      "description": "The `bot` document whose logins may write. One grant per bot.",
+      "type": "string"
+    },
+    "kinds": {
+      "description": "What it may write. Never `bot`, `discovery`, `resource_profile`, or\n`policy_writer`: those are for people (ADR-0042 §4).",
+      "items": {
+        "$ref": "#/$defs/WriterKind"
+      },
+      "type": "array"
+    },
+    "max_documents": {
+      "default": 200,
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "names": {
+      "description": "Patterns every document name must match: exact, or `prefix*`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "namespace": {
+      "description": "The one namespace the writer owns documents in. Not `default`.",
+      "type": "string"
+    },
+    "profiles": {
+      "default": [],
+      "description": "The profiles its resources may complete.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "bot",
+    "namespace",
+    "names",
+    "kinds"
+  ],
+  "title": "policy_writer spec",
+  "type": "object"
+}

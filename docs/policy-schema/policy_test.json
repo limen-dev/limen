@@ -1,0 +1,171 @@
+{
+  "$defs": {
+    "Expect": {
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Standing access: the identity holds a role that grants it.",
+          "type": "string"
+        },
+        {
+          "const": "request",
+          "description": "Not granted, but the identity could ask for it (ADR-0025).",
+          "type": "string"
+        },
+        {
+          "const": "deny",
+          "description": "No way in at all, not even by asking.",
+          "type": "string"
+        }
+      ]
+    },
+    "TestCase": {
+      "additionalProperties": false,
+      "properties": {
+        "expect": {
+          "$ref": "#/$defs/Expect"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "principal": {
+          "$ref": "#/$defs/TestPrincipal"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "via_role": {
+          "description": "With `expect: allow`: the role the decision must go through.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "who": {
+          "$ref": "#/$defs/Who"
+        }
+      },
+      "required": [
+        "who",
+        "resource",
+        "principal",
+        "expect"
+      ],
+      "type": "object"
+    },
+    "TestPrincipal": {
+      "additionalProperties": false,
+      "description": "Exactly one field (or `database` with its role) names the principal.",
+      "properties": {
+        "database": {
+          "description": "With `db_role` or `mongo_role`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "db_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kafka_user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kube_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "login": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mongo_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mq_user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redis_user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "search_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tcp": {
+          "type": "boolean"
+        },
+        "web": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Who": {
+      "additionalProperties": false,
+      "description": "The identity a case speaks for, written by what policy sees, never by user\nname: cases don't depend on who is in the user table.",
+      "properties": {
+        "bot": {
+          "description": "A bot, by name. Its roles come from its document.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "groups": {
+          "description": "IdP groups. The roles come from the role mappings.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "roles": {
+          "description": "Roles held directly.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/TestCase"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "cases"
+  ],
+  "title": "policy_test spec",
+  "type": "object"
+}

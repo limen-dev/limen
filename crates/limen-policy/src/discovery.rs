@@ -24,7 +24,7 @@ pub const DEFAULT_STALE_AFTER_CYCLES: u32 = 3;
 /// How long a stale resource is kept before it is removed.
 pub const DEFAULT_REMOVE_AFTER: Duration = Duration::from_hours(24 * 7);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoveryDoc {
     pub version: Version,
@@ -32,7 +32,7 @@ pub struct DiscoveryDoc {
     pub spec: DiscoverySpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoverySpec {
     pub provider: Provider,
@@ -88,20 +88,20 @@ impl DiscoverySpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     Aws,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoveryAccount {
     /// The describe-only role to assume (`arn:aws:iam::<account>:role/...`).
     pub role_arn: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoveryMatch {
     #[serde(rename = "type")]
@@ -126,7 +126,19 @@ pub struct DiscoveryMatch {
 }
 
 /// What a matcher looks for. Each lands as its protocol did (ADR-0027).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     /// EC2 instances, as SSH resources.
@@ -166,7 +178,7 @@ impl Source {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoverySsh {
     #[serde(default = "ssh_port", skip_serializing_if = "is_ssh_port")]
@@ -184,7 +196,9 @@ fn is_ssh_port(p: &u16) -> bool {
     *p == 22
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SshAddress {
     #[default]
@@ -414,7 +428,7 @@ fn valid_role_arn(arn: &str) -> bool {
 /// One thing a worker saw in a cloud account. It reports facts, not names or
 /// labels: the control plane turns them into a [`Proposal`] with the
 /// `discovery` document, so a compromised worker can't choose either.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Found {
     pub source: Source,
     pub account: String,
@@ -445,7 +459,7 @@ impl Found {
 }
 
 /// What the control plane would make of a [`Found`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Proposal {
     pub name: String,
     pub labels: BTreeMap<String, String>,

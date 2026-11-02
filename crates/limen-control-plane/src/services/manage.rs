@@ -1705,11 +1705,17 @@ impl ManagementService for ManageService {
 
     async fn get_schema(
         &self,
-        _request: Request<pb::GetSchemaRequest>,
+        request: Request<pb::GetSchemaRequest>,
     ) -> Result<Response<pb::GetSchemaResponse>, Status> {
-        Err(Status::unimplemented(
-            "GetSchema comes in a later stage; docs/policy.md lists the settable fields",
-        ))
+        // Any authenticated caller: the schema is public (docs/policy-schema/).
+        who(&self.0, &request, &self.0.policy.current().policy)?;
+        let kind = required_kind(request.get_ref().kind)?;
+        let schema = limen_policy::schema::spec_schema(kind)
+            .ok_or_else(|| internal("generating a schema", format!("no schema for {kind}")))?;
+        Ok(Response::new(pb::GetSchemaResponse {
+            json_schema: schema.to_string(),
+            server_version: env!("CARGO_PKG_VERSION").to_owned(),
+        }))
     }
 }
 

@@ -72,7 +72,7 @@ pub fn settable(path: &str) -> Option<Settable> {
 // ---- Documents --------------------------------------------------------------
 
 /// The fixed half of a resource, which writers complete. People only.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceProfileDoc {
     pub version: Version,
@@ -80,7 +80,7 @@ pub struct ResourceProfileDoc {
     pub spec: ProfileSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileSpec {
     /// A partial resource `spec`: everything the writer can't change.
@@ -93,7 +93,7 @@ pub struct ProfileSpec {
 }
 
 /// Where a settable endpoint may point. Empty for a text field.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Bound {
     /// Exact host names, or `*.suffix` for any name under `suffix`.
@@ -106,7 +106,7 @@ pub struct Bound {
     pub ports: Vec<u16>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileLabels {
     /// Labels every resource from the profile carries. Writers can't change them.
@@ -118,7 +118,7 @@ pub struct ProfileLabels {
 }
 
 /// What one bot may write (ADR-0042 §4). People only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyWriterDoc {
     pub version: Version,
@@ -126,7 +126,7 @@ pub struct PolicyWriterDoc {
     pub spec: WriterSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriterSpec {
     /// The `bot` document whose logins may write. One grant per bot.
@@ -152,7 +152,9 @@ fn default_max_documents() -> u32 {
     DEFAULT_WRITER_DOCUMENTS
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WriterKind {
     Resource,
@@ -178,7 +180,7 @@ impl WriterKind {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Approvers {
     /// IdP groups.

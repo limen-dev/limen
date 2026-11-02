@@ -1609,3 +1609,41 @@ async fn past_policy_versions_read_back_as_they_were() {
         .expect("from inline documents");
     assert_eq!(inline, old);
 }
+
+#[tokio::test]
+async fn the_schema_is_served_for_every_kind() {
+    let Some(f) = start().await else {
+        eprintln!("SKIPPED: set LIMEN_TEST_DATABASE_URL");
+        return;
+    };
+    for kind in limen_policy::schema::KINDS {
+        let value = pb::DocumentKind::from_str_name(&format!(
+            "DOCUMENT_KIND_{}",
+            kind.to_ascii_uppercase()
+        ))
+        .expect(kind);
+        // A bot writer reads it too: the provider's plan does.
+        let got = f
+            .api()
+            .get_schema(forwarded(
+                pb::GetSchemaRequest { kind: value.into() },
+                Some(&f.bot),
+            ))
+            .await
+            .expect("schema")
+            .into_inner();
+        let served: serde_json::Value = serde_json::from_str(&got.json_schema).expect("json");
+        assert_eq!(
+            Some(served),
+            limen_policy::schema::spec_schema(kind),
+            "{kind}"
+        );
+        assert!(!got.server_version.is_empty());
+    }
+    let err = f
+        .api()
+        .get_schema(forwarded(pb::GetSchemaRequest { kind: 0 }, Some(&f.bot)))
+        .await
+        .expect_err("no kind");
+    assert_eq!(err.code(), Code::InvalidArgument);
+}
