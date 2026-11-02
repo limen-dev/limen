@@ -26,7 +26,7 @@ import gitlab from '../assets/logos/gitlab.svg?raw';
 
 // Brand logos are Simple Icons (CC0). The icons without a brand are drawn as strokes.
 type Logo = { svg: string; color: string; label: string };
-const brand = (svg: string, color: string, label: string): Logo => ({ svg: svg.replace(/<title>.*?<\/title>/, ''), color, label });
+const brand = (svg: string, color: string, label: string): Logo => ({ svg: svg.replace(/<title>.*?<\/title>/, '').replace('<svg role="img"', '<svg aria-hidden="true" focusable="false"'), color, label });
 const line = (d: string, label: string): Logo => ({ svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`, color: 'var(--lm-accent-strong)', label });
 const terminal = line('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/>', 'Terminal');
 const globe = line('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>', 'Web');
@@ -170,7 +170,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                 </div>
                 <div class="status ok" id="chain-status"><span class="dot"></span><span id="chain-text">chain intact</span></div>
               </div>
-              <ol class="blocks" id="blocks"></ol>
+              <ol class="blocks" id="blocks" tabindex="0" aria-label="Audit events"></ol>
               <p class="ledger-msg" id="ledger-msg" aria-live="polite"></p>
               <div class="ledger-actions">
                 <button class="btn small danger" id="tamper" type="button" disabled>✎ Tamper with an event</button>
