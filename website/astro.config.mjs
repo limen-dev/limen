@@ -80,6 +80,7 @@ export default defineConfig({
           items: [
             { slug: 'docs/guides/bots' },
             { slug: 'docs/guides/management-api' },
+            { slug: 'docs/guides/terraform' },
             { slug: 'docs/guides/access-requests' },
             { slug: 'docs/guides/access-reviews' },
             { slug: 'docs/guides/discovery' },

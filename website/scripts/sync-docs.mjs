@@ -26,6 +26,7 @@ const SHORT = {
   'guides/tcp': 'Raw TCP',
   'guides/bots': 'CI bots',
   'guides/management-api': 'Management API',
+  'guides/terraform': 'Terraform and OpenTofu',
   'guides/policy-tooling': 'Policy tests and explain',
   'runbooks/audit-verify': 'Verify the audit chain',
   'architecture/components': 'Server programs',

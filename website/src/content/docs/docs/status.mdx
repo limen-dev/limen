@@ -30,7 +30,8 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 | Search across audit and recordings | <span class="chip ok">built</span> | link to Athena history |
 | Resource discovery | <span class="chip ok">built</span> | against real AWS (EC2, RDS, Redshift, ElastiCache, EKS) |
 | Policy tests, who-can, diff, explain | <span class="chip ok">built</span> | |
-| One management API: policy from the CLI, the console, or Terraform | <span class="chip plan">planned</span> | Phase 14 (ADR-0042), in progress |
+| One management API: policy from the CLI, the console, or Terraform | <span class="chip ok">built</span> | Phase 14 (ADR-0042), stages 1 and 2; bot logins against a stand-in CI issuer only |
+| Terraform and OpenTofu provider | <span class="chip warn">unverified</span> | built and tested against a stand-in for the control plane, [not yet released](../guides/terraform/) |
 | Access reviews, signed evidence packs | <span class="chip ok">built</span> | PDF evidence pack not built |
 | Live session watch | <span class="chip ok">built</span> for SSH | other protocols |
 
