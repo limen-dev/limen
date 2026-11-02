@@ -48,6 +48,8 @@ export default defineConfig({
       components: { Footer: './src/components/DocsFooter.astro' },
       // Our own 404 page (src/pages/404.astro) replaces Starlight's.
       disable404Route: true,
+      // Wrap long code lines instead of scrolling them sideways.
+      expressiveCode: { defaultProps: { wrap: true } },
       lastUpdated: false,
       pagination: true,
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },

@@ -19,7 +19,7 @@
   --sl-color-gray-3: var(--lm-muted);
   --sl-color-gray-5: var(--lm-line-strong);
   --sl-color-gray-6: var(--lm-surface);
-  --sl-content-width: 46rem;
+  --sl-content-width: 52rem;
 }
 :root[data-theme='dark'], :root:not([data-theme]) {
   --sl-color-accent-low: rgb(45 212 191 / 0.14);
@@ -157,4 +157,11 @@ header.header {
 
 @media (prefers-reduced-motion: no-preference) {
   .sidebar-content a, .sl-markdown-content a { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s; }
+}
+
+/* Starlight centres the text in the space left over, which pushes "On this page" towards the middle.
+   Give the right column a fixed width at the edge, like the left sidebar, and let the text fill the rest. */
+@media (min-width: 72rem) {
+  .right-sidebar-container { width: var(--sl-sidebar-width); }
+  [data-has-sidebar][data-has-toc] .main-pane { width: calc(100% - var(--sl-sidebar-width)); --sl-content-margin-inline: auto; }
 }
