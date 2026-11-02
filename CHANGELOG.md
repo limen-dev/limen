@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.0-rc.2](https://github.com/limen-dev/limen/compare/v0.1.0-rc.1...v0.1.0-rc.2) (2026-11-02)
+
+
+### Features
+
+* **control-plane:** GetDocument reads past policy versions ([#225](https://github.com/limen-dev/limen/issues/225)) ([a2de176](https://github.com/limen-dev/limen/commit/a2de176a5d8535ed83d038800f4325e2226b47bf))
+* **control-plane:** GetSchema serves each kind's JSON Schema ([#228](https://github.com/limen-dev/limen/issues/228)) ([5fb0719](https://github.com/limen-dev/limen/commit/5fb07197220e89ca0af62fa43b287c72924edbcd))
+* **control-plane:** store policy documents once by digest, and refresh by digest ([#208](https://github.com/limen-dev/limen/issues/208)) ([1722325](https://github.com/limen-dev/limen/commit/172232546752bd1f8b5ca6c1897586f3d0069dec))
+* limen doctor, plain ssh/scp/rsync/git via ssh_config, one kubeconfig, denial hints ([#127](https://github.com/limen-dev/limen/issues/127)) ([3febf66](https://github.com/limen-dev/limen/commit/3febf66148ead9250cd081a9fc5109ee377d475c))
+* **website:** filter integrations by verification, fill short rows ([#223](https://github.com/limen-dev/limen/issues/223)) ([e97329d](https://github.com/limen-dev/limen/commit/e97329d0ae30a7711273359f02e5becc3363f4c1))
+* **website:** integration logos, grouped by category ([#217](https://github.com/limen-dev/limen/issues/217)) ([8b450a3](https://github.com/limen-dev/limen/commit/8b450a3e90d5288067791b7e3fbc93bfd4fab2a1))
+* **website:** link the logo strip, bolder hero stats, scroll hint on code, shorter sidebar labels ([#222](https://github.com/limen-dev/limen/issues/222)) ([6383996](https://github.com/limen-dev/limen/commit/63839965d6af16c8079cb07aecdfbb9ea7b3e276))
+
+
+### Bug Fixes
+
+* **console:** wrap long values on phones: bots, policy and session detail ([#145](https://github.com/limen-dev/limen/issues/145)) ([#210](https://github.com/limen-dev/limen/issues/210)) ([3f4f604](https://github.com/limen-dev/limen/commit/3f4f604269cde1533d5dc651d8f986aac8ae5757))
+* **deps:** bump pageant to 0.2.5 (GHSA-662x-8wvj-2276) ([#214](https://github.com/limen-dev/limen/issues/214)) ([e9d1614](https://github.com/limen-dev/limen/commit/e9d16143c586d5df1763d8498f309a1a7d3234d8))
+* **site:** pass the cross-browser matrix on a Linux runner ([#211](https://github.com/limen-dev/limen/issues/211)) ([535362e](https://github.com/limen-dev/limen/commit/535362e11473ea38924877f464f353c15ef2f104))
+* **website:** accessible names for the logo icons and the scrollable audit list ([#224](https://github.com/limen-dev/limen/issues/224)) ([45ed888](https://github.com/limen-dev/limen/commit/45ed8881382dddedb28615ceaa4fb3df8329cb3f))
+* **website:** dark logo tiles in dark theme ([#220](https://github.com/limen-dev/limen/issues/220)) ([0de5036](https://github.com/limen-dev/limen/commit/0de5036a9b2e1dead9ed5da2ea1dd9486df63971))
+* **website:** robots.txt, canonical URL, real descriptions on every page, legible MySQL logo ([#226](https://github.com/limen-dev/limen/issues/226)) ([0c3c864](https://github.com/limen-dev/limen/commit/0c3c86482f85bf9c6602d926c061a0b50d54f096))
+
+
+### Performance Improvements
+
+* **website:** preload the fonts and stop per-frame style reads on the homepage ([#227](https://github.com/limen-dev/limen/issues/227)) ([75d4da5](https://github.com/limen-dev/limen/commit/75d4da5b1978b9d8c439572596326ab40d25eed8))
+
 ## 0.1.0-rc.1 (2026-11-01)
 
 
