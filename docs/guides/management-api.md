@@ -42,6 +42,7 @@ Each Terraform resource is one document: `limen_resource`, `limen_role`, `limen_
 | import | `GetDocument`, then keep its `ownership` | A document another owner manages can't be written; `TransferDocument` moves one between a writer's own sources. |
 
 - **Drift:** compare `spec_json` and `labels` with what you sent. They are exactly what you wrote (`spec_json` has its keys sorted). The profile's fixed half is in `effective_spec_json` and `effective_labels`, so it never shows as drift.
+- **Past versions:** `GetDocument { policy_version }` reads a document as an earlier policy version had it (`limen manage get --policy-version N`). If its current revision was already there, it comes in full. An older revision comes as that version stored it, to admins only: the effective document, the version it first appeared in, and no owner or etag, since those are kept for current revisions only.
 - **Retries:** send a fresh UUID as `request_id` per operation, and the same one when retrying it. A repeat returns the first result; the same id with a different body is `REQUEST_ID_REUSED`.
 - **`ownership.source`** names your writer, such as `terraform/<workspace>`. Two states in one namespace should use different sources; a write to a document another source manages is `OWNED_ELSEWHERE`.
 - **Plans in pull requests can't log in:** a pull request run never matches a bot (ADR-0019). Plan online in the protected-branch run, and validate offline in pull requests.

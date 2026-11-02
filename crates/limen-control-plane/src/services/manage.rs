@@ -320,6 +320,31 @@ fn document(head: &Head, effective: &BTreeMap<Key, Value>) -> pb::Document {
     }
 }
 
+/// A revision that is no longer current, as a past version stored it: the
+/// effective document, with no owner, etag, or times.
+fn past_document(kind: &str, name: &str, body: &Value, first_version: i64) -> pb::Document {
+    let spec = body
+        .get("spec")
+        .map_or_else(|| "{}".to_owned(), Value::to_string);
+    let labels = labels_of(Some(body));
+    pb::Document {
+        kind: kind_value(kind),
+        name: name.to_owned(),
+        description: body
+            .get("metadata")
+            .and_then(|m| m.get("description"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        labels: labels.clone(),
+        spec_json: spec.clone(),
+        effective_spec_json: spec,
+        policy_version: first_version,
+        effective_labels: labels,
+        ..pb::Document::default()
+    }
+}
+
 /// Whether `who` may see `head`. Admins see everything; a writer sees its
 /// namespace and the profiles it may complete.
 fn readable(who: &Who, head: &Head) -> bool {
@@ -1223,20 +1248,59 @@ impl ManagementService for ManageService {
         let who = who(&self.0, &request, &current.policy)?;
         writers_and_admins(&who)?;
         let req = request.into_inner();
-        if req.policy_version != 0 && req.policy_version != current.version {
-            return Err(Status::unimplemented(
-                "reading a past policy version comes in a later stage",
-            ));
-        }
         let kind = required_kind(req.kind)?;
         // A document the caller may not see reads exactly like a missing one.
         let missing = || Status::not_found(format!("{kind}/{} doesn't exist", req.name));
-        let head = heads
-            .get(&(kind.to_owned(), req.name.clone()))
-            .filter(|h| readable(&who, h))
+        let key = (kind.to_owned(), req.name.clone());
+        let head = heads.get(&key).filter(|h| readable(&who, h));
+        if req.policy_version == 0 || req.policy_version == current.version {
+            let head = head.ok_or_else(missing)?;
+            return Ok(Response::new(pb::GetDocumentResponse {
+                document: Some(document(head, &effective_index(&current.policy))),
+            }));
+        }
+        let version = req.policy_version;
+        if version < 0 {
+            return Err(Status::invalid_argument("policy_version can't be negative"));
+        }
+        let no_version = || Status::not_found(format!("policy version {version} doesn't exist"));
+        if version > current.version {
+            return Err(no_version());
+        }
+        let db = &self.0.db;
+        if !crate::db::policy_version_exists(db, version)
+            .await
+            .map_err(|e| internal("reading a policy version", e))?
+        {
+            return Err(no_version());
+        }
+        let (body, first) = crate::db::policy_document_at(db, version, kind, &req.name)
+            .await
+            .map_err(|e| internal("reading a policy version", e))?
             .ok_or_else(missing)?;
+        // The current revision, as enforcement has it, to tell whether the
+        // past version held it (a head reconciled after a restore keeps an
+        // older policy_version, so that alone doesn't say).
+        let now = current
+            .policy
+            .documents()
+            .into_iter()
+            .find(|d| d.kind() == kind && d.name() == req.name)
+            .and_then(|d| serde_json::to_value(&d).ok());
+        let document = match head {
+            // The current revision was already there: it has its owner,
+            // etag, and history.
+            Some(head) if head.policy_version <= version && now.as_ref() == Some(&body) => {
+                document(head, &BTreeMap::from([(key, body)]))
+            }
+            // Owners, etags, and history are kept for current revisions only,
+            // so an older one comes as the version stored it, to admins only:
+            // a writer can't be shown whose namespace it was in.
+            _ if matches!(who, Who::Admin { .. }) => past_document(kind, &req.name, &body, first),
+            _ => return Err(missing()),
+        };
         Ok(Response::new(pb::GetDocumentResponse {
-            document: Some(document(head, &effective_index(&current.policy))),
+            document: Some(document),
         }))
     }
 
