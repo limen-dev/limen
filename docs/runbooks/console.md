@@ -52,3 +52,22 @@ THEME=light CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/script
 It exits 1 when any page has a problem and 2 when an engine couldn't start (never 0, since nothing was tested). Pass `shots` as the second argument to save screenshots. It can't judge how a page *feels* (check screenshots on a phone profile), anything behind a login you lack, or real devices. A dev stack beside another copy needs its own project name, ports and image tag (see the header of `deploy/compose/scripts/lib.sh`).
 
 **Firefox.** Playwright's Firefox doesn't start on every macOS version (not on 27.0.1, #151). `console-matrix-firefox.mjs` runs the same checks in an installed Firefox through Puppeteer (WebDriver BiDi): `npm i puppeteer-core axe-core` in the same directory, then `CONSOLE_URL=https://localhost:3443 node <repo>/deploy/compose/scripts/console-matrix-firefox.mjs` (and `THEME=light`). It has no touch emulation or screenshots, and fails a run whose page isn't in the requested theme.
+
+**Without a stack (CI).** `deploy/compose/scripts/console-snapshot-matrix.mjs check` runs the same engines, sizes and both themes over saved pages in `crates/limen-control-plane/tests/console-pages/`, with the repository's own CSS and scripts from `crates/limen-control-plane/assets/`, so it needs no stack and no certificate (it serves plain http on localhost and bypasses no browser warning). `.github/workflows/console-browser-tests.yml` runs it on pull requests that touch the console assets, templates or fixtures (Chromium and WebKit), and weekly or by hand with Firefox too. It reports sideways scroll, content past the viewport, JavaScript errors, axe-core violations (WCAG 2.1 A and AA) and tap targets under 24px (WCAG 2.5.8). It does not fail on links inside a line of text or a table cell, or on the bars of a chart, which are counted separately; touch targets under 44px on phone and tablet profiles are counted, not failed.
+
+```sh
+cd /tmp/matrix                                                    # where playwright-core and axe-core are installed
+node <repo>/deploy/compose/scripts/console-snapshot-matrix.mjs check <repo>/crates/limen-control-plane/tests/console-pages
+BROWSERS=chromium THEMES=light node <repo>/deploy/compose/scripts/console-snapshot-matrix.mjs check <repo>/crates/limen-control-plane/tests/console-pages
+```
+
+Firefox falls back to an installed Firefox through Puppeteer (`npm i puppeteer-core`) when Playwright's build doesn't start. **Regenerate the fixtures** after changing a template or adding a page, from a running dev stack with data (`setup.sh --yes --stacks tcp,web`):
+
+```sh
+deploy/compose/scripts/console-login.sh admin@example.com /tmp/admin.jar
+rm -rf /tmp/console-snap && PAGES_ONLY=1 node <repo>/deploy/compose/scripts/console-snapshot-matrix.mjs snapshot /tmp/console-snap /tmp/admin.jar
+rm -rf crates/limen-control-plane/tests/console-pages/console && cp -R /tmp/console-snap/console crates/limen-control-plane/tests/console-pages/
+mise exec -- gitleaks dir crates/limen-control-plane/tests/console-pages --redact --no-banner   # dev data only, but check
+```
+
+A fixture shows what the stack held when it was captured (dev users, no live sessions), so it covers the markup of 18 pages and nothing that needs a click: forms, lock, kill and token creation are not exercised, and neither are the session detail, recording and watch pages (no live session when captured).

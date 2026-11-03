@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="darkreader-lock">
+<title>Dashboards · Limen</title>
+<link rel="icon" href="/console/static/logo-mark.svg?v=df07b240ca8e" type="image/svg+xml">
+<link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/console/static/console.css?v=df07b240ca8e">
+<script src="/console/static/console.js?v=df07b240ca8e"></script>
+
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/console/">
+      <img class="logo-light" src="/console/static/logo-mark.svg?v=df07b240ca8e" alt="" width="26" height="26">
+      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=df07b240ca8e" alt="" width="26" height="26">
+      <span>Limen</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg><span>Access</span></a>
+      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg><span>Policy changes</span></a>
+      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg><span>Reviews</span></a>
+      
+      
+      <div class="nav-label">Administration</div>
+      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg><span>Users</span></a>
+      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg><span>Bots</span></a>
+      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#server"/></svg><span>Workers</span></a>
+      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg><span>Audit trail</span></a>
+      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg><span>Policy</span></a>
+      <a href="/console/dashboards" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#chart-column"/></svg><span>Dashboards</span></a>
+      
+    </nav>
+    <div class="sidebar-foot">
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#moon"/></svg></button>
+      </div>
+      <form method="post" action="/console/logout" class="me">
+        <span class="avatar av-4" aria-hidden="true">A</span>
+        <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
+        <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#log-out"/></svg></button>
+      </form>
+    </div>
+  </aside>
+  <div class="main">
+    <main data-refresh="30">
+
+<div class="page-head">
+  <div>
+    <h1>Dashboards</h1>
+    <p class="sub">What has been happening, from the console's own records (kept for 30 days). Times are UTC. Click a number, a bar or a row to see the events or sessions behind it.</p>
+  </div>
+</div>
+<div class="toolbar">
+  <div class="tb-label">Period
+    <nav class="tabs" aria-label="Period">
+      <a href="/console/dashboards?range=24h&#38;view=overview" aria-current="true">24 hours</a>
+      <a href="/console/dashboards?range=7d&#38;view=overview">7 days</a>
+      <a href="/console/dashboards?range=30d&#38;view=overview">30 days</a>
+    </nav>
+  </div>
+  <div class="tb-label">View
+    <nav class="tabs" aria-label="View">
+      <a href="/console/dashboards?range=24h&amp;view=overview" aria-current="true">Overview</a>
+      <a href="/console/dashboards?range=24h&amp;view=security">Security</a>
+      <a href="/console/dashboards?range=24h&amp;view=sre">Reliability</a>
+      <a href="/console/dashboards?range=24h&amp;view=bots">Bots</a>
+      <a href="/console/dashboards?range=24h&amp;view=usage">Usage</a>
+      <a href="/console/dashboards?range=24h&amp;view=all">Everything</a>
+
+    </nav>
+  </div>
+</div>
+<details>
+  <summary>Choose panels</summary>
+  <form method="get" action="/console/dashboards" class="chooser">
+    <input type="hidden" name="range" value="24h">
+    <fieldset><legend>Activity</legend><div class="opts"><label><input type="checkbox" name="p" value="sessions" checked> Sessions over time</label><label><input type="checkbox" name="p" value="busiest-resources" checked> Busiest resources</label><label><input type="checkbox" name="p" value="active-people" checked> Most active people</label><label><input type="checkbox" name="p" value="bot-repos" checked> Bot sessions by repository</label><label><input type="checkbox" name="p" value="session-length" checked> Session length</label><label><input type="checkbox" name="p" value="kinds"> Sessions by kind</label><label><input type="checkbox" name="p" value="traffic"> Data transferred</label></div></fieldset>
+    <fieldset><legend>Security</legend><div class="opts"><label><input type="checkbox" name="p" value="signins" checked> Sign-ins and denials</label><label><input type="checkbox" name="p" value="denial-reasons"> Why access was denied</label><label><input type="checkbox" name="p" value="admin-actions" checked> Admin actions</label><label><input type="checkbox" name="p" value="access-requests"> Access requests</label><label><input type="checkbox" name="p" value="time-to-approve"> Time to approve</label><label><input type="checkbox" name="p" value="grants-by-role"> Grants by role</label><label><input type="checkbox" name="p" value="review-items"> Access review items</label><label><input type="checkbox" name="p" value="discovered"> Discovered resources</label><label><input type="checkbox" name="p" value="denied-people"> Most refused people</label><label><input type="checkbox" name="p" value="off-hours"> Out-of-hours access</label><label><input type="checkbox" name="p" value="long-sessions"> Longest sessions</label><label><input type="checkbox" name="p" value="logins"> Accounts used</label><label><input type="checkbox" name="p" value="sources"> Where sessions came from</label><label><input type="checkbox" name="p" value="unrecorded"> Finished without a recording</label></div></fieldset>
+    <fieldset><legend>Reliability</legend><div class="opts"><label><input type="checkbox" name="p" value="endings"> How sessions ended</label><label><input type="checkbox" name="p" value="quiet-components"> Components gone quiet</label><label><input type="checkbox" name="p" value="worker-load"> Tunnels per worker</label><label><input type="checkbox" name="p" value="db-errors"> Database statement errors</label><label><input type="checkbox" name="p" value="kube-errors"> Kubernetes API errors</label><label><input type="checkbox" name="p" value="web-errors"> Web app server errors</label></div></fieldset>
+    <div class="actions"><button type="submit">Show these panels</button><button type="button" class="secondary" data-check="all">Select all</button><button type="button" class="secondary" data-check="none">Clear</button></div>
+  </form>
+</details>
+<section class="stats">
+
+  <a class="card stat drill c-green" href="/console/sessions?from=2026-11-02T22%3A00" title="Show the records behind this number"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span><div><b>0</b><span>Sessions</span></div></a>
+
+  <a class="card stat drill c-blue" href="/console/users" title="Show the records behind this number"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg></span><div><b>0</b><span>People</span></div></a>
+
+  <a class="card stat drill c-violet" href="/console/sessions?actor=bot&#38;from=2026-11-02T22%3A00" title="Show the records behind this number"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg></span><div><b>0</b><span>Bot sessions</span></div></a>
+
+  <a class="card stat drill c-teal" href="/console/audit?kind=auth.login&#38;from=2026-11-02T22%3A00" title="Show the records behind this number"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg></span><div><b>6</b><span>Sign-ins</span></div></a>
+
+  <a class="card stat drill c-amber" href="/console/audit?kind=auth.denied&#38;from=2026-11-02T22%3A00" title="Show the records behind this number"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#ban"/></svg></span><div><b>0</b><span>Denied</span></div></a>
+
+  <div class="card stat c-amber"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#clock"/></svg></span><div><b>—</b><span>Avg session</span></div></div>
+
+</section>
+<section class="panels">
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Sessions</h2><span class="hint">Started per period</span>
+      <span class="legend"><span><i class="swatch bar-a"></i>People</span><span><i class="swatch bar-bot"></i>Bots</span></span>
+    </div>
+    <svg class="chart" viewBox="0 0 640 200" role="group" aria-label="Sessions">
+      
+      <line class="grid" x1="40" x2="632" y1="176" y2="176"/>
+      <text class="axis" x="34" y="180" text-anchor="end">0</text>
+      
+      <line class="grid" x1="40" x2="632" y1="10" y2="10"/>
+      <text class="axis" x="34" y="14" text-anchor="end">1</text>
+      
+      
+      <text class="axis" x="52" y="192" text-anchor="middle">22:00</text><text class="axis" x="148" y="192" text-anchor="middle">02:00</text><text class="axis" x="244" y="192" text-anchor="middle">06:00</text><text class="axis" x="340" y="192" text-anchor="middle">10:00</text><text class="axis" x="436" y="192" text-anchor="middle">14:00</text><text class="axis" x="532" y="192" text-anchor="middle">18:00</text>
+    </svg>
+    <p class="chart-empty">No activity in this period.</p>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Sign-ins and denials</h2><span class="hint">Successful logins next to refused attempts</span>
+      <span class="legend"><span><i class="swatch bar-a"></i>Sign-ins</span><span><i class="swatch bar-bad"></i>Denied</span></span>
+    </div>
+    <svg class="chart" viewBox="0 0 640 200" role="group" aria-label="Sign-ins and denials">
+      
+      <line class="grid" x1="40" x2="632" y1="176" y2="176"/>
+      <text class="axis" x="34" y="180" text-anchor="end">0</text>
+      
+      <line class="grid" x1="40" x2="632" y1="93" y2="93"/>
+      <text class="axis" x="34" y="97" text-anchor="end">2</text>
+      
+      <line class="grid" x1="40" x2="632" y1="10" y2="10"/>
+      <text class="axis" x="34" y="14" text-anchor="end">5</text>
+      
+      <a href="/console/audit?kind=auth.login&#38;from=2026-11-02T23%3A00&#38;to=2026-11-03T00%3A00" class="bar-link" aria-label="23:00: 4 sign-ins"><rect class="bar-a" x="68" y="44" width="8" height="132" rx="2"><title>23:00: 4 sign-ins</title></rect></a><a href="/console/audit?kind=auth.login&#38;from=2026-11-03T10%3A00&#38;to=2026-11-03T11%3A00" class="bar-link" aria-label="10:00: 1 sign-ins"><rect class="bar-a" x="332" y="143" width="8" height="33" rx="2"><title>10:00: 1 sign-ins</title></rect></a><a href="/console/audit?kind=auth.login&#38;from=2026-11-03T21%3A00&#38;to=2026-11-03T22%3A00" class="bar-link" aria-label="21:00: 1 sign-ins"><rect class="bar-a" x="596" y="143" width="8" height="33" rx="2"><title>21:00: 1 sign-ins</title></rect></a>
+      <text class="axis" x="52" y="192" text-anchor="middle">22:00</text><text class="axis" x="148" y="192" text-anchor="middle">02:00</text><text class="axis" x="244" y="192" text-anchor="middle">06:00</text><text class="axis" x="340" y="192" text-anchor="middle">10:00</text><text class="axis" x="436" y="192" text-anchor="middle">14:00</text><text class="axis" x="532" y="192" text-anchor="middle">18:00</text>
+    </svg>
+    
+  </div>
+
+</section>
+<section class="panels thirds">
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Busiest resources</h2><span class="hint">Sessions</span></div>
+    <p class="chart-empty">Nothing in this period.</p>
+    <ul class="ranked">
+    
+    </ul>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Most active people</h2><span class="hint">Sessions</span></div>
+    <p class="chart-empty">Nothing in this period.</p>
+    <ul class="ranked">
+    
+    </ul>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Bot sessions by repository</h2><span class="hint">CI jobs, by the repository or project that ran them</span></div>
+    <p class="chart-empty">Nothing in this period.</p>
+    <ul class="ranked">
+    
+    </ul>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Session length</h2><span class="hint">Finished sessions</span></div>
+    <p class="chart-empty">Nothing in this period.</p>
+    <ul class="ranked">
+    
+    </ul>
+  </div>
+
+  <div class="card panel">
+    <div class="panel-head"><h2>Admin actions</h2><span class="hint">Locks, kills, revokes, tokens, policy</span></div>
+    
+    <ul class="ranked">
+    
+      <li>
+        <span class="rk-label"><a href="/console/audit?kind=policy.change&#38;from=2026-11-02T22%3A00">policy.change</a></span>
+        <span class="rk-n">1</span>
+        <svg class="rk-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect class="rk-track" width="100" height="6" rx="3"/><rect class="bar-d" width="100" height="6" rx="3"/></svg>
+      </li>
+    
+    </ul>
+  </div>
+
+</section>
+
+    </main>
+    <div class="foot">Limen 0.1.0-rc.1 · policy v1</div>
+  </div>
+</div>
+</body>
+</html>
