@@ -125,11 +125,9 @@ for index in app-orders secret-hr logs-2026; do
   es_admin -X DELETE "$es_direct/$index" >/dev/null 2>&1 || true
   os_admin -X DELETE "$(os_url "/$index")" >/dev/null 2>&1 || true
 done
-for url in "$es_direct" ; do
-  es_admin -X PUT "$url/app-orders/_doc/1?refresh=true" -d '{"item":"widget","note":"public"}' >/dev/null
-  es_admin -X PUT "$url/secret-hr/_doc/1?refresh=true" -d '{"salary":"classified-data"}' >/dev/null
-  es_admin -X PUT "$url/logs-2026/_doc/1?refresh=true" -d '{"msg":"hello"}' >/dev/null
-done
+es_admin -X PUT "$es_direct/app-orders/_doc/1?refresh=true" -d '{"item":"widget","note":"public"}' >/dev/null
+es_admin -X PUT "$es_direct/secret-hr/_doc/1?refresh=true" -d '{"salary":"classified-data"}' >/dev/null
+es_admin -X PUT "$es_direct/logs-2026/_doc/1?refresh=true" -d '{"msg":"hello"}' >/dev/null
 os_admin -X PUT "$(os_url /app-orders/_doc/1)?refresh=true" -d '{"item":"widget-os","note":"public"}' >/dev/null
 os_admin -X PUT "$(os_url /secret-hr/_doc/1)?refresh=true" -d '{"salary":"classified-data"}' >/dev/null
 pass "stack up, policy applied, test documents seeded"
