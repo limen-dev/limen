@@ -1,4 +1,4 @@
-# Limen discovery
+# Terraform module: discovery
 
 The describe-only IAM role workers assume to discover EC2 instances, databases, caches and clusters ([discovery guide](../../../../docs/guides/discovery.md)). Only the listed worker roles can assume it, optionally with an external id. No `iam:PassRole`, no data access, no writes.
 

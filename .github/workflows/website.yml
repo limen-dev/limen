@@ -13,6 +13,8 @@ on:
       - "website/**"
       - "docs/**"
       - "deploy/compose/README.md"
+      - "deploy/helm/limen/README.md"
+      - "deploy/terraform/**/README.md"
       - "mise.toml"
       - ".github/workflows/website.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.

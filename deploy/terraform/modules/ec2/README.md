@@ -1,4 +1,4 @@
-# Limen ec2
+# Terraform module: ec2
 
 Control planes, proxies or workers on Auto Scaling groups of EC2 instances running the container under systemd. `groups` is a map: each entry is one group, in its own VPC if you like. Use it where Fargate does not fit, typically workers that need a long drain or a network Fargate cannot join.
 

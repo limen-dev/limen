@@ -15,7 +15,7 @@ Each workflow has a `paths:` filter. `rust.yml` lists what to leave out; the oth
 | `secret-scan.yml` | Every push to `main` and every pull request (no path filter: a secret can be in any file) | gitleaks over the whole git history. Reviewed false positives are in `.gitleaksignore` |
 | `infra.yml` | `deploy/terraform/`, `deploy/helm/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, Helm lint and schema check, dashboards, dev-users check |
 | `workflows.yml` | `.github/workflows/` | actionlint |
-| `website.yml` | `website/`, `docs/`, `deploy/compose/README.md` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
+| `website.yml` | `website/`, `docs/`, `deploy/compose/README.md`, `deploy/helm/limen/README.md` and the READMEs under `deploy/terraform/` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
 | `website-browser-tests.yml` | Never on a push or pull request: Mondays 04:30 UTC, or `gh workflow run website-browser-tests.yml` | The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes, dark and light (`website/scripts/browser-matrix.mjs`) |
 
 Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. `release.yml` calls the first four (not the website) before building anything.

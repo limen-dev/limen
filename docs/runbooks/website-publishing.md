@@ -1,6 +1,6 @@
 # Publishing the website
 
-The site in `website/` is published to GitHub Pages at <https://limen-dev.github.io/limen> by the `deploy` job of `.github/workflows/website.yml`. That workflow builds and checks the site (links, third-party requests, ADR-0031 claims) on every pull request and every push to `main` that touches `website/`, `docs/`, `deploy/compose/README.md` or `mise.toml`. On `main` the deploy job runs after the checks pass. A manual run (`gh workflow run website.yml`) ignores the path filter.
+The site in `website/` is published to GitHub Pages at <https://limen-dev.github.io/limen> by the `deploy` job of `.github/workflows/website.yml`. That workflow builds and checks the site (links, third-party requests, ADR-0031 claims) on every pull request and every push to `main` that touches `website/`, `docs/`, `deploy/compose/README.md`, `deploy/helm/limen/README.md`, a README under `deploy/terraform/` or `mise.toml`. On `main` the deploy job runs after the checks pass. A manual run (`gh workflow run website.yml`) ignores the path filter.
 
 ## Turning it on
 

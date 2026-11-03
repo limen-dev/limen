@@ -1,4 +1,4 @@
-# Limen datadog
+# Terraform module: datadog
 
 Datadog monitors for Limen: log monitors on the audit events the control plane ships, and metric monitors on its Prometheus metrics through the Agent's OpenMetrics check.
 

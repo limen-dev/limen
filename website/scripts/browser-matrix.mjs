@@ -39,6 +39,9 @@ const pages = [
   '/docs/runbooks/',
   '/docs/runbooks/database-onboarding/',
   '/docs/reference/compose-stack/',
+  '/docs/guides/deploy/',
+  '/docs/reference/deploy/helm-chart/',
+  '/docs/reference/deploy/terraform-ecs/',
   '/this-page-does-not-exist',
 ];
 

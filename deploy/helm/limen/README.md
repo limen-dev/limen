@@ -1,8 +1,6 @@
 <!-- Generated: edit README.md.gotmpl and values.yaml, then run `mise exec -- helm-docs --chart-search-root deploy/helm --sort-values-order file`. CI checks it is current. -->
 # Limen Helm chart
 
-![Version: 0.1.0-rc.1](https://img.shields.io/badge/Version-0.1.0--rc.1-informational?style=flat-square) ![AppVersion: 0.1.0-rc.1](https://img.shields.io/badge/AppVersion-0.1.0--rc.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
-
 Runs the control plane (StatefulSet, headless Service, PodDisruptionBudget), the proxy (Deployment, `LoadBalancer` Service) and the workers (Deployment). It templates the manifests in [`deploy/kubernetes/limen`](../../kubernetes/limen/README.md); read that README for why each setting looks the way it does.
 
 **Unverified:** the chart passes `helm lint` and `helm template` (CI runs both) but was never installed on a cluster. Issue #85 tracks the real-cluster test.

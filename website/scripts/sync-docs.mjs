@@ -26,6 +26,7 @@ const SHORT = {
   'guides/tcp': 'Raw TCP',
   'guides/bots': 'CI bots',
   'guides/management-api': 'Management API',
+  'guides/deploy': 'Deploy on AWS or Kubernetes',
   'guides/terraform': 'Terraform and OpenTofu',
   'guides/policy-tooling': 'Policy tests and explain',
   'runbooks/audit-verify': 'Verify the audit chain',
@@ -56,6 +57,16 @@ add('docs/policy.md', 'reference/policy');
 add('docs/cli-reference.md', 'reference/cli', 'CLI reference');
 add('docs/diagrams/README.md', 'architecture/diagrams', 'Diagrams');
 add('deploy/compose/README.md', 'reference/compose-stack', 'Local stack (Compose)');
+// The deployment references: the chart README (values table from helm-docs) and each Terraform
+// module's and example's README (inputs and outputs from terraform-docs).
+add('deploy/helm/limen/README.md', 'reference/deploy/helm-chart', 'Helm chart');
+add('deploy/terraform/modules/README.md', 'reference/deploy/terraform-modules', 'Terraform modules');
+for (const m of ['foundation', 'ecs', 'ec2', 'discovery', 'audit', 'datadog']) {
+  add(`deploy/terraform/modules/${m}/README.md`, `reference/deploy/terraform-${m}`, `Module: ${m}`);
+}
+for (const e of ['complete', 'kubernetes']) {
+  add(`deploy/terraform/examples/${e}/README.md`, `reference/deploy/terraform-example-${e}`, `Example: ${e}`);
+}
 
 // Pages written by hand (none are link targets yet).
 const handwritten = {};
