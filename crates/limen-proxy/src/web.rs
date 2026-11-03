@@ -18,6 +18,7 @@ use hyper::body::{Bytes, Incoming};
 use hyper_util::rt::TokioIo;
 use limen_audit::{Context as AuditContext, EventKind};
 use limen_ca::verify::{UserIdentity, verify_user};
+use limen_core::web_handoff::{valid_browser_nonce, valid_return_path};
 use limen_policy::{AccessRequest, Principal, model::WebTarget};
 use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::{RedeemWebHandoffRequest, WebAppSession};
@@ -761,13 +762,6 @@ fn websocket_origin_allowed(headers: &HeaderMap, host: &str, public_port: u16) -
         && origin.username().is_empty()
 }
 
-fn valid_browser_nonce(nonce: &str) -> bool {
-    nonce.len() <= 128
-        && base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(nonce)
-            .is_ok_and(|bytes| bytes.len() == 32)
-}
-
 async fn login_redirect(
     proxy: &Proxy,
     route: &WebRoute,
@@ -1302,13 +1296,6 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
         HeaderValue::from_static("no-referrer"),
     );
     destination
-}
-
-fn valid_return_path(value: &str) -> bool {
-    let Ok(uri) = Uri::try_from(value) else {
-        return false;
-    };
-    uri.authority().is_none() && safe_uri(&uri)
 }
 
 #[allow(clippy::too_many_arguments)] // Carries the bounded fields for one denial event.

@@ -1023,3 +1023,72 @@ pub async fn requestable_for(
         .collect();
     Ok(policy.policy.requestable_resources(cert_roles, &eligible))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(extra: &serde_json::Value) -> RequestSpec {
+        let mut v = serde_json::json!({ "who": ["engineers"] });
+        v.as_object_mut()
+            .expect("object")
+            .extend(extra.as_object().expect("object").clone());
+        serde_json::from_value(v).expect("spec")
+    }
+
+    #[test]
+    fn bots_cannot_ask_for_access() {
+        assert!(must_be_person("alice").is_ok());
+        let denied = must_be_person("bot:ci").expect_err("bot");
+        assert_eq!(denied.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn a_reason_is_optional_only_when_nothing_requires_it() {
+        // A reason is required unless the role turns that off.
+        let required = spec(&serde_json::json!({}));
+        assert!(check_reason(&required, false, "").is_err());
+        let open = spec(&serde_json::json!({ "require_reason": false }));
+        assert_eq!(check_reason(&open, false, "  ").expect("empty"), "");
+        assert_eq!(
+            check_reason(&open, false, "  fix  ").expect("trimmed"),
+            "fix"
+        );
+        // Break-glass always needs one.
+        assert!(check_reason(&open, true, "").is_err());
+        assert!(check_reason(&required, false, "   ").is_err());
+    }
+
+    #[test]
+    fn reasons_are_bounded_text() {
+        let strict = spec(&serde_json::json!({}));
+        assert!(check_reason(&strict, false, &"a".repeat(500)).is_ok());
+        for bad in [&"a".repeat(501), "line\nbreak", "esc\u{1b}[31m", "nul\0"] {
+            let e = check_reason(&strict, false, bad).expect_err("rejected");
+            assert_eq!(e.code(), tonic::Code::InvalidArgument, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_ticket_pattern_must_match_the_reason() {
+        let s = spec(&serde_json::json!({ "ticket_pattern": "[A-Z]+-[0-9]+" }));
+        assert!(check_reason(&s, false, "deploy fix OPS-123").is_ok());
+        let e = check_reason(&s, false, "deploy fix").expect_err("no ticket");
+        assert_eq!(e.code(), tonic::Code::InvalidArgument);
+        assert!(
+            check_reason(&s, false, "").is_err(),
+            "a pattern implies a reason"
+        );
+    }
+
+    #[test]
+    fn durations_and_ids_parse_defensively() {
+        assert_eq!(secs(60), 60);
+        assert_eq!(secs(-1), 0, "a negative stored duration never wraps");
+        let id = Uuid::now_v7();
+        assert_eq!(parse_id(&format!(" {id} ")).expect("id"), id);
+        for bad in ["", "nope", "123"] {
+            assert!(parse_id(bad).is_err(), "{bad:?}");
+        }
+    }
+}

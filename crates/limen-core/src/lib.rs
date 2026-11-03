@@ -12,6 +12,7 @@ pub mod resource;
 pub mod secret;
 pub mod shutdown;
 pub mod telemetry;
+pub mod web_handoff;
 
 /// Version of the running binary, taken from the workspace package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

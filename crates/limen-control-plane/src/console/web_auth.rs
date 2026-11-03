@@ -4,7 +4,6 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use base64::Engine as _;
 use limen_audit::{Context, EventKind};
 use limen_ca::UserCertRequest;
 use limen_policy::{AccessRequest, Principal};
@@ -19,6 +18,8 @@ use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
 
+use limen_core::web_handoff::{valid_browser_nonce, valid_return_path};
+
 use super::store::{self, WebAppLogin};
 use super::views::error_page;
 use super::{
@@ -30,6 +31,10 @@ use crate::state::AppState;
 
 const LOGIN_TTL_SECS: i64 = 600;
 const HANDOFF_TTL_SECS: i64 = 60;
+/// Longest a web app identity lives, whatever the console session or role
+/// TTL allows. Kept equal to the old shared constant; raise it on purpose,
+/// not by changing `LOGIN_TTL_SECS`.
+const WEB_IDENTITY_MAX_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 const IDENTITY_ISSUER: &str = "urn:limen:control-plane";
 
 #[derive(Debug, Deserialize)]
@@ -280,7 +285,7 @@ pub async fn login_callback(
             state.config.default_cert_ttl,
             state.config.max_cert_ttl,
         ))
-        .min(std::time::Duration::from_secs(LOGIN_TTL_SECS as u64));
+        .min(WEB_IDENTITY_MAX_TTL);
     let key = match KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256) {
         Ok(key) => key,
         Err(e) => {
@@ -460,37 +465,6 @@ pub async fn jwks(State(state): State<AppState>) -> Response {
             StatusCode::SERVICE_UNAVAILABLE.into_response()
         }
     }
-}
-
-fn valid_browser_nonce(nonce: &str) -> bool {
-    nonce.len() <= 128
-        && base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(nonce)
-            .is_ok_and(|bytes| bytes.len() == 32)
-}
-
-fn valid_return_path(path: &str) -> bool {
-    let Ok(uri) = http::Uri::try_from(path) else {
-        return false;
-    };
-    let Some(path_and_query) = uri.path_and_query() else {
-        return false;
-    };
-    let route = path_and_query.path();
-    path.len() <= 4096
-        && uri.authority().is_none()
-        && route.starts_with('/')
-        && !route.starts_with("//")
-        && !route.contains("//")
-        && !route.contains(['#', '\\', '%'])
-        && route
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"/-._~".contains(&b))
-        && route
-            .split('/')
-            .all(|segment| segment != "." && segment != "..")
-        && path.bytes().all(|b| b.is_ascii_graphic())
-        && !path.contains('#')
 }
 
 async fn denied(

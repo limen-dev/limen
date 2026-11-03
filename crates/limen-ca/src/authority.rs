@@ -393,3 +393,198 @@ pub fn pem_to_der(pem: &str) -> Result<Vec<u8>, CaError> {
         .map(|c| c.to_vec())
         .map_err(|e| CaError::InvalidRequest(format!("invalid certificate PEM: {e}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use rcgen::KeyPair;
+
+    use super::*;
+    use crate::signer::FileSigner;
+
+    async fn ca(purpose: CaPurpose) -> CertificateAuthority {
+        let signer = Arc::new(FileSigner::generate().expect("key"));
+        CertificateAuthority::create_self_signed(purpose, signer)
+            .await
+            .expect("ca")
+    }
+
+    fn csr() -> Vec<u8> {
+        let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("key");
+        CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr")
+            .der()
+            .to_vec()
+    }
+
+    fn user(name: &str, ttl: Duration) -> UserCertRequest {
+        UserCertRequest {
+            csr_der: csr(),
+            username: name.into(),
+            roles: vec!["dev".into()],
+            login_id: Uuid::nil(),
+            ttl,
+            ci: None,
+        }
+    }
+
+    fn component(id: &str, dns: &[&str]) -> ComponentCertRequest {
+        ComponentCertRequest {
+            csr_der: csr(),
+            kind: ComponentKind::Proxy,
+            id: id.into(),
+            dns_names: dns.iter().map(|d| (*d).to_owned()).collect(),
+            labels: std::collections::BTreeMap::new(),
+            ttl: Duration::from_secs(3600),
+        }
+    }
+
+    fn is_invalid(r: &Result<IssuedCert, CaError>) -> bool {
+        matches!(r, Err(CaError::InvalidRequest(_)))
+    }
+
+    #[tokio::test]
+    async fn a_user_certificate_is_a_short_lived_client_leaf() {
+        let ca = ca(CaPurpose::UserX509).await;
+        let issued = ca
+            .issue_user(user("alice", Duration::from_secs(600)))
+            .await
+            .expect("issue");
+        let (_, cert) = x509_parser::parse_x509_certificate(&issued.der).expect("parse");
+        assert!(!cert.is_ca(), "a leaf is never a CA");
+        let lifetime =
+            cert.validity().not_after.timestamp() - cert.validity().not_before.timestamp();
+        assert!(
+            (600..=600 + 120).contains(&lifetime),
+            "ttl plus the back-dating: {lifetime}"
+        );
+        let eku = cert
+            .extended_key_usage()
+            .expect("eku")
+            .expect("present")
+            .value;
+        assert!(eku.client_auth && !eku.server_auth);
+        cert.verify_signature(Some(
+            x509_parser::parse_x509_certificate(ca.cert_der())
+                .expect("ca")
+                .1
+                .public_key(),
+        ))
+        .expect("signed by the CA");
+    }
+
+    #[tokio::test]
+    async fn each_ca_issues_only_its_own_kind() {
+        let users = ca(CaPurpose::UserX509).await;
+        let internal = ca(CaPurpose::Internal).await;
+        assert!(is_invalid(
+            &users.issue_component(component("p1", &[])).await
+        ));
+        assert!(is_invalid(
+            &internal
+                .issue_user(user("alice", Duration::from_secs(60)))
+                .await
+        ));
+    }
+
+    #[tokio::test]
+    async fn lifetimes_and_names_are_bounded() {
+        let users = ca(CaPurpose::UserX509).await;
+        for ttl in [Duration::ZERO, Duration::from_hours(31 * 24 + 1)] {
+            assert!(
+                is_invalid(&users.issue_user(user("alice", ttl)).await),
+                "{ttl:?}"
+            );
+        }
+        assert!(
+            users
+                .issue_user(user("alice", Duration::from_hours(31 * 24)))
+                .await
+                .is_ok()
+        );
+        for name in ["", "al\nice", "al\u{7f}ice", &"a".repeat(MAX_NAME_LEN + 1)] {
+            assert!(
+                is_invalid(&users.issue_user(user(name, Duration::from_secs(60))).await),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn only_bots_carry_the_bot_prefix_and_ci_facts() {
+        let users = ca(CaPurpose::UserX509).await;
+        // A person cannot claim the bot: prefix.
+        assert!(is_invalid(
+            &users
+                .issue_user(user("bot:ci", Duration::from_secs(60)))
+                .await
+        ));
+        // A bot must carry CI facts.
+        let mut bot = user("bot:ci", Duration::from_secs(60));
+        bot.ci = Some([("repo".to_owned(), "x/y".to_owned())].into());
+        assert!(users.issue_user(bot.clone()).await.is_ok());
+        // A person cannot carry CI facts.
+        let mut person = user("alice", Duration::from_secs(60));
+        person.ci = bot.ci.clone();
+        assert!(is_invalid(&users.issue_user(person).await));
+        // Facts are bounded and non-empty.
+        for facts in [
+            [("repo".to_owned(), String::new())].into(),
+            [("repo".to_owned(), "a\nb".to_owned())].into(),
+            [("repo".to_owned(), "a".repeat(MAX_CI_VALUE + 1))].into(),
+            (0..=MAX_CI_FACTS)
+                .map(|i| (format!("k{i}"), "v".to_owned()))
+                .collect(),
+        ] {
+            let mut b = bot.clone();
+            b.ci = Some(facts);
+            assert!(is_invalid(&users.issue_user(b).await));
+        }
+    }
+
+    #[tokio::test]
+    async fn component_dns_names_must_be_valid() {
+        let internal = ca(CaPurpose::Internal).await;
+        assert!(
+            internal
+                .issue_component(component("p1", &["proxy.example.com", "127.0.0.1"]))
+                .await
+                .is_ok()
+        );
+        for bad in [
+            "",
+            "-a.example",
+            "a-.example",
+            "a..example",
+            "a b.example",
+            "a_b.example",
+        ] {
+            assert!(
+                is_invalid(&internal.issue_component(component("p1", &[bad])).await),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_csr_must_be_small_and_well_formed() {
+        let users = ca(CaPurpose::UserX509).await;
+        for der in [vec![], vec![0x30, 0x00], vec![0u8; 16 * 1024 + 1]] {
+            let mut req = user("alice", Duration::from_secs(60));
+            req.csr_der = der;
+            assert!(matches!(
+                users.issue_user(req).await,
+                Err(CaError::InvalidCsr(_))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_existing_ca_cert_must_match_its_key() {
+        let a = ca(CaPurpose::UserX509).await;
+        let other = Arc::new(FileSigner::generate().expect("key"));
+        assert!(
+            CertificateAuthority::from_existing(CaPurpose::UserX509, other, a.cert_pem()).is_err()
+        );
+    }
+}
