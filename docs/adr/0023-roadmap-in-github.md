@@ -17,4 +17,4 @@ Until now the roadmap was a table in `docs/design.md`. It records *exit criteria
 
 ## Consequences
 - Commits are not assigned to milestones (GitHub only assigns issues and pull requests), so a commit reaches a milestone through its issue or pull request. Direct pushes to `main` don't show up in a milestone; use pull requests.
-- The milestones are in a private repository today, so they are visible to collaborators only until the repository is public.
+- The milestones were in a private repository when this was written. The repository is public (2026-11-03), so they are visible to everyone.

@@ -58,7 +58,7 @@ THEME=light SITE_URL=http://localhost:4341 node <repo>/website/scripts/firefox-m
 
 ## Publishing
 
-Nothing is published until the repository is public, so there is **no workflow yet** (#138). Run `npm run build` before you push a change to the site or to a document in `docs/`: it is the whole check. When publishing arrives, `SITE_URL` and `SITE_BASE` set the address (for GitHub Pages `/limen/`; for a custom domain `/`).
+`.github/workflows/website.yml` builds and checks the site on every pull request and publishes it to GitHub Pages from `main` ([runbook](../docs/runbooks/website-publishing.md)). Run `npm run build` before you push a change to the site or to a document in `docs/`: it is the whole check. `SITE_URL` and `SITE_BASE` set the address (for GitHub Pages `/limen/`; for a custom domain `/`).
 
 ## Mermaid diagrams
 
