@@ -1000,3 +1000,14 @@ mod tests {
         assert_eq!(frame(b'Z', b"I"), [b'Z', 0, 0, 0, 5, b'I']);
     }
 }
+
+/// Entry points for `fuzz/` (fuzz/README.md). Compiled only under cargo-fuzz's `--cfg fuzzing`.
+#[cfg(fuzzing)]
+pub mod fuzz {
+    use super::read_frame;
+
+    /// Read every frame the bytes hold, with a small length cap.
+    pub async fn frames(mut bytes: &[u8]) {
+        while read_frame(&mut bytes, 1 << 16).await.is_ok() {}
+    }
+}

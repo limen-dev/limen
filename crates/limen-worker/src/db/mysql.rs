@@ -1383,3 +1383,19 @@ mod tests {
         assert_eq!(hello.caps & 0x100_0000, 0, "no DEPRECATE_EOF");
     }
 }
+
+/// Entry points for `fuzz/` (fuzz/README.md). Compiled only under cargo-fuzz's `--cfg fuzzing`,
+/// so a normal build has none of this.
+#[cfg(fuzzing)]
+pub mod fuzz {
+    use super::{parse_client_hello, parse_err, parse_server_hello, read_packet};
+
+    /// Read every packet the bytes hold, then parse each as the messages that use them.
+    pub async fn packets(mut bytes: &[u8]) {
+        while let Ok(p) = read_packet(&mut bytes).await {
+            let _ = parse_err(&p.payload);
+            let _ = parse_server_hello(&p.payload);
+            let _ = parse_client_hello(&p.payload);
+        }
+    }
+}

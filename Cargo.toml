@@ -131,6 +131,8 @@ tempfile = "3.27"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
+# cargo-fuzz builds with --cfg fuzzing (fuzz/README.md)
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
