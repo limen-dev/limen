@@ -76,6 +76,20 @@ pub fn github_token_from_response(body: &str) -> anyhow::Result<String> {
         .context("GitHub's answer had no token")
 }
 
+/// How long to wait for GitHub's token endpoint, connect to last byte.
+const GITHUB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A bare `reqwest::Client` waits forever and follows redirects, so a stalled
+/// endpoint would hang the CI job until its own limit, and the request
+/// carries a bearer token.
+fn github_client(timeout: std::time::Duration) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("building the HTTP client")
+}
+
 async fn github_token(audience: &str) -> anyhow::Result<String> {
     let (Ok(url), Ok(bearer)) = (
         std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL"),
@@ -86,7 +100,8 @@ async fn github_token(audience: &str) -> anyhow::Result<String> {
              (ACTIONS_ID_TOKEN_REQUEST_URL is not set). Add `permissions: id-token: write` to the job"
         );
     };
-    let response = reqwest::Client::new()
+    let client = github_client(GITHUB_TIMEOUT)?;
+    let response = client
         .get(github_token_url(&url, audience))
         .bearer_auth(bearer)
         .header("Accept", "application/json; api-version=2.0")
@@ -187,6 +202,55 @@ mod tests {
             TokenSource::File("t.jwt".into()),
             "a file wins over an environment variable"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_token_endpoint_times_out() {
+        // Accepts the connection and never answers.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let url = format!("http://{}/token", listener.local_addr().expect("addr"));
+        let _hold = tokio::spawn(async move {
+            let _conn = listener.accept().await;
+            std::future::pending::<()>().await;
+        });
+        let client = github_client(std::time::Duration::from_millis(200)).expect("client");
+        let started = std::time::Instant::now();
+        let err = client.get(&url).send().await.expect_err("must not hang");
+        assert!(err.is_timeout(), "{err}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_not_followed() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let url = format!("http://{}/token", listener.local_addr().expect("addr"));
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+            let (mut conn, _) = listener.accept().await.expect("accept");
+            // Read the whole request head first: closing a socket with unread
+            // data resets the connection and can eat the response.
+            let mut head = Vec::new();
+            let mut buf = [0u8; 512];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = conn.read(&mut buf).await.expect("read");
+                assert!(n > 0, "client hung up before sending a request");
+                head.extend_from_slice(&buf[..n]);
+            }
+            conn.write_all(
+                b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/steal\r\nContent-Length: 0\r\n\r\n",
+            )
+            .await
+            .expect("write");
+            // Keep the connection open until the client is done with it.
+            let _ = conn.read(&mut buf).await;
+        });
+        let client = github_client(GITHUB_TIMEOUT).expect("client");
+        let response = client.get(&url).send().await.expect("answer");
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
     }
 
     #[test]
