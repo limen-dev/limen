@@ -77,6 +77,11 @@ pub enum SpoolError {
     UnknownConsumer(String),
     #[error("spool closed")]
     Closed,
+    /// An fsync failed. The kernel may have dropped the pages it could not
+    /// write and report success on the next try, so nothing after this can
+    /// be called durable. Restart: opening re-reads what is really on disk.
+    #[error("spool unusable after a failed fsync ({0}); restart to recover from disk")]
+    Broken(String),
     #[error("another process has the spool at {0} open")]
     Locked(String),
 }
@@ -116,6 +121,11 @@ pub struct Spool {
     /// Woken by an append, so the flusher syncs at once instead of at the
     /// next tick.
     dirty: Arc<Notify>,
+    /// Set once an fsync fails, and never cleared (see [`SpoolError::Broken`]).
+    broken: watch::Sender<Option<String>>,
+    /// Test hook: make the next fsyncs fail.
+    #[cfg(test)]
+    fail_sync: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn segment_name(first: u64) -> String {
@@ -321,6 +331,9 @@ impl Spool {
             synced,
             appended: Arc::new(Notify::new()),
             dirty: Arc::new(Notify::new()),
+            broken: watch::channel(None).0,
+            #[cfg(test)]
+            fail_sync: Arc::default(),
         };
         Ok(spool)
     }
@@ -358,19 +371,58 @@ impl Spool {
         });
     }
 
+    /// Whether an fsync has failed. Only a restart clears it, so a health
+    /// check should report it.
+    #[must_use]
+    pub fn is_broken(&self) -> bool {
+        self.broken.borrow().is_some()
+    }
+
+    /// The error to return once an fsync has failed, if one has.
+    fn check_broken(&self) -> Result<(), SpoolError> {
+        match &*self.broken.borrow() {
+            Some(why) => Err(SpoolError::Broken(why.clone())),
+            None => Ok(()),
+        }
+    }
+
+    /// Record a failed fsync and wake every append waiting on one.
+    fn mark_broken(&self, e: &std::io::Error) -> SpoolError {
+        tracing::error!(error = %e, "spool fsync failed; refusing appends until restart");
+        let why = e.to_string();
+        self.broken.send_replace(Some(why.clone()));
+        SpoolError::Broken(why)
+    }
+
+    /// `sync_data` on `file`, or the test hook's failure.
+    #[cfg_attr(not(test), allow(clippy::unused_self))] // `self` is only for the test hook
+    fn sync(&self, file: &File) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.fail_sync.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(std::io::Error::other("injected fsync failure"));
+        }
+        file.sync_data()
+    }
+
     /// fsync whatever has been written, and publish the new durable point.
     pub async fn flush(&self) -> Result<(), SpoolError> {
+        self.check_broken()?;
         let (file, upto) = {
             let mut st = self.lock();
             if !st.dirty {
                 return Ok(());
             }
+            let file = st.active.try_clone()?;
             st.dirty = false;
-            (st.active.try_clone()?, st.next)
+            (file, st.next)
         };
-        tokio::task::spawn_blocking(move || file.sync_data())
+        let this = self.clone();
+        let synced = tokio::task::spawn_blocking(move || this.sync(&file))
             .await
-            .map_err(|e| SpoolError::Io(std::io::Error::other(e)))??;
+            .map_err(|e| SpoolError::Io(std::io::Error::other(e)))?;
+        if let Err(e) = synced {
+            return Err(self.mark_broken(&e));
+        }
         self.synced.send_if_modified(|v| {
             let changed = upto > *v;
             *v = (*v).max(upto);
@@ -388,6 +440,7 @@ impl Spool {
         if payload.len() > MAX_RECORD {
             return Err(SpoolError::TooLarge(payload.len()));
         }
+        self.check_broken()?;
         let index = {
             let mut st = self.lock();
             let used: u64 = st.segments.iter().map(|s| s.bytes).sum();
@@ -413,21 +466,34 @@ impl Spool {
             seg.count += 1;
             seg.bytes += buf.len() as u64;
             if seg.bytes >= self.config.segment_bytes {
-                self.roll(&mut st)?;
+                self.roll(&mut st).map_err(|e| match e {
+                    SpoolError::Io(io) => self.mark_broken(&io),
+                    other => other,
+                })?;
             }
             index
         };
         self.dirty.notify_one();
-        let mut rx = self.synced.subscribe();
-        rx.wait_for(|synced| *synced > index)
-            .await
-            .map_err(|_| SpoolError::Closed)?;
+        let mut synced = self.synced.subscribe();
+        let mut broken = self.broken.subscribe();
+        // Durable wins over broken: a record the last good fsync covered
+        // stays acknowledged.
+        tokio::select! {
+            biased;
+            r = async { synced.wait_for(|s| *s > index).await.map(|_| ()) } => {
+                r.map_err(|_| SpoolError::Closed)?;
+            }
+            r = async { broken.wait_for(Option::is_some).await.map(|_| ()) } => {
+                r.map_err(|_| SpoolError::Closed)?;
+                return Err(self.check_broken().expect_err("set before it fired"));
+            }
+        }
         Ok(index)
     }
 
     /// Close the active segment (fsynced) and start a new one.
     fn roll(&self, st: &mut State) -> Result<(), SpoolError> {
-        st.active.sync_data()?;
+        self.sync(&st.active)?;
         let next = st.next;
         let path = self.config.dir.join("segments").join(segment_name(next));
         let file = OpenOptions::new()
@@ -691,6 +757,43 @@ mod tests {
             Spool::open(config(dir2.path())),
             Err(SpoolError::Corrupt { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn a_failed_fsync_fails_waiting_and_later_appends_instead_of_hanging() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        assert_eq!(spool.append(b"durable").await.expect("append"), 0);
+
+        spool
+            .fail_sync
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let waiting = tokio::time::timeout(Duration::from_secs(5), spool.append(b"lost"))
+            .await
+            .expect("an append must not wait forever on a failed fsync");
+        assert!(matches!(waiting, Err(SpoolError::Broken(_))), "{waiting:?}");
+
+        // Later success of the hook must not bring it back: the kernel may
+        // have dropped the pages and report a clean fsync.
+        spool
+            .fail_sync
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            spool.append(b"after").await,
+            Err(SpoolError::Broken(_))
+        ));
+        assert!(matches!(spool.flush().await, Err(SpoolError::Broken(_))));
+        assert!(spool.is_broken());
+        // What was acknowledged before the failure is still readable.
+        assert_eq!(spool.read("a", 10).expect("read")[0].1, b"durable".to_vec());
+        drop(spool);
+
+        // A restart re-reads the disk and works again.
+        let spool = Spool::open(config(dir.path())).expect("reopen");
+        spool.start();
+        let next = spool.append(b"new").await.expect("append after restart");
+        assert!(next >= 1);
     }
 
     #[tokio::test]

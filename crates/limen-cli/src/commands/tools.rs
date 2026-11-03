@@ -276,22 +276,17 @@ fn edit_config_file(
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         }
     }
-    let tmp = target.with_extension("limen-tmp");
-    std::fs::write(&tmp, &updated).with_context(|| format!("writing {}", tmp.display()))?;
-    let permissions = match std::fs::metadata(&target) {
-        Ok(m) => m.permissions(),
-        Err(_) => {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                std::fs::Permissions::from_mode(0o600)
-            }
-            #[cfg(not(unix))]
-            std::fs::metadata(&tmp)?.permissions()
-        }
+    // The file's own mode, so contents are never readable by more than the
+    // original allowed (not even for the moment before a chmod).
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(&target).map_or(0o600, |m| m.permissions().mode() & 0o7777)
     };
-    std::fs::set_permissions(&tmp, permissions)?;
-    std::fs::rename(&tmp, &target).with_context(|| format!("replacing {}", target.display()))?;
+    #[cfg(not(unix))]
+    let mode = 0o600;
+    profile::atomic_write(&target, updated.as_bytes(), mode)
+        .with_context(|| format!("replacing {}", target.display()))?;
     Ok(())
 }
 
