@@ -31,6 +31,10 @@ use crate::state::AppState;
 
 const LOGIN_TTL_SECS: i64 = 600;
 const HANDOFF_TTL_SECS: i64 = 60;
+/// Longest a web app identity lives, whatever the console session or role
+/// TTL allows. Kept equal to the old shared constant; raise it on purpose,
+/// not by changing `LOGIN_TTL_SECS`.
+const WEB_IDENTITY_MAX_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 const IDENTITY_ISSUER: &str = "urn:limen:control-plane";
 
 #[derive(Debug, Deserialize)]
@@ -281,7 +285,7 @@ pub async fn login_callback(
             state.config.default_cert_ttl,
             state.config.max_cert_ttl,
         ))
-        .min(std::time::Duration::from_secs(LOGIN_TTL_SECS as u64));
+        .min(WEB_IDENTITY_MAX_TTL);
     let key = match KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256) {
         Ok(key) => key,
         Err(e) => {
