@@ -1,4 +1,4 @@
-# Complete example
+# Terraform example: complete
 
 The whole of Limen on AWS: network, PostgreSQL, KMS keys, audit store, secrets, load balancers, and control planes, proxies and workers from maps. Copy `terraform.tfvars.example`, then `terraform apply`. Walk-through: [Deploying Limen on AWS](../../../../docs/guides/deploy.md).
 

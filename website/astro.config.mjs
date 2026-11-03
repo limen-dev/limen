@@ -106,6 +106,23 @@ export default defineConfig({
         {
           label: 'Operate',
           items: [
+            { slug: 'docs/guides/deploy' },
+            {
+              label: 'Deploy reference',
+              collapsed: true,
+              items: [
+                { slug: 'docs/reference/deploy/helm-chart' },
+                { slug: 'docs/reference/deploy/terraform-modules' },
+                { slug: 'docs/reference/deploy/terraform-foundation' },
+                { slug: 'docs/reference/deploy/terraform-ecs' },
+                { slug: 'docs/reference/deploy/terraform-ec2' },
+                { slug: 'docs/reference/deploy/terraform-discovery' },
+                { slug: 'docs/reference/deploy/terraform-audit' },
+                { slug: 'docs/reference/deploy/terraform-datadog' },
+                { slug: 'docs/reference/deploy/terraform-example-complete' },
+                { slug: 'docs/reference/deploy/terraform-example-kubernetes' },
+              ],
+            },
             { slug: 'docs/guides/scale-out' },
             { slug: 'docs/reference/compose-stack' },
             { label: 'Runbooks', collapsed: true, items: [{ autogenerate: { directory: 'docs/runbooks' } }] },

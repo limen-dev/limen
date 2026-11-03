@@ -1,4 +1,4 @@
-# Limen audit
+# Terraform module: audit
 
 The audit store: an S3 bucket the control plane appends signed, hash-chained batches and recordings to, a Glue table over it with partition projection, and an Athena workgroup for Grafana. It also outputs the IAM policies for the control plane (write), Grafana (read) and the verifier.
 

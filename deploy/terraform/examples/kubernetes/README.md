@@ -1,4 +1,4 @@
-# Kubernetes example
+# Terraform example: kubernetes
 
 The foundation for the Helm chart: database, keys, audit store and secrets, plus the control plane's IRSA role. It does not create the cluster. `terraform output -raw helm_values > limen-values.yaml`, then follow [Deploying Limen on AWS](../../../../docs/guides/deploy.md) (On Kubernetes).
 

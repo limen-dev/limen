@@ -1,4 +1,4 @@
-# Limen foundation
+# Terraform module: foundation
 
 Everything Limen needs besides compute: a PostgreSQL database (RDS), the four KMS signing keys, the audit store (the `audit` module), the secrets (database URL, join tokens, the internal CA certificate) and an IAM role for the control plane's Kubernetes service account. Its outputs feed the `ecs` and `ec2` modules, or the Helm chart (`helm_values`, `kubernetes_secrets`).
 

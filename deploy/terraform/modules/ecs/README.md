@@ -1,4 +1,4 @@
-# Limen ecs
+# Terraform module: ecs
 
 Control planes, proxies and workers as ECS services on Fargate. `services` is a map: each entry is one service, so any number of each component runs from one call. Control planes publish the internal CA to a secret and proxies and workers wait for it (`internal_ca`). Drain timeouts are derived from `stop_timeout`, and control planes run with an `ephemeral` audit spool.
 
