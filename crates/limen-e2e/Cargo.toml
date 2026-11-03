@@ -29,7 +29,6 @@ reqwest = { workspace = true, features = ["http2"] }
 russh.workspace = true
 rand.workspace = true
 serde_json.workspace = true
-rustls-pki-types.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 time.workspace = true

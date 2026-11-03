@@ -42,7 +42,6 @@ webbrowser.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
-limen-testkit.workspace = true
 tempfile.workspace = true
 
 [lints]
