@@ -31,7 +31,8 @@ GitHub Pages is a reasonable place to **start**: free, deploys from the Actions 
 - **Checks in the build.** `check-links.mjs` fails on a broken page or anchor. `check-site.mjs` fails when a guide is missing, a page loads anything from another origin, or the homepage stops saying what is unverified or claims something ADR-0031 forbids (access receipts, AI agents, comparisons).
 - **Tolerant URLs and a Limen 404.** `trailingSlash` is `ignore`, so `/docs` and `/docs/` both load in dev and preview (built pages keep the slash). `404.html` is the site's own page, which sends a missing-slash address to the right page and suggests the closest pages otherwise (#143).
 - **Fonts and scripts are self-hosted.** No analytics, no third-party requests.
-- **Still open:** switching publishing on when the repository is public (#138), run the quickstart in CI (#135), generate the CLI reference from `clap` (#133), deploy guides after Phase 15 (#134), domain and redirects (#136).
+- **Update (2026-11-03): the repository is public and the site is live** at <https://limen-dev.github.io/limen> (`PUBLISH_SITE` is `true`, #138). The "private today" and "not published yet" lines above describe the position when they were written.
+- **Still open (2026-11-03):** deploy guides after Phase 15 (#134), domain and redirects (#136). The quickstart in CI (#135) and the generated CLI reference (#133) are done.
 
 ## Consequences
 - A new milestone ("Docs site and homepage") and a `website/` workspace outside the Rust build; CI builds it and checks links.

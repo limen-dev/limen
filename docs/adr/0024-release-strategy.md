@@ -31,10 +31,10 @@ Releases are automated; a person decides *when*, never *how*.
 1. **Prove the pipeline (now):** adopt release-please, add image publishing, the SBOM, and the attestation, then merge the first release PR as `v0.1.0-rc.1` (a *pre-release*) from the Phase 3.5 state. It shows whether the pipeline works end to end.
 2. **`v0.1.0`** once the rc passes a smoke test (install the CLI from the release, start the published images with the compose file, run `demo-phase35.sh`).
 3. **Each milestone** closes with a tag and release notes.
-4. **When the repository goes public:** Homebrew tap, public image visibility, and the Terraform Registry decision.
+4. **Now that the repository is public (2026-11-03):** Homebrew tap, public image visibility, and the Terraform Registry decision.
 
 ## Consequences
-- The repository is private today, so releases and GHCR images are visible to collaborators only until it is public.
+- The repository was private when this was written, so releases and GHCR images were visible to collaborators only. It is public now (2026-11-03): releases are visible to everyone. Whether each GHCR package is public is a separate setting (Packages, Package settings) that was not checked.
 - `Cargo.toml`'s workspace version is the single source of the number; the release workflow must check that the tag matches it.
 - The existing `release.yml` (tag triggers a draft with binaries) is replaced by the release-please workflow above; its build matrix and packaging steps carry over.
 
