@@ -69,6 +69,8 @@ pub enum SpoolError {
     Full { used: u64, max: u64 },
     #[error("record of {0} bytes exceeds the limit")]
     TooLarge(usize),
+    #[error("empty records are not allowed")]
+    Empty,
     #[error("spool corrupt in {segment}: {reason}")]
     Corrupt { segment: String, reason: String },
     #[error("unknown consumer {0:?}")]
@@ -146,7 +148,20 @@ fn scan(
         }
         let size = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
         let crc = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-        if size > MAX_RECORD || len - pos - HEADER < size as u64 {
+        if size == 0 || size > MAX_RECORD {
+            // A writer never produces either, and a crash leaves a prefix of
+            // a valid record, so this is not a torn write. The exception is
+            // a zero-filled tail, which some filesystems leave after a crash
+            // (and which would otherwise parse as an empty record).
+            let mut rest = Vec::new();
+            file.read_to_end(&mut rest)?;
+            if header.iter().chain(&rest).all(|b| *b == 0) {
+                torn = true;
+                break;
+            }
+            return Err(corrupt(path, "invalid record length"));
+        }
+        if len - pos - HEADER < size as u64 {
             torn = true;
             break;
         }
@@ -367,6 +382,9 @@ impl Spool {
 
     /// Append a record and wait until it's durable. Returns its number.
     pub async fn append(&self, payload: &[u8]) -> Result<u64, SpoolError> {
+        if payload.is_empty() {
+            return Err(SpoolError::Empty);
+        }
         if payload.len() > MAX_RECORD {
             return Err(SpoolError::TooLarge(payload.len()));
         }
@@ -706,6 +724,43 @@ mod tests {
             bytes.len(),
             "nothing was truncated"
         );
+    }
+
+    #[tokio::test]
+    async fn a_zero_filled_tail_is_dropped_but_a_bad_length_mid_file_is_corruption() {
+        // Some filesystems extend a file with zeros across a crash.
+        let dir = tempfile::tempdir().expect("dir");
+        {
+            let spool = Spool::open(config(dir.path())).expect("open");
+            spool.start();
+            for i in 0..3u8 {
+                spool.append(&[i; 10]).await.expect("append");
+            }
+            assert!(matches!(spool.append(b"").await, Err(SpoolError::Empty)));
+        }
+        let seg = std::fs::read_dir(dir.path().join("segments"))
+            .expect("ls")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .max()
+            .expect("segment");
+        let mut f = OpenOptions::new().append(true).open(&seg).expect("open");
+        f.write_all(&[0u8; 64]).expect("zero tail");
+        drop(f);
+        let spool = Spool::open(config(dir.path())).expect("zero tail is a torn write");
+        spool.start();
+        assert_eq!(spool.read("a", 100).expect("read").len(), 3);
+        assert_eq!(spool.append(b"after").await.expect("append"), 3);
+        drop(spool);
+
+        // An absurd length with real data after it is damage, not a crash.
+        let mut bytes = std::fs::read(&seg).expect("read");
+        bytes[0] = 0xff;
+        std::fs::write(&seg, bytes).expect("write");
+        assert!(matches!(
+            Spool::open(config(dir.path())),
+            Err(SpoolError::Corrupt { .. })
+        ));
     }
 
     #[test]
