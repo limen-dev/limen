@@ -5,8 +5,8 @@
 #   PREFIX=/usr/local scripts/install-cli.sh
 #
 # Re-run it after pulling to upgrade. Needs a Rust toolchain (rustup reads the
-# version pinned in rust-toolchain.toml). Release tarballs (ADR-0024) will
-# replace the source build once the repository is published.
+# version pinned in rust-toolchain.toml). Releases (ADR-0024)
+# also ship CLI tarballs; this script is the build-from-source route.
 set -euo pipefail
 
 prefix="${PREFIX:-$HOME/.local}"
