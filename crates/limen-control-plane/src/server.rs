@@ -392,21 +392,43 @@ async fn rotate_server_cert(state: AppState, tls: Arc<RwLock<Arc<ServerConfig>>>
     }
 }
 
-/// `/healthz` (process up) and `/readyz` (database reachable).
+/// `/healthz` (process up, audit spool usable) and `/readyz` (database
+/// reachable). A spool whose fsync failed refuses every append until the
+/// process restarts, so `/healthz` fails and the orchestrator restarts it.
 pub async fn serve_health(
     state: AppState,
     addr: SocketAddr,
     mut done: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
+    let spool = state.pipeline.spool.clone();
     let app = Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route(
+            "/healthz",
+            get({
+                let spool = spool.clone();
+                move || {
+                    let broken = spool.is_broken();
+                    async move {
+                        if broken {
+                            (StatusCode::SERVICE_UNAVAILABLE, "audit spool broken")
+                        } else {
+                            (StatusCode::OK, "ok")
+                        }
+                    }
+                }
+            }),
+        )
         .route("/metrics", get(|| async { limen_core::metrics::render() }))
         .route(
             "/readyz",
             get(move || {
                 let db = state.db.clone();
                 let draining = Arc::clone(&state.draining);
+                let broken = spool.is_broken();
                 async move {
+                    if broken {
+                        return (StatusCode::SERVICE_UNAVAILABLE, "audit spool broken");
+                    }
                     if draining.load(Ordering::SeqCst) {
                         return (StatusCode::SERVICE_UNAVAILABLE, "shutting down");
                     }
