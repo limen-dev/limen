@@ -572,3 +572,65 @@ pub async fn redeem(
         return_path,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn return_paths_stay_on_the_app_host() {
+        for ok in [
+            "/",
+            "/app",
+            "/a/b-c_d.e~f",
+            "/app?next=/x&y=1",
+            "/app?next=//x",
+        ] {
+            assert!(valid_return_path(ok), "{ok} should be accepted");
+        }
+        for bad in [
+            "",
+            "app",
+            "//evil.example",
+            "///evil.example",
+            "/a//b",
+            "https://evil.example/",
+            "http://evil.example",
+            "javascript:alert(1)",
+            "/\\evil.example",
+            "/a\\b",
+            "/a/../b",
+            "/a/./b",
+            "/..",
+            "/a%2e%2e/b",
+            "/a%2Fb",
+            "/a#frag",
+            "/a b",
+            "/a\tb",
+            "/a\nb",
+            "/caf\u{e9}",
+            "/%0d%0aSet-Cookie:x=1",
+        ] {
+            assert!(!valid_return_path(bad), "{bad:?} should be rejected");
+        }
+        assert!(!valid_return_path(&format!("/{}", "a".repeat(4096))));
+    }
+
+    #[test]
+    fn browser_nonces_are_exactly_32_url_safe_bytes() {
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        assert!(valid_browser_nonce(&engine.encode([7u8; 32])));
+        assert!(!valid_browser_nonce(&engine.encode([7u8; 31])));
+        assert!(!valid_browser_nonce(&engine.encode([7u8; 33])));
+        assert!(!valid_browser_nonce(""));
+        assert!(!valid_browser_nonce(&"A".repeat(200)));
+        // Padding and the standard alphabet are not the format we issue.
+        assert!(!valid_browser_nonce(&format!(
+            "{}=",
+            engine.encode([7u8; 32])
+        )));
+        assert!(!valid_browser_nonce(
+            &base64::engine::general_purpose::STANDARD.encode([0xfbu8; 32])
+        ));
+    }
+}
