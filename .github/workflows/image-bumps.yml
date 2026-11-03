@@ -1,0 +1,72 @@
+name: image-bumps
+
+# Weekly: looks for newer container image tags (scripts/bump-images.py), and opens one draft
+# pull request that bumps deploy/compose/.env and the places that must agree with it.
+# Major versions and new release lines are listed in the pull request, never applied.
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" in the repository settings.
+# A draft runs no CI, and a pull request opened with the workflow token starts none either:
+# mark it ready for review to run the checks and the compose demos.
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: image-bumps
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Look for newer images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Find and apply bumps
+        # bash with pipefail, so a registry error fails the run despite the pipe into tee.
+        shell: bash
+        run: |
+          python3 -I scripts/bump-images.py --apply | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the versions still agree
+        run: scripts/check-versions.sh
+
+      - name: Open or update the draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "Nothing to bump."
+            exit 0
+          fi
+          branch=chore/image-bumps
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add deploy/compose/.env .github/workflows/rust.yml rust-toolchain.toml mise.toml
+          git commit -m "chore(deploy): bump container images"
+          git push --force origin "$branch"
+          {
+            cat report.md
+            echo
+            echo "Opened by .github/workflows/image-bumps.yml. It is a draft so that no CI runs on it;"
+            echo "mark it ready for review to run the checks and the compose demos before merging."
+          } > body.md
+          if gh pr view "$branch" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$branch" --body-file body.md
+          else
+            gh pr create --draft --base main --head "$branch" \
+              --title "chore(deploy): bump container images" --body-file body.md
+          fi

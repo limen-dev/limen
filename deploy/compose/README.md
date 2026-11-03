@@ -78,6 +78,8 @@ Without a browser: `limen login --device` prints a URL and code to open anywhere
 
 Every container image used by the stack, the demos and the image builds is listed in one file, [`.env`](.env). Compose loads it itself; the demos and `scripts/ci-db-targets.sh` source it. Tool versions are in `mise.toml`. To change a version, edit `.env` and run `scripts/check-versions.sh`. It fails on drift: a compose file or script that pins an image itself, a Dockerfile that defaults a base image instead of taking a build arg, a build that doesn't pass the arg, or a place that can't read `.env` (CI service containers, Rust toolchain pins) disagreeing with it. CI runs it in the lint job.
 
+A weekly workflow ([`image-bumps.yml`](../../.github/workflows/image-bumps.yml), which runs `scripts/bump-images.py`) looks for newer tags and opens one draft pull request with the patch and minor bumps; mark it ready for review to run CI and the demos. Major versions and new release lines (for example `redis:7.4` to `8.x`), images pinned by digest, and the variables the script is told to hold (`MONGO_IMAGE`, with the reason) are only listed. Run `scripts/bump-images.py` yourself for the report (add `--apply` to edit the files). Not run end to end yet: the report and the file edits were run locally, the workflow itself only linted (`unverified` until its first scheduled or manual run).
+
 ## Layout
 
 ```
