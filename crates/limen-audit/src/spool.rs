@@ -153,6 +153,15 @@ fn scan(
         let mut payload = vec![0u8; size];
         file.read_exact(&mut payload)?;
         if crc32fast::hash(&payload) != crc {
+            // A complete record with more bytes after it is not a torn write
+            // (a crash leaves the damage at the very end). Treating it as one
+            // would silently discard the valid records that follow.
+            if pos + HEADER + (size as u64) < len {
+                return Err(corrupt(
+                    path,
+                    "checksum mismatch before the end of the segment",
+                ));
+            }
             torn = true;
             break;
         }
@@ -160,7 +169,6 @@ fn scan(
         records.push(payload);
     }
     // The caller decides whether a bad tail is a crash artifact or corruption.
-    let _ = path;
     Ok((records, pos, torn))
 }
 
@@ -665,6 +673,39 @@ mod tests {
             Spool::open(config(dir2.path())),
             Err(SpoolError::Corrupt { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn a_bad_checksum_before_the_tail_is_corruption_not_a_torn_write() {
+        let dir = tempfile::tempdir().expect("dir");
+        {
+            let spool = Spool::open(config(dir.path())).expect("open");
+            spool.start();
+            for i in 0..5u8 {
+                spool.append(&[i; 10]).await.expect("append");
+            }
+        }
+        // One segment holds all five records. Flip a payload byte in the
+        // second; the three valid records after it must not be dropped.
+        let segs: Vec<_> = std::fs::read_dir(dir.path().join("segments"))
+            .expect("ls")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(segs.len(), 1, "all records share a segment");
+        let mut bytes = std::fs::read(&segs[0]).expect("read");
+        let header = usize::try_from(HEADER).expect("small");
+        bytes[(header + 10) + header + 3] ^= 0xff;
+        std::fs::write(&segs[0], &bytes).expect("write");
+        assert!(matches!(
+            Spool::open(config(dir.path())),
+            Err(SpoolError::Corrupt { .. })
+        ));
+        assert_eq!(
+            std::fs::read(&segs[0]).expect("read").len(),
+            bytes.len(),
+            "nothing was truncated"
+        );
     }
 
     #[test]
