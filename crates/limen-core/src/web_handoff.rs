@@ -35,7 +35,7 @@ pub fn valid_return_path(path: &str) -> bool {
         && route
             .split('/')
             .all(|segment| segment != "." && segment != "..")
-        && query.is_none_or(|q| !q.bytes().any(|b| b"#\"<>\\^`{|}".contains(&b)))
+        && query.is_none_or(|q| !q.bytes().any(|b| b"#\"<>".contains(&b)))
 }
 
 #[cfg(test)]
@@ -51,6 +51,15 @@ mod tests {
             "/app?next=/x&y=1",
             "/app?next=//x",
             "/a?",
+        ] {
+            assert!(valid_return_path(ok), "{ok} should be accepted");
+        }
+        // Browsers send these raw in a query; a sign-in must not break on them.
+        for ok in [
+            "/app?q={x}|^`",
+            "/app?q=a\\b",
+            "/app?q=[1]&r=a%20b",
+            "/app?q=a:b@c",
         ] {
             assert!(valid_return_path(ok), "{ok} should be accepted");
         }
@@ -74,6 +83,7 @@ mod tests {
             "/a#frag",
             "/a?x#frag",
             "/a?x=\"y",
+            "/a?x=<y>",
             "/a b",
             "/a\tb",
             "/a\nb",
