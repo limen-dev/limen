@@ -18,6 +18,7 @@ use hyper::body::{Bytes, Incoming};
 use hyper_util::rt::TokioIo;
 use limen_audit::{Context as AuditContext, EventKind};
 use limen_ca::verify::{UserIdentity, verify_user};
+use limen_core::web_handoff::{valid_browser_nonce, valid_return_path};
 use limen_policy::{AccessRequest, Principal, model::WebTarget};
 use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::{RedeemWebHandoffRequest, WebAppSession};
@@ -761,13 +762,6 @@ fn websocket_origin_allowed(headers: &HeaderMap, host: &str, public_port: u16) -
         && origin.username().is_empty()
 }
 
-fn valid_browser_nonce(nonce: &str) -> bool {
-    nonce.len() <= 128
-        && base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(nonce)
-            .is_ok_and(|bytes| bytes.len() == 32)
-}
-
 async fn login_redirect(
     proxy: &Proxy,
     route: &WebRoute,
@@ -1304,14 +1298,6 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
     destination
 }
 
-fn valid_return_path(value: &str) -> bool {
-    let Ok(uri) = Uri::try_from(value) else {
-        return false;
-    };
-    // `Uri` silently drops a fragment while parsing, so check the raw text.
-    uri.authority().is_none() && !value.contains('#') && safe_uri(&uri)
-}
-
 #[allow(clippy::too_many_arguments)] // Carries the bounded fields for one denial event.
 async fn audit_denied(
     proxy: &Proxy,
@@ -1633,33 +1619,6 @@ mod tests {
                 "{path}"
             );
         }
-    }
-
-    #[test]
-    fn handoff_return_paths_and_nonces_are_checked_like_the_control_plane_issues_them() {
-        for ok in ["/", "/app", "/a/b-c_d.e~f", "/app?next=/x&y=1"] {
-            assert!(valid_return_path(ok), "{ok} should be accepted");
-        }
-        for bad in [
-            "",
-            "app",
-            "//evil.example",
-            "https://evil.example/",
-            "/\\evil.example",
-            "/a/../b",
-            "/a%2e%2e/b",
-            "/a#frag",
-            "/a b",
-            "/a\nb",
-        ] {
-            assert!(!valid_return_path(bad), "{bad:?} should be rejected");
-        }
-        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        assert!(valid_browser_nonce(&engine.encode([7u8; 32])));
-        assert!(!valid_browser_nonce(&engine.encode([7u8; 31])));
-        assert!(!valid_browser_nonce(&engine.encode([7u8; 33])));
-        assert!(!valid_browser_nonce(""));
-        assert!(!valid_browser_nonce(&"A".repeat(200)));
     }
 
     #[test]

@@ -4,7 +4,6 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use base64::Engine as _;
 use limen_audit::{Context, EventKind};
 use limen_ca::UserCertRequest;
 use limen_policy::{AccessRequest, Principal};
@@ -18,6 +17,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
+
+use limen_core::web_handoff::{valid_browser_nonce, valid_return_path};
 
 use super::store::{self, WebAppLogin};
 use super::views::error_page;
@@ -462,37 +463,6 @@ pub async fn jwks(State(state): State<AppState>) -> Response {
     }
 }
 
-fn valid_browser_nonce(nonce: &str) -> bool {
-    nonce.len() <= 128
-        && base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(nonce)
-            .is_ok_and(|bytes| bytes.len() == 32)
-}
-
-fn valid_return_path(path: &str) -> bool {
-    let Ok(uri) = http::Uri::try_from(path) else {
-        return false;
-    };
-    let Some(path_and_query) = uri.path_and_query() else {
-        return false;
-    };
-    let route = path_and_query.path();
-    path.len() <= 4096
-        && uri.authority().is_none()
-        && route.starts_with('/')
-        && !route.starts_with("//")
-        && !route.contains("//")
-        && !route.contains(['#', '\\', '%'])
-        && route
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"/-._~".contains(&b))
-        && route
-            .split('/')
-            .all(|segment| segment != "." && segment != "..")
-        && path.bytes().all(|b| b.is_ascii_graphic())
-        && !path.contains('#')
-}
-
 async fn denied(
     state: &AppState,
     addr: Option<std::net::IpAddr>,
@@ -571,66 +541,4 @@ pub async fn redeem(
         session: Some(session),
         return_path,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn return_paths_stay_on_the_app_host() {
-        for ok in [
-            "/",
-            "/app",
-            "/a/b-c_d.e~f",
-            "/app?next=/x&y=1",
-            "/app?next=//x",
-        ] {
-            assert!(valid_return_path(ok), "{ok} should be accepted");
-        }
-        for bad in [
-            "",
-            "app",
-            "//evil.example",
-            "///evil.example",
-            "/a//b",
-            "https://evil.example/",
-            "http://evil.example",
-            "javascript:alert(1)",
-            "/\\evil.example",
-            "/a\\b",
-            "/a/../b",
-            "/a/./b",
-            "/..",
-            "/a%2e%2e/b",
-            "/a%2Fb",
-            "/a#frag",
-            "/a b",
-            "/a\tb",
-            "/a\nb",
-            "/caf\u{e9}",
-            "/%0d%0aSet-Cookie:x=1",
-        ] {
-            assert!(!valid_return_path(bad), "{bad:?} should be rejected");
-        }
-        assert!(!valid_return_path(&format!("/{}", "a".repeat(4096))));
-    }
-
-    #[test]
-    fn browser_nonces_are_exactly_32_url_safe_bytes() {
-        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        assert!(valid_browser_nonce(&engine.encode([7u8; 32])));
-        assert!(!valid_browser_nonce(&engine.encode([7u8; 31])));
-        assert!(!valid_browser_nonce(&engine.encode([7u8; 33])));
-        assert!(!valid_browser_nonce(""));
-        assert!(!valid_browser_nonce(&"A".repeat(200)));
-        // Padding and the standard alphabet are not the format we issue.
-        assert!(!valid_browser_nonce(&format!(
-            "{}=",
-            engine.encode([7u8; 32])
-        )));
-        assert!(!valid_browser_nonce(
-            &base64::engine::general_purpose::STANDARD.encode([0xfbu8; 32])
-        ));
-    }
 }
