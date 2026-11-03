@@ -1308,7 +1308,8 @@ fn valid_return_path(value: &str) -> bool {
     let Ok(uri) = Uri::try_from(value) else {
         return false;
     };
-    uri.authority().is_none() && safe_uri(&uri)
+    // `Uri` silently drops a fragment while parsing, so check the raw text.
+    uri.authority().is_none() && !value.contains('#') && safe_uri(&uri)
 }
 
 #[allow(clippy::too_many_arguments)] // Carries the bounded fields for one denial event.
@@ -1632,6 +1633,33 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[test]
+    fn handoff_return_paths_and_nonces_are_checked_like_the_control_plane_issues_them() {
+        for ok in ["/", "/app", "/a/b-c_d.e~f", "/app?next=/x&y=1"] {
+            assert!(valid_return_path(ok), "{ok} should be accepted");
+        }
+        for bad in [
+            "",
+            "app",
+            "//evil.example",
+            "https://evil.example/",
+            "/\\evil.example",
+            "/a/../b",
+            "/a%2e%2e/b",
+            "/a#frag",
+            "/a b",
+            "/a\nb",
+        ] {
+            assert!(!valid_return_path(bad), "{bad:?} should be rejected");
+        }
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        assert!(valid_browser_nonce(&engine.encode([7u8; 32])));
+        assert!(!valid_browser_nonce(&engine.encode([7u8; 31])));
+        assert!(!valid_browser_nonce(&engine.encode([7u8; 33])));
+        assert!(!valid_browser_nonce(""));
+        assert!(!valid_browser_nonce(&"A".repeat(200)));
     }
 
     #[test]
