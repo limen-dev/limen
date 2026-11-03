@@ -150,27 +150,37 @@ fn exec_credential(profile: &Profile) -> anyhow::Result<String> {
 }
 
 fn write_private(path: &Path, text: &str) -> anyhow::Result<()> {
-    use std::io::Write as _;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("writing {}", path.display()))?;
-    file.write_all(text.as_bytes())?;
-    Ok(())
+    // A new 0600 file renamed into place: opening the target would keep the
+    // mode of a file that already exists and leave a half-written one if
+    // interrupted.
+    crate::profile::atomic_write(path, text.as_bytes(), 0o600)
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_tightens_an_existing_world_readable_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("limen-kc-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("kubeconfig.json");
+        std::fs::write(&path, "old").expect("seed");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        write_private(&path, "new").expect("write");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "new");
+        let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(std::fs::read_dir(&dir).expect("ls").count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use crate::profile::ProfileMeta;
     use limen_core::secret::Secret;
 
