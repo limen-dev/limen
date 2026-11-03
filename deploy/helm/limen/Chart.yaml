@@ -1,0 +1,12 @@
+apiVersion: v2
+name: limen
+description: Limen control plane, proxy and worker
+type: application
+version: 0.1.0-rc.1
+appVersion: "0.1.0-rc.1"
+home: https://github.com/limen-dev/limen
+# helm push turns the first source into org.opencontainers.image.source, which
+# links the GHCR package to this repository: it inherits the repository's
+# visibility (public) instead of starting private.
+sources:
+  - https://github.com/limen-dev/limen

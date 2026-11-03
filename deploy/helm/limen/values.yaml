@@ -1,0 +1,168 @@
+# Limen chart values. A value marked REQUIRED has no default: `helm install`
+# fails with a message naming it.
+#
+# Each of controlPlanes, proxies and workers is a map: add an entry to run one
+# more group. An entry overrides the matching *Defaults block, so it holds
+# only what differs. Keys become part of every resource name. Example:
+#   workers:
+#     prod-db: { proxy: public }
+#     staging: { proxy: public, replicas: 2 }
+
+image:
+  # -- Registry the images are pulled from. They are named limen-control-plane, limen-proxy and limen-worker.
+  registry: ghcr.io/limen-dev
+  # -- Limen release to run, as the image tag (v0.1.0). Empty runs the chart's appVersion, the release it was published with.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+# -- Pull secrets for a private mirror of the images.
+imagePullSecrets: []
+
+# Secrets and ConfigMaps you create beforehand (see README.md). A group can
+# point at its own with `joinSecret`, so each can have its own token.
+existingSecrets:
+  # -- Secret with the database URL, key `url`.
+  database: limen-database
+  # -- Default Secret with a proxy's join token, key `token`.
+  proxyJoin: limen-proxy-join
+  # -- Default Secret with a worker's join token, key `token`.
+  workerJoin: limen-worker-join
+internalCA:
+  # -- ConfigMap with the internal CA certificate, key `internal-ca.pem`. Proxies and workers trust it.
+  configMap: limen-internal-ca
+
+# -- Control plane groups, by key. One StatefulSet per entry; each entry is a separate Limen deployment (own database and keys). REQUIRED unless you run no control plane.
+controlPlanes: {}
+controlPlaneDefaults:
+  # -- Replicas per group.
+  replicas: 3
+  # -- How long a replica drains on SIGTERM (LIMEN_DRAIN_TIMEOUT).
+  drainTimeout: 20s
+  # -- Must exceed drainTimeout by enough to finish the drain and the handoff.
+  terminationGracePeriodSeconds: 45
+  oidc:
+    # -- OIDC issuer URL. REQUIRED.
+    issuer: ""
+    # -- OIDC client id. REQUIRED.
+    clientId: ""
+  # -- Audit S3 bucket name. REQUIRED.
+  auditS3Bucket: ""
+  # -- ARNs of the four KMS signing keys of the KMS CA backend (ADR-0020).
+  kms:
+    internalCaKey: ""
+    userCaKey: ""
+    sshUserCaKey: ""
+    sshHostCaKey: ""
+  # -- Secret with the database URL. Empty uses existingSecrets.database.
+  databaseSecret: ""
+  spool:
+    # -- Size of the volume that holds the audit spool (`durable` mode).
+    size: 10Gi
+    # -- Storage class of that volume. Empty uses the cluster default.
+    storageClassName: ""
+  # -- PodDisruptionBudget. It is capped so a node can always be drained.
+  pdb: { minAvailable: 2 }
+  # -- Container resources.
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+  # -- Extra environment variables, as in a container spec.
+  extraEnv: []
+  # -- Pod security context. fsGroup makes volumes writable by the nonroot image (uid 65532).
+  podSecurityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+  # -- Container security context.
+  securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Pod annotations, e.g. prometheus.io/scrape, /port (the admin port) and /path: /metrics.
+  podAnnotations: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Service account. Annotate it with the IRSA role for KMS and S3.
+  serviceAccount: { create: true, annotations: {} }
+
+# -- Proxy groups, by key. One Deployment and LoadBalancer Service per entry. REQUIRED unless you run no proxy.
+proxies: {}
+proxyDefaults:
+  # -- Replicas per group.
+  replicas: 3
+  # -- How long a proxy drains on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS).
+  drainTimeoutSecs: 20
+  # -- Must exceed drainTimeoutSecs.
+  terminationGracePeriodSeconds: 40
+  # -- Prefix of each proxy's name; the join token must approve it. REQUIRED.
+  namePrefix: ""
+  # -- Public DNS name(s) of the load balancer, comma separated. REQUIRED.
+  dnsNames: ""
+  # -- Key of the control plane group to dial. Empty uses the first.
+  controlPlane: ""
+  # -- Overrides controlPlane, e.g. "cp.other-cluster.example.com:3080".
+  controlPlaneAddr: ""
+  # -- Secret with this group's join token. Empty uses existingSecrets.proxyJoin.
+  joinSecret: ""
+  service:
+    # -- Service type.
+    type: LoadBalancer
+    # -- Service port.
+    port: 443
+    # -- Service annotations. The defaults ask AWS for a Network Load Balancer in TCP mode; TLS is end to end (ADR-0005).
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+  # -- PodDisruptionBudget. It is capped so a node can always be drained.
+  pdb: { minAvailable: 2 }
+  # -- Container resources.
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+  # -- Extra environment variables, as in a container spec.
+  extraEnv: []
+  # -- Pod security context. fsGroup makes volumes writable by the nonroot image (uid 65532).
+  podSecurityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+  # -- Container security context.
+  securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Pod annotations, e.g. prometheus.io/scrape, /port (the admin port) and /path: /metrics.
+  podAnnotations: {}
+  # -- Tolerations.
+  tolerations: []
+
+# -- Worker groups, by key. One Deployment per entry. REQUIRED unless you run no worker.
+workers: {}
+workerDefaults:
+  # -- Replicas per group.
+  replicas: 3
+  # -- Sessions a worker accepts at once (LIMEN_MAX_SESSIONS).
+  maxSessions: 200
+  # -- How long a worker lets open sessions finish on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS).
+  drainTimeoutSecs: 300
+  # -- Must exceed drainTimeoutSecs plus about 20 s to upload recordings. The chart refuses a smaller value.
+  terminationGracePeriodSeconds: 330
+  # -- Prefix of each worker's name. REQUIRED.
+  namePrefix: ""
+  # -- Key of the proxy group to dial. Empty uses the first.
+  proxy: ""
+  # -- Overrides proxy: host:port.
+  proxyAddr: ""
+  # -- Overrides proxy: the proxy's certificate name.
+  proxyName: ""
+  # -- Secret with this group's join token. Empty uses existingSecrets.workerJoin.
+  joinSecret: ""
+  # -- Run resource discovery (ADR-0027); see docs/guides/discovery.md.
+  discovery: false
+  # -- Service account. Annotate it with the IRSA role the worker uses (the one modules/discovery trusts); any annotation creates the service account.
+  serviceAccount: { annotations: {} }
+  # -- Container resources.
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+  # -- Extra environment variables, as in a container spec.
+  extraEnv: []
+  # -- Pod security context. fsGroup makes volumes writable by the nonroot image (uid 65532).
+  podSecurityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+  # -- Container security context.
+  securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Pod annotations, e.g. prometheus.io/scrape, /port (the admin port) and /path: /metrics.
+  podAnnotations: {}
+  # -- Tolerations.
+  tolerations: []

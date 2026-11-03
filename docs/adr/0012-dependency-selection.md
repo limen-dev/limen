@@ -69,12 +69,35 @@ A dependency is adopted only if all of these hold:
 | gRPC errors | tonic-types 0.14.6 (MIT) | 0.14.8 | 2026 | Adopt (ADR-0042). The `google.rpc` error details (`ErrorInfo`, `RetryInfo`) the management API returns, so clients match on a stable reason instead of message text. Same project and version as `tonic`, pinned to it so the lockfile doesn't move `tonic`; no published advisories (`cargo audit` clean, checked 2026-10-29) |
 | JSON Schema | schemars 1.2.3 (MIT) | 1.2.3 | 2026-10-12 | Adopt (ADR-0042 §2). Derives the JSON Schema (draft 2020-12) of each document kind's `spec` from the same `serde` types that parse it, honoring their `serde` attributes, so the schema `GetSchema` serves and `docs/policy-schema/` commits can't drift from the parser. Used by `limen-policy` and `limen-core` with only the `derive` and `std` features; its own dependencies are `dyn-clone` and `ref-cast`, plus `serde` and `serde_json`, which are already in the tree (it was already in the lockfile through `serde_with`). The derive adds two build-time crates, `schemars_derive` and `serde_derive_internals` (from the `serde` project), neither of which ends up in a binary. Widely used (600M downloads) and maintained; `cargo audit` and `cargo deny` clean (checked 2026-11-02) |
 | API contract (CI and dev only) | buf 1.74.0 (Apache-2.0, pinned in `mise.toml`) | 1.75.0 | 2026-10-14 | Adopt (ADR-0042). `buf lint` and `buf breaking` for `limen.manage.v1` only (`proto/buf.yaml`); not used to build, so `protoc` stays the code generator. Pinned one release behind the newest (1.75.0 is a week old). Actively maintained, no published security advisories (checked 2026-10-29) |
+| Helm chart check (CI and dev only) | kubeconform 0.8.0 (Apache-2.0, pinned in `mise.toml`) | 0.8.0 | 2026-06-04 | Adopt. `infra.yml` validates the rendered chart against the Kubernetes JSON schema in strict mode; it found an anti-affinity selector that `helm lint` and `helm template` accepted and the API server rejects. It downloads the schemas from `raw.githubusercontent.com` when it runs; nothing from it ships |
+| Terraform reference docs (CI and dev only) | terraform-docs 0.24.0 (MIT, pinned in `mise.toml`) | 0.24.0 | 2026-05-10 | Adopt as a **maintainer tool only**: `deploy/terraform/docs.sh` writes the inputs, outputs and community-module tables of each module's README from the code, so they cannot drift; `infra.yml` runs it with `--check`. Nothing from it ships or runs in a deployment |
+| Helm chart reference docs (CI and dev only) | helm-docs 1.14.2 (GPL-3.0, pinned in `mise.toml`) | 1.14.2 | 2024-07-08 (repo active 2026-06) | Adopt as a **maintainer tool only**: it writes the chart README's values table from the `# --` comments in `values.yaml`; `infra.yml` regenerates it and fails on a diff. It is GPL-3.0 and only run as a build tool, never linked or shipped, and it is not derived into the output. The last release is old; the fallback is to write the table by hand or generate it with `helm show values` |
 
 ## Accepted advisories
 
 | Advisory | Crate (path) | Why it's accepted |
 |---|---|---|
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
+
+## Terraform registry modules (2026-10-25)
+
+The `ecs` and `ec2` modules under `deploy/terraform/modules` build on community modules from `terraform-aws-modules`, pinned with a pessimistic constraint (`~>`). Versions and release dates from the Terraform registry on 2026-10-25.
+
+| Module | Version | Last release | Used for | Verdict |
+|---|---|---|---|---|
+| `terraform-aws-modules/ecs/aws` (`cluster`, `service`) | 7.6.1 | 2026-09-18 | Fargate cluster, services, task and execution roles, service security group, autoscaling | Adopt |
+| `terraform-aws-modules/autoscaling/aws` | 9.3.2 | 2026-09-18 | Launch template, Auto Scaling group, instance profile and role | Adopt |
+| `terraform-aws-modules/security-group/aws` | 6.0.0 | 2026-06-03 | Instance security groups | Adopt |
+| `terraform-aws-modules/rds/aws` | 7.2.2 | 2026-09-18 | PostgreSQL | Adopt |
+| `terraform-aws-modules/kms/aws` | 4.2.2 | 2026-09-18 | CA signing keys | Adopt |
+| `terraform-aws-modules/secrets-manager/aws` | 2.2.0 | 2026-09-28 | Database URL, join tokens, CA secret | Adopt |
+| `terraform-aws-modules/iam/aws` (`iam-role`) | 6.8.2 | 2026-09-18 | Control plane IRSA role | Adopt |
+| `terraform-aws-modules/vpc/aws` | 6.7.3 | 2026-09-18 | Example VPC | Adopt |
+| `terraform-aws-modules/alb/aws` | 10.5.1 | 2026-08-26 | Example Network Load Balancers | Adopt |
+
+Two helper container images are referenced by default in `modules/ecs` (`public.ecr.aws/aws-cli/aws-cli:2.38.0`, `public.ecr.aws/docker/library/busybox:1.37.0`) and one in the Kubernetes guide (`busybox:1.37.0`).
+
+Advisory check: not done against a Terraform advisory source (none is wired into CI); the modules are widely used and maintained. Re-check when bumping.
 
 ## Consequences
 - We own two small protocol codecs: MySQL (server side toward clients, client side toward targets) and RESP, plus the PostgreSQL frame layer. All are to be fuzzed with `cargo-fuzz`; that is still open for the Phase 6 codecs (design §14).
