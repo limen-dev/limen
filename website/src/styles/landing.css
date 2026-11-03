@@ -78,7 +78,7 @@ kbd { font-size: 0.72rem; padding: 0.15rem 0.4rem; border-radius: 5px; border: 1
 .pill:hover { border-color: var(--lm-accent); }
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--lm-accent); box-shadow: 0 0 0 0 var(--lm-glow); animation: ping 2.4s infinite; }
 @keyframes ping { 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-h1 { font-size: clamp(2.9rem, 7vw, 5.6rem); font-weight: 700; margin: 1.4rem 0 1.2rem; letter-spacing: -0.045em; line-height: 0.98; }
+h1 { font-size: clamp(2.2rem, 4.4vw, 3.6rem); font-weight: 700; margin: 1.4rem 0 1.2rem; letter-spacing: -0.045em; line-height: 0.98; }
 .grad { background: linear-gradient(95deg, var(--lm-accent-strong), var(--lm-accent-2) 80%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lede { font-size: clamp(1.1rem, 1.6vw, 1.3rem); max-width: 38rem; color: var(--lm-text-dim); }
 .lede b { color: var(--lm-text); font-weight: 600; }
