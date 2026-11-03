@@ -147,7 +147,6 @@ impl Profile {
 
 /// Write `contents` atomically, mode 0600 if `private` else 0644, in a 0700 directory.
 pub fn write_file(path: &Path, contents: &str, private: bool) -> anyhow::Result<()> {
-    use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
         #[cfg(unix)]
@@ -156,19 +155,102 @@ pub fn write_file(path: &Path, contents: &str, private: bool) -> anyhow::Result<
             std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         }
     }
-    let tmp = path.with_extension("tmp");
+    atomic_write(
+        path,
+        contents.as_bytes(),
+        if private { 0o600 } else { 0o644 },
+    )?;
+    Ok(())
+}
+
+/// Replace `path` with `contents` through a temporary sibling, so a reader
+/// never sees half a file and nobody can read the contents with more access
+/// than `mode` gives (ignored off Unix). The temporary file is created
+/// fresh with that mode: `OpenOptions::mode` does not apply to a file that
+/// already exists, so a leftover from a crash would keep its old, maybe
+/// wider, permissions.
+pub(crate) fn atomic_write(path: &Path, contents: &[u8], mode: u32) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("path has no file name"))?
+        .to_os_string();
+    // Appended, not `with_extension`, which would make `a.pem` and `a.key` share one.
+    name.push(".limen-tmp");
+    let tmp = path.with_file_name(name);
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(if private { 0o600 } else { 0o644 });
+        options.mode(mode);
     }
     #[cfg(not(unix))]
-    let _ = private;
-    let mut file = options.open(&tmp)?;
-    file.write_all(contents.as_bytes())?;
-    file.sync_all()?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    let _ = mode;
+    let written = (|| {
+        let mut file = options.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            // The umask may have taken bits away; ask for exactly `mode`.
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::*;
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_private_file_is_never_wider_than_0600_even_over_a_stale_temp_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        let key = dir.path().join("key.pem");
+        // A leftover from a crashed write, world-readable.
+        let stale = dir.path().join("key.pem.limen-tmp");
+        std::fs::write(&stale, "old").expect("stale");
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+
+        write_file(&key, "secret", true).expect("write");
+        assert_eq!(mode(&key), 0o600);
+        assert_eq!(std::fs::read_to_string(&key).expect("read"), "secret");
+        assert!(!stale.exists(), "no temp file is left behind");
+    }
+
+    #[test]
+    fn files_with_the_same_stem_do_not_share_a_temp_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        write_file(&dir.path().join("a.pem"), "public", false).expect("pem");
+        write_file(&dir.path().join("a.key"), "private", true).expect("key");
+        assert_eq!(mode(&dir.path().join("a.pem")), 0o644);
+        assert_eq!(mode(&dir.path().join("a.key")), 0o600);
+    }
+
+    #[test]
+    fn replacing_keeps_the_mode_asked_for() {
+        let dir = tempfile::tempdir().expect("dir");
+        let file = dir.path().join("config");
+        atomic_write(&file, b"one", 0o640).expect("first");
+        atomic_write(&file, b"two", 0o640).expect("second");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "two");
+        assert_eq!(mode(&file), 0o640);
+    }
 }
