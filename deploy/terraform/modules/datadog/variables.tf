@@ -32,6 +32,7 @@ variable "spool_pending_threshold" {
 }
 
 variable "tags" {
-  type    = list(string)
-  default = ["service:limen"]
+  description = "Tags added to every monitor."
+  type        = list(string)
+  default     = ["service:limen"]
 }

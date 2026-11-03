@@ -4,7 +4,8 @@ output "bucket" {
 }
 
 output "bucket_arn" {
-  value = aws_s3_bucket.audit.arn
+  description = "Audit bucket ARN."
+  value       = aws_s3_bucket.audit.arn
 }
 
 output "kms_key_arn" {
@@ -13,11 +14,13 @@ output "kms_key_arn" {
 }
 
 output "glue_database" {
-  value = aws_glue_catalog_database.audit.name
+  description = "Glue database holding the events table."
+  value       = aws_glue_catalog_database.audit.name
 }
 
 output "glue_table" {
-  value = aws_glue_catalog_table.events.name
+  description = "Glue table over the audit events, with partition projection."
+  value       = aws_glue_catalog_table.events.name
 }
 
 output "athena_workgroup" {

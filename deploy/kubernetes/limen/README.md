@@ -21,4 +21,4 @@ Three control planes, three proxies, and three workers, laid out as [Running Lim
 - Workers: scale on `limen_worker_sessions_active / limen_worker_sessions_max`, with a target around 0.6, using your metrics pipeline (for example a Prometheus adapter feeding a HorizontalPodAutoscaler). A HorizontalPodAutoscaler is not included because the metric source differs between clusters.
 - Scaling a StatefulSet down leaves the volume of the removed pod behind. If it still holds unshipped audit events, hand them to a peer with `limen-spool-adopt` before you delete the volume (see the [runbook](../../../docs/runbooks/scale-out.md)).
 
-ECS and EC2 Auto Scaling examples are part of Phase 15, with the Terraform modules.
+A [Helm chart](../../helm/limen/README.md) templates these manifests. ECS and EC2 deployments are in the [Terraform modules](../../terraform/modules/README.md).

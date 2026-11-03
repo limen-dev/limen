@@ -1,4 +1,5 @@
 output "monitor_ids" {
+  description = "Datadog monitor ids by name."
   value = merge(
     {
       denied_spike  = datadog_monitor.denied_spike.id
