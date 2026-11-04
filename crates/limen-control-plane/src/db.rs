@@ -913,6 +913,23 @@ pub async fn recent_revoked_logins(db: &Db) -> Result<Vec<String>, sqlx::Error> 
     .await
 }
 
+/// Whether `username` is locked, and whether the login `login_id` has ended,
+/// in one round trip. Every API call a user makes asks this.
+pub async fn lock_and_logout(
+    db: &Db,
+    username: &str,
+    login_id: &str,
+) -> Result<(bool, bool), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE username = $1 AND released_at IS NULL),
+                EXISTS (SELECT 1 FROM login_revocations WHERE login_id = $2)",
+    )
+    .bind(username)
+    .bind(login_id)
+    .fetch_one(db)
+    .await
+}
+
 pub async fn is_login_revoked(db: &Db, login_id: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM login_revocations WHERE login_id = $1)")
         .bind(login_id)

@@ -36,7 +36,7 @@ impl Access for AccessService {
         &self,
         request: Request<RequestAccessRequest>,
     ) -> Result<Response<AccessRequestInfo>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
@@ -59,7 +59,7 @@ impl Access for AccessService {
         &self,
         request: Request<ListAccessRequestsRequest>,
     ) -> Result<Response<ListAccessRequestsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let requests = access::list_requests(&self.0, &who(user), &request.into_inner()).await?;
         Ok(Response::new(ListAccessRequestsResponse { requests }))
@@ -69,7 +69,7 @@ impl Access for AccessService {
         &self,
         request: Request<DecideAccessRequestRequest>,
     ) -> Result<Response<AccessRequestInfo>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
@@ -82,7 +82,7 @@ impl Access for AccessService {
         &self,
         request: Request<CancelAccessRequestRequest>,
     ) -> Result<Response<AccessRequestInfo>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         access::cancel(&self.0, &who(user), &request.into_inner().id)
             .await
@@ -93,7 +93,7 @@ impl Access for AccessService {
         &self,
         request: Request<ListAccessGrantsRequest>,
     ) -> Result<Response<ListAccessGrantsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let grants =
             access::list_grants(&self.0, &who(user), request.into_inner().include_ended).await?;
@@ -104,7 +104,7 @@ impl Access for AccessService {
         &self,
         request: Request<RevokeAccessGrantRequest>,
     ) -> Result<Response<RevokeAccessGrantResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.admin()?;
         let r = request.into_inner();
         let (revoked, sessions_ended) =
@@ -119,7 +119,7 @@ impl Access for AccessService {
         &self,
         request: Request<ExplainRequest>,
     ) -> Result<Response<ExplainResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let r = request.into_inner();
         let admin_view = !r.user.is_empty();

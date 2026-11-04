@@ -81,8 +81,8 @@ impl Who {
     }
 }
 
-fn who<T>(state: &AppState, request: &Request<T>, policy: &Policy) -> Result<Who, Status> {
-    let resolved = caller::resolve(request, &state.cas)?;
+async fn who<T>(state: &AppState, request: &Request<T>, policy: &Policy) -> Result<Who, Status> {
+    let resolved = caller::resolve_current(request, state).await?;
     let id = resolved.user()?;
     let username = id.username.clone();
     if id.bot {
@@ -1209,7 +1209,7 @@ impl ManagementService for ManageService {
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy)?;
+        let who = who(&self.0, &request, &current.policy).await?;
         let grant = match &who {
             Who::Writer { grant, .. } => {
                 let spec = &grant.spec;
@@ -1245,7 +1245,7 @@ impl ManagementService for ManageService {
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy)?;
+        let who = who(&self.0, &request, &current.policy).await?;
         writers_and_admins(&who)?;
         let req = request.into_inner();
         let kind = required_kind(req.kind)?;
@@ -1311,7 +1311,7 @@ impl ManagementService for ManageService {
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy)?;
+        let who = who(&self.0, &request, &current.policy).await?;
         writers_and_admins(&who)?;
         let req = request.into_inner();
         let kind = required_kind(req.kind)?;
@@ -1377,7 +1377,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::CreateDocumentRequest>,
     ) -> Result<Response<pb::CreateDocumentResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         let req = request.into_inner();
         let (change, target, input) = create_plan(&who, &req)?;
         let result = self
@@ -1406,7 +1406,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::UpdateDocumentRequest>,
     ) -> Result<Response<pb::UpdateDocumentResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         let req = request.into_inner();
         let (change, target, input) = update_plan(&who, &req)?;
         let result = self
@@ -1435,7 +1435,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::DeleteDocumentRequest>,
     ) -> Result<Response<pb::DeleteDocumentResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         let req = request.into_inner();
         let (change, target) = delete_plan(&who, &req)?;
         let result = self
@@ -1464,7 +1464,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::BatchWriteRequest>,
     ) -> Result<Response<pb::BatchWriteResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         let req = request.into_inner();
         if req.writes.is_empty() || req.writes.len() > MAX_BATCH {
             return Err(Status::invalid_argument(format!(
@@ -1523,7 +1523,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::ReplaceSourceRequest>,
     ) -> Result<Response<pb::ReplaceSourceResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         // Files can hold any kind, so this is for people with limen:admin.
         admins(&who)?;
         let req = request.into_inner();
@@ -1574,7 +1574,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::TransferDocumentRequest>,
     ) -> Result<Response<pb::TransferDocumentResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         let req = request.into_inner();
         let kind = required_kind(req.kind)?;
         if req.etag.is_empty() {
@@ -1657,7 +1657,7 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::ListPolicyVersionsRequest>,
     ) -> Result<Response<pb::ListPolicyVersionsResponse>, Status> {
-        let who = who(&self.0, &request, &self.latest().await?.policy)?;
+        let who = who(&self.0, &request, &self.latest().await?.policy).await?;
         admins(&who)?;
         let req = request.into_inner();
         let size = page_size(req.page_size, 50, 200)?;
@@ -1708,7 +1708,7 @@ impl ManagementService for ManageService {
         request: Request<pb::GetSchemaRequest>,
     ) -> Result<Response<pb::GetSchemaResponse>, Status> {
         // Any authenticated caller: the schema is public (docs/policy-schema/).
-        who(&self.0, &request, &self.0.policy.current().policy)?;
+        who(&self.0, &request, &self.0.policy.current().policy).await?;
         let kind = required_kind(request.get_ref().kind)?;
         let schema = limen_policy::schema::spec_schema(kind)
             .ok_or_else(|| internal("generating a schema", format!("no schema for {kind}")))?;

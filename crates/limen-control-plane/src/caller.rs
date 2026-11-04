@@ -4,14 +4,17 @@
 use std::net::{IpAddr, SocketAddr};
 
 use base64::Engine as _;
+use limen_audit::{Context, EventKind};
 use limen_ca::verify::{ComponentIdentity, UserIdentity, verify_component, verify_user};
 use limen_core::identity::{ADMIN_ROLE, AUDITOR_ROLE, ComponentKind};
 use limen_proto::relay;
 use limen_tunnel::PeerInfo;
 use rustls_pki_types::CertificateDer;
+use serde_json::json;
 use tonic::Status;
 
 use crate::ca_store::Cas;
+use crate::state::{AppState, internal};
 
 #[derive(Debug, Clone)]
 pub enum Caller {
@@ -103,6 +106,46 @@ impl Caller {
 }
 
 const MAX_FORWARDED_CERT_LEN: usize = 8 * 1024;
+
+/// Resolve the caller of `request` and refuse a person or bot whose account
+/// is locked, or whose login has ended (`limen logout`), while their
+/// certificate is still valid. Locks and ended logins are read from the
+/// database, so they take effect on the next call. Every service a user
+/// calls uses this; [`resolve`] is for login, logout, `WhoAmI`, and
+/// component callers.
+pub async fn resolve_current<T>(
+    request: &tonic::Request<T>,
+    state: &AppState,
+) -> Result<Caller, Status> {
+    let caller = resolve(request, &state.cas)?;
+    let Caller::User { identity, addr } = &caller else {
+        return Ok(caller);
+    };
+    let (locked, ended) =
+        crate::db::lock_and_logout(&state.db, &identity.username, &identity.login_id)
+            .await
+            .map_err(|e| internal("checking locks", e))?;
+    let (reason, message) = match (locked, ended) {
+        (false, false) => return Ok(caller),
+        (true, _) => ("user locked", "user locked"),
+        (false, true) => ("logged out", "this login has ended; run `limen login`"),
+    };
+    tracing::warn!(user = %identity.username, client_addr = ?addr, reason, "API call refused");
+    let data = json!({
+        "action": "api",
+        "reason": reason,
+        "login_id": identity.login_id,
+        "client_addr": addr.map(|a| a.to_string()),
+    });
+    let context = Context {
+        user: Some(identity.username.clone()),
+        session_id: None,
+    };
+    if let Err(e) = state.audit.emit(EventKind::AuthDenied, context, data).await {
+        tracing::error!(error = %e, "failed to audit a refused API call");
+    }
+    Err(Status::permission_denied(message))
+}
 
 /// Resolve the caller of `request`.
 pub fn resolve<T>(request: &tonic::Request<T>, cas: &Cas) -> Result<Caller, Status> {

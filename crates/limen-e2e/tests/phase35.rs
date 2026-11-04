@@ -7,13 +7,16 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use limen_e2e::{Deployment, eventually, ssh_client};
+use limen_proto::manage::v1::DescribeCallerRequest;
+use limen_proto::manage::v1::management_service_client::ManagementServiceClient;
 use limen_proto::v1::admin_client::AdminClient;
+use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, KillSessionRequest, ListLocksRequest,
-    LockUserRequest, PolicySource, UnlockUserRequest,
+    LockUserRequest, LogoutRequest, PolicySource, UnlockUserRequest,
 };
 use limen_testkit::ssh_target::SshTarget;
-use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
+use limen_testkit::users::{ADMIN, DEVELOPER, GUEST, ONCALL};
 use russh::ChannelMsg;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -336,4 +339,98 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
             .iter()
             .any(|e| e["kind"] == "auth.denied" && e["data"]["reason"] == "user locked")
     );
+}
+
+/// A certificate outlives a lock and a logout (it lasts an hour by default),
+/// so the control plane's own API must refuse it as the proxy does: an admin
+/// who is locked, or who logged out, can no longer change anything.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_api_refuses_a_locked_or_logged_out_admin() {
+    let Some(d) = Deployment::start().await else {
+        return;
+    };
+    let alice = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut as_alice = AdminClient::new(d.proxy_channel(Some(alice.clone())));
+    let mut manage_as_alice = ManagementServiceClient::new(d.proxy_channel(Some(alice.clone())));
+    let oncall = d.login(ONCALL, &["admins"]).await.expect("second admin");
+    let mut as_oncall = AdminClient::new(d.proxy_channel(Some(oncall)));
+    as_alice
+        .list_locks(ListLocksRequest {})
+        .await
+        .expect("admin API");
+    manage_as_alice
+        .describe_caller(DescribeCallerRequest {})
+        .await
+        .expect("management API");
+
+    as_oncall
+        .lock_user(LockUserRequest {
+            username: ADMIN.into(),
+            reason: "laptop stolen".into(),
+        })
+        .await
+        .expect("lock");
+    let refused = as_alice
+        .list_locks(ListLocksRequest {})
+        .await
+        .expect_err("locked admin");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(refused.message().contains("user locked"), "{refused:?}");
+    let refused = as_alice
+        .unlock_user(UnlockUserRequest {
+            username: ADMIN.into(),
+        })
+        .await
+        .expect_err("a locked admin can't unlock themselves");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    let refused = manage_as_alice
+        .describe_caller(DescribeCallerRequest {})
+        .await
+        .expect_err("locked writer");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+
+    as_oncall
+        .unlock_user(UnlockUserRequest {
+            username: ADMIN.into(),
+        })
+        .await
+        .expect("unlock");
+    as_alice
+        .list_locks(ListLocksRequest {})
+        .await
+        .expect("unlocked at once");
+
+    AuthClient::new(d.proxy_channel(Some(alice.clone())))
+        .logout(LogoutRequest {})
+        .await
+        .expect("logout");
+    let refused = as_alice
+        .list_locks(ListLocksRequest {})
+        .await
+        .expect_err("ended login");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(refused.message().contains("login has ended"), "{refused:?}");
+    let refused = manage_as_alice
+        .describe_caller(DescribeCallerRequest {})
+        .await
+        .expect_err("ended login, management API");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    as_oncall
+        .list_locks(ListLocksRequest {})
+        .await
+        .expect("the other admin carries on");
+
+    eventually(Duration::from_secs(20), "refusals audited", || async {
+        let events = read_jsonl(&d);
+        let refused = |why: &str| {
+            events.iter().any(|e| {
+                e["kind"] == "auth.denied"
+                    && e["user"] == ADMIN
+                    && e["data"]["action"] == "api"
+                    && e["data"]["reason"] == why
+            })
+        };
+        refused("user locked") && refused("logged out")
+    })
+    .await;
 }

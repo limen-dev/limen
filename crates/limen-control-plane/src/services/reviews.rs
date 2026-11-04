@@ -27,26 +27,14 @@ fn who(u: &limen_ca::verify::UserIdentity) -> Who<'_> {
     }
 }
 
-/// A locked person loses the use of a certificate that is still valid.
-async fn not_locked(state: &AppState, username: &str) -> Result<(), Status> {
-    if crate::db::is_locked(&state.db, username)
-        .await
-        .map_err(|_| Status::internal("checking locks"))?
-    {
-        return Err(Status::permission_denied("user locked"));
-    }
-    Ok(())
-}
-
 #[tonic::async_trait]
 impl Reviews for ReviewsService {
     async fn start_review(
         &self,
         request: Request<StartReviewRequest>,
     ) -> Result<Response<ReviewInfo>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.admin()?;
-        not_locked(&self.0, &user.username).await?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
         reviews::start(&self.0, &who(user), &r.name, r.due_days, r.override_days)
@@ -58,7 +46,7 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<ListReviewsRequest>,
     ) -> Result<Response<ListReviewsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let all = request.into_inner().scope == "all";
         Ok(Response::new(ListReviewsResponse {
@@ -70,7 +58,7 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<ListReviewItemsRequest>,
     ) -> Result<Response<ListReviewItemsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let r = request.into_inner();
         Ok(Response::new(ListReviewItemsResponse {
@@ -82,9 +70,8 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<DecideReviewItemRequest>,
     ) -> Result<Response<ReviewItemInfo>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
-        not_locked(&self.0, &user.username).await?;
         self.0.refuse_if_draining()?;
         let r = request.into_inner();
         reviews::decide(&self.0, &who(user), &r.item_id, r.certify, &r.comment)
@@ -96,7 +83,7 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<ListDeniesRequest>,
     ) -> Result<Response<ListDeniesResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         Ok(Response::new(ListDeniesResponse {
             denies: reviews::list_denies(&self.0, &who(user), request.into_inner().include_ended)
@@ -108,9 +95,8 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<LiftDenyRequest>,
     ) -> Result<Response<LiftDenyResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.admin()?;
-        not_locked(&self.0, &user.username).await?;
         let r = request.into_inner();
         Ok(Response::new(LiftDenyResponse {
             lifted: reviews::lift_deny(&self.0, &who(user), &r.id, &r.reason).await?,
@@ -121,9 +107,8 @@ impl Reviews for ReviewsService {
         &self,
         request: Request<ExportEvidenceRequest>,
     ) -> Result<Response<ExportEvidenceResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.reader()?;
-        not_locked(&self.0, &user.username).await?;
         let r = request.into_inner();
         let (pack, manifest_sha256) =
             crate::evidence::export(&self.0, &user.username, r.from_unix, r.to_unix).await?;

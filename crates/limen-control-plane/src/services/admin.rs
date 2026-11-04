@@ -54,7 +54,7 @@ impl Admin for AdminService {
         &self,
         request: Request<ApplyPolicyRequest>,
     ) -> Result<Response<ApplyPolicyResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let admin = caller.admin()?.clone();
         let req = request.into_inner();
         let total: usize = req.sources.iter().map(|s| s.content.len()).sum();
@@ -187,7 +187,7 @@ impl Admin for AdminService {
         &self,
         request: Request<ListDiscoveredRequest>,
     ) -> Result<Response<ListDiscoveredResponse>, Status> {
-        caller::resolve(&request, &self.0.cas)?.admin()?;
+        caller::resolve_current(&request, &self.0).await?.admin()?;
         let items = crate::discovery::list(&self.0.db, &request.into_inner().state).await?;
         Ok(Response::new(ListDiscoveredResponse { items }))
     }
@@ -196,7 +196,10 @@ impl Admin for AdminService {
         &self,
         request: Request<ReviewDiscoveredRequest>,
     ) -> Result<Response<DiscoveredInfo>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let r = request.into_inner();
         crate::discovery::review(
             &self.0,
@@ -215,7 +218,7 @@ impl Admin for AdminService {
         &self,
         request: Request<GetPolicyDocumentsRequest>,
     ) -> Result<Response<GetPolicyDocumentsResponse>, Status> {
-        caller::resolve(&request, &self.0.cas)?.admin()?;
+        caller::resolve_current(&request, &self.0).await?.admin()?;
         let loaded = self.0.policy.current();
         // The snapshot view: older CLIs can't parse the control plane's own
         // kinds, and they don't change who can reach what.
@@ -231,7 +234,7 @@ impl Admin for AdminService {
         &self,
         request: Request<GetPolicyRequest>,
     ) -> Result<Response<GetPolicyResponse>, Status> {
-        caller::resolve(&request, &self.0.cas)?.admin()?;
+        caller::resolve_current(&request, &self.0).await?.admin()?;
         let loaded = self.0.policy.current();
         Ok(Response::new(GetPolicyResponse {
             version: loaded.version,
@@ -246,7 +249,10 @@ impl Admin for AdminService {
         &self,
         request: Request<CreateJoinTokenRequest>,
     ) -> Result<Response<CreateJoinTokenResponse>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let req = request.into_inner();
         let labels = parse_labels(&req.labels)?;
         let ttl = (req.ttl_seconds != 0).then(|| Duration::from_secs(u64::from(req.ttl_seconds)));
@@ -273,7 +279,7 @@ impl Admin for AdminService {
         &self,
         request: Request<ListComponentsRequest>,
     ) -> Result<Response<ListComponentsResponse>, Status> {
-        caller::resolve(&request, &self.0.cas)?.admin()?;
+        caller::resolve_current(&request, &self.0).await?.admin()?;
         let (components, tunnels) = db::list_components(&self.0.db)
             .await
             .map_err(|e| internal("listing components", e))?;
@@ -310,7 +316,10 @@ impl Admin for AdminService {
         &self,
         request: Request<LockUserRequest>,
     ) -> Result<Response<LockUserResponse>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let req = request.into_inner();
         let locked =
             ops::lock_user(&self.0, actor(&admin.username), &req.username, &req.reason).await?;
@@ -321,7 +330,10 @@ impl Admin for AdminService {
         &self,
         request: Request<UnlockUserRequest>,
     ) -> Result<Response<UnlockUserResponse>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let unlocked = ops::unlock_user(
             &self.0,
             actor(&admin.username),
@@ -335,7 +347,7 @@ impl Admin for AdminService {
         &self,
         request: Request<ListLocksRequest>,
     ) -> Result<Response<ListLocksResponse>, Status> {
-        caller::resolve(&request, &self.0.cas)?.admin()?;
+        caller::resolve_current(&request, &self.0).await?.admin()?;
         let locks = db::active_locks(&self.0.db)
             .await
             .map_err(|e| internal("listing locks", e))?
@@ -354,7 +366,10 @@ impl Admin for AdminService {
         &self,
         request: Request<KillSessionRequest>,
     ) -> Result<Response<KillSessionResponse>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let req = request.into_inner();
         let killed = ops::kill_session(
             &self.0,
@@ -370,7 +385,10 @@ impl Admin for AdminService {
         &self,
         request: Request<RevokeComponentRequest>,
     ) -> Result<Response<RevokeComponentResponse>, Status> {
-        let admin = caller::resolve(&request, &self.0.cas)?.admin()?.clone();
+        let admin = caller::resolve_current(&request, &self.0)
+            .await?
+            .admin()?
+            .clone();
         let req = request.into_inner();
         let revoked = ops::revoke_component(
             &self.0,
