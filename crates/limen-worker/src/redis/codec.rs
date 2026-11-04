@@ -138,8 +138,13 @@ impl FrameScanner {
     }
 }
 
+/// Where the line that starts at `buf[0]` ends. Byte 0 is the type byte, so a terminator can't
+/// start there: callers slice `buf[1..end]`, and `end == 0` would panic (found by fuzzing).
 fn find_crlf(buf: &[u8]) -> Option<usize> {
-    buf.windows(2).position(|w| w == b"\r\n")
+    buf.windows(2)
+        .skip(1)
+        .position(|w| w == b"\r\n")
+        .map(|i| i + 1)
 }
 
 /// `None` is a RESP2 null (`-1`).
@@ -586,5 +591,18 @@ mod tests {
     #[test]
     fn error_replies_cannot_be_split_by_newlines() {
         assert_eq!(error_reply("a\r\nb"), b"-a  b\r\n");
+    }
+
+    /// Found by fuzzing (fuzz/README.md): a buffer starting with CRLF made the scanners slice `1..0`.
+    #[test]
+    fn a_buffer_that_starts_with_crlf_is_refused_not_a_panic() {
+        for input in [&b"\r\n\x00\r"[..], b"\r\n", b"\r\n\r\n", b"*1\r\n\r\n\r\n"] {
+            let _ = FrameScanner::new().advance(input);
+            let _ = RequestScanner::new().advance(input);
+            let _ = parse_command(input);
+            let _ = parse_value(input);
+        }
+        assert!(FrameScanner::new().advance(b"\r\n\r\n").is_err());
+        assert!(parse_value(b"\r\n\r\n").is_err());
     }
 }

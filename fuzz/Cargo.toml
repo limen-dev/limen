@@ -1,0 +1,59 @@
+[package]
+name = "limen-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+limen-worker = { path = "../crates/limen-worker" }
+tokio = { version = "1", features = ["rt"] }
+
+# Not part of the main workspace: it needs nightly, and its dependencies are built with
+# sanitizer flags (fuzz/README.md).
+[workspace]
+
+[[bin]]
+name = "redis_frames"
+path = "fuzz_targets/redis_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mongo_wire"
+path = "fuzz_targets/mongo_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "amqp_frames"
+path = "fuzz_targets/amqp_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kafka_header"
+path = "fuzz_targets/kafka_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mysql_packets"
+path = "fuzz_targets/mysql_packets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pg_frames"
+path = "fuzz_targets/pg_frames.rs"
+test = false
+doc = false
+bench = false

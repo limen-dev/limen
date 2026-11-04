@@ -17,6 +17,12 @@ pub mod sigv4;
 pub mod sqltext;
 pub mod target;
 
+// Entry points for fuzz/ (cargo-fuzz sets `--cfg fuzzing`); nothing in a normal build.
+#[cfg(fuzzing)]
+pub use mysql::fuzz as fuzz_mysql;
+#[cfg(fuzzing)]
+pub use pg::fuzz as fuzz_pg;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 
