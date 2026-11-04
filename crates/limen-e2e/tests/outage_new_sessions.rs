@@ -273,6 +273,10 @@ async fn new_sessions_during_an_outage(
         } else {
             closed_at = Some(started.elapsed());
         }
+        // Ten a second, well under the proxy's accept limit (50 a second per address, burst
+        // 200). Unpaced, a fast machine runs out of burst and the proxy drops the connection,
+        // which looks exactly like a refused session.
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let reasons = refused.lock().expect("refusal list").clone();
     worker.stop().await;
@@ -289,7 +293,7 @@ async fn a_full_audit_spool_refuses_new_sessions_instead_of_running_unrecorded()
         return;
     }
     // Inside the 3s grace period, so a stale policy cannot be the reason.
-    let window = Duration::from_millis(2500);
+    let window = Duration::from_millis(1500);
 
     let (allowed, closed_at, reasons) = Box::pin(new_sessions_during_an_outage(&[], window)).await;
     eprintln!("control: allowed {allowed}, closed at {closed_at:?}, refusals {reasons:?}");
