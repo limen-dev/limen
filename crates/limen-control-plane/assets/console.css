@@ -335,6 +335,10 @@ form.stack label.check { flex-direction: row; align-items: flex-start; gap: 10px
 form.stack label.check input { width: auto; flex: none; }
 form.stack label.check span { flex: 1; }
 ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+/* The Integrations page: wide text columns keep a readable width and the table scrolls inside its box, instead of one word per line. */
+td.settings { min-width: 240px; }
+td.where { min-width: 180px; overflow-wrap: anywhere; }
+table.integrations td.when { min-width: 190px; }
 .count { color: var(--text-3); font-weight: 450; font-size: 12.5px; margin-left: 4px; }
 .notice.warn { border-color: var(--warn, #d97706); }
 .bar { display: inline-block; vertical-align: middle; width: 90px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-right: 8px; }
