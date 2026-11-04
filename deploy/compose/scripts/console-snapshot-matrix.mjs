@@ -254,6 +254,7 @@ async function check() {
 
   let problems = 0;
   let smallTargets = 0;
+  const tally = new Map(); // DETAIL=1: which selectors are under 44px, and how big they are
   const report = (profile, theme, path, msg) => {
     problems += 1;
     console.log(`  ✗ ${profile} [${theme}] ${path}: ${msg}`);
@@ -315,17 +316,28 @@ async function check() {
             // A bar in a chart is a data mark: 24 bars cannot each be 24px wide on a phone, and the
             // records behind it are reachable from the audit page. Counted separately.
             const mark = !!el.closest('svg');
-            small.push({ w: Math.round(r.width), h: Math.round(r.height), inline: inline || mark, what: `${el.tagName.toLowerCase()} "${(el.textContent || el.getAttribute('aria-label') || el.title || '').trim().slice(0, 24)}"` });
+            small.push({ w: Math.round(r.width), h: Math.round(r.height), inline: inline || mark, sel: `${el.tagName.toLowerCase()}${typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}${el.closest('nav, header, footer, table, form, .chooser') ? ' in ' + el.closest('nav, header, footer, table, form, .chooser').tagName.toLowerCase() : ''}`, what: `${el.tagName.toLowerCase()} "${(el.textContent || el.getAttribute('aria-label') || el.title || '').trim().slice(0, 24)}"` });
           }
           return { sideways, wide, small };
         });
         if (layout.sideways > 1) fail(`scrolls sideways by ${layout.sideways}px${layout.wide.length ? ` (${layout.wide.join('; ')})` : ''}`);
         else for (const w of layout.wide) fail(`content past the viewport: ${w}`);
-        // WCAG 2.2 AA (2.5.8) wants 24px unless the target is a link in text; 44px is the comfortable
-        // size, counted but not failed.
+        // WCAG 2.2 AA (2.5.8) wants 24px unless the target is a link in text, on every profile. On a
+        // touch screen (phone and tablet profiles) the bar is 44px, the size iOS and Material ask for.
         const tiny = layout.small.filter((t) => !t.inline && Math.min(t.w, t.h) < 24);
         if (tiny.length) fail(`${tiny.length} tap target(s) under 24px: ${tiny.slice(0, 3).map((t) => `${t.what} ${t.w}x${t.h}`).join('; ')}`);
-        if (profile.mobile) smallTargets += layout.small.filter((t) => !t.inline && Math.min(t.w, t.h) < 44).length;
+        if (profile.mobile) {
+          const under = layout.small.filter((t) => !t.inline && Math.min(t.w, t.h) < 44);
+          smallTargets += under.length;
+          if (under.length) fail(`${under.length} tap target(s) under 44px on a touch screen: ${under.slice(0, 3).map((t) => `${t.what} ${t.w}x${t.h}`).join('; ')}`);
+          if (process.env.DETAIL) for (const t of under) tally.set(`${t.sel} ${t.w}x${t.h} ${t.what}`, (tally.get(`${t.sel} ${t.w}x${t.h} ${t.what}`) ?? 0) + 1);
+        }
+
+        // SHOTS=<dir>: a screenshot of each page, to look at (not part of the verdict).
+        if (process.env.SHOTS) {
+          mkdirSync(process.env.SHOTS, { recursive: true });
+          await page.screenshot({ path: join(process.env.SHOTS, `${profile.name}-${theme}-${(path.replace(/\W+/g, '_') || 'home')}.png`) });
+        }
 
         await page.evaluate(axeSource);
         const axe = await page.evaluate(() =>
@@ -342,7 +354,8 @@ async function check() {
   }
   for (const b of Object.values(launched)) await b.close();
   server.close();
-  console.log(`\n${problems} problem(s); ${smallTargets} touch targets under 44px on phone/tablet profiles (counted, not failed)`);
+  console.log(`\n${problems} problem(s); ${smallTargets} touch targets under 44px on phone/tablet profiles`);
+  if (process.env.DETAIL) for (const [k, n] of [...tally].sort((x, y) => y[1] - x[1]).slice(0, 40)) console.log(`  ${String(n).padStart(5)}  ${k}`);
   if (notRun.length) {
     console.log(`NOT TESTED: ${notRun.join(', ')}`);
     process.exit(2);

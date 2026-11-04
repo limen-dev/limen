@@ -569,3 +569,18 @@ table.facts td, table.facts th { overflow-wrap: anywhere; }
 details > summary { overflow-wrap: anywhere; }
 details > summary .pill { white-space: normal; text-align: left; }
 .hint .mono { overflow-wrap: anywhere; }
+
+/* Touch screens (#145): every control is at least 44px, the size iOS and Material ask for (WCAG 2.5.5
+   AAA; 2.5.8 AA asks for 24px). `pointer: coarse` only, so a mouse at a narrow width keeps the
+   denser sizes above. The menu strip scrolls sideways, so taller links do not widen the page. */
+@media (pointer: coarse) {
+  .brand, .nav a { min-height: 44px; }
+  .tabs a, .tabs.kinds a, .tabs.cats a { display: inline-flex; align-items: center; min-height: 44px; }
+  button, .button { min-height: 44px; }
+  button.secondary, button.danger, .theme button, .me button.link { min-width: 44px; min-height: 44px; }
+  input, select, textarea { min-height: 44px; }
+  .dp-btn { top: 0; right: 0; width: 44px; height: 44px; }
+  .tabs a { min-width: 44px; justify-content: center; }
+  .card h2 a { display: inline-flex; align-items: center; min-height: 44px; }
+  summary { box-sizing: border-box; min-height: 44px; align-content: center; }
+}
