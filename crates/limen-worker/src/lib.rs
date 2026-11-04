@@ -246,17 +246,7 @@ fn parse_secret(s: &str) -> Result<Secret<String>, String> {
 }
 
 fn parse_duration(s: &str) -> Result<Duration, String> {
-    let (n, unit) = s.split_at(
-        s.find(|c: char| !c.is_ascii_digit())
-            .ok_or("missing unit")?,
-    );
-    let n: u64 = n.parse().map_err(|_| "invalid number")?;
-    match unit {
-        "s" => Ok(Duration::from_secs(n)),
-        "m" => Ok(Duration::from_mins(n)),
-        "h" => Ok(Duration::from_hours(n)),
-        _ => Err("use s, m, or h".into()),
-    }
+    limen_core::duration::parse_short(s)
 }
 
 /// Shared worker state.

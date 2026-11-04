@@ -2,6 +2,7 @@
 
 pub mod backoff;
 pub mod broker;
+pub mod duration;
 pub mod identity;
 pub mod labels;
 pub mod login;

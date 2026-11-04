@@ -46,16 +46,7 @@ pub fn parse_idle(text: &str) -> Result<Duration, String> {
     if text == "0" {
         return Ok(Duration::ZERO);
     }
-    let split = text
-        .find(|c: char| !c.is_ascii_digit())
-        .ok_or("add a unit: s, m, or h")?;
-    let n: u64 = text[..split].parse().map_err(|_| "not a number")?;
-    match &text[split..] {
-        "s" => Ok(Duration::from_secs(n)),
-        "m" => Ok(Duration::from_mins(n)),
-        "h" => Ok(Duration::from_hours(n)),
-        _ => Err("use s, m, or h".into()),
-    }
+    limen_core::duration::parse_short(text)
 }
 
 /// The engine role to act as when the person didn't name one: the only one policy allows.

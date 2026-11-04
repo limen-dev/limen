@@ -595,17 +595,7 @@ async fn run_locks(
 }
 
 fn parse_ttl(s: &str) -> anyhow::Result<Duration> {
-    let split = s
-        .find(|c: char| !c.is_ascii_digit())
-        .context("ttl needs a unit (s, m, h)")?;
-    let (n, unit) = s.split_at(split);
-    let n: u64 = n.parse().context("invalid ttl")?;
-    Ok(match unit {
-        "s" => Duration::from_secs(n),
-        "m" => Duration::from_mins(n),
-        "h" => Duration::from_hours(n),
-        _ => bail!("ttl unit must be s, m, or h"),
-    })
+    limen_core::duration::parse_short(s).map_err(|e| anyhow::anyhow!("invalid ttl {s:?}: {e}"))
 }
 
 /// Read YAML files, recursing into directories. Sorted for stable output.
