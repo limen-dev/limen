@@ -1,0 +1,126 @@
+name: browser-tests
+
+# The website and the web console in Chromium, WebKit and Firefox at phone, tablet and desktop
+# sizes, in light and dark: sideways scroll, JS errors, axe WCAG A/AA, small touch targets.
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
+#
+# - Console: needs no running stack. The pages are fixtures captured from a dev stack
+#   (crates/limen-control-plane/tests/console-pages) and the CSS and scripts are the repository's
+#   own, so it runs on a pull request that touches them (Chromium and WebKit, quick).
+#   Regenerate the fixtures after changing a template: docs/runbooks/console.md.
+# - Website: builds the site and serves it. Slow, so never on a pull request.
+# Weekly and by hand (gh workflow run browser-tests.yml) both run, with Firefox.
+
+on:
+  # A draft pull request runs nothing; marking it ready for review starts the run.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/limen-control-plane/assets/**"
+      - "crates/limen-control-plane/templates/**"
+      - "crates/limen-control-plane/tests/console-pages/**"
+      - "deploy/compose/scripts/console-snapshot-matrix.mjs"
+      - ".github/workflows/browser-tests.yml"
+  schedule:
+    - cron: "30 4 * * 1"
+  # A manual run ignores the path filter.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  console:
+    name: Console browser matrix (${{ matrix.theme }} theme)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # A pull request is quick (two engines); the weekly and manual runs add Firefox.
+      BROWSERS: ${{ github.event_name == 'pull_request' && 'chromium,webkit' || 'chromium,webkit,firefox' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [dark, light]
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Node
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: node
+
+      # The script resolves Playwright and axe from the directory it runs in, so they are
+      # installed in a scratch directory and never become dependencies of the repository.
+      - name: Install the browsers
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/browsers" && cd "$RUNNER_TEMP/browsers"
+          npm init -y >/dev/null
+          npm i playwright-core@1.64.1 axe-core@4.14.0
+          IFS=, read -ra engines <<<"$BROWSERS"
+          npx playwright-core install --with-deps "${engines[@]}"
+
+      # Exit 1: a finding. Exit 2: an engine did not start, so it tested nothing.
+      - name: Run the matrix
+        working-directory: ${{ runner.temp }}/browsers
+        env:
+          THEMES: ${{ matrix.theme }}
+        run: node "$GITHUB_WORKSPACE/deploy/compose/scripts/console-snapshot-matrix.mjs" check "$GITHUB_WORKSPACE/crates/limen-control-plane/tests/console-pages"
+
+  website:
+    name: Website browser matrix (${{ matrix.theme }} theme)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [dark, light]
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Node
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: node
+
+      - name: Build the site
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+
+      # The script resolves Playwright and axe from the directory it runs in, so they
+      # are installed in a scratch directory instead of becoming site dependencies.
+      - name: Install the browsers
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/browsers" && cd "$RUNNER_TEMP/browsers"
+          npm init -y >/dev/null
+          npm i playwright-core@1.64.1 axe-core@4.14.0
+          npx playwright-core install --with-deps chromium webkit firefox
+
+      - name: Serve the site
+        working-directory: website
+        run: |
+          nohup npx astro preview --port 4341 > "$RUNNER_TEMP/preview.log" 2>&1 &
+          curl --silent --fail --retry 30 --retry-delay 1 --retry-connrefused http://localhost:4341/ >/dev/null
+
+      # Exit 1: a finding. Exit 2: an engine did not start, so it tested nothing.
+      - name: Run the matrix
+        working-directory: ${{ runner.temp }}/browsers
+        env:
+          SITE_URL: http://localhost:4341
+          THEME: ${{ matrix.theme }}
+        run: node "$GITHUB_WORKSPACE/website/scripts/browser-matrix.mjs"

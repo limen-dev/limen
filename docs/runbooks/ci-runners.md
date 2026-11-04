@@ -1,6 +1,6 @@
 # CI runners and which jobs run
 
-CI for `limen-dev/limen` runs on GitHub-hosted runners. Workflows (`.github/workflows/`): `rust.yml`, `audit.yml`, `secret-scan.yml`, `infra.yml`, `workflows.yml`, `website.yml`, `website-browser-tests.yml` and `release.yml`.
+CI for `limen-dev/limen` runs on GitHub-hosted runners. Workflows (`.github/workflows/`): `rust.yml`, `audit.yml`, `secret-scan.yml`, `infra.yml`, `workflows.yml`, `website.yml`, `browser-tests.yml` and `release.yml`.
 
 ## What runs for a change
 
@@ -16,7 +16,7 @@ Each workflow has a `paths:` filter. `rust.yml` lists what to leave out; the oth
 | `infra.yml` | `deploy/terraform/`, `deploy/helm/`, `deploy/grafana/`, dev-users files, `crates/` (dashboards are generated from metric names), the workflow itself | Terraform fmt and validate, Helm lint and schema check, dashboards, dev-users check |
 | `workflows.yml` | `.github/workflows/` | actionlint |
 | `website.yml` | `website/`, `docs/`, `deploy/compose/README.md`, `deploy/helm/limen/README.md` and the READMEs under `deploy/terraform/` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
-| `website-browser-tests.yml` | Never on a push or pull request: Mondays 04:30 UTC, or `gh workflow run website-browser-tests.yml` | The built site in Chromium, WebKit and Firefox at phone, tablet and desktop sizes, dark and light (`website/scripts/browser-matrix.mjs`) |
+| `browser-tests.yml` | `crates/limen-control-plane/assets/`, `templates/` and `tests/console-pages/`, `deploy/compose/scripts/console-snapshot-matrix.mjs` (console job only, Chromium and WebKit, not on a draft); Mondays 04:30 UTC or `gh workflow run browser-tests.yml` run both jobs with Firefox | Console: the saved pages in `tests/console-pages/`. Website: the built site (`website/scripts/browser-matrix.mjs`, never on a pull request). Both in phone, tablet and desktop sizes, dark and light |
 
 Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. `release.yml` calls the first four (not the website) before building anything.
 
