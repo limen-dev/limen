@@ -823,11 +823,7 @@ async fn login_redirect(
         .append_pair("resource", &route.resource)
         .append_pair("host", &route.target.host)
         .append_pair("browser_nonce", &browser_nonce)
-        .append_pair(
-            "return_path",
-            uri.path_and_query()
-                .map_or("/", http::uri::PathAndQuery::as_str),
-        );
+        .append_pair("return_path", return_path_for(uri));
     let mut response = redirect_response(destination.as_str());
     response.headers_mut().insert(
         header::REFERRER_POLICY,
@@ -841,6 +837,17 @@ async fn login_redirect(
         .expect("base64url browser nonce is a valid cookie value"),
     );
     response
+}
+
+/// Where to send the browser back after sign-in: the path it asked for, or
+/// `/` when the control plane would refuse that path. Its rules are strict
+/// (no `%` escapes in the path, for one), and a deep link such as
+/// `/files/my%20doc` must reach the sign-in page, not a 400.
+fn return_path_for(uri: &Uri) -> &str {
+    uri.path_and_query()
+        .map(http::uri::PathAndQuery::as_str)
+        .filter(|path| valid_return_path(path))
+        .unwrap_or("/")
 }
 
 fn read_app_session(
@@ -1731,6 +1738,15 @@ mod tests {
         assert_eq!(headers["x-forwarded-for"], "127.0.0.1");
         assert_eq!(headers[header::COOKIE], "app_session=kept");
         assert!(!headers.contains_key("x-remove-me"));
+    }
+
+    #[test]
+    fn sign_in_returns_to_the_requested_path_or_the_root() {
+        let uri = |s: &str| s.parse::<Uri>().expect("test uri");
+        assert_eq!(return_path_for(&uri("/app?x=1")), "/app?x=1");
+        assert_eq!(return_path_for(&uri("/files/my%20doc")), "/");
+        assert_eq!(return_path_for(&uri("/a/../b")), "/");
+        assert_eq!(return_path_for(&uri("/")), "/");
     }
 
     #[test]
