@@ -23,8 +23,8 @@ es_put /_security/user/write '{"password":"write-dev-only-1","roles":["limen_wri
 # OpenSearch: the same shape through the security plugin.
 os_put /_plugins/_security/api/roles/limen_read '{"cluster_permissions":["cluster_monitor"],"index_permissions":[{"index_patterns":["app-*","logs-*"],"allowed_actions":["read","indices:admin/get"]}]}'
 os_put /_plugins/_security/api/roles/limen_write '{"cluster_permissions":["cluster_monitor","indices:data/write/bulk*"],"index_permissions":[{"index_patterns":["app-*"],"allowed_actions":["read","write","create_index","indices:admin/get"]}]}'
-os_put /_plugins/_security/api/internalusers/read '{"password":"Read-dev-only-1","backend_roles":[]}'
-os_put /_plugins/_security/api/internalusers/write '{"password":"Write-dev-only-1","backend_roles":[]}'
+os_put /_plugins/_security/api/internalusers/read '{"password":"Search-dev-only-ro-1","backend_roles":[]}'
+os_put /_plugins/_security/api/internalusers/write '{"password":"Search-dev-only-rw-1","backend_roles":[]}'
 os_put /_plugins/_security/api/rolesmapping/limen_read '{"users":["read"]}'
 os_put /_plugins/_security/api/rolesmapping/limen_write '{"users":["write"]}'
 echo "provisioned"
