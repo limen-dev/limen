@@ -81,11 +81,8 @@ async fn echoes(client: &mut TcpStream, payload: &[u8]) -> bool {
     ) && got == payload
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not() {
-    let Some(mut deployment) = Deployment::start().await else {
-        return;
-    };
+/// Apply the policy, enrol a worker and wait until both sides hold it. Returns the worker.
+async fn tcp_deployment_ready(deployment: &Deployment) -> limen_e2e::RunningWorker {
     let target = echo_target().await;
     let admin_user = deployment
         .login(ADMIN, &["admins"])
@@ -125,31 +122,44 @@ async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not()
             && worker.worker.policy_version() == Some(applied.version)
     })
     .await;
+    worker
+}
+
+/// Open a local listener whose connections become sessions to `tcp-echo`.
+async fn listener_for(
+    deployment: &Deployment,
+    developer: &limen_tunnel::tls::Identity,
+) -> (
+    std::net::SocketAddr,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let ca = std::fs::read_to_string(deployment.ca_file()).expect("CA");
+    db_client::listen_on(
+        &deployment.proxy_addr.to_string(),
+        &ca,
+        developer.clone(),
+        limen_tunnel::alpn::TCP,
+        "tcp-echo",
+        "access",
+        "",
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not() {
+    let Some(mut deployment) = Deployment::start().await else {
+        return;
+    };
+    let worker = tcp_deployment_ready(&deployment).await;
 
     // Logging in needs the control plane, so get the certificate before the outage.
-    let ca = std::fs::read_to_string(deployment.ca_file()).expect("CA");
     let developer = deployment
         .login(DEVELOPER, &["tcp-users"])
         .await
         .expect("developer login");
-    let proxy = deployment.proxy_addr.to_string();
-    let connect = |name: &'static str| {
-        let (proxy, ca, developer) = (proxy.clone(), ca.clone(), developer.clone());
-        async move {
-            db_client::listen_on(
-                &proxy,
-                &ca,
-                developer,
-                limen_tunnel::alpn::TCP,
-                name,
-                "access",
-                "",
-            )
-            .await
-        }
-    };
 
-    let (listener, refused) = connect("tcp-echo").await;
+    let (listener, refused) = listener_for(&deployment, &developer).await;
     let mut open = TcpStream::connect(listener).await.expect("local listener");
     assert!(echoes(&mut open, b"before the outage").await);
     assert!(refused.lock().expect("refusal list").is_empty());
@@ -164,7 +174,7 @@ async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not()
 
     // Inside the grace period (3s in tests) the proxy and the worker still decide from their
     // cached snapshot, so a new session is allowed with no control plane at all.
-    let (listener, refused) = connect("tcp-echo").await;
+    let (listener, refused) = listener_for(&deployment, &developer).await;
     let mut within = TcpStream::connect(listener).await.expect("local listener");
     assert!(
         echoes(&mut within, b"new session in grace").await,
@@ -174,7 +184,7 @@ async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not()
 
     // Past it, nothing can be decided, so a new session is refused (fail closed).
     tokio::time::sleep(Duration::from_secs(5)).await;
-    let (listener, refused) = connect("tcp-echo").await;
+    let (listener, refused) = listener_for(&deployment, &developer).await;
     let mut late = TcpStream::connect(listener).await.expect("local listener");
     let _ = late.write_all(b"never echoed").await;
     eventually(
@@ -194,4 +204,112 @@ async fn a_new_worker_session_needs_a_fresh_enough_policy_and_open_ones_do_not()
     );
     assert!(echoes(&mut within, b"also after").await);
     worker.stop().await;
+}
+
+/// A login is a control plane job (it signs the certificate), so with the control plane down it
+/// fails, inside the grace period as well as after it; nobody gets in who did not already hold a
+/// certificate.
+#[tokio::test(flavor = "multi_thread")]
+async fn logging_in_fails_while_the_control_plane_is_down() {
+    let Some(mut deployment) = Deployment::start().await else {
+        return;
+    };
+    let worker = tcp_deployment_ready(&deployment).await;
+    deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect("login works while the control plane is up");
+
+    deployment.stop_control_plane().await;
+
+    // Inside the grace period.
+    let err = deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect_err("a login inside the grace period must fail");
+    eprintln!("login in grace: {} {}", err.code(), err.message());
+
+    // After it.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let err = deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect_err("a login past the grace period must fail");
+    eprintln!("login after grace: {} {}", err.code(), err.message());
+    worker.stop().await;
+}
+
+/// With the control plane down, open new sessions for up to `window` and report how many were
+/// allowed, when one was first closed without carrying data (if any), and the refusals the client
+/// saw. `proxy_args` is the only thing that differs between the two spool tests.
+async fn new_sessions_during_an_outage(
+    proxy_args: &[&str],
+    window: Duration,
+) -> (usize, Option<Duration>, Vec<String>) {
+    let mut deployment = Deployment::start_with_proxy_args(proxy_args)
+        .await
+        .expect("a deployment");
+    let worker = tcp_deployment_ready(&deployment).await;
+    let developer = deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect("developer login");
+    let (listener, refused) = listener_for(&deployment, &developer).await;
+
+    // Works while events drain to the control plane.
+    let mut first = TcpStream::connect(listener).await.expect("local listener");
+    assert!(echoes(&mut first, b"recorded").await);
+    drop(first);
+
+    deployment.stop_control_plane().await;
+
+    let started = tokio::time::Instant::now();
+    let mut allowed = 0;
+    let mut closed_at = None;
+    while started.elapsed() < window && closed_at.is_none() {
+        let mut c = TcpStream::connect(listener).await.expect("local listener");
+        if echoes(&mut c, b"x").await {
+            allowed += 1;
+        } else {
+            closed_at = Some(started.elapsed());
+        }
+    }
+    let reasons = refused.lock().expect("refusal list").clone();
+    worker.stop().await;
+    (allowed, closed_at, reasons)
+}
+
+/// When the control plane is down nothing drains the proxy's audit spool. Once it is full, audit
+/// fails closed (ADR-0009, ADR-0011): a new session is refused rather than run unrecorded.
+/// The control run, with the default spool size, shows that it is the spool and not something
+/// else about the outage that stops the session.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_full_audit_spool_refuses_new_sessions_instead_of_running_unrecorded() {
+    if limen_testkit::database_url().is_none() {
+        return;
+    }
+    // Inside the 3s grace period, so a stale policy cannot be the reason.
+    let window = Duration::from_millis(2500);
+
+    let (allowed, closed_at, reasons) = Box::pin(new_sessions_during_an_outage(&[], window)).await;
+    eprintln!("control: allowed {allowed}, closed at {closed_at:?}, refusals {reasons:?}");
+    assert!(
+        closed_at.is_none() && allowed > 0,
+        "with room in the spool, new sessions run during the grace period"
+    );
+
+    let (allowed, closed_at, reasons) = Box::pin(new_sessions_during_an_outage(
+        &["--audit-spool-max-bytes=1500"],
+        window,
+    ))
+    .await;
+    eprintln!("tiny spool: allowed {allowed}, closed at {closed_at:?}, refusals {reasons:?}");
+    assert!(
+        closed_at.is_some(),
+        "a full spool must stop new sessions inside the grace period (allowed {allowed})"
+    );
+    assert!(
+        reasons.iter().all(|r| !r.contains("can't be decided")),
+        "the policy was still fresh, so this is not the grace period: {reasons:?}"
+    );
 }
