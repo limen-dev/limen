@@ -125,6 +125,7 @@ export LIMEN_HOME="$state/home-admin"
 
 step "Build and start"
 (cd "$root" && cargo build --release -q -p limen-cli)
+stack_renew_expired_identities
 if has kube; then
   step "Kubernetes cluster $KUBE_CLUSTER and the worker's service account"
   stack_kube_prepare

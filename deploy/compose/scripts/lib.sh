@@ -259,6 +259,25 @@ stack_lock() {
   trap "rm -rf '$lock'" EXIT
 }
 
+# Dev identities (proxy, workers) are short-lived. A stack left running past their expiry has
+# components that exit with "certificate in DIR expired at ..." on every restart, and `up` alone
+# does not fix that: they only enroll when their data directory is empty. This removes each such
+# container and its identity volume so `up` recreates it and it enrolls again with the dev join
+# token. Everything else (Postgres, audit, recordings) is left alone. Needs stack_setup to have run.
+stack_renew_expired_identities() {
+  local id dir vol name
+  for id in $("${compose[@]}" ps -a -q 2>/dev/null); do
+    case "$(docker inspect -f '{{.State.Status}}' "$id" 2>/dev/null)" in restarting|exited) ;; *) continue ;; esac
+    dir="$(docker logs --tail 5 "$id" 2>&1 | sed -n 's/^Error: certificate in \([^ ]*\) expired at .*/\1/p' | tail -1)"
+    [ -n "$dir" ] || continue
+    name="$(docker inspect -f '{{.Name}}' "$id")"
+    vol="$(docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$dir\"}}{{.Name}}{{end}}{{end}}" "$id")"
+    docker rm -f "$id" >/dev/null
+    [ -z "$vol" ] || docker volume rm "$vol" >/dev/null
+    ui_note "${name#/}: its certificate expired, so it will enroll again"
+  done
+}
+
 # Checks what the selection needs. Prints one line per check, returns 1 if any failed.
 stack_preflight() {
   ui_init
