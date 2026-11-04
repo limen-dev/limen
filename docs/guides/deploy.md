@@ -96,4 +96,4 @@ Workers can find EC2 instances, databases, caches and clusters ([discovery guide
 
 - **The proxy's public TLS certificate.** Design §91 leaves it open (ACM exportable certificate or one supplied from Secrets Manager). The load balancers pass TCP through, as the design requires, and nothing here provisions the certificate. This blocks real browser and CLI trust until it is decided.
 - **Audit durability of control planes on ECS and EC2.** They run with `spool_mode = "ephemeral"`, because neither keeps its disk: a replica that dies before it hands over its spool loses the events not yet in S3 (up to `LIMEN_AUDIT_S3_FLUSH`, 60 s by default). The verifier reports them as gaps. For no loss, use the Kubernetes chart, whose StatefulSet keeps a volume (`durable`). See [running Limen at scale](scale-out.md).
-- **First admin.** Set `LIMEN_BOOTSTRAP_ADMIN_GROUPS` (extra environment) so the first admin can log in and apply policy.
+- **First admin.** Set `LIMEN_BOOTSTRAP_ADMIN_GROUPS` (extra environment) so the first admin can log in and apply policy. The [Okta guide](okta.md) shows the identity provider side.

@@ -18,5 +18,5 @@ Runbooks are added as each component ships. Rows without a link are planned:
 | [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |
 | [Onboarding MongoDB, Atlas, or DocumentDB](mongodb-onboarding.md) | 9 ✅ |
 | [Access requests, search, discovery, reviews, and watching](access-workflows.md) | 13 ✅ |
-| Control plane outage | not scheduled |
-| Okta setup | 15 |
+| [Control plane outage](control-plane-outage.md) | 15 ✅ |
+| Okta setup: see the [Okta guide](../guides/okta.md) (unverified against a real tenant) | 15 |
