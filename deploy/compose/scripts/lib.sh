@@ -150,13 +150,15 @@ stack_describe() {
   esac
 }
 
-_hint() { # _hint docker|cargo|curl|ssh: how to install it on this OS
+_hint() { # _hint docker|cargo|protoc|curl|ssh: how to install it on this OS
   local os; os="$(uname -s)"
   case "$1:$os" in
     docker:Darwin) echo "install OrbStack (brew install --cask orbstack, https://orbstack.dev) or Docker Desktop, and start it" ;;
     docker:Linux) echo "install Docker Engine with the Compose plugin: https://docs.docker.com/engine/install/" ;;
     docker:*) echo "install Docker (WSL 2 with Docker Desktop on Windows): https://docs.docker.com/get-docker/" ;;
     cargo:*) echo "install the toolchain in mise.toml with 'mise install' (https://mise.jdx.dev) or rustup (https://rustup.rs); or set LIMEN_BIN to an existing limen binary" ;;
+    protoc:Darwin) echo "brew install protobuf, or 'mise install' (protoc is pinned in mise.toml)" ;;
+    protoc:*) echo "apt install protobuf-compiler / dnf install protobuf-compiler, or 'mise install' (protoc is pinned in mise.toml)" ;;
     curl:Darwin) echo "brew install curl" ;;
     curl:*) echo "install it with your package manager (apt install curl, dnf install curl, ...)" ;;
     kubectl:*) echo "install it with 'mise install' (kubectl is pinned in mise.toml) or https://kubernetes.io/docs/tasks/tools/" ;;
@@ -255,9 +257,8 @@ stack_lock() {
     mkdir "$lock"
   fi
   printf '%s\n' "$$" >"$lock/pid"
-  # shellcheck disable=SC2064 # expand $lock now
-  trap "rm -rf '$lock'" EXIT
 }
+stack_unlock() { rm -rf "$STACK_STATE/setup.lock"; }
 
 # Dev identities (proxy, workers) are short-lived. A stack left running past their expiry has
 # components that exit with "certificate in DIR expired at ..." on every restart, and `up` alone
@@ -277,6 +278,14 @@ stack_renew_expired_identities() {
     ui_note "${name#/}: its certificate expired, so it will enroll again"
   done
 }
+
+# Some setup work only needs doing once per container (creating Kafka topics, applying the
+# Kubernetes service account). The marker records which containers it was done for, so a
+# re-run skips it unless one of them was recreated.
+#   already_done NAME CONTAINER...   mark_done NAME CONTAINER...
+_container_ids() { docker inspect -f '{{.Id}}' "$@" 2>/dev/null | tr '\n' ' '; }
+already_done() { [ "$(cat "$STACK_STATE/done-$1" 2>/dev/null)" = "$(_container_ids "${@:2}")" ]; }
+mark_done() { _container_ids "${@:2}" >"$STACK_STATE/done-$1"; }
 
 # Checks what the selection needs. Prints one line per check, returns 1 if any failed.
 stack_preflight() {
@@ -305,7 +314,11 @@ stack_preflight() {
     fi
   fi
   if [ -x "${LIMEN_BIN:-}" ]; then ok "limen CLI at $LIMEN_BIN"
-  elif command -v cargo >/dev/null 2>&1; then ok "cargo (builds the limen CLI)"
+  elif command -v cargo >/dev/null 2>&1; then
+    ok "cargo (builds the limen CLI)"
+    # The build compiles the .proto files, which needs protoc on PATH (or $PROTOC).
+    if [ -x "${PROTOC:-}" ] || command -v protoc >/dev/null 2>&1; then ok "protoc (compiles the API definitions)"
+    else miss "protoc (needed to build the limen CLI)" "$(_hint protoc)"; fi
   else miss "cargo (needed to build the limen CLI)" "$(_hint cargo)"; fi
   if command -v curl >/dev/null 2>&1; then ok curl; else miss curl "$(_hint curl)"; fi
   if $want_ssh; then
@@ -365,6 +378,7 @@ stack_summary() {
 # the kubectl inside the cluster container, so the host needs none.
 stack_kube_prepare() {
   local k=("${compose[@]}" exec -T kubernetes kubectl) tok
+  if already_done kube "$KUBE_CLUSTER" && [ -s "$LIMEN_KUBE_DIR/token" ]; then return 0; fi
   mkdir -p "$LIMEN_KUBE_DIR"
   "${compose[@]}" up -d --wait kubernetes >/dev/null 2>&1 || fail "the Kubernetes cluster did not become ready"
   "${k[@]}" apply -f - <"$root/deploy/kubernetes/access/limen-kube-worker.yaml" >/dev/null
@@ -388,6 +402,7 @@ YAML
   "${k[@]}" -n limen-system get secret limen-kube-worker-token -o jsonpath='{.data.ca\.crt}' | base64 -d >"$LIMEN_KUBE_DIR/ca.pem"
   # The worker runs as a different user in a container.
   chmod 755 "$LIMEN_KUBE_DIR"; chmod 644 "$LIMEN_KUBE_DIR/token" "$LIMEN_KUBE_DIR/ca.pem"
+  mark_done kube "$KUBE_CLUSTER"
 }
 
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
