@@ -962,11 +962,11 @@ fn sanitize_request_headers(
     if target.identity_headers {
         headers.insert(
             HeaderName::from_static("x-limen-user"),
-            HeaderValue::from_str(&session.username).expect("validated user identity"),
+            header_text(&session.username),
         );
         headers.insert(
             HeaderName::from_static("x-limen-roles"),
-            HeaderValue::from_str(&session.roles.join(",")).expect("validated role names"),
+            header_text(&session.roles.join(",")),
         );
         headers.insert(
             HeaderName::from_static("x-limen-identity"),
@@ -974,6 +974,26 @@ fn sanitize_request_headers(
                 .expect("validated signed identity assertion"),
         );
     }
+}
+
+/// A header value for text that comes from the identity provider. A header
+/// can't carry control characters (a NUL, a line break, DEL), but a username
+/// (an email or `preferred_username`) may hold them, and the claim isn't
+/// validated. A value that doesn't fit is sent percent-encoded (UTF-8) instead
+/// of panicking in the request path; one that fits is sent as it is.
+fn header_text(text: &str) -> HeaderValue {
+    HeaderValue::from_str(text).unwrap_or_else(|_| {
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(text.len() * 3);
+        for b in text.bytes() {
+            if b.is_ascii_graphic() && b != b'%' {
+                out.push(char::from(b));
+            } else {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+        HeaderValue::from_str(&out).expect("percent-encoded text is visible ASCII")
+    })
 }
 
 fn identity_assertion_matches(
@@ -1597,6 +1617,21 @@ impl Drop for AuditResponseBody {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn header_text_never_panics_on_identity_provider_text() {
+        use super::header_text;
+        assert_eq!(header_text("dev@example.com"), "dev@example.com");
+        assert_eq!(header_text("a,b"), "a,b");
+        assert_eq!(
+            header_text("josé@example.com").as_bytes(),
+            "josé@example.com".as_bytes()
+        );
+        assert_eq!(header_text("a\0b"), "a%00b");
+        assert_eq!(header_text("100%\u{7f}"), "100%25%7F");
+        assert_eq!(header_text("a\r\nx-evil: 1"), "a%0D%0Ax-evil:%201");
+        assert_eq!(header_text(""), "");
+    }
+
     use super::*;
 
     #[test]

@@ -47,6 +47,12 @@ pub fn dir_for(proxy: &str) -> anyhow::Result<PathBuf> {
             }
         })
         .collect();
+    // `.` and `..` survive the filter but name directories, not profiles.
+    let safe = if safe.is_empty() || safe.chars().all(|c| c == '.') {
+        "_".repeat(safe.len().max(1))
+    } else {
+        safe
+    };
     Ok(home()?.join("profiles").join(safe))
 }
 
@@ -252,5 +258,28 @@ mod tests {
         atomic_write(&file, b"two", 0o640).expect("second");
         assert_eq!(std::fs::read_to_string(&file).expect("read"), "two");
         assert_eq!(mode(&file), 0o640);
+    }
+}
+
+#[cfg(test)]
+mod dir_for_tests {
+    use super::dir_for;
+
+    #[test]
+    fn dir_for_never_names_a_parent_directory() {
+        for proxy in ["..", ".", "...", ""] {
+            let dir = dir_for(proxy).expect("dir");
+            assert!(
+                dir.file_name()
+                    .is_some_and(|n| n.to_string_lossy().chars().all(|c| c == '_')),
+                "{proxy:?} -> {}",
+                dir.display()
+            );
+        }
+        assert!(
+            dir_for("proxy.example.com:8443")
+                .expect("dir")
+                .ends_with("proxy.example.com_8443")
+        );
     }
 }
