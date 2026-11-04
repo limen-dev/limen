@@ -27,4 +27,4 @@ Fonts and icons are served from the binary, so the console loads nothing from ot
 
 # Vendored: brand icons for resource kinds
 
-`simple-icons` 16.35.0 (CC0-1.0, `simple-icons.LICENSE`): the PostgreSQL, MySQL, Redis, Kubernetes, MongoDB, OpenSearch, Elasticsearch, RabbitMQ, and Apache Kafka marks, inlined in `../icons.svg` as `k-*` symbols. Product names and logos belong to their owners and are used only to say what a resource is.
+`simple-icons` 16.35.0 (CC0-1.0, `simple-icons.LICENSE`): the PostgreSQL, MySQL, Redis, Kubernetes, MongoDB, OpenSearch, Elasticsearch, RabbitMQ, and Apache Kafka marks, inlined in `../icons.svg` as `k-*` symbols, and (from 16.36.0) the Okta, Keycloak, Auth0, Google, Datadog, OpenTelemetry and OpenID marks as `b-*` symbols for the Integrations page. Product names and logos belong to their owners and are used only to say what a resource is.

@@ -22,6 +22,8 @@ use crate::state::AppState;
 /// One configured integration, and what to say about it.
 pub struct IntegrationView {
     pub icon: &'static str,
+    /// Colour class of the logo tile (`k-okta`, ...).
+    pub brand: &'static str,
     pub name: &'static str,
     /// Where it points, reduced to what is safe to show.
     pub target: String,
@@ -34,6 +36,8 @@ pub struct IntegrationView {
 
 /// One audit sink.
 pub struct SinkView {
+    pub icon: &'static str,
+    pub brand: &'static str,
     pub name: &'static str,
     pub target: String,
     pub details: Vec<String>,
@@ -105,6 +109,7 @@ fn identity(config: &Config) -> Vec<IntegrationView> {
     let signer = match config.ca_backend {
         CaBackend::File => IntegrationView {
             icon: "key-round",
+            brand: "k-other",
             name: "Certificate authority keys",
             target: "Local key files".into(),
             details: vec!["Development only: production keeps the keys in KMS".into()],
@@ -113,6 +118,7 @@ fn identity(config: &Config) -> Vec<IntegrationView> {
         },
         CaBackend::Kms => IntegrationView {
             icon: "key-round",
+            brand: "k-kms",
             name: "Certificate authority keys",
             target: "AWS KMS".into(),
             details: [
@@ -131,9 +137,11 @@ fn identity(config: &Config) -> Vec<IntegrationView> {
             status: "KMS".into(),
         },
     };
+    let (idp_icon, idp_brand) = idp_logo(&config.oidc_issuer);
     vec![
         IntegrationView {
-            icon: "shield-check",
+            icon: idp_icon,
+            brand: idp_brand,
             name: "Identity provider (OIDC)",
             target: origin_and_path(&config.oidc_issuer),
             details: idp,
@@ -148,15 +156,21 @@ fn sinks(config: &Config, snapshots: &[(String, SinkSnapshot)], fenced: bool) ->
     snapshots
         .iter()
         .map(|(name, snap)| {
-            let (label, target, details): (&'static str, String, Vec<String>) = match name.as_str()
-            {
+            let (label, (icon, brand), target, details): (
+                &'static str,
+                (&'static str, &'static str),
+                String,
+                Vec<String>,
+            ) = match name.as_str() {
                 crate::pipeline::CONSOLE => (
                     "Console store",
+                    ("database", "k-postgres"),
                     "The control plane database".into(),
                     vec!["Feeds the Sessions, Audit trail and Dashboards pages".into()],
                 ),
                 crate::pipeline::JSONL => (
                     "JSONL file",
+                    ("scroll-text", "k-other"),
                     config
                         .audit_file
                         .as_ref()
@@ -166,6 +180,7 @@ fn sinks(config: &Config, snapshots: &[(String, SinkSnapshot)], fenced: bool) ->
                 ),
                 crate::pipeline::S3 => (
                     "Amazon S3",
+                    ("warehouse", "k-s3"),
                     format!(
                         "s3://{}/{}",
                         config.audit_s3_bucket.as_deref().unwrap_or_default(),
@@ -175,6 +190,7 @@ fn sinks(config: &Config, snapshots: &[(String, SinkSnapshot)], fenced: bool) ->
                 ),
                 crate::pipeline::DATADOG => (
                     "Datadog Logs",
+                    ("b-datadog", "k-datadog"),
                     config
                         .datadog_logs_url
                         .as_deref()
@@ -185,10 +201,17 @@ fn sinks(config: &Config, snapshots: &[(String, SinkSnapshot)], fenced: bool) ->
                         format!("Environment tag {}", config.environment),
                     ],
                 ),
-                _ => ("Audit sink", String::new(), Vec::new()),
+                _ => (
+                    "Audit sink",
+                    ("scroll-text", "k-other"),
+                    String::new(),
+                    Vec::new(),
+                ),
             };
             let paused = fenced && name == crate::pipeline::S3;
             SinkView {
+                icon,
+                brand,
                 name: label,
                 target,
                 details,
@@ -230,7 +253,8 @@ fn outbound(config: &Config) -> Vec<IntegrationView> {
     let mut rows = Vec::new();
     rows.push(match limen_core::telemetry::trace_export() {
         Some(t) => IntegrationView {
-            icon: "activity",
+            icon: "b-opentelemetry",
+            brand: "k-otel",
             name: "Trace export (OTLP)",
             target: origin_and_path(&t.endpoint),
             details: vec![
@@ -246,7 +270,8 @@ fn outbound(config: &Config) -> Vec<IntegrationView> {
             status: "exporting".into(),
         },
         None => IntegrationView {
-            icon: "activity",
+            icon: "b-opentelemetry",
+            brand: "k-other",
             name: "Trace export (OTLP)",
             target: "Off".into(),
             details: vec!["Set LIMEN_OTLP_ENDPOINT to export traces".into()],
@@ -255,14 +280,18 @@ fn outbound(config: &Config) -> Vec<IntegrationView> {
         },
     });
     let secret_url = |name: &'static str, url: &Option<limen_core::secret::Secret<String>>| {
-        url.as_ref().map(|u| IntegrationView {
-            icon: "radio",
-            name,
-            // A webhook's path is its credential, so only where it points is shown.
-            target: origin_of(u.expose()),
-            details: Vec::new(),
-            class: "",
-            status: "configured".into(),
+        url.as_ref().map(|u| {
+            let slack = name.contains("Slack");
+            IntegrationView {
+                icon: if slack { "message-square" } else { "radio" },
+                brand: if slack { "k-slack" } else { "k-webhook" },
+                name,
+                // A webhook's path is its credential, so only where it points is shown.
+                target: origin_of(u.expose()),
+                details: Vec::new(),
+                class: "",
+                status: "configured".into(),
+            }
         })
     };
     let signed = config.notify_webhook_secret.is_some();
@@ -290,6 +319,27 @@ fn outbound(config: &Config) -> Vec<IntegrationView> {
     rows
 }
 
+/// The logo for an identity provider, guessed from where its issuer lives. Anything unrecognised
+/// (and any self-hosted provider that isn't Keycloak) gets the generic OIDC mark.
+fn idp_logo(issuer: &str) -> (&'static str, &'static str) {
+    let Ok(u) = url::Url::parse(issuer) else {
+        return ("b-openid", "k-oidc");
+    };
+    let host = u.host_str().unwrap_or_default().to_ascii_lowercase();
+    let on = |d: &str| host == d || host.ends_with(&format!(".{d}"));
+    if on("okta.com") || on("oktapreview.com") {
+        ("b-okta", "k-okta")
+    } else if on("auth0.com") {
+        ("b-auth0", "k-auth0")
+    } else if host == "accounts.google.com" {
+        ("b-google", "k-google")
+    } else if u.path().contains("/realms/") {
+        ("b-keycloak", "k-keycloak")
+    } else {
+        ("b-openid", "k-oidc")
+    }
+}
+
 /// `scheme://host[:port]` of a URL, or a note that it isn't one. Never a user name, password, path
 /// or query.
 fn origin_of(raw: &str) -> String {
@@ -313,7 +363,17 @@ fn origin_and_path(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{origin_and_path, origin_of};
+    use super::{idp_logo, origin_and_path, origin_of};
+
+    #[test]
+    fn identity_provider_logo_follows_the_issuer() {
+        assert_eq!(idp_logo("https://acme.okta.com/oauth2/default").0, "b-okta");
+        assert_eq!(idp_logo("https://acme.eu.auth0.com/").0, "b-auth0");
+        assert_eq!(idp_logo("https://accounts.google.com").0, "b-google");
+        assert_eq!(idp_logo("https://sso.acme.io/realms/limen").0, "b-keycloak");
+        assert_eq!(idp_logo("https://evil-okta.com/").0, "b-openid");
+        assert_eq!(idp_logo("nonsense").0, "b-openid");
+    }
 
     #[test]
     fn urls_are_reduced_to_what_is_safe_to_show() {
