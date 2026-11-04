@@ -158,6 +158,13 @@ impl LogArgs {
                     }
                 }
             });
+        if provider.is_some() {
+            let _ = TRACE_EXPORT.set(TraceExport {
+                endpoint: self.otlp_endpoint.clone().unwrap_or_default(),
+                ca_file: self.otlp_ca_file.is_some(),
+                sample_ratio: self.trace_sample_ratio,
+            });
+        }
         install(
             self.format(),
             &self.log_level,
@@ -165,6 +172,27 @@ impl LogArgs {
         );
         TelemetryGuard { provider }
     }
+}
+
+/// How trace export was set up, for the console's integrations page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraceExport {
+    /// The collector's base URL as configured.
+    pub endpoint: String,
+    /// Whether an extra CA file is trusted for it.
+    pub ca_file: bool,
+    /// Share of new traces exported, 0 to 1.
+    pub sample_ratio: f64,
+}
+
+static TRACE_EXPORT: std::sync::OnceLock<TraceExport> = std::sync::OnceLock::new();
+
+/// The trace export this process was started with. `None` when it is off, or when the exporter
+/// could not be set up (the service runs without it). Whether spans reach the collector is not
+/// known: the exporter is best effort and reports nothing back.
+#[must_use]
+pub fn trace_export() -> Option<&'static TraceExport> {
+    TRACE_EXPORT.get()
 }
 
 /// Flushes and stops trace export on drop.

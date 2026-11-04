@@ -18,6 +18,7 @@
 mod assets;
 mod auth;
 mod dashboards;
+mod integrations;
 pub mod oidc_flow;
 mod pages;
 mod policy_edit;
@@ -101,6 +102,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/audit", get(pages::audit))
         .route("/console/audit/kubernetes", get(pages::kube_requests))
         .route("/console/dashboards", get(dashboards::dashboards))
+        .route("/console/integrations", get(integrations::integrations))
         .route("/console/policy", get(pages::policy))
         .route("/console/policy/dry-run", post(pages::dry_run))
         .route("/console/policy/simulate", post(pages::simulate))

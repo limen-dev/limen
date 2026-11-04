@@ -141,8 +141,15 @@ grep -q 'web-staging-1' <<<"$bob_home" || fail "developer doesn't see his resour
 if grep -q '>Users<' <<<"$bob_home"; then fail "developer sees the admin navigation"; fi
 [ "$(status "$bob_jar" /console/users)" = 403 ] || fail "developer reached the users page"
 [ "$(status "$bob_jar" /console/workers)" = 403 ] || fail "developer reached the workers page"
-[ "$(status "$bob_jar" /console/policy)" = 403 ] || fail "developer reached the policy page"
+[ "$(status "$bob_jar" /console/integrations)" = 403 ] || fail "developer reached the integrations page"
 pass "non-admins see their own resources and sessions only"
+
+step "admin sees what is configured, and no secret"
+integrations="$(page "$alice_jar" /console/integrations)"
+grep -q 'Identity provider' <<<"$integrations" || fail "the integrations page has no identity provider"
+grep -q 'Audit sinks' <<<"$integrations" || fail "the integrations page has no audit sinks"
+if grep -q -i 'password\|client_secret' <<<"$integrations"; then fail "the integrations page shows a secret"; fi
+pass "the integrations page shows the configuration, read only"
 
 step "Session recording: stored, hashed, and served by the console"
 sleep 6

@@ -439,6 +439,7 @@ async fn console_end_to_end() {
         "/console/audit",
         "/console/audit/kubernetes",
         "/console/dashboards",
+        "/console/integrations",
     ] {
         let page = dev_user.get(path).await;
         assert_eq!(page.status, 403, "{path}");
@@ -1208,6 +1209,62 @@ async fn console_login_is_bound_to_the_browser_that_started_it() {
     assert_eq!(page.status, 303, "first use works for its own browser");
     let replay = attacker.get_once(&callback).await;
     assert_eq!(replay.status, 403, "a login can't be replayed");
+}
+
+/// The Integrations page (#125) shows what is configured and how the sinks are doing, and never a secret: not a webhook's path, a key in a query string, an API key, or a
+/// signing secret.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_integrations_page_shows_what_is_configured_and_no_secrets() {
+    let Some(d) = Deployment::start_with_console_args(&[
+        "--notify-slack-url=https://hooks.slack.com/services/T0/B0/PATH-IS-A-SECRET",
+        "--notify-webhook-url=https://hooks.example.test/in?token=QUERY-IS-A-SECRET",
+        "--notify-webhook-secret=SIGNING-KEY-IS-A-SECRET",
+        "--datadog-logs-url=https://intake.example.test/api/v2/logs?dd-api-key=DD-QUERY-SECRET",
+        "--datadog-api-key=DD-API-KEY-IS-A-SECRET",
+    ])
+    .await
+    else {
+        return;
+    };
+    let mut admin = Browser::new(&d, true);
+    let login = admin.login(&d, ADMIN, &["admins"]).await;
+    assert_eq!(login.status, 200, "{}", login.body);
+
+    let page = admin.get("/console/integrations").await;
+    assert_eq!(page.status, 200, "{}", page.body);
+    let body = &page.body;
+    // What is configured.
+    for want in [
+        "Identity provider (OIDC)",
+        "Certificate authority keys",
+        "Console store",
+        "JSONL file",
+        "Datadog Logs",
+        "https://intake.example.test/api/v2/logs",
+        "Trace export (OTLP)",
+        "Access request webhook",
+        "Signed (secret set)",
+        "Access request Slack",
+        "https://hooks.slack.com",
+        "https://hooks.example.test",
+    ] {
+        assert!(body.contains(want), "missing {want:?}");
+    }
+    // Where each sink stands: the console store has taken events by now.
+    assert!(body.contains("Waiting") && body.contains("Failed batches"));
+    // No secret, in any form.
+    for secret in [
+        "PATH-IS-A-SECRET",
+        "QUERY-IS-A-SECRET",
+        "SIGNING-KEY-IS-A-SECRET",
+        "DD-QUERY-SECRET",
+        "DD-API-KEY-IS-A-SECRET",
+    ] {
+        assert!(!body.contains(secret), "the page leaks {secret:?}");
+    }
+    // The menu has the page for an admin. That a person who is not one is refused is checked,
+    // with the other admin pages, in `console_end_to_end`.
+    assert!(body.contains("href=\"/console/integrations\""));
 }
 
 /// The rows of a list page's table: the filter's suggestions above it name users and resources too.
