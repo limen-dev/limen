@@ -77,7 +77,8 @@ async function snapshot() {
   const save = (path, body) => {
     const file = path.endsWith('/') || !extname(path) ? join(dir, path, 'index.html') : join(dir, path);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, body);
+    // End a page with a newline, so the saved files are clean in a diff.
+    writeFileSync(file, file.endsWith('.html') && typeof body === 'string' && !body.endsWith('\n') ? `${body}\n` : body);
   };
   const collectAssets = (text) => {
     for (const m of text.matchAll(/\/console\/static\/[^"'()\s?#<>]+/g)) assets.add(m[0]);
