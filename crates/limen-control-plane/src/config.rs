@@ -471,7 +471,12 @@ fn parse_static_token(s: &str) -> Result<StaticJoinToken, String> {
 
 /// Like [`parse_duration`], but `0s` is allowed.
 pub fn parse_duration_or_zero(s: &str) -> Result<Duration, String> {
-    let digits = s.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    // Zero turns a feature off (no drain wait, no scheduled reviews), so only
+    // a zero with a real unit counts: `0hours` or `0x` must be an error, not
+    // a silent off switch.
+    let s = s.trim();
+    // A bare `0` stays valid: the docs say "0 off".
+    let digits = s.strip_suffix(['s', 'm', 'h', 'd']).unwrap_or(s);
     if !digits.is_empty() && digits.bytes().all(|b| b == b'0') {
         return Ok(Duration::ZERO);
     }
@@ -715,7 +720,11 @@ mod tests {
         assert_eq!(parse_duration_or_zero("0s"), Ok(Duration::ZERO));
         assert_eq!(parse_duration_or_zero("00m"), Ok(Duration::ZERO));
         assert_eq!(parse_duration_or_zero("20s"), Ok(Duration::from_secs(20)));
+        assert_eq!(parse_duration_or_zero("0"), Ok(Duration::ZERO));
         assert!(parse_duration_or_zero("s").is_err());
+        for typo in ["0x", "0hours", "0 days", "0w"] {
+            assert!(parse_duration_or_zero(typo).is_err(), "{typo:?}");
+        }
         assert!(parse_duration("0s").is_err(), "TTLs must stay positive");
     }
 }
