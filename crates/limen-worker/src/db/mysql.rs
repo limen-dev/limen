@@ -519,9 +519,12 @@ fn parse_client_hello(p: &[u8]) -> Result<ClientHello> {
     let (user, mut rest) = cstr(&p[32..]).ok_or_else(bad)?;
     if flags & PLUGIN_AUTH_LENENC_DATA != 0 {
         let (size, header) = lenenc(rest).ok_or_else(bad)?;
-        rest = rest
-            .get(header + usize::try_from(size).map_err(|_| bad())?..)
+        // `size` is the client's: adding it to the header length can overflow (found by fuzzing).
+        let skip = usize::try_from(size)
+            .ok()
+            .and_then(|size| header.checked_add(size))
             .ok_or_else(bad)?;
+        rest = rest.get(skip..).ok_or_else(bad)?;
     } else if flags & SECURE_CONNECTION != 0 {
         let size = usize::from(*rest.first().ok_or_else(bad)?);
         rest = rest.get(1 + size..).ok_or_else(bad)?;
@@ -1344,6 +1347,21 @@ mod tests {
             ("42S02".into(), 1146, "Table 'x' doesn't exist".into())
         );
         assert_eq!(parse_err(&[0xff, 1, 0, b'o', b'k']).0, "HY000");
+    }
+
+    #[test]
+    fn a_length_that_overflows_is_a_malformed_hello_not_a_panic() {
+        let mut p = Vec::new();
+        let flags = PROTOCOL_41 | PLUGIN_AUTH_LENENC_DATA;
+        p.extend_from_slice(&flags.to_le_bytes());
+        p.extend_from_slice(&[0, 0, 0, 1]);
+        p.push(45);
+        p.extend_from_slice(&[0u8; 23]);
+        p.extend_from_slice(b"limen_ro\0");
+        // A length-encoded size of u64::MAX: 0xfe, then eight 0xff.
+        p.push(0xfe);
+        p.extend_from_slice(&[0xff; 8]);
+        assert!(parse_client_hello(&p).is_err());
     }
 
     #[test]
