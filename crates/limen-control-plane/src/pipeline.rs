@@ -120,6 +120,41 @@ async fn all_done(tasks: &mut [tokio::task::JoinHandle<()>]) {
 /// How long consumers get to notice the deadline and stop.
 const DEADLINE_GRACE: Duration = Duration::from_millis(500);
 
+/// How one audit sink is doing: what the console's integrations page shows. Updated by the
+/// wrapper in [`Pipeline::spawn_consumer`], so the shipping loop itself is unchanged.
+#[derive(Debug, Default)]
+pub struct SinkStatus {
+    /// Unix seconds of the last batch the sink accepted; 0 until one has.
+    last_ok_unix: std::sync::atomic::AtomicI64,
+    /// Batches the sink refused or failed, since this process started.
+    errors: std::sync::atomic::AtomicU64,
+}
+
+impl SinkStatus {
+    fn record(&self, outcome: &Result<(), ShipError>) {
+        use std::sync::atomic::Ordering::Relaxed;
+        match outcome {
+            Ok(()) => self
+                .last_ok_unix
+                .store(time::OffsetDateTime::now_utc().unix_timestamp(), Relaxed),
+            Err(_) => {
+                self.errors.fetch_add(1, Relaxed);
+            }
+        }
+    }
+}
+
+/// A sink's state at one moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SinkSnapshot {
+    /// Events in the spool this sink has not been given yet.
+    pub pending: u64,
+    /// When it last accepted a batch, if it has since this process started.
+    pub last_ok_unix: Option<i64>,
+    /// Failed batches since this process started.
+    pub errors: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub spool: Spool,
@@ -136,6 +171,8 @@ pub struct Pipeline {
     /// While set, this replica writes nothing to S3: it cannot confirm that it
     /// still owns its id (and so its manifest chain).
     fenced: Arc<std::sync::atomic::AtomicBool>,
+    /// One entry per consumer in `names`.
+    status: Arc<BTreeMap<String, Arc<SinkStatus>>>,
 }
 
 /// Why S3 shipping is paused while the replica is fenced.
@@ -241,6 +278,12 @@ impl Pipeline {
             deadline: Arc::new(watch::channel(false).0),
             tasks: Arc::default(),
             fenced: Arc::default(),
+            status: Arc::new(
+                consumers
+                    .iter()
+                    .map(|c| ((*c).to_owned(), Arc::default()))
+                    .collect(),
+            ),
         })
     }
 
@@ -249,6 +292,18 @@ impl Pipeline {
         F: Fn(Vec<(u64, Vec<u8>)>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<(), ShipError>> + Send + 'static,
     {
+        let status = self.status.get(&config.name).cloned();
+        let send = move |batch| {
+            let shipping = send(batch);
+            let status = status.clone();
+            async move {
+                let outcome = shipping.await;
+                if let Some(status) = &status {
+                    status.record(&outcome);
+                }
+                outcome
+            }
+        };
         let task = tokio::spawn(run_consumer(
             self.spool.clone(),
             config,
@@ -274,6 +329,27 @@ impl Pipeline {
     #[must_use]
     pub fn is_fenced(&self) -> bool {
         self.fenced.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The consumers this replica runs and how each is doing, in a stable order.
+    #[must_use]
+    pub fn sink_snapshots(&self) -> Vec<(String, SinkSnapshot)> {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.names
+            .iter()
+            .map(|name| {
+                let status = self.status.get(name);
+                let last_ok = status.map_or(0, |s| s.last_ok_unix.load(Relaxed));
+                (
+                    name.clone(),
+                    SinkSnapshot {
+                        pending: self.spool.pending(name),
+                        last_ok_unix: (last_ok > 0).then_some(last_ok),
+                        errors: status.map_or(0, |s| s.errors.load(Relaxed)),
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Start every configured sink. They run until [`Pipeline::drain`].
@@ -415,5 +491,39 @@ mod fence_tests {
         assert!(check_fence(&fenced).is_err(), "retry, never drop");
         fenced.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(check_fence(&fenced).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn a_sink_status_counts_failures_and_remembers_the_last_success() {
+        let status = SinkStatus::default();
+        assert_eq!(
+            status
+                .last_ok_unix
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        status.record(&Err(ShipError::Retry("down".into())));
+        status.record(&Err(ShipError::Retry("down".into())));
+        assert_eq!(status.errors.load(std::sync::atomic::Ordering::Relaxed), 2);
+        assert_eq!(
+            status
+                .last_ok_unix
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        status.record(&Ok(()));
+        assert!(
+            status
+                .last_ok_unix
+                .load(std::sync::atomic::Ordering::Relaxed)
+                > 0
+        );
+        // A success does not clear the count: it is failures since the process started.
+        assert_eq!(status.errors.load(std::sync::atomic::Ordering::Relaxed), 2);
     }
 }
