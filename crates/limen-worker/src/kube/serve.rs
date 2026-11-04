@@ -469,7 +469,9 @@ async fn start_stream(
                 session_id: uuid::Uuid::parse_str(&admitted.session_id).ok(),
             };
             let end = json!({ "kind": "kube", "resource": admitted.resource, "login": stream_info.subresource, "worker_id": worker.id(), "reason": "the connection was not upgraded" });
-            let _ = worker.audit.emit(EventKind::SessionEnd, ctx, end).await;
+            if let Err(e) = worker.audit.emit(EventKind::SessionEnd, ctx, end).await {
+                tracing::error!(error = %e, session = %admitted.session_id, "failed to audit the end of a kube stream that was never upgraded");
+            }
             return;
         };
         pump::run(
