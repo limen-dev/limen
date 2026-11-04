@@ -74,8 +74,12 @@ async function snapshot() {
   const assets = new Set();
   let saved = 0;
 
+  // A generated id (a review, a session) is saved as "example": the folder name means nothing,
+  // and a regeneration then does not rename it.
+  const stable = (path) => path.replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/|$)/g, '/example');
   const save = (path, body) => {
-    const file = path.endsWith('/') || !extname(path) ? join(dir, path, 'index.html') : join(dir, path);
+    const target = stable(path);
+    const file = target.endsWith('/') || !extname(target) ? join(dir, target, 'index.html') : join(dir, target);
     mkdirSync(dirname(file), { recursive: true });
     // End a page with a newline, so the saved files are clean in a diff.
     writeFileSync(file, file.endsWith('.html') && typeof body === 'string' && !body.endsWith('\n') ? `${body}\n` : body);
