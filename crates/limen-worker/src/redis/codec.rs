@@ -440,7 +440,12 @@ fn parse_at(buf: &[u8], pos: &mut usize, depth: usize) -> Result<Value, CodecErr
             }
         },
         b'%' | b'|' => {
-            for _ in 0..parse_len(header)?.unwrap_or(0) * 2 {
+            // A map holds key and value per pair. The count is the client's, so doubling it
+            // can overflow: in a release build that wraps, and the scanner would then read
+            // fewer elements than the frame declares and mis-find where it ends (found by fuzzing).
+            let pairs = parse_len(header)?.unwrap_or(0);
+            let items = pairs.checked_mul(2).ok_or(CodecError::Protocol("length"))?;
+            for _ in 0..items {
                 parse_at(buf, pos, depth + 1)?;
             }
             Ok(Value::Other)
@@ -467,6 +472,16 @@ mod tests {
 
     fn scan(buf: &[u8]) -> Result<Option<usize>, CodecError> {
         FrameScanner::new().advance(buf)
+    }
+
+    #[test]
+    fn a_map_with_an_enormous_pair_count_is_refused_not_wrapped() {
+        // 2^62 pairs doubles past i64::MAX; found by fuzzing as an overflow panic.
+        for &kind in b"%|" {
+            let mut frame = vec![kind];
+            frame.extend_from_slice(b"4611686018427387904\r\n");
+            assert!(parse_value(&frame).is_err(), "{}", kind as char);
+        }
     }
 
     #[test]
