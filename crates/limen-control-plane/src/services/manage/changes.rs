@@ -449,7 +449,7 @@ fn decode_token(token: &str) -> Result<(OffsetDateTime, Uuid), Status> {
 
 impl ManageService {
     async fn viewer<T>(&self, request: &Request<T>) -> Result<Viewer, Status> {
-        let resolved = caller::resolve(request, &self.0.cas)?;
+        let resolved = caller::resolve_current(request, &self.0).await?;
         let id = resolved.user()?;
         let groups = if id.bot {
             Vec::new()

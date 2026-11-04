@@ -16,7 +16,7 @@ impl Resources for ResourcesService {
         &self,
         request: Request<ListResourcesRequest>,
     ) -> Result<Response<ListResourcesResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let loaded = self.0.policy.current();
         let reachable = crate::access::reachable(&self.0, &user.username, &user.roles)

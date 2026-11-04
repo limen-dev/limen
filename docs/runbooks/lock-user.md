@@ -17,9 +17,12 @@ Find a session ID in the audit trail (`session.start`, filter by user) or in the
 |---|---|
 | Login | Refused immediately (`auth.denied`, reason `user locked`). |
 | New SSH session | Refused at the proxy within about 10 s (the policy snapshot refresh), and by the control plane **immediately** when it issues the per-session certificates, so SSH sessions are blocked at once. |
+| Control plane API | Refused **immediately** for every call the user makes (admin, management, access requests, reviews, audit search, `limen ls`), with `auth.denied`, `action: api`. A locked admin can't change policy or unlock themselves. |
 | Open session | The proxy ends it within about 11 s (10 s snapshot refresh, 1 s check). `session.end` records reason `user locked` or `session killed`, and the recording is kept. |
 
 The user's login certificate stays valid until it expires but Limen no longer honours it. Locks outlive restarts: they are rows in the control plane database, and every snapshot carries them.
+
+Keep a second admin: a locked admin can't unlock themselves, so keep at least two people with `limen:admin` (or the `--bootstrap-admin-group`). If the only admin is locked, release the lock in the database (`UPDATE user_locks SET released_at = now(), released_by = 'db' WHERE username = '...' AND released_at IS NULL`); it is not audited, so record it.
 
 If the control plane is down you can't lock or unlock. Proxies and workers keep enforcing the last snapshot they have, including existing locks.
 
