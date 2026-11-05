@@ -795,7 +795,11 @@ pub async fn lock_user(
 }
 
 /// Release a user's active lock. `false` if they weren't locked.
-pub async fn unlock_user(db: &Db, username: &str, by: &str) -> Result<bool, sqlx::Error> {
+pub async fn unlock_user<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    username: &str,
+    by: &str,
+) -> Result<bool, sqlx::Error> {
     let updated = sqlx::query(
         "UPDATE user_locks SET released_at = now(), released_by = $2 WHERE username = $1 AND released_at IS NULL",
     )
