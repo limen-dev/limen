@@ -710,3 +710,147 @@ fn a_missing_broker_credential_is_caught_when_the_session_is_prepared() {
     .expect_err("no credential");
     assert!(err.to_string().contains("no credential"), "{err}");
 }
+
+/// A content header whose property table holds the given array entries.
+fn header_with_arrays(body: u64, arrays: &[(&str, &[&str])]) -> Vec<u8> {
+    let mut table = Vec::new();
+    for (name, items) in arrays {
+        let mut inner = Vec::new();
+        for item in *items {
+            inner.push(b'S');
+            inner.extend_from_slice(&u32::try_from(item.len()).expect("short").to_be_bytes());
+            inner.extend_from_slice(item.as_bytes());
+        }
+        table.push(u8::try_from(name.len()).expect("short"));
+        table.extend_from_slice(name.as_bytes());
+        table.push(b'A');
+        table.extend_from_slice(&u32::try_from(inner.len()).expect("short").to_be_bytes());
+        table.extend_from_slice(&inner);
+    }
+    let mut header = vec![0, 60, 0, 0];
+    header.extend_from_slice(&body.to_be_bytes());
+    header.extend_from_slice(&0x2000u16.to_be_bytes());
+    header.extend_from_slice(&u32::try_from(table.len()).expect("short").to_be_bytes());
+    header.extend_from_slice(&table);
+    header
+}
+
+#[tokio::test]
+async fn cc_and_bcc_keys_on_the_default_exchange_are_queues_the_role_must_write_to() {
+    let mut rig = rig(vec![grant(&[], &[MqClass::Write], &["orders"])]).await;
+    rig.client.open_channel(1).await;
+    rig.client.open_channel(2).await;
+    for (channel, header) in [(1u16, "CC"), (2, "BCC")] {
+        let args = Out::new()
+            .u16(0)
+            .shortstr("")
+            .shortstr("orders")
+            .u8(0)
+            .finish();
+        let frames = publish_frames(channel, &args, b"x");
+        rig.client.send(&frames[0]).await;
+        rig.client
+            .send(&Frame {
+                kind: HEADER,
+                channel,
+                payload: header_with_arrays(1, &[(header, &["payments"])]),
+            })
+            .await;
+        rig.client.send(&frames[2]).await;
+        let (ch, c, m, _) = rig.client.recv_method().await;
+        assert_eq!((ch, c, m), (channel, 20, 40), "{header} is refused");
+    }
+    settle().await;
+    let methods = rig.broker.methods();
+    assert!(
+        !methods.contains(&(1, 60, 40)) && !methods.contains(&(2, 60, 40)),
+        "{methods:?}"
+    );
+    assert!(
+        rig.broker
+            .frames()
+            .iter()
+            .all(|f| f.kind != HEADER && f.kind != BODY)
+    );
+    // The same keys, naming queues the role may write to, go through.
+    rig.client.open_channel(3).await;
+    let args = Out::new()
+        .u16(0)
+        .shortstr("")
+        .shortstr("orders")
+        .u8(0)
+        .finish();
+    let frames = publish_frames(3, &args, b"x");
+    rig.client.send(&frames[0]).await;
+    rig.client
+        .send(&Frame {
+            kind: HEADER,
+            channel: 3,
+            payload: header_with_arrays(1, &[("CC", &["orders"])]),
+        })
+        .await;
+    rig.client.send(&frames[2]).await;
+    settle().await;
+    assert!(rig.broker.methods().contains(&(3, 60, 40)));
+}
+
+#[tokio::test]
+async fn an_empty_queue_name_is_judged_as_the_queue_last_declared() {
+    // The role may configure `scratch` but read only `inbox`.
+    let mut rig = rig(vec![
+        grant(&[], &[MqClass::Configure], &["scratch"]),
+        grant(&[], &[MqClass::Read], &["inbox"]),
+    ])
+    .await;
+    rig.client.open_channel(1).await;
+    let declare = Out::new().u16(0).shortstr("scratch").u8(0).u32(0).finish();
+    rig.client.send(&Frame::method(1, 50, 10, &declare)).await;
+    let (_, c, m, _) = rig.client.recv_method().await;
+    assert_eq!((c, m), (50, 11));
+    // "" means `scratch` to the broker; reading it needs the read permission.
+    let consume = Out::new()
+        .u16(0)
+        .shortstr("")
+        .shortstr("")
+        .u8(0)
+        .u32(0)
+        .finish();
+    rig.client.send(&Frame::method(1, 60, 20, &consume)).await;
+    let (ch, c, m, _) = rig.client.recv_method().await;
+    assert_eq!((ch, c, m), (1, 20, 40), "refused");
+    settle().await;
+    assert!(!rig.broker.methods().contains(&(1, 60, 20)));
+}
+
+#[tokio::test]
+async fn a_default_exchange_dead_letter_key_is_checked_when_the_queue_is_declared() {
+    let mut rig = rig(vec![grant(
+        &[],
+        &[MqClass::Configure, MqClass::Write],
+        &["work"],
+    )])
+    .await;
+    rig.client.open_channel(1).await;
+    let mut table = Vec::new();
+    for (name, value) in [
+        ("x-dead-letter-exchange", ""),
+        ("x-dead-letter-routing-key", "secret"),
+    ] {
+        table.push(u8::try_from(name.len()).expect("short"));
+        table.extend_from_slice(name.as_bytes());
+        table.push(b'S');
+        table.extend_from_slice(&u32::try_from(value.len()).expect("short").to_be_bytes());
+        table.extend_from_slice(value.as_bytes());
+    }
+    let declare = Out::new()
+        .u16(0)
+        .shortstr("work")
+        .u8(0)
+        .longstr(&table)
+        .finish();
+    rig.client.send(&Frame::method(1, 50, 10, &declare)).await;
+    let (ch, c, m, _) = rig.client.recv_method().await;
+    assert_eq!((ch, c, m), (1, 20, 40), "refused");
+    settle().await;
+    assert!(!rig.broker.methods().contains(&(1, 50, 10)));
+}
