@@ -356,7 +356,11 @@ async fn recordings_stream_to_s3() {
         .strip_prefix(&format!("s3://{bucket}/"))
         .expect("s3 uri");
     assert!(
-        key.starts_with("recordings/dt=") && key.contains("/sess-1-") && key.ends_with(".cast")
+        key.starts_with("recordings/dt=")
+            && key.contains("/sess-1-")
+            && std::path::Path::new(key)
+                .extension()
+                .is_some_and(|e| e == "cast")
     );
     // A second upload for the same session is a different object.
     let again = sink
