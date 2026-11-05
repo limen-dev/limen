@@ -286,6 +286,27 @@ mod tests {
         assert!(check(&snapshot_sig, now).is_err(), "domain separation");
     }
 
+    /// Something signed in the past (an audit manifest) is judged by the
+    /// signer's certificate as of when it was signed, not by today's clock.
+    #[tokio::test]
+    async fn a_signature_is_judged_as_of_its_time() {
+        use crate::envelope::{Purpose, verify, verify_at};
+        let f = fixture().await;
+        let cp = component(&f.internal, ComponentKind::ControlPlane, "cp1").await;
+        let signed = cp
+            .sign(Purpose::AuditManifest, b"manifest".to_vec())
+            .expect("sign");
+        let now = OffsetDateTime::now_utc();
+        let ca = f.internal.cert_der();
+        assert!(verify(&signed, Purpose::AuditManifest, ca).is_ok());
+        assert!(verify_at(&signed, Purpose::AuditManifest, ca, now).is_ok());
+        // The certificate lives ten minutes: long after, it is no longer valid.
+        let later = now + time::Duration::hours(2);
+        assert!(verify_at(&signed, Purpose::AuditManifest, ca, later).is_err());
+        let before = now - time::Duration::hours(2);
+        assert!(verify_at(&signed, Purpose::AuditManifest, ca, before).is_err());
+    }
+
     #[test]
     fn nonce_cache_rejects_replays() {
         let cache = NonceCache::default();
