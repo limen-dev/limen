@@ -10,51 +10,50 @@
 </div>
 
 <h2>Identity and certificates</h2>
-<div class="table-wrap"><table class="integrations">
-  <thead><tr><th>Integration</th><th>Where</th><th>Settings</th><th>Status</th></tr></thead>
-  <tbody>
+<div class="int-grid">
   {% for i in identity %}
-    <tr>
-      <td class="nowrap"><div class="kind-cell"><span class="kind k-proxy"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ i.icon }}"/></svg></span><div><b>{{ i.name }}</b></div></div></td>
-      <td class="mono where">{{ i.target }}</td>
-      <td class="settings"><ul class="plain">{% for d in i.details %}<li>{{ d }}</li>{% endfor %}</ul></td>
-      <td>{% if i.class.is_empty() %}<span class="pill ok">{{ i.status }}</span>{% else %}<span class="pill {{ i.class }}">{{ i.status }}</span>{% endif %}</td>
-    </tr>
+    <article class="int-card">
+      <div class="int-head">
+        <span class="kind lg {{ i.brand }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ i.icon }}"/></svg></span>
+        <div class="int-title"><b>{{ i.name }}</b><span class="mono where">{{ i.target }}</span></div>
+        <span class="pill {% if i.class.is_empty() %}ok{% else %}{{ i.class }}{% endif %}">{{ i.status }}</span>
+      </div>
+      {% if !i.details.is_empty() %}<ul class="plain int-details">{% for d in i.details %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+    </article>
   {% endfor %}
-  </tbody>
-</table></div>
+</div>
 
 <h2>Audit sinks</h2>
 <p class="sub">Every event is written to a local spool first and shipped from there, so a sink that is down delays its copy and loses nothing while the spool has room (see the audit spool runbook). The counts are for this replica since it started.</p>
-<div class="table-wrap"><table class="integrations">
-  <thead><tr><th>Sink</th><th>Where</th><th>Settings</th><th class="num">Waiting</th><th>Last accepted</th><th class="num">Failed batches</th><th>Status</th></tr></thead>
-  <tbody>
+<div class="int-grid">
   {% for s in sinks %}
-    <tr>
-      <td class="nowrap"><b>{{ s.name }}</b></td>
-      <td class="mono where">{{ s.target }}</td>
-      <td class="settings"><ul class="plain">{% for d in s.details %}<li>{{ d }}</li>{% endfor %}</ul></td>
-      <td class="num">{{ s.pending }}</td>
-      <td class="nowrap when">{{ s.last_ok }}</td>
-      <td class="num">{% if s.errors > 0 %}<span class="pill warn">{{ s.errors }}</span>{% else %}0{% endif %}</td>
-      <td>{% if !s.class.is_empty() %}<span class="pill {{ s.class }}">{{ s.status }}</span>{% endif %}</td>
-    </tr>
+    <article class="int-card">
+      <div class="int-head">
+        <span class="kind lg {{ s.brand }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span>
+        <div class="int-title"><b>{{ s.name }}</b><span class="mono where">{{ s.target }}</span></div>
+        {% if s.class.is_empty() %}<span class="pill ok">active</span>{% else %}<span class="pill {{ s.class }}">{{ s.status }}</span>{% endif %}
+      </div>
+      {% if !s.details.is_empty() %}<ul class="plain int-details">{% for d in s.details %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+      <dl class="int-stats">
+        <div><dt>Waiting</dt><dd>{{ s.pending }}</dd></div>
+        <div><dt>Failed batches</dt><dd>{% if s.errors > 0 %}<span class="pill warn">{{ s.errors }}</span>{% else %}0{% endif %}</dd></div>
+        <div class="wide"><dt>Last accepted</dt><dd>{{ s.last_ok }}</dd></div>
+      </dl>
+    </article>
   {% endfor %}
-  </tbody>
-</table></div>
+</div>
 
 <h2>Traces and notices</h2>
-<div class="table-wrap"><table class="integrations">
-  <thead><tr><th>Integration</th><th>Where</th><th>Settings</th><th>Status</th></tr></thead>
-  <tbody>
+<div class="int-grid">
   {% for i in outbound %}
-    <tr>
-      <td class="nowrap"><div class="kind-cell"><span class="kind k-worker"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ i.icon }}"/></svg></span><div><b>{{ i.name }}</b></div></div></td>
-      <td class="mono where">{{ i.target }}</td>
-      <td class="settings"><ul class="plain">{% for d in i.details %}<li>{{ d }}</li>{% endfor %}</ul></td>
-      <td>{% if i.class.is_empty() %}<span class="pill ok">{{ i.status }}</span>{% else %}<span class="pill {{ i.class }}">{{ i.status }}</span>{% endif %}</td>
-    </tr>
+    <article class="int-card">
+      <div class="int-head">
+        <span class="kind lg {{ i.brand }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ i.icon }}"/></svg></span>
+        <div class="int-title"><b>{{ i.name }}</b><span class="mono where">{{ i.target }}</span></div>
+        <span class="pill {% if i.class.is_empty() %}ok{% else %}{{ i.class }}{% endif %}">{{ i.status }}</span>
+      </div>
+      {% if !i.details.is_empty() %}<ul class="plain int-details">{% for d in i.details %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+    </article>
   {% endfor %}
-  </tbody>
-</table></div>
+</div>
 {% endblock %}

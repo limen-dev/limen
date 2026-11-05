@@ -25,3 +25,8 @@ c07a5ac9ac822f95436e03904c6f78759e984ab9:crates/limen-control-plane/src/search/m
 c07a5ac9ac822f95436e03904c6f78759e984ab9:crates/limen-control-plane/src/search/mask.rs:private-key:145
 dc24b01845373279b42e82f73d89910f7f2ddb67:docs/guides/search.md:generic-api-key:131
 fbc66c4e1ec4f3c708ccaebe1ca38fe8fff45e4b:deploy/compose/demo-phase5.sh:curl-auth-user:54
+# Reviewed 2026-11-05: dev-only logins for the throwaway Elasticsearch and OpenSearch test containers
+# in the compose stack (same as the search entries above). Found in the unmerged branch
+# fix/setup-expired-identity, which the full-history scan reads.
+f4993545bdfd131fc26a2c2348fc8270758a4a2c:deploy/compose/scripts/seed.sh:curl-auth-user:25
+f4993545bdfd131fc26a2c2348fc8270758a4a2c:deploy/compose/scripts/seed.sh:curl-auth-user:26

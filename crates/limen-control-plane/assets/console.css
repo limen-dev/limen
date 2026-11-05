@@ -336,9 +336,24 @@ form.stack label.check input { width: auto; flex: none; }
 form.stack label.check span { flex: 1; }
 ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 /* The Integrations page: wide text columns keep a readable width and the table scrolls inside its box, instead of one word per line. */
-td.settings { min-width: 240px; }
-td.where { min-width: 180px; overflow-wrap: anywhere; }
-table.integrations td.when { min-width: 190px; }
+.int-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin: 4px 0 28px; }
+.int-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 20px; display: flex; flex-direction: column; min-width: 0; transition: border-color .15s; }
+.int-card:hover { border-color: color-mix(in srgb, var(--text-3) 55%, var(--border)); }
+.int-head { display: flex; align-items: flex-start; gap: 14px; }
+.int-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; padding-top: 1px; }
+.int-title b { font-size: 15px; line-height: 1.3; }
+.int-title .where { color: var(--text-3); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.int-head .pill { flex: none; margin-top: 2px; }
+.int-card ul.int-details { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--border); gap: 9px; color: var(--text-2); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.int-card .int-details li { position: relative; padding-left: 16px; }
+.int-card .int-details li::before { content: ""; position: absolute; left: 3px; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+.int-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; margin: auto 0 0; padding: 16px; background: var(--sunken); border-radius: 10px; }
+.int-details + .int-stats, .int-head + .int-stats { margin-top: 20px; }
+.int-stats .wide { grid-column: 1 / -1; }
+.int-stats dt { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.int-stats dd { margin: 4px 0 0; font-size: 14px; font-weight: 550; }
+.k-okta { --kc: #007dc1; } .k-keycloak { --kc: #4d6fa8; } .k-auth0 { --kc: #eb5424; } .k-google { --kc: #4285f4; } .k-oidc { --kc: #f78c40; }
+.k-kms { --kc: #dd344c; } .k-s3 { --kc: #569a31; } .k-datadog { --kc: #632ca6; } .k-otel { --kc: #425cc7; } .k-slack { --kc: #e01e5a; } .k-webhook { --kc: #0ea5e9; }
 .count { color: var(--text-3); font-weight: 450; font-size: 12.5px; margin-left: 4px; }
 .notice.warn { border-color: var(--warn, #d97706); }
 .bar { display: inline-block; vertical-align: middle; width: 90px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-right: 8px; }
