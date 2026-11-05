@@ -267,42 +267,41 @@ pub fn indexed(prefix: &str, values: &[String]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    /// A server that never stops sending: the worker must give up at its
-    /// limit, not wait to buffer the whole body.
+    /// A server that sends a little more than the limit and then goes quiet
+    /// with the connection open: the worker must answer at the limit, not
+    /// wait for the end of the body (which never comes).
     #[tokio::test]
-    async fn an_endless_response_is_cut_off_at_the_limit() {
+    async fn a_response_is_cut_off_at_the_limit_not_after_it_ends() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let sent = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&sent);
         tokio::spawn(async move {
             let Ok((mut s, _)) = listener.accept().await else {
                 return;
             };
             let mut req = [0u8; 4096];
             let _ = s.read(&mut req).await;
-            if s.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-                .await
-                .is_err()
-            {
-                return;
+            let _ = s
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await;
+            let mut sent = 0;
+            while sent < MAX_RESPONSE + 64 * 1024 {
+                let chunk = format!("{:x}\r\n{}\r\n", 65536, "a".repeat(65536));
+                if s.write_all(chunk.as_bytes()).await.is_err() {
+                    return;
+                }
+                sent += 65536;
             }
-            let chunk = format!("{:x}\r\n{}\r\n", 65536, "a".repeat(65536));
-            while s.write_all(chunk.as_bytes()).await.is_ok() {
-                counted.fetch_add(65536, Ordering::SeqCst);
-            }
+            // Hold the socket open, say nothing.
+            tokio::time::sleep(Duration::from_secs(120)).await;
         });
         let aws = Aws::new(None).expect("client");
         let started = std::time::Instant::now();
         let got = aws.finish(aws.http.get(format!("http://{addr}/"))).await;
-        assert_eq!(got, Err("the response is too large".to_owned()));
-        assert!(started.elapsed() < Duration::from_secs(20));
-        assert!(sent.load(Ordering::SeqCst) < 4 * MAX_RESPONSE);
+        assert_eq!(got, Err("the response is too large".to_owned()), "{got:?}");
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 }
