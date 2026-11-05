@@ -72,6 +72,15 @@ impl SshCertificates for SshCertificatesService {
             ));
         }
 
+        // A revoked proxy's grants are refused at once, from the database.
+        if db::revoked_components(&self.0.db)
+            .await
+            .map_err(|e| internal("checking revoked components", e))?
+            .contains(&verified.proxy.id)
+        {
+            return Err(Status::permission_denied("the proxy has been revoked"));
+        }
+
         // The control plane's own, current view of policy has the last word.
         let loaded = self.0.policy.current();
         // Roles from approved access requests count, and the session's
