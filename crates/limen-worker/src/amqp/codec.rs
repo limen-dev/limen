@@ -123,6 +123,50 @@ impl Frame {
         ))
     }
 
+    /// The extra routing keys a content header carries in its `CC` and `BCC`
+    /// headers: `RabbitMQ` routes a copy of the message under each, through the
+    /// same exchange. Only arrays of strings count, as at the broker.
+    ///
+    /// # Errors
+    /// If the header's properties are cut short or malformed.
+    pub fn routing_extras(&self) -> Result<Vec<String>, Malformed> {
+        let mut found = Vec::new();
+        if self.kind != HEADER {
+            return Ok(found);
+        }
+        let mut a = Args::new(&self.payload);
+        a.take(12)?; // class, weight, body size
+        let flags = a.u16()?;
+        if flags & 0x8000 != 0 {
+            a.shortstr()?; // content-type
+        }
+        if flags & 0x4000 != 0 {
+            a.shortstr()?; // content-encoding
+        }
+        if flags & 0x2000 == 0 {
+            return Ok(found);
+        }
+        let mut table = Args::new(a.longstr()?);
+        while table.pos < table.buf.len() {
+            let key = table.shortstr()?;
+            let kind = table.u8()?;
+            if kind == b'A' && (key == "CC" || key == "BCC") {
+                let mut items = Args::new(table.longstr()?);
+                while items.pos < items.buf.len() {
+                    let item = items.u8()?;
+                    if item == b'S' {
+                        found.push(String::from_utf8_lossy(items.longstr()?).into_owned());
+                    } else {
+                        items.skip_value(item, 1)?;
+                    }
+                }
+            } else {
+                table.skip_value(kind, 0)?;
+            }
+        }
+        Ok(found)
+    }
+
     /// The body size a content header announces.
     #[must_use]
     pub fn body_size(&self) -> Option<u64> {
