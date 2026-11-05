@@ -259,7 +259,7 @@ for needle in ("secret-hr", ".security", "covers every index", "write requests",
     assert needle in reasons, f"no refusal mentioning {needle!r}"
 engines = {e["data"]["engine"] for e in req}
 assert engines == {"elasticsearch", "opensearch"}, engines
-for secret in ("classified-data", "elastic-dev-only", "read-dev-only-1", "write-dev-only-1", "Dev-only-Opensearch-1", "Read-dev-only-1", "widget-os", "written via limen", "bulk-1"):
+for secret in ("classified-data", "elastic-dev-only", "read-dev-only-1", "write-dev-only-1", "Dev-only-Opensearch-1", "Search-dev-only-ro-1", "widget-os", "written via limen", "bulk-1"):
     assert secret not in text, f"{secret!r} leaked into the audit trail"
 assert all("body" not in e["data"] for e in req), "bodies are not logged by default"
 starts = [e for e in events if e["kind"] == "session.start" and e["data"]["kind"] in ("elasticsearch", "opensearch")]
