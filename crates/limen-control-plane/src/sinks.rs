@@ -80,8 +80,6 @@ pub struct S3Sink {
     pub kms_key: Option<String>,
     pub writer: String,
     signer: SignerSlot,
-    /// The internal CA, to verify the manifests the chain is resumed from.
-    internal_ca: Option<rustls_pki_types::CertificateDer<'static>>,
     /// `(next seq, sha256 of the last manifest)`; `None` until loaded from S3.
     chain: Arc<Mutex<Option<(u64, String)>>>,
 }
@@ -102,16 +100,8 @@ impl S3Sink {
             kms_key,
             writer,
             signer,
-            internal_ca: None,
             chain: Arc::new(Mutex::new(None)),
         }
-    }
-
-    /// Verify the signature and signer of the manifest the chain resumes from.
-    #[must_use]
-    pub fn with_internal_ca(mut self, ca: rustls_pki_types::CertificateDer<'static>) -> Self {
-        self.internal_ca = Some(ca);
-        self
     }
 
     fn key(&self, rest: &str) -> String {
@@ -151,29 +141,22 @@ impl S3Sink {
         }
         keys.sort_unstable_by(|a, b| b.cmp(a));
         let highest = keys.first().and_then(|k| key_seq(k));
-        // The newest manifest that verifies. A key that doesn't (planted,
-        // corrupt, signed by another writer) is skipped with an error in the
-        // log rather than stopping the writer for good; the verifier reports
-        // the break it leaves.
+        // The newest manifest that is consistent with its key and writer. A key
+        // that is not (planted, corrupt, another writer's) is skipped with an
+        // error in the log rather than stopping the writer for good; the
+        // verifier reports the break it leaves. The signature is not checked
+        // here: the signing certificate lives 24 hours, so a replica restarting
+        // after that could not resume from its own last manifest.
         let mut trusted = None;
         for key in &keys {
             let body = self.get(key).await?;
-            let Some(ca) = &self.internal_ca else {
-                // No CA to verify with (tests): trust the newest, as before.
-                let signed: SignedManifest = serde_json::from_slice(&body)
-                    .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-                let manifest: Manifest = serde_json::from_str(&signed.manifest)
-                    .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-                trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
-                break;
-            };
-            match trusted_manifest(&body, &self.writer, ca) {
+            match consistent_manifest(&body, key, &self.writer) {
                 Ok(manifest) => {
                     trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
                     break;
                 }
                 Err(why) => {
-                    tracing::error!(%key, %why, "skipping a manifest that does not verify when resuming the audit chain");
+                    tracing::error!(%key, %why, "skipping a manifest that is not this writer's when resuming the audit chain");
                 }
             }
         }
@@ -356,28 +339,15 @@ fn resume_point(highest_key: Option<u64>, trusted: Option<(u64, String)>) -> (u6
     (after_trusted.max(after_keys), prev)
 }
 
-/// A manifest file whose signature chains to the internal CA, whose signer is
-/// the control plane that is its writer, and which names that writer.
-pub fn trusted_manifest(
-    file: &[u8],
-    writer: &str,
-    internal_ca: &rustls_pki_types::CertificateDer<'_>,
-) -> Result<Manifest, String> {
-    let b64 = base64::engine::general_purpose::STANDARD;
+/// A manifest file that parses and agrees with its key (`<seq>.json`) and its writer.
+fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest, String> {
     let signed: SignedManifest = serde_json::from_slice(file).map_err(|e| e.to_string())?;
-    let envelope = limen_proto::v1::Signed {
-        payload: signed.manifest.clone().into_bytes(),
-        signature: b64.decode(&signed.signature).unwrap_or_default(),
-        signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
-    };
-    let (by, _) = limen_session::envelope::verify(&envelope, Purpose::AuditManifest, internal_ca)
-        .map_err(|e| format!("signature: {e}"))?;
-    if let Some(problem) = signer_problem(&by.id, writer) {
-        return Err(problem);
-    }
     let manifest: Manifest = serde_json::from_str(&signed.manifest).map_err(|e| e.to_string())?;
     if manifest.writer != writer {
         return Err(format!("manifest names writer {}", manifest.writer));
+    }
+    if key_seq(key) != Some(manifest.seq) {
+        return Err(format!("manifest has seq {}, not its key's", manifest.seq));
     }
     Ok(manifest)
 }
@@ -543,32 +513,11 @@ pub async fn s3_client(endpoint: Option<&str>, path_style: bool) -> aws_sdk_s3::
 mod tests {
     use super::*;
 
-    async fn signed_manifest(
-        ca: &limen_ca::CertificateAuthority,
-        signer_id: &str,
-        manifest_writer: &str,
-    ) -> Vec<u8> {
-        use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
-        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
-        let csr = CertificateParams::default()
-            .serialize_request(&key)
-            .expect("csr");
-        let cert = ca
-            .issue_component(limen_ca::ComponentCertRequest {
-                csr_der: csr.der().to_vec(),
-                kind: limen_core::identity::ComponentKind::ControlPlane,
-                id: signer_id.into(),
-                dns_names: vec![],
-                labels: BTreeMap::new(),
-                ttl: std::time::Duration::from_secs(600),
-            })
-            .await
-            .expect("issue");
-        let signer = EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer");
+    fn manifest_file(writer: &str, seq: u64) -> Vec<u8> {
         let manifest = Manifest {
             version: 1,
-            writer: manifest_writer.into(),
-            seq: 3,
+            writer: writer.into(),
+            seq,
             object: "events/x".into(),
             sha256: String::new(),
             count: 0,
@@ -577,47 +526,29 @@ mod tests {
             prev_manifest_sha256: String::new(),
             created_at: String::new(),
         };
-        let json = serde_json::to_string(&manifest).expect("json");
-        let envelope = signer
-            .sign(Purpose::AuditManifest, json.clone().into_bytes())
-            .expect("sign");
-        let b64 = base64::engine::general_purpose::STANDARD;
         serde_json::to_vec(&SignedManifest {
-            manifest: json,
-            signature: b64.encode(&envelope.signature),
-            signer_cert: b64.encode(&envelope.signer_cert_der),
+            manifest: serde_json::to_string(&manifest).expect("json"),
+            signature: String::new(),
+            signer_cert: String::new(),
         })
         .expect("file")
     }
 
-    #[tokio::test]
-    async fn only_a_manifest_signed_by_its_own_writer_is_trusted() {
-        let ca = limen_ca::CertificateAuthority::create_self_signed(
-            limen_ca::CaPurpose::Internal,
-            Arc::new(limen_ca::FileSigner::generate().expect("key")),
-        )
-        .await
-        .expect("ca");
-        let good = signed_manifest(&ca, "cp-a", "cp-a").await;
+    #[test]
+    fn only_a_manifest_that_fits_its_key_and_writer_is_resumed_from() {
+        let key = "manifests/cp-a/000000000003.json";
         assert_eq!(
-            trusted_manifest(&good, "cp-a", ca.cert_der())
-                .expect("trusted")
+            consistent_manifest(&manifest_file("cp-a", 3), key, "cp-a")
+                .expect("fits")
                 .seq,
             3
         );
-        // Signed by another control plane's certificate.
-        let other = signed_manifest(&ca, "cp-b", "cp-a").await;
-        assert!(trusted_manifest(&other, "cp-a", ca.cert_der()).is_err());
-        // Signed by a CA that is not ours.
-        let rogue = limen_ca::CertificateAuthority::create_self_signed(
-            limen_ca::CaPurpose::Internal,
-            Arc::new(limen_ca::FileSigner::generate().expect("key")),
-        )
-        .await
-        .expect("ca");
-        let forged = signed_manifest(&rogue, "cp-a", "cp-a").await;
-        assert!(trusted_manifest(&forged, "cp-a", ca.cert_der()).is_err());
-        assert!(trusted_manifest(b"garbage", "cp-a", ca.cert_der()).is_err());
+        assert!(consistent_manifest(&manifest_file("cp-b", 3), key, "cp-a").is_err());
+        assert!(consistent_manifest(&manifest_file("cp-a", 4), key, "cp-a").is_err());
+        assert!(consistent_manifest(b"garbage", key, "cp-a").is_err());
+        assert!(
+            consistent_manifest(&manifest_file("cp-a", 3), "manifests/cp-a/zzz", "cp-a").is_err()
+        );
     }
 
     #[test]
