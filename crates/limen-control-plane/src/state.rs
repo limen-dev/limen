@@ -229,7 +229,7 @@ impl PolicyStore {
             return Ok(known);
         };
         let docs: Vec<limen_policy::Document> = serde_json::from_value(row.documents)?;
-        let policy = Policy::from_documents(docs)?;
+        let policy = Policy::from_stored_documents(docs)?;
         tracing::info!(version = row.version, digest = %row.digest, "loaded policy");
         let loaded = LoadedPolicy {
             version: row.version,

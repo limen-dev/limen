@@ -601,6 +601,49 @@ mod bots {
     }
 
     #[test]
+    fn a_stored_gitlab_environment_rule_still_loads_but_is_not_applied_again() {
+        let doc = bot_doc(
+            "  join:\n    method: gitlab\n    match: { project_path: acme/infra, environment: prod }\n",
+        );
+        let docs = || Policy::parse_yaml_documents([("b.yaml", doc.as_str())]).expect("parses");
+        // Applying it is refused ...
+        assert!(
+            Policy::from_documents(docs())
+                .expect_err("refused")
+                .to_string()
+                .contains("environment_protected")
+        );
+        // ... but a control plane that already holds it still starts, and says so.
+        let stored = Policy::from_stored_documents(docs()).expect("loads");
+        assert!(
+            stored
+                .warnings()
+                .iter()
+                .any(|w| w.contains("environment_protected"))
+        );
+    }
+
+    #[test]
+    fn a_bot_matched_by_name_only_gets_a_warning() {
+        let by_name = bot_doc(
+            "  join:\n    method: github_actions\n    match: { repository: acme/infra, ref: refs/heads/main }\n",
+        );
+        let p = Policy::parse_yaml([("b.yaml", by_name.as_str())]).expect("valid");
+        assert!(
+            p.warnings()
+                .iter()
+                .any(|w| w.contains("bot b") && w.contains("repository_id")),
+            "{:?}",
+            p.warnings()
+        );
+        let by_id = bot_doc(
+            "  join:\n    method: github_actions\n    match: { repository: acme/infra, repository_id: \"42\", ref: refs/heads/main }\n",
+        );
+        let p = Policy::parse_yaml([("b.yaml", by_id.as_str())]).expect("valid");
+        assert!(!p.warnings().iter().any(|w| w.contains("repository_id")));
+    }
+
+    #[test]
     fn a_repository_alone_is_refused() {
         let e = rejected(
             "  join:\n    method: github_actions\n    match: { repository: acme/infra }\n",

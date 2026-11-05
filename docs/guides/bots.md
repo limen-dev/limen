@@ -21,7 +21,7 @@ spec:
   max_ttl: 15m                      # at most 1h; there is no refresh
 ```
 
-Apply it like any policy (`limen admin apply`). The validator refuses rules too broad to mean anything: a repository alone, a wildcard, a pull-request ref or event, a GitLab `ref` without `ref_protected: "true"` or `environment` without `environment_protected: "true"`, an `oidc` rule without an issuer and exact `sub`, and built-in roles such as `limen:admin`. See [the policy reference](../policy.md#bot).
+Apply it like any policy (`limen admin apply`). The validator refuses rules too broad to mean anything: a repository alone, a wildcard, a pull-request ref or event, a GitLab `ref` without `ref_protected: "true"` or `environment` without `environment_protected: "true"`, an `oidc` rule without an issuer and exact `sub`, and built-in roles such as `limen:admin`. See [the policy reference](../policy.md#bot). Match the provider's numeric id as well as the name (`repository_id` for GitHub Actions, `project_id` for GitLab): a repository that is deleted and created again under the same name still matches by name, and `limen admin apply` warns about a bot that matches by name only.
 
 ## 2. Log in from the job
 

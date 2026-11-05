@@ -248,7 +248,23 @@ impl Policy {
         Ok(docs)
     }
 
+    /// Build a policy from documents being applied: every check, including the
+    /// ones added over time to refuse rules too broad to mean anything.
     pub fn from_documents(docs: impl IntoIterator<Item = Document>) -> Result<Self, PolicyError> {
+        Self::build(docs, true)
+    }
+
+    /// Build a policy from documents already applied and stored. A check
+    /// added after they were applied (a bot rule that is now refused) does not
+    /// stop a control plane from starting on what it holds; the next apply
+    /// meets it, and `warnings` names it.
+    pub fn from_stored_documents(
+        docs: impl IntoIterator<Item = Document>,
+    ) -> Result<Self, PolicyError> {
+        Self::build(docs, false)
+    }
+
+    fn build(docs: impl IntoIterator<Item = Document>, strict: bool) -> Result<Self, PolicyError> {
         let mut policy = Policy::default();
         for doc in docs {
             match doc {
@@ -270,7 +286,7 @@ impl Policy {
                     }
                 }
                 Document::Bot(bot) => {
-                    bot::validate_bot(&bot)?;
+                    bot::validate_bot(&bot, strict)?;
                     let name = bot.metadata.name.clone();
                     if policy.bots.insert(name.clone(), bot).is_some() {
                         return Err(PolicyError::Duplicate { kind: "bot", name });
@@ -857,6 +873,35 @@ impl Policy {
                         "role {name}: a group in request.who already holds it through a role mapping, so there is nothing to request"
                     ));
                 }
+            }
+        }
+        // A repository name can be freed and taken again by someone else; the
+        // provider's numeric id cannot.
+        for bot in self.bots() {
+            let join = &bot.spec.join;
+            let (id_claim, name_claim) = match join.method {
+                bot::JoinMethod::GithubActions => ("repository_id", "repository"),
+                bot::JoinMethod::Gitlab => ("project_id", "project_path"),
+                bot::JoinMethod::Oidc => continue,
+            };
+            if join.method == bot::JoinMethod::Gitlab
+                && join.claims.contains_key("environment")
+                && !join
+                    .claims
+                    .get("environment_protected")
+                    .is_some_and(|v| v.values().iter().all(|x| x == "true"))
+            {
+                out.push(format!(
+                    "bot {}: matches a gitlab environment without `environment_protected: \"true\"`; anyone who can run a job can name an unprotected environment (this rule was applied before that was refused)",
+                    bot.metadata.name
+                ));
+            }
+            if join.claims.contains_key(name_claim) && !join.claims.contains_key(id_claim) {
+                out.push(format!(
+                    "bot {}: matches {name_claim} by name only; if the {} is deleted and created again under the same name, it matches. Add `{id_claim}` to join.match (the provider's numeric id)",
+                    bot.metadata.name,
+                    if name_claim == "repository" { "repository" } else { "project" }
+                ));
             }
         }
         // A tag anyone with write access to the account can set must not be
