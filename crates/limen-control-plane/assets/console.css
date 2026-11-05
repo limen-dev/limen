@@ -344,9 +344,9 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .int-title b { font-size: 15px; line-height: 1.3; }
 .int-title .where { color: var(--text-3); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .int-head .pill { flex: none; margin-top: 2px; }
-.int-details { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); gap: 9px; color: var(--text-2); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
-.int-details li { position: relative; padding-left: 16px; }
-.int-details li::before { content: ""; position: absolute; left: 3px; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+.int-card ul.int-details { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--border); gap: 9px; color: var(--text-2); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.int-card .int-details li { position: relative; padding-left: 16px; }
+.int-card .int-details li::before { content: ""; position: absolute; left: 3px; top: .6em; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
 .int-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; margin: auto 0 0; padding: 16px; background: var(--sunken); border-radius: 10px; }
 .int-details + .int-stats, .int-head + .int-stats { margin-top: 20px; }
 .int-stats .wide { grid-column: 1 / -1; }
