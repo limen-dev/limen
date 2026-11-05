@@ -63,6 +63,7 @@ metadata: { name: catalog-prod, labels: { env: prod } }
 spec:
   mongodb:
     endpoint: "mongo-0.internal:27017"      # any replica set member; the worker follows the primary
+    # hosts: ["*.db.example.com"]            # where it may follow it (see below)
     default_database: shop
     auth: scram                              # scram (SHA-256) | scram_sha1 | x509 | aws
     credentials_dir: /etc/limen/mongo/catalog-prod
@@ -78,6 +79,8 @@ spec:
 **X.509.** The MongoDB user is the certificate subject (`$external`), such as `CN=limen-x509,O=Limen`. The role name only selects which `.pem` the worker presents.
 
 **Atlas.** Use a replica set member's `host:27017` (`mongodb+srv://` isn't resolved yet), `flavor: atlas`, the system bundle as `tls_ca_file` (`/etc/ssl/certs/ca-certificates.crt`), and `auth: scram`, `x509` or `aws`. Allow the worker's egress IP (or use PrivateLink) in Atlas. *Unverified against a real Atlas cluster.*
+
+**Where the worker follows.** A member names the primary and the worker goes there with the login, so it only follows a host in the same domain as `endpoint` (an address stays in its /16) unless the resource lists `hosts` (exact names, `*.suffix` patterns, IP literals). A primary outside that is refused with a message naming `mongodb.hosts`. The field is part of the resource, not of a delegated writer's reach (ADR-0042).
 
 **DocumentDB.** `flavor: documentdb`, the AWS global bundle as `tls_ca_file`, and `auth: scram` (5.0), `scram_sha1` (4.0) or `aws` (the worker's IAM identity, `$external`, instance clusters on 5.0, not the primary user). X.509 isn't supported by DocumentDB. Use the cluster endpoint. DocumentDB implements a subset of commands, so some `mongosh` helpers fail server-side. *Unverified against a real cluster.*
 

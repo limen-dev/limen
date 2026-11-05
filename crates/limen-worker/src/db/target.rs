@@ -64,6 +64,10 @@ pub struct Target {
     /// Set for a resource built from a profile (ADR-0042): what the worker
     /// may dial. Kept when the endpoint follows a replica set primary.
     guard: Option<limen_policy::model::Delegated>,
+    /// The configured `host:port`, kept when the endpoint follows a primary.
+    bootstrap: String,
+    /// The resource's `hosts`: where a server may send the worker next.
+    follow_hosts: Vec<String>,
 }
 
 impl Target {
@@ -101,6 +105,7 @@ impl Target {
             identity,
         )
         .await
+        .map(|target| target.following(&spec.hosts))
     }
 
     async fn build(
@@ -123,6 +128,8 @@ impl Target {
                 fixed_name,
                 tls: None,
                 guard: None,
+                bootstrap: spec.endpoint.to_owned(),
+                follow_hosts: Vec::new(),
             });
         }
         let path = spec
@@ -161,7 +168,23 @@ impl Target {
             fixed_name,
             tls: Some(Arc::new(config)),
             guard: None,
+            bootstrap: spec.endpoint.to_owned(),
+            follow_hosts: Vec::new(),
         })
+    }
+
+    /// The hosts the resource lets a server send the worker to.
+    #[must_use]
+    pub fn following(mut self, hosts: &[String]) -> Self {
+        self.follow_hosts = hosts.to_vec();
+        self
+    }
+
+    /// Whether the worker may go on to `reported` (a primary a replica set
+    /// member named): see [`limen_policy::delegation::may_follow`].
+    #[must_use]
+    pub fn may_follow(&self, reported: &str) -> bool {
+        limen_policy::delegation::may_follow(&self.bootstrap, reported, &self.follow_hosts)
     }
 
     /// The same target, dialed only where `guard` allows (ADR-0042).

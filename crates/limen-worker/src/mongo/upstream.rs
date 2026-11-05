@@ -415,6 +415,13 @@ pub async fn connect(
         if !info.writable_primary {
             match (&info.primary, hop) {
                 (Some(primary), 0) if *primary != target.endpoint => {
+                    // The worker takes the credential along: only where the
+                    // resource lets a server send it.
+                    if !target.may_follow(primary) {
+                        return Err(protocol(format!(
+                            "the server named {primary} as the primary, which is outside this resource's `hosts`; list it under `mongodb.hosts` if it is right"
+                        )));
+                    }
                     target = target.with_endpoint(primary).map_err(protocol)?;
                     continue;
                 }

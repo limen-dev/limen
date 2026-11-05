@@ -39,7 +39,7 @@ limen kafka connect events-kafka-staging --brokers 4
 # Run: kcat -b 127.0.0.1:51234 -L
 ```
 
-Use `127.0.0.1:51234` as the bootstrap server with `security.protocol=PLAINTEXT`. Kafka clients connect to every broker at its advertised address, so the command opens one more loopback listener per broker slot (`--brokers N`, default 8, at most 64) and the worker rewrites advertised addresses to those ports. A cluster with more brokers than slots is refused with a message saying so. If the CLI's ports change, restart the command and your client.
+Use `127.0.0.1:51234` as the bootstrap server with `security.protocol=PLAINTEXT`. Kafka clients connect to every broker at its advertised address, so the command opens one more loopback listener per broker slot (`--brokers N`, default 8, at most 64) and the worker rewrites advertised addresses to those ports. A cluster with more brokers than slots is refused with a message saying so. The worker takes its login to the broker it dials, so it only dials a host in the same domain as `endpoint` (an address stays in its /16) unless the resource lists `hosts` under `kafka` (exact names, `*.suffix` patterns, IP literals); a broker outside that is refused with a message naming `kafka.hosts`. If the CLI's ports change, restart the command and your client.
 
 ```yaml
 - resources: { kind: [kafka], labels: { env: [staging] } }

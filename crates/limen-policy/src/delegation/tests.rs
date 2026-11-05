@@ -129,6 +129,7 @@ const PROFILE_ONLY: &[(&str, &[&str])] = &[
         &[
             "flavor",
             "auth",
+            "hosts",
             "auth_source",
             "credentials_dir",
             "tls_ca_file",
@@ -142,7 +143,7 @@ const PROFILE_ONLY: &[(&str, &[&str])] = &[
         "opensearch",
         &["region", "aws", "serverless", "tls", "audit"],
     ),
-    ("rabbitmq", &["region", "aws", "tls", "sasl"]),
+    ("rabbitmq", &["region", "aws", "tls", "sasl", "hosts"]),
     (
         "web",
         &[
@@ -686,4 +687,52 @@ fn numeric_names_and_broad_wildcards() {
         "{:?}",
         policy.warnings()
     );
+}
+
+#[test]
+fn a_worker_follows_only_hosts_near_the_one_it_was_given() {
+    let msk = "b-1.cluster.abc.c2.kafka.us-east-1.amazonaws.com:9094";
+    for (from, to, ok) in [
+        (
+            msk,
+            "b-2.cluster.abc.c2.kafka.us-east-1.amazonaws.com",
+            true,
+        ),
+        (
+            msk,
+            "b-1.cluster.abc.c2.kafka.us-east-1.amazonaws.com",
+            true,
+        ),
+        (msk, "evil.example.net", false),
+        (msk, "evil.us-east-1.amazonaws.com", false),
+        (msk, "10.0.0.5", false),
+        // Compose and in-cluster style names.
+        ("kafka-1:9092", "kafka-2", true),
+        ("kafka-1:9092", "kafka-2.evil.net", false),
+        ("kafka.default.svc:9092", "broker-0.kafka.default.svc", true),
+        ("kafka.default.svc:9092", "broker-0.kafka.other.svc", false),
+        // Addresses stay in their /16.
+        ("10.1.2.3:9092", "10.1.9.9", true),
+        ("10.1.2.3:9092", "10.2.0.1", false),
+        ("10.1.2.3:9092", "kafka-2", false),
+        ("[2001:db8:1::1]:9092", "2001:db8:1:5::2", true),
+        ("[2001:db8:1::1]:9092", "2001:db9::1", false),
+        ("kafka-1:9092", "", false),
+    ] {
+        assert_eq!(may_follow(from, to, &[]), ok, "{from} -> {to}");
+    }
+    // The resource's own list decides when it has one.
+    let hosts = vec!["*.public.example.com".to_owned(), "203.0.113.7".to_owned()];
+    assert!(may_follow(msk, "b0.public.example.com", &hosts));
+    assert!(may_follow(msk, "203.0.113.7", &hosts));
+    assert!(!may_follow(
+        msk,
+        "b-2.cluster.abc.c2.kafka.us-east-1.amazonaws.com",
+        &hosts[..1]
+    ));
+    assert!(may_follow(
+        msk,
+        "b-1.cluster.abc.c2.kafka.us-east-1.amazonaws.com",
+        &hosts
+    ));
 }
