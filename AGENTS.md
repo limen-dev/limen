@@ -1,17 +1,22 @@
 # Limen: instructions for coding agents
 
-Self-hosted, Rust, identity-aware access (SSH today; databases planned). Before changing behavior read `docs/design.md` §13 (phase status, ✅ = done; several are implemented) and the relevant `docs/adr/`.
+Self-hosted, Rust, identity-aware access (SSH, databases, Kubernetes, web apps). Layout, build and test commands, commit style and the PR checklist are in `CONTRIBUTING.md`; crate roles in `docs/design.md` §12; phase status in §13; decisions in `docs/adr/`; demos in `demos/README.md`. This file holds only what is specific to agents.
 
 ## Rules
 - **Worktree only.** `git worktree add .claude/worktrees/<topic> -b <branch>`; edit, build and commit there. Never edit the main checkout or switch its branch.
-- **Phase by phase.** Work only on phases the owner approved; don't build ahead (planned integrations are data-only stubs). A phase ships tests, docs and a demo (`demos/demo-*.sh`).
-- **Verify before claiming.** Run it, then report what ran and what you didn't verify. Anything tested only against a local stand-in is `unverified`. `SKIPPED` integration tests are not a pass.
-- **Security invariants.** Secrets via `limen_core::secret::Secret`, never logged. mTLS everywhere; no long-lived user credentials; audit fails closed. Never weaken these to make a test pass.
-- **Dependencies.** New dependency: add a row to ADR-0012 after checking maintenance and advisories. New entry point or data store: update `docs/threat-model.md`.
-- **Versions.** Container images are pinned only in `deploy/compose/.env` (then run `scripts/check-versions.sh`); tools in `mise.toml`.
-- **Docs travel with code.** Behavior changes update docs/ADRs in the same PR.
+- **Approved work only.** Read `docs/design.md` §13 before changing behavior. Work on phases the owner approved; don't build ahead.
+- **Verify before claiming.** Run it, and say what you ran and what you didn't. Anything tested only against a local stand-in is `unverified`. A `SKIPPED` test is not a pass.
+- **Invariants** (full list in `CONTRIBUTING.md` Rules): secrets never logged (`limen_core::secret::Secret`), mTLS everywhere, audit fails closed, no `unsafe`. Never weaken one to make a test pass.
 - **Certificates.** Don't bypass browser warnings or touch trust stores. Dev CA: `deploy/compose/.state/internal-ca.pem` (`curl --cacert`).
-- **Confirm before irreversible or outward-facing actions** (force-push, deleting data or branches, tagging, marking ready, commenting). Look at the target before deleting or overwriting.
+- **Ask before irreversible or outward-facing actions:** force-push, deleting data or branches, tagging, marking a PR ready, commenting. Look at the target before deleting or overwriting.
+
+## Checks
+Pick what fits the change; CI runs the rest.
+- Always: `cargo fmt --all`, then `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`.
+- Tests for the crates you touched. Integration tests need `postgres kms s3` from `deploy/compose` and the `LIMEN_TEST_*` variables in `CONTRIBUTING.md`.
+- Generated files must be regenerated, not hand-edited: `scripts/gen-cli-reference.sh` (`docs/cli-reference.md`), `python3 deploy/grafana/generate.py`, `python3 deploy/compose/scripts/gen-dev-users.py` (dev users live only in `deploy/compose/config/dev-users.toml`).
+- Per area: `cargo deny --locked check && cargo audit` for dependency changes; `cd proto && mise exec -- buf lint && mise exec -- buf format --diff --exit-code` and `buf breaking` for `proto/`; `scripts/check-versions.sh` after editing image pins in `deploy/compose/.env`; `mise exec -- actionlint` for workflows; `mise exec -- gitleaks git --redact --no-banner .` before a PR.
+- Behavior or phase work: run the matching `demos/demo-*.sh` (headers say what each needs) and add or update one for new phases. Tools come from `mise.toml` via `mise exec -- <tool>`.
 
 ## Git and PRs
 - Conventional, small, focused commits. Stage specific files, never `git add -A`. Don't push or tag unless asked.
@@ -19,35 +24,4 @@ Self-hosted, Rust, identity-aware access (SSH today; databases planned). Before 
 - Don't push and mark ready at the same moment: the two runs share a concurrency group and the later cancels the earlier. Push, let the skipped run settle, then mark ready.
 
 ## Subagents
-Spawn them freely when they help; use judgment, not a quota.
-- **Use for:** broad searches (`Explore`), independent tasks (a crate, a doc pass, writing tests), a fresh-eyes diff review, long test or demo runs while you continue.
-- **Parallel is fine** when tasks share no state (files, migrations, ports, compose stack); otherwise run them one after another. Each parallel writer gets its own worktree.
-- **Brief them fully:** goal, paths, constraints from this file, what to return. They follow every rule here and don't push, tag or open PRs unless told.
-- **Verify their output:** reports are claims; check the diff and re-run key checks.
-- **Avoid:** spawning for small changes, to re-read context you already hold, or to repeat an investigation. Subagents don't spawn subagents. One review per diff.
-
-## Commands
-```sh
-cargo fmt && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings   # pedantic lints, must be clean
-# integration tests (need compose services: postgres kms s3):
-AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 LIMEN_TEST_S3_ENDPOINT=http://localhost:8333 \
-LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 \
-cargo test --workspace --all-features --locked
-cargo deny --locked check && cargo audit; mise exec -- actionlint; mise exec -- gitleaks git --redact --no-banner .   # a new gitleaks finding fails CI
-(cd proto && mise exec -- buf lint && mise exec -- buf breaking --against "$(git rev-parse --git-common-dir)#ref=origin/main,subdir=proto")   # ADR-0042
-demos/demo-phase35.sh --keep                   # full-stack check (also demo-phase2/3.sh)
-```
-Always run fmt + clippy and the tests of crates you touched. Add `deny`/`audit` for dependency changes, `buf` for `proto/`, gitleaks + actionlint before a PR, a demo for phase work. Tools: `mise exec -- <tool>`. Docker runtime: OrbStack.
-
-## Layout
-- Binaries: `crates/limen-{control-plane,proxy,worker,cli}`. Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component,kube}`. Tests: `limen-testkit`, `limen-e2e`.
-- Dev stack: `deploy/compose/` (`setup.sh`; see its README). Demos: `demos/`. Terraform: `deploy/terraform`.
-- Console: Rust in `crates/limen-control-plane/src/console/`; Askama `templates/` and static `assets/` (css, js, icons.svg) sit beside `src/` in the same crate.
-- Dashboards: `python3 deploy/grafana/generate.py`.
-- Dev users: only in `deploy/compose/config/dev-users.toml`; regenerate with `python3 deploy/compose/scripts/gen-dev-users.py`. Tests use `limen_testkit::users`.
-
-## Gotchas
-- sqlx needs literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.
-- Askama templates are compiled in: rebuild after editing. Reference static assets with `?v={{ chrome.assets }}` (fingerprinted).
-- Console CSP forbids inline script and third-party origins: use external files and classes (`style-src-attr 'unsafe-inline'` is allowed, scripts never). The policy is `CSP` in `console/mod.rs`; don't loosen it without an ADR note.
-- macOS: no `timeout` or `sleep`-polling in shell; run long commands in the background.
+Use them when they save time or keep context clean (broad searches, independent tasks, a review of a finished diff). Give a self-contained brief; parallel writers get separate worktrees; check their output before relying on it. They follow these rules and don't push or open PRs unless told.
