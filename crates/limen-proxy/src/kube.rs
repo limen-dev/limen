@@ -42,7 +42,9 @@ type Body = tonic::body::Body;
 
 /// Headers a client must not choose. The worker strips these too; stripping
 /// them here keeps them off the tunnel at all.
-const CLIENT_CONTROLLED: [&str; 1] = ["authorization"];
+/// The forwarding headers are here too: this is the first hop, so the client
+/// must not choose the source address the API server logs.
+const CLIENT_CONTROLLED: [&str; 4] = ["authorization", "forwarded", "via", "x-real-ip"];
 
 pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Response<Body> {
     let peer = req.extensions().get::<PeerInfo>().cloned();
@@ -269,6 +271,7 @@ fn sanitize(headers: &mut HeaderMap, upgrading: bool) {
             k.starts_with("x-limen-")
                 || k.starts_with("impersonate-")
                 || k.starts_with("x-remote-")
+                || k.starts_with("x-forwarded-")
                 || CLIENT_CONTROLLED.contains(&k)
                 || (HOP_BY_HOP.contains(&k) && !(upgrading && k == "connection"))
         })
@@ -518,6 +521,12 @@ mod tests {
             "x-limen-client-cert",
             "x-remote-user",
             "keep-alive",
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip",
+            "via",
         ] {
             h.insert(
                 HeaderName::from_bytes(name.as_bytes()).expect("name"),
