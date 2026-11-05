@@ -388,7 +388,7 @@ impl Spool {
 
     /// Record a failed fsync and wake every append waiting on one.
     fn mark_broken(&self, e: &std::io::Error) -> SpoolError {
-        tracing::error!(error = %e, "spool fsync failed; refusing appends until restart");
+        tracing::error!(error = %e, "spool write or fsync failed; refusing appends until restart");
         let why = e.to_string();
         self.broken.send_replace(Some(why.clone()));
         SpoolError::Broken(why)
