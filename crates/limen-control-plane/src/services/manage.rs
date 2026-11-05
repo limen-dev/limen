@@ -83,6 +83,13 @@ impl Who {
 
 async fn who<T>(state: &AppState, request: &Request<T>, policy: &Policy) -> Result<Who, Status> {
     let resolved = caller::resolve_current(request, state).await?;
+    who_of(&resolved, policy)
+}
+
+/// What an authenticated caller is, decided against a policy. Call
+/// `caller::resolve_current` first, before any work that costs the database
+/// something, so an unauthenticated caller can't trigger it.
+fn who_of(resolved: &caller::Caller, policy: &Policy) -> Result<Who, Status> {
     let id = resolved.user()?;
     let username = id.username.clone();
     if id.bot {
@@ -1206,10 +1213,12 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::DescribeCallerRequest>,
     ) -> Result<Response<pb::DescribeCallerResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        caller.user()?;
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy).await?;
+        let who = who_of(&caller, &current.policy)?;
         let grant = match &who {
             Who::Writer { grant, .. } => {
                 let spec = &grant.spec;
@@ -1242,10 +1251,12 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::GetDocumentRequest>,
     ) -> Result<Response<pb::GetDocumentResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        caller.user()?;
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy).await?;
+        let who = who_of(&caller, &current.policy)?;
         writers_and_admins(&who)?;
         let req = request.into_inner();
         let kind = required_kind(req.kind)?;
@@ -1308,10 +1319,12 @@ impl ManagementService for ManageService {
         &self,
         request: Request<pb::ListDocumentsRequest>,
     ) -> Result<Response<pb::ListDocumentsResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        caller.user()?;
         let (current, heads) = policy_store::snapshot(&self.0)
             .await
             .map_err(|e| store_error(&e))?;
-        let who = who(&self.0, &request, &current.policy).await?;
+        let who = who_of(&caller, &current.policy)?;
         writers_and_admins(&who)?;
         let req = request.into_inner();
         let kind = required_kind(req.kind)?;

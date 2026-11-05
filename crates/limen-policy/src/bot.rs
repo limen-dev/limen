@@ -286,6 +286,14 @@ pub(crate) fn validate_bot(bot: &BotDoc) -> Result<(), PolicyError> {
                         .into(),
                 ));
             }
+            // `environment_protected` is in the token only when the job names an
+            // environment; a rule that names one must require it.
+            if has("environment") && !value_is("environment_protected", "true") {
+                return Err(bad(
+                    "matching a gitlab `environment` also needs `environment_protected: \"true\"`: anyone who can run a job can name an unprotected environment"
+                        .into(),
+                ));
+            }
         }
         JoinMethod::Oidc => {
             if !has("sub") {

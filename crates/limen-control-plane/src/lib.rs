@@ -72,7 +72,8 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         &config.oidc_client_id,
         config.oidc_username_claim,
         http.clone(),
-    )?;
+    )?
+    .allow_unverified_email(config.oidc_allow_unverified_email);
     let bots = bots::BotVerifier::new(
         &config.bot_audience,
         config.bot_max_token_age,
@@ -175,7 +176,8 @@ fn build_console(
         &config.console_oidc_client_id,
         config.oidc_username_claim,
         http.clone(),
-    )?;
+    )?
+    .allow_unverified_email(config.oidc_allow_unverified_email);
     let oidc = console::BrowserOidc::new(
         &config.oidc_issuer,
         config.oidc_internal_url.as_deref(),

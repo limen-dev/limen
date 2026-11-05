@@ -59,6 +59,7 @@ fn ci_facts(
             "ref_protected",
             "user_login",
             "environment",
+            "environment_protected",
         ],
         JoinMethod::Oidc => &[],
     };

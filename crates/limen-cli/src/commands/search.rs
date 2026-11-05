@@ -149,6 +149,7 @@ pub async fn connect(
     )
     .await?;
 
+    let mut host_port = None;
     let (listener, how) = match socket {
         Some(path) => (
             bind_socket(path)?,
@@ -156,15 +157,9 @@ pub async fn connect(
         ),
         None => {
             let addr = listen.unwrap_or("127.0.0.1:0");
-            let tcp = tokio::net::TcpListener::bind(addr)
-                .await
-                .with_context(|| format!("listening on {addr}"))?;
+            let tcp = super::tcp::bind_loopback(addr).await?;
             let local = tcp.local_addr()?;
-            if !local.ip().is_loopback() {
-                bail!(
-                    "--listen must be a loopback address: anyone who can reach it would act as you"
-                );
-            }
+            host_port = Some(local.port());
             (
                 Listener::Tcp(tcp),
                 format!("curl http://{}:{}/", local.ip(), local.port()),
@@ -202,7 +197,7 @@ pub async fn connect(
                 let (active, quiet_since) = (Arc::clone(&active), Arc::clone(&quiet_since));
                 active.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    session(local, proxy.as_deref(), &resource, &role, &group).await;
+                    session(local, host_port, proxy.as_deref(), &resource, &role, &group).await;
                     *quiet_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
                         tokio::time::Instant::now();
                     active.fetch_sub(1, Ordering::SeqCst);
@@ -228,23 +223,236 @@ pub async fn connect(
 /// HTTP error with an engine-shaped JSON body, so `curl` and the clients
 /// show why instead of "connection closed".
 async fn session(
-    mut local: Box<dyn Io>,
+    local: Box<dyn Io>,
+    host_port: Option<u16>,
     proxy: Option<&str>,
     resource: &str,
     role: &str,
     group: &str,
 ) {
-    match super::ssh::open_session_in(proxy, limen_tunnel::alpn::SEARCH, resource, role, "", group)
+    let Some(port) = host_port else {
+        // A unix socket: a browser can't reach it, so there is nothing to check.
+        match super::ssh::open_session_in(
+            proxy,
+            limen_tunnel::alpn::SEARCH,
+            resource,
+            role,
+            "",
+            group,
+        )
         .await
-    {
-        Ok(mut upstream) => {
-            let _ = tokio::io::copy_bidirectional(&mut local, &mut upstream).await;
+        {
+            Ok(mut upstream) => {
+                let mut local = local;
+                let _ = tokio::io::copy_bidirectional(&mut local, &mut upstream).await;
+            }
+            Err(e) => {
+                let mut local = local;
+                let _ = local.write_all(&refusal(&e)).await;
+                let _ = local.shutdown().await;
+            }
         }
+        return;
+    };
+    // A TCP listener on loopback is reachable from any web page the user
+    // opens (DNS rebinding, or a plain cross-site request). Every request is
+    // checked before it is forwarded.
+    let (mut local_r, mut local_w) = tokio::io::split(local);
+    let mut buf = Vec::new();
+    let first = match next_request(&mut local_r, &mut buf, port).await {
+        Next::Request(req) => req,
+        Next::Eof => return,
+        Next::Rejected(why) => {
+            let _ = local_w.write_all(&web_refusal(why)).await;
+            let _ = local_w.shutdown().await;
+            return;
+        }
+    };
+    let mut upstream = match super::ssh::open_session_in(
+        proxy,
+        limen_tunnel::alpn::SEARCH,
+        resource,
+        role,
+        "",
+        group,
+    )
+    .await
+    {
+        Ok(u) => u,
         Err(e) => {
-            let _ = local.write_all(&refusal(&e)).await;
-            let _ = local.shutdown().await;
+            let _ = local_w.write_all(&refusal(&e)).await;
+            let _ = local_w.shutdown().await;
+            return;
+        }
+    };
+    let (mut up_r, mut up_w) = tokio::io::split(&mut upstream);
+    let mut replies = Box::pin(tokio::io::copy(&mut up_r, &mut local_w));
+    let mut requests = Box::pin(forward_requests(
+        &mut local_r,
+        &mut up_w,
+        &mut buf,
+        port,
+        first,
+    ));
+    tokio::select! {
+        _ = &mut replies => {}
+        verdict = &mut requests => match verdict {
+            // The client is done sending; let the replies finish.
+            Next::Eof => {
+                drop(requests);
+                let _ = up_w.shutdown().await;
+                let _ = replies.await;
+            }
+            Next::Rejected(why) => {
+                drop(requests);
+                drop(replies);
+                let _ = local_w.write_all(&web_refusal(why)).await;
+                let _ = local_w.shutdown().await;
+            }
+            Next::Request(_) => {}
+        },
+    }
+}
+
+/// The longest request head accepted from a local client.
+const MAX_HEAD: usize = 16 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+struct Req {
+    head: usize,
+    body: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Next {
+    Eof,
+    Request(Req),
+    Rejected(&'static str),
+}
+
+/// Why a request head is not forwarded, or the length of its body.
+///
+/// The `Host` header must be this listener's own address (a rebinding page
+/// carries its own domain there), and a request that carries `Origin` came
+/// from a web page: `curl` and the client libraries send neither a foreign
+/// `Host` nor an `Origin`.
+fn check_head(head: &[u8], port: u16) -> Result<u64, &'static str> {
+    let text = std::str::from_utf8(head).map_err(|_| "the request head is not valid text")?;
+    let mut host = None;
+    let mut length = None;
+    for line in text.split("\r\n").skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match name.trim().to_ascii_lowercase().as_str() {
+            "host" if host.replace(value).is_some() => {
+                return Err("more than one Host header");
+            }
+            "origin" => return Err("requests from web pages (with an Origin header) are refused"),
+            "transfer-encoding" | "upgrade" => {
+                return Err("chunked bodies and protocol upgrades are not supported");
+            }
+            "content-length" => {
+                let n = value.parse::<u64>().map_err(|_| "bad Content-Length")?;
+                if length.replace(n).is_some() {
+                    return Err("more than one Content-Length header");
+                }
+            }
+            _ => {}
         }
     }
+    let host = host.ok_or("a Host header is required")?;
+    let own = ["127.0.0.1", "localhost", "[::1]"]
+        .iter()
+        .any(|h| host.eq_ignore_ascii_case(&format!("{h}:{port}")));
+    if !own {
+        return Err("the Host header is not this listener's loopback address");
+    }
+    Ok(length.unwrap_or(0))
+}
+
+/// Reads the next request head from the client (keeping any bytes read past it in `buf`).
+async fn next_request<R: AsyncRead + Unpin>(r: &mut R, buf: &mut Vec<u8>, port: u16) -> Next {
+    use tokio::io::AsyncReadExt as _;
+    let head = loop {
+        if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break at + 4;
+        }
+        if buf.len() > MAX_HEAD {
+            return Next::Rejected("the request head is too long");
+        }
+        let mut chunk = [0u8; 4096];
+        match r.read(&mut chunk).await {
+            Ok(0) | Err(_) => return Next::Eof,
+            Ok(n) => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
+        }
+    };
+    match check_head(buf.get(..head).unwrap_or_default(), port) {
+        Ok(body) => Next::Request(Req { head, body }),
+        Err(why) => Next::Rejected(why),
+    }
+}
+
+/// Forwards the checked request `first`, then every following request on the
+/// connection after checking it the same way.
+async fn forward_requests<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    r: &mut R,
+    w: &mut W,
+    buf: &mut Vec<u8>,
+    port: u16,
+    first: Req,
+) -> Next {
+    use tokio::io::AsyncReadExt as _;
+    let mut req = first;
+    loop {
+        // The head, and as much of the body as is already buffered.
+        let body_buffered = u64::try_from(buf.len().saturating_sub(req.head)).unwrap_or(u64::MAX);
+        let taken = req
+            .head
+            .saturating_add(usize::try_from(body_buffered.min(req.body)).unwrap_or(usize::MAX));
+        if w.write_all(buf.get(..taken).unwrap_or_default())
+            .await
+            .is_err()
+        {
+            return Next::Eof;
+        }
+        buf.drain(..taken);
+        let mut left = req.body.saturating_sub(body_buffered);
+        while left > 0 {
+            let mut chunk = [0u8; 8192];
+            let want = usize::try_from(left).unwrap_or(usize::MAX).min(chunk.len());
+            match r.read(chunk.get_mut(..want).unwrap_or_default()).await {
+                Ok(0) | Err(_) => return Next::Eof,
+                Ok(n) => {
+                    if w.write_all(chunk.get(..n).unwrap_or_default())
+                        .await
+                        .is_err()
+                    {
+                        return Next::Eof;
+                    }
+                    left = left.saturating_sub(n as u64);
+                }
+            }
+        }
+        match next_request(r, buf, port).await {
+            Next::Request(next) => req = next,
+            other => return other,
+        }
+    }
+}
+
+fn web_refusal(why: &str) -> Vec<u8> {
+    let body = serde_json::json!({
+        "error": { "type": "limen_exception", "reason": format!("Limen: {why}") },
+        "status": 403
+    })
+    .to_string();
+    format!(
+        "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
 }
 
 /// Whether Limen refused the session, or couldn't open it. Clients retry the
@@ -337,6 +545,85 @@ mod tests {
         assert_eq!(
             status("no capacity: every worker is at its session limit"),
             "503"
+        );
+    }
+
+    fn head(host: &str, extra: &str) -> Vec<u8> {
+        format!("POST /x/_search HTTP/1.1\r\nHost: {host}\r\n{extra}\r\n").into_bytes()
+    }
+
+    #[test]
+    fn only_the_listeners_own_address_is_a_valid_host() {
+        for ok in [
+            "127.0.0.1:9200",
+            "localhost:9200",
+            "LocalHost:9200",
+            "[::1]:9200",
+        ] {
+            assert_eq!(
+                check_head(&head(ok, "content-length: 7\r\n"), 9200),
+                Ok(7),
+                "{ok}"
+            );
+        }
+        for bad in [
+            "attacker.example:9200",
+            "127.0.0.1.attacker.example:9200",
+            "127.0.0.1:9201",
+            "127.0.0.1",
+            "10.0.0.1:9200",
+        ] {
+            assert!(check_head(&head(bad, ""), 9200).is_err(), "{bad}");
+        }
+        assert!(
+            check_head(b"GET / HTTP/1.1\r\n\r\n", 9200).is_err(),
+            "no Host"
+        );
+        assert!(
+            check_head(
+                &head("127.0.0.1:9200", "Origin: https://evil.example\r\n"),
+                9200
+            )
+            .is_err()
+        );
+        assert!(
+            check_head(
+                &head("127.0.0.1:9200", "Transfer-Encoding: chunked\r\n"),
+                9200
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn every_request_on_a_connection_is_checked() {
+        use tokio::io::AsyncReadExt as _;
+        let ok = head("127.0.0.1:9200", "content-length: 2\r\n");
+        let mut wire = ok.clone();
+        wire.extend_from_slice(b"{}");
+        wire.extend_from_slice(&head(
+            "127.0.0.1:9200",
+            "Origin: https://evil.example\r\ncontent-length: 2\r\n",
+        ));
+        wire.extend_from_slice(b"{}");
+        let (mut client, server) = tokio::io::duplex(65536);
+        client.write_all(&wire).await.expect("write");
+        let (mut sink_r, mut sink_w) = tokio::io::duplex(65536);
+        let mut r = server;
+        let mut buf = Vec::new();
+        let Next::Request(first) = next_request(&mut r, &mut buf, 9200).await else {
+            panic!("the first request is fine");
+        };
+        let verdict = forward_requests(&mut r, &mut sink_w, &mut buf, 9200, first).await;
+        assert!(matches!(verdict, Next::Rejected(_)), "{verdict:?}");
+        drop(sink_w);
+        let mut forwarded = Vec::new();
+        sink_r.read_to_end(&mut forwarded).await.expect("read");
+        let mut want = ok;
+        want.extend_from_slice(b"{}");
+        assert_eq!(
+            forwarded, want,
+            "only the first request reaches the session"
         );
     }
 
