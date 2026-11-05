@@ -3,6 +3,9 @@ changelog:
   exclude:
     labels: [chore, ignore-for-release]
   categories:
+    # Pre-1.0 breaking changes (ADR-0024). Label the pull request `breaking-change`.
+    - title: Upgrade notes
+      labels: [breaking-change]
     - title: Security
       labels: [security]
     - title: Features
