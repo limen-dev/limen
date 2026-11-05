@@ -627,12 +627,16 @@ async fn record_contents_never_reach_the_audit_trail() {
 #[tokio::test]
 async fn metadata_lists_only_reachable_topics_with_brokers_at_the_local_ports() {
     let mut rig = rig(vec![grant(&[KafkaClass::Read], &["orders.*"], &[])]).await;
-    // v1, all topics (null array).
+    // v4, all topics (null array), no automatic creation.
     let body = rig
         .client
-        .call(wire::api::METADATA, 1, &Writer::new().i32(-1).finish())
+        .call(
+            wire::api::METADATA,
+            4,
+            &Writer::new().i32(-1).i8(0).finish(),
+        )
         .await;
-    let m = MetadataResponse::decode(1, &body).expect("decodes");
+    let m = MetadataResponse::decode(4, &body).expect("decodes");
     // Brokers 1 and 2 are on listeners 1 and 2 (rank 0 and 1), not at their real addresses.
     let addrs: Vec<_> = m
         .brokers
@@ -651,9 +655,10 @@ async fn metadata_lists_only_reachable_topics_with_brokers_at_the_local_ports() 
         .i32(2)
         .string("orders.new")
         .string("payments")
+        .i8(0)
         .finish();
-    let body = rig.client.call(wire::api::METADATA, 1, &named).await;
-    let m = MetadataResponse::decode(1, &body).expect("decodes");
+    let body = rig.client.call(wire::api::METADATA, 4, &named).await;
+    let m = MetadataResponse::decode(4, &body).expect("decodes");
     let by_name: std::collections::BTreeMap<_, _> =
         m.topics.iter().map(|t| (t.name.clone(), t.error)).collect();
     assert_eq!(by_name["orders.new"], 0);
@@ -662,6 +667,15 @@ async fn metadata_lists_only_reachable_topics_with_brokers_at_the_local_ports() 
     let asked = rig.brokers[0].seen(wire::api::METADATA);
     let last = asked.last().expect("asked");
     assert!(!last.body.windows(8).any(|w| w == b"payments"));
+}
+
+/// Metadata before v4 has no `allow_auto_topic_creation` flag to clear, so a
+/// request that names a topic would make the broker create it. Those versions
+/// end the session as unsupported.
+#[test]
+fn metadata_versions_without_the_auto_creation_flag_are_not_supported() {
+    let (lo, hi) = wire::api::supported(wire::api::METADATA).expect("supported");
+    assert!(lo >= 4 && hi >= lo);
 }
 
 #[tokio::test]
@@ -696,7 +710,7 @@ async fn find_coordinator_is_rewritten_and_a_refused_group_never_reaches_the_bro
     let mut rig = rig(vec![grant(&[KafkaClass::Read], &[], &["reports-*"])]).await;
     // The client asks for metadata first, as clients do.
     rig.client
-        .call(wire::api::METADATA, 1, &Writer::new().i32(0).finish())
+        .call(wire::api::METADATA, 4, &Writer::new().i32(0).i8(0).finish())
         .await;
     let ask = |g: &str| Writer::new().string(g).i8(0).finish();
     let body = rig
@@ -737,7 +751,11 @@ async fn a_cluster_bigger_than_the_cli_opened_listeners_is_a_clear_refusal() {
     )
     .await;
     rig.client
-        .send(wire::api::METADATA, 1, &Writer::new().i32(-1).finish())
+        .send(
+            wire::api::METADATA,
+            4,
+            &Writer::new().i32(-1).i8(0).finish(),
+        )
         .await;
     assert!(
         rig.client.closed().await,
@@ -763,7 +781,7 @@ async fn a_session_on_a_broker_slot_goes_to_the_broker_of_that_rank() {
     )
     .await;
     rig.client
-        .call(wire::api::METADATA, 1, &Writer::new().i32(0).finish())
+        .call(wire::api::METADATA, 4, &Writer::new().i32(0).i8(0).finish())
         .await;
     assert_eq!(
         rig.brokers[1].seen(wire::api::METADATA).len(),
@@ -787,7 +805,7 @@ async fn a_session_on_a_broker_slot_goes_to_the_broker_of_that_rank() {
     )
     .await;
     rig.client
-        .call(wire::api::METADATA, 1, &Writer::new().i32(0).finish())
+        .call(wire::api::METADATA, 4, &Writer::new().i32(0).i8(0).finish())
         .await;
     assert_eq!(
         rig.brokers[0].seen(wire::api::METADATA).len(),
@@ -801,7 +819,7 @@ async fn responses_keep_their_order_when_the_worker_answers_one_itself() {
     let mut rig = rig(vec![grant(&[KafkaClass::Write], &["orders.*"], &[])]).await;
     let a = rig
         .client
-        .send(wire::api::METADATA, 1, &Writer::new().i32(0).finish())
+        .send(wire::api::METADATA, 4, &Writer::new().i32(0).i8(0).finish())
         .await;
     let b = rig
         .client
@@ -1080,7 +1098,7 @@ async fn audit_failing_closed_stops_requests_and_answers_with_a_retriable_error(
 async fn a_broker_that_goes_away_ends_the_session() {
     let mut rig = rig(vec![grant(&[KafkaClass::Read], &[], &[])]).await;
     rig.client
-        .call(wire::api::METADATA, 1, &Writer::new().i32(0).finish())
+        .call(wire::api::METADATA, 4, &Writer::new().i32(0).i8(0).finish())
         .await;
     drop(rig.brokers);
     // The accept loops hold the listeners; the connection itself stays up.

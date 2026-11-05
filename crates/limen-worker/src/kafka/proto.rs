@@ -1413,7 +1413,7 @@ mod tests {
         let offered = offered_versions(&upstream);
         assert!(offered.contains(&(api::PRODUCE, 3, 8)));
         assert!(offered.contains(&(api::FETCH, 4, 6)));
-        assert!(offered.contains(&(api::METADATA, 1, 8)));
+        assert!(offered.contains(&(api::METADATA, 4, 8)));
         assert!(offered.iter().all(|(k, _, _)| *k != 99));
         assert!(
             offered.iter().all(|(k, _, _)| *k != api::OFFSET_COMMIT),
