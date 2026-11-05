@@ -70,7 +70,7 @@ fn may_send(kind: ComponentKind, event: EventKind) -> bool {
 
 /// Whether `raw` has no line break (compact JSON never does: line breaks
 /// inside strings are escaped).
-fn is_single_line(raw: &[u8]) -> bool {
+pub(crate) fn is_single_line(raw: &[u8]) -> bool {
     !raw.iter().any(|b| matches!(b, b'\n' | b'\r'))
 }
 
