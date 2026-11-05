@@ -98,7 +98,7 @@ macro_rules! user_select {
     () => {
         "SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
         l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci
-     FROM users u LEFT JOIN user_locks l ON l.username = u.username AND l.released_at IS NULL"
+     FROM users u LEFT JOIN user_locks l ON lower(l.username) = lower(u.username) AND l.released_at IS NULL"
     };
 }
 
