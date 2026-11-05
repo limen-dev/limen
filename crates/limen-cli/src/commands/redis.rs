@@ -88,6 +88,12 @@ pub(crate) async fn default_principal(
 /// A listener only the current user can reach: a socket file in a private directory.
 #[cfg(unix)]
 pub(crate) fn bind_socket(path: &Path) -> anyhow::Result<Listener> {
+    bind_unix_socket(path).map(Listener::Unix)
+}
+
+/// The checked unix socket itself (mode 0600, in a directory only the user can enter).
+#[cfg(unix)]
+pub(crate) fn bind_unix_socket(path: &Path) -> anyhow::Result<tokio::net::UnixListener> {
     use std::os::unix::fs::{
         DirBuilderExt as _, FileTypeExt as _, MetadataExt as _, PermissionsExt as _,
     };
@@ -120,7 +126,7 @@ pub(crate) fn bind_socket(path: &Path) -> anyhow::Result<Listener> {
     let listener = tokio::net::UnixListener::bind(path)
         .with_context(|| format!("listening on {}", path.display()))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(Listener::Unix(listener))
+    Ok(listener)
 }
 
 #[cfg(not(unix))]
@@ -159,15 +165,8 @@ pub async fn connect(
         ),
         None => {
             let addr = listen.unwrap_or("127.0.0.1:0");
-            let tcp = tokio::net::TcpListener::bind(addr)
-                .await
-                .with_context(|| format!("listening on {addr}"))?;
+            let tcp = super::tcp::bind_loopback(addr).await?;
             let local = tcp.local_addr()?;
-            if !local.ip().is_loopback() {
-                bail!(
-                    "--listen must be a loopback address: anyone who can reach it would act as you"
-                );
-            }
             (
                 Listener::Tcp(tcp),
                 format!("redis-cli -h {} -p {}", local.ip(), local.port()),
