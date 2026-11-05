@@ -210,7 +210,10 @@ impl StreamDecoder {
                             .find(|(n, _)| n.eq_ignore_ascii_case(name))
                             .map(|(_, v)| v.as_str())
                     };
-                    let kind = match find("streamtype") {
+                    // A header value may hold several, NUL-separated; the API
+                    // server reads the first, so the recording must too.
+                    let kind = match find("streamtype").map(|v| v.split('\0').next().unwrap_or(""))
+                    {
                         Some("stdin") => SpdyStream::Stdin,
                         Some("stdout") => SpdyStream::Stdout,
                         Some("stderr") => SpdyStream::Stderr,
@@ -222,10 +225,17 @@ impl StreamDecoder {
                     // A long port-forward opens two streams per forwarded
                     // connection and never says when one is done. Forget the
                     // oldest rather than fail a healthy forward.
-                    if self.spdy_streams.len() >= 1024
-                        && let Some(oldest) = self.spdy_streams.keys().next().copied()
-                    {
-                        self.spdy_streams.remove(&oldest);
+                    if self.spdy_streams.len() >= 1024 {
+                        if !self.port_forward {
+                            // An exec has a handful of streams. Past the cap,
+                            // new ones are noise: keep the real ones (opened
+                            // first) rather than let a flood push stdout out
+                            // of the table and off the recording.
+                            continue;
+                        }
+                        if let Some(oldest) = self.spdy_streams.keys().next().copied() {
+                            self.spdy_streams.remove(&oldest);
+                        }
                     }
                     self.spdy_streams.insert(stream_id, kind);
                     if let Some(port) = find("port").and_then(|p| p.parse::<u16>().ok())
@@ -381,6 +391,31 @@ mod tests {
             }));
         }
         assert_eq!(ports.into_iter().collect::<Vec<_>>(), [8080]);
+    }
+
+    /// The recording must see what the API server sees: a flood of extra
+    /// streams must not push stdout out of the table, and a NUL-separated
+    /// `streamtype` is read as its first value.
+    #[test]
+    fn spdy_exec_output_stays_recorded_when_the_client_tries_to_hide_it() {
+        let mut d = StreamDecoder::new(StreamKind::ExecSpdy);
+        let mut z = Compressor::default();
+        let mut open = Vec::new();
+        open.extend(z.syn_stream(1, &[("streamtype", "error")]));
+        open.extend(z.syn_stream(5, &[("streamtype", "stdout\0stdin")]));
+        for id in 0..1100u32 {
+            open.extend(z.syn_stream(1001 + 2 * id, &[("streamtype", "stdin")]));
+        }
+        d.client(&open).expect("client");
+        assert_eq!(
+            d.server(&data(5, false, b"secret output")).expect("server"),
+            [Event::Output(b"secret output".to_vec())]
+        );
+        assert_eq!(
+            d.server(&data(1, true, br#"{"status":"Success"}"#))
+                .expect("server"),
+            [Event::Exit(0)]
+        );
     }
 
     #[test]
