@@ -639,6 +639,36 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         let Some(session_id) = e.session_id else {
             continue;
         };
+        // Who may speak for a session: a proxy opens every session but a
+        // Kubernetes stream, which only its worker writes. So a worker's event
+        // is ignored for a session a proxy declared as some other kind, and a
+        // proxy's start replaces what a worker wrote first for the same id
+        // (that row can only be a forgery, since a proxy never starts a kube
+        // stream).
+        if matches!(e.kind, EventKind::SessionStart | EventKind::SessionEnd) {
+            let existing: Option<Option<String>> =
+                sqlx::query_scalar("SELECT kind FROM sessions WHERE session_id = $1")
+                    .bind(session_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            let existing = existing.flatten();
+            if e.producer.component == "worker" {
+                if existing.as_deref().is_some_and(|k| k != "kube") {
+                    continue;
+                }
+            } else if e.kind == EventKind::SessionStart && existing.as_deref() == Some("kube") {
+                sqlx::query(
+                    "UPDATE sessions SET username = NULL, kind = NULL, resource = NULL, login = NULL,
+                       worker_id = NULL, proxy_id = NULL, client_addr = NULL, recording_uri = NULL,
+                       recording_sha256 = NULL, ended_at = NULL, end_reason = NULL, duration_ms = NULL,
+                       bytes_in = NULL, bytes_out = NULL
+                     WHERE session_id = $1",
+                )
+                .bind(session_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(

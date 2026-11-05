@@ -105,6 +105,45 @@ async fn a_session_keeps_the_first_identity_and_recording_it_was_given() {
     assert_eq!(s.recording_sha256.as_deref(), Some("abc"));
 }
 
+/// A worker writes only Kubernetes streams. One that writes first for a session
+/// a proxy opens does not keep it: the proxy's start replaces the forgery, and
+/// the worker's later events are ignored (pentest #66).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workers_forged_session_start_does_not_outlive_the_proxys() {
+    let Some(db) = fresh_db().await else { return };
+    let id = Uuid::now_v7();
+    let from_worker = |kind: EventKind, user: &str, data: serde_json::Value| {
+        let mut e = event(kind, id, user, data);
+        e.producer.component = "worker".into();
+        e
+    };
+    let forged = from_worker(
+        EventKind::SessionStart,
+        "mallory@example.com",
+        json!({ "kind": "kube", "resource": "other", "worker_id": "w9" }),
+    );
+    store::project_events(&db, &[forged])
+        .await
+        .expect("forged first");
+    store::project_events(&db, &[start(id), end(id), recording(id)])
+        .await
+        .expect("real events");
+    let later_end = from_worker(
+        EventKind::SessionEnd,
+        "mallory@example.com",
+        json!({ "kind": "kube", "worker_id": "w9", "reason": "forged", "duration_ms": 1 }),
+    );
+    store::project_events(&db, &[later_end])
+        .await
+        .expect("forged end");
+    let s = store::session(&db, id).await.expect("query").expect("row");
+    assert_eq!(s.username.as_deref(), Some(DEVELOPER));
+    assert_eq!(s.kind.as_deref(), Some("ssh"));
+    assert_eq!(s.resource.as_deref(), Some("web-1"));
+    assert_eq!(s.worker_id.as_deref(), Some("w1"));
+    assert_eq!(s.end_reason.as_deref(), Some("user locked"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn projection_is_idempotent_and_order_independent() {
     let Some(db) = fresh_db().await else { return };
