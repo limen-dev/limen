@@ -618,7 +618,7 @@ async fn ingest_accepts_own_events_and_rejects_forgery_and_bad_recordings() {
         serde_json::to_vec(&limen_audit::Event::new(
             EventKind::SessionStart,
             producer,
-            serde_json::json!({"resource": "web-1"}),
+            serde_json::json!({"kind": "ssh", "resource": "web-1", "proxy_id": proxy_id}),
         ))
         .expect("json")
     };

@@ -124,7 +124,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
                 let event = limen_audit::Event::new(
                     limen_audit::EventKind::SessionStart,
                     producer,
-                    serde_json::json!({ "resource": "web-1", "i": i }),
+                    serde_json::json!({ "kind": "ssh", "resource": "web-1", "proxy_id": proxy_id, "i": i }),
                 );
                 serde_json::to_vec(&event).expect("json")
             })
