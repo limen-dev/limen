@@ -101,7 +101,28 @@ pub struct IdpSettings {
     pub scopes: Vec<String>,
 }
 
+/// Refuse a URL the proxy or the identity provider handed us unless it is
+/// `https`, or `http` to a loopback host (the dev stack). The CLI opens these
+/// in a browser, so `file:`, `javascript:` and custom schemes must not pass.
+fn require_secure_url(raw: &str, what: &str) -> anyhow::Result<()> {
+    let url = reqwest::Url::parse(raw).with_context(|| format!("{what} is not a valid URL"))?;
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if loopback => Ok(()),
+        other => bail!(
+            "refusing {what}: scheme `{other}` is not https (http is allowed only for loopback hosts)"
+        ),
+    }
+}
+
 async fn discover(settings: &IdpSettings, http: &HttpClient) -> anyhow::Result<Metadata> {
+    require_secure_url(&settings.issuer, "the identity provider issuer")?;
     let issuer = IssuerUrl::new(settings.issuer.clone()).context("invalid issuer URL")?;
     Metadata::discover_async(issuer, http)
         .await
@@ -167,6 +188,8 @@ pub async fn pkce_login(
         .add_scopes(scopes(settings))
         .set_pkce_challenge(challenge)
         .url();
+
+    require_secure_url(url.as_str(), "the authorization URL")?;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<Callback>();
     let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -289,7 +312,7 @@ fn callback_page(heading: &str, detail: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::callback_error_message;
+    use super::{callback_error_message, require_secure_url};
 
     #[test]
     fn callback_error_text_cannot_inject_terminal_escapes() {
@@ -299,5 +322,27 @@ mod tests {
         );
         assert!(!msg.chars().any(char::is_control), "{msg:?}");
         assert!(msg.len() < 1000, "{}", msg.len());
+    }
+
+    #[test]
+    fn only_https_or_loopback_http_urls_pass() {
+        for ok in [
+            "https://idp.example.com/auth",
+            "http://localhost:5556/dex",
+            "http://127.0.0.1:5556/",
+            "http://[::1]:5556/",
+        ] {
+            assert!(require_secure_url(ok, "x").is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://idp.example.com/auth",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "myapp://open?x=1",
+            "http://localhost.evil.com/",
+            "not a url",
+        ] {
+            assert!(require_secure_url(bad, "x").is_err(), "{bad}");
+        }
     }
 }
