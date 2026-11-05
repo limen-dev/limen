@@ -238,7 +238,7 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | I: sensitive data in audit (PII in SQL literals, Redis and MongoDB values) | Redis values and MongoDB command values redacted by default. SQL full text by default (owner decision), with per-resource literal normalization. Bound parameters redacted by default. Access to the bucket and Grafana is limited to auditors |
 | S: Grafana access | Okta OIDC, auditor and admin groups only. Read-only Athena role (`reader_policy_json` in the audit module). The dev stack's Grafana allows anonymous viewers and an open Trino: development only |
 
-### TB9: GitHub Actions ↔ GitHub-hosted runners (CI)
+### TB14: GitHub Actions ↔ GitHub-hosted runners (CI)
 Pull request code runs on GitHub-hosted runners: a fresh VM per job, discarded afterwards. See [the CI runbook](runbooks/ci-runners.md).
 
 | Threat | Mitigation |
@@ -321,7 +321,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 | 2026-10-29 | 14 (stage 2) | Built: every kind through `limen.manage.v1` (people-only kinds for admins); writers' roles, mappings, and tests with the escalation rules above; `IN_USE` for bots and profiles a grant names |
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
 | 2026-10-29 | 14 (stage 1) | Built: `limen.manage.v1` served and relayed by the proxy; `policy_document_heads` and `policy_requests` in use; the worker's connect guard for delegated resources; `policy.write_denied` and `policy.ownership_transfer` audit events |
-| 2026-10-29 | CI | CI runs pull request code on GitHub-hosted runners (TB9) |
+| 2026-10-29 | CI | CI runs pull request code on GitHub-hosted runners (TB14, was a second TB9) |
 | 2026-10-29 | 14 (design) | Management API and delegated writers (TB13): new planned entry point `limen.manage.v1`; new planned data stores `policy_documents`, `policy_document_heads`, `policy_requests`, pending policy changes; confused deputy through the worker, SSRF from delegated resources, approval bypass; the existing `ApplyPolicy` race (#182) |
 | 2026-10-29 | Docs | Website deploy (TB12): GitHub Pages from Actions, off until the repository is public |
 | 2026-10-26 | Docs | Public website (TB12): a static site with no Limen data; supply chain and third-party requests |
