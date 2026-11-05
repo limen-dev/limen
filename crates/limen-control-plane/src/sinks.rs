@@ -319,6 +319,24 @@ impl S3Sink {
 const DD_MAX_ENTRIES: usize = 1000;
 const DD_MAX_PAYLOAD: usize = 5 * 1024 * 1024;
 
+/// A value safe to put in a Datadog tag list: a comma would start another
+/// tag and a colon would change the key, so anything but letters, digits and
+/// `_ - . /` becomes `_`. The component name comes from an event, which a
+/// compromised component writes.
+fn tag_value(value: &str) -> String {
+    value
+        .chars()
+        .take(200)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct DatadogSink {
     pub http: reqwest::Client,
@@ -354,9 +372,11 @@ impl DatadogSink {
             obj.insert(
                 "ddtags".into(),
                 format!(
-                    "env:{},version:{},event_kind:{kind},component:{component}",
-                    self.environment,
-                    limen_core::VERSION
+                    "env:{},version:{},event_kind:{},component:{}",
+                    tag_value(&self.environment),
+                    limen_core::VERSION,
+                    tag_value(&kind),
+                    tag_value(&component),
                 )
                 .into(),
             );
@@ -451,6 +471,22 @@ mod tests {
     #[test]
     fn gzip_is_deterministic() {
         assert_eq!(gzip(b"same").expect("gz"), gzip(b"same").expect("gz"));
+    }
+
+    #[test]
+    fn a_component_name_cannot_add_datadog_tags() {
+        let sink = DatadogSink {
+            http: reqwest::Client::new(),
+            url: String::new(),
+            api_key: Secret::new("k".into()),
+            hostname: "cp-1".into(),
+            environment: "test".into(),
+        };
+        let raw = br#"{"kind":"ssh.exec","user":"u","event_id":"e1","producer":{"component":"worker,env:prod,team:x","instance_id":"w","seq":1},"data":{}}"#;
+        let entry = sink.log_entry(raw);
+        let tags = entry["ddtags"].as_str().expect("tags");
+        assert_eq!(tags.split(',').count(), 4, "{tags}");
+        assert!(tags.contains("component:worker_env_prod_team_x"), "{tags}");
     }
 
     #[test]
