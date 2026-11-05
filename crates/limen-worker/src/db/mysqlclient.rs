@@ -242,7 +242,7 @@ fn parse_row(payload: &[u8], columns: u64) -> Option<Row> {
         }
         let (len, used) = lenenc(payload.get(at..)?)?;
         at += used;
-        let end = at + usize::try_from(len).ok()?;
+        let end = at.checked_add(usize::try_from(len).ok()?)?;
         row.push(Some(
             String::from_utf8_lossy(payload.get(at..end)?).into_owned(),
         ));
@@ -263,5 +263,17 @@ mod tests {
             Some(vec![Some("ab".into()), None, Some(String::new())])
         );
         assert_eq!(parse_row(&payload[..2], 1), None);
+    }
+
+    /// A target that announces a length near `u64::MAX` (a `0xfe` length-encoded
+    /// integer) must be refused, not overflow `at + len` (a panic in debug).
+    #[test]
+    fn an_enormous_length_from_the_target_is_refused() {
+        let mut payload = vec![0xfe];
+        payload.extend_from_slice(&u64::MAX.to_le_bytes());
+        assert_eq!(parse_row(&payload, 1), None);
+        let mut payload = vec![1, b'x', 0xfe];
+        payload.extend_from_slice(&(u64::MAX - 1).to_le_bytes());
+        assert_eq!(parse_row(&payload, 2), None);
     }
 }
