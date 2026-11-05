@@ -317,6 +317,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-05 | Pentest | First static pass of the code review ([`pentest-plan.md`](pentest-plan.md)): revoked proxies are now refused at grant admission (TB2); worker-written audit events can overwrite projected session rows and recording hashes, peer proxies and the control plane API do not check revocation, and the anonymous h2 connection cap is global only (open; the mitigations above are not yet true for these) |
 | 2026-10-29 | 14 (stage 2) | Built: console editing through `policy_store` (`/console/policy/documents`, read-only for documents owned elsewhere) and the **Policy changes** pages (`/console/changes`), deciding with the API's functions |
 | 2026-10-29 | 14 (stage 2) | Built: every kind through `limen.manage.v1` (people-only kinds for admins); writers' roles, mappings, and tests with the escalation rules above; `IN_USE` for bots and profiles a grant names |
 | 2026-10-29 | 14 (stage 2) | Built: pending policy changes (`policy_changes`), `GetChange`, `ListChanges`, `ApproveChange`, `RejectChange`, `CancelChange`; `--policy-tests` and `--widening-approval`; `policy.change_pending` and `policy.change_decided` |
