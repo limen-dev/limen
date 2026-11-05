@@ -124,6 +124,30 @@ async fn a_revoked_proxys_grants_are_refused() {
         .into_inner();
     assert!(revoked.revoked);
 
+    // The control plane refuses the revoked proxy's relayed calls too (its
+    // certificate has not expired, so only the revocation stops it).
+    let again = admin.clone();
+    eventually(
+        Duration::from_secs(15),
+        "the control plane refuses calls relayed by the revoked proxy",
+        || {
+            let mut again = again.clone();
+            let id = d.proxy().id();
+            async move {
+                again
+                    .revoke_component(RevokeComponentRequest {
+                        component_id: id,
+                        reason: "again".into(),
+                    })
+                    .await
+                    .is_err_and(|s| {
+                        s.code() == tonic::Code::PermissionDenied && s.message().contains("revoked")
+                    })
+            }
+        },
+    )
+    .await;
+
     // The revoked proxy still holds a certificate that has not expired. Once
     // the worker has the new restrictions it must refuse the proxy's grants,
     // and say why. (One login per attempt, spaced out, to stay under the

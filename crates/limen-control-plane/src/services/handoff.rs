@@ -27,7 +27,7 @@ type AckStream =
 impl HandoffService {
     /// The caller's id, if it is a live peer replica.
     async fn authorize<T>(&self, request: &Request<T>) -> Result<String, Status> {
-        let caller = caller::resolve(request, &self.0.cas)?;
+        let caller = caller::resolve_checked(request, &self.0).await?;
         let id = match &caller {
             Caller::Component {
                 identity,

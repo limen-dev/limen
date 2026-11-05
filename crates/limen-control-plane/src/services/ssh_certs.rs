@@ -46,7 +46,7 @@ impl SshCertificates for SshCertificatesService {
         &self,
         request: Request<IssueSessionCertificatesRequest>,
     ) -> Result<Response<IssueSessionCertificatesResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
             return Err(Status::permission_denied(

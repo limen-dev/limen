@@ -22,7 +22,7 @@ impl Registry for RegistryService {
         &self,
         request: Request<ReportTunnelsRequest>,
     ) -> Result<Response<ReportTunnelsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let proxy = caller.direct_proxy()?.clone();
         let req = request.into_inner();
         if req.tunnels.len() > MAX_TUNNELS_PER_REPORT {
@@ -55,7 +55,7 @@ impl Registry for RegistryService {
         &self,
         request: Request<ListTunnelsRequest>,
     ) -> Result<Response<ListTunnelsResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let proxy = caller.direct_proxy()?.clone();
         let rows = db::live_peer_tunnels(&self.0.db)
             .await

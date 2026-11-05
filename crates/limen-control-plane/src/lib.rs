@@ -135,6 +135,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         registration,
         draining: Arc::default(),
         snapshot_signer,
+        revoked: Arc::default(),
     })
 }
 

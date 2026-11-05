@@ -100,7 +100,7 @@ impl AuditIngest for IngestService {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         self.0.refuse_if_draining()?;
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let component = caller.component()?.clone();
         let events = request.into_inner().events;
         if events.len() > MAX_EVENTS {
@@ -163,7 +163,7 @@ impl AuditIngest for IngestService {
         request: Request<Streaming<RecordingChunk>>,
     ) -> Result<Response<UploadRecordingResponse>, Status> {
         self.0.refuse_if_draining()?;
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
             return Err(Status::permission_denied("only workers upload recordings"));
