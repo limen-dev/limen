@@ -56,8 +56,16 @@ pub fn verify_grant(
             "proxy ID doesn't match the signer".into(),
         ));
     }
-    if grant.nonce.len() < 16 {
-        return Err(SessionError::Grant("nonce too short".into()));
+    if grant.nonce.len() < 16 || grant.nonce.len() > 64 {
+        return Err(SessionError::Grant("nonce must be 16..=64 bytes".into()));
+    }
+    // A grant is for opening one session now: a proxy cannot sign one that
+    // stays valid for long (the nonce cache holds it until `establish_by`).
+    let window = grant.establish_by_unix.saturating_sub(grant.issued_at_unix);
+    if !(0..=ESTABLISH_WITHIN.as_secs().cast_signed() + CLOCK_SKEW_SECS).contains(&window) {
+        return Err(SessionError::Grant(
+            "establish window longer than allowed".into(),
+        ));
     }
     let user = verify_user(
         &CertificateDer::from(grant.user_cert_der.as_slice()),
@@ -247,6 +255,21 @@ mod tests {
         assert!(
             check(&sign(&proxy, &escalated).expect("sign"), now).is_err(),
             "roles must match the user cert"
+        );
+
+        // The establish window is bounded, so a proxy cannot mint a grant that
+        // stays valid for long; the nonce is bounded too.
+        let mut long_lived = grant(cert.clone(), login.clone(), "p1");
+        long_lived.establish_by_unix = long_lived.issued_at_unix + 24 * 3600;
+        assert!(
+            check(&sign(&proxy, &long_lived).expect("sign"), now).is_err(),
+            "establish window"
+        );
+        let mut big_nonce = grant(cert.clone(), login.clone(), "p1");
+        big_nonce.nonce = vec![7; 4096];
+        assert!(
+            check(&sign(&proxy, &big_nonce).expect("sign"), now).is_err(),
+            "nonce length"
         );
 
         let wrong_proxy = sign(&proxy, &grant(cert, login, "p2")).expect("sign");
