@@ -42,7 +42,7 @@ const BLOCK_END: &str = "# <<< limen <<<";
 /// spaces, quotes, wildcards, or anything else OpenSSH would read as syntax.
 /// Names come from policy, so this is a guard against a policy author, not
 /// the user; anything else is skipped with a warning.
-fn safe_name(s: &str) -> bool {
+pub(crate) fn safe_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 253
         && !s.starts_with('-')
