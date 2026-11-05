@@ -15,7 +15,9 @@ doc() { awk -v kind="kind: $1" -v name="  name: $2" 'BEGIN{RS="\n---\n"} index($
 base=(-f "$chart/ci-values.yaml")
 
 # 0. No image.tag runs the release the chart was published with; an explicit tag wins.
-app="$(awk -F'"' '/^appVersion:/ {print $2}' "$chart/Chart.yaml")"
+# release-please rewrites appVersion without quotes, so accept both forms.
+app="$(sed -nE 's/^appVersion: *"?([^"[:space:]]+)"?.*/\1/p' "$chart/Chart.yaml")"
+[[ -n "$app" ]] || fail "could not read appVersion from Chart.yaml"
 out="$(render "${base[@]}" --set image.tag=)"
 grep -q "limen-proxy:v${app}\$" <<<"$out" || fail "image.tag unset did not default to v${app}"
 out="$(render "${base[@]}" --set image.tag=custom)"
