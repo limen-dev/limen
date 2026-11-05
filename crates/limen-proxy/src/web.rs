@@ -1622,6 +1622,33 @@ impl Drop for AuditResponseBody {
     }
 }
 
+/// Entry points for `fuzz/` (fuzz/README.md). Compiled only under cargo-fuzz's `--cfg fuzzing`.
+#[cfg(fuzzing)]
+pub mod fuzz {
+    use super::*;
+
+    /// The pure request-parsing helpers, on any bytes: the `Host` authority, the request
+    /// URI, the `Cookie` header, and identity text going into a header value.
+    pub fn request_parts(data: &[u8], public_port: u16) {
+        if let Ok(text) = std::str::from_utf8(data) {
+            let _ = parse_authority(text, public_port);
+            let _ = header_text(text);
+        }
+        if let Ok(uri) = Uri::try_from(data) {
+            let _ = safe_uri(&uri);
+            let _ = return_path_for(&uri);
+        }
+        let mut headers = HeaderMap::new();
+        for line in data.split(|b| *b == b'\n').take(8) {
+            if let Ok(value) = HeaderValue::from_bytes(line) {
+                headers.append(header::COOKIE, value);
+            }
+        }
+        let _ = cookie_value(&headers, APP_COOKIE);
+        let _ = filtered_cookie(&headers);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
