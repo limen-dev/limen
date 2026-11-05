@@ -410,7 +410,16 @@ fn opens_database(grant: &RedisGrant, db: u32) -> bool {
 /// The database a `SELECT` asks for, if it is a plain number.
 #[must_use]
 pub fn selected_database(args: &[Vec<u8>]) -> Option<u32> {
-    std::str::from_utf8(args.get(1)?).ok()?.parse().ok()
+    let text = std::str::from_utf8(args.get(1)?).ok()?;
+    // What Redis itself accepts: ASCII digits, no sign, no leading zero.
+    // (Rust would also take `+1` and `01`, which the server rejects.)
+    if text.is_empty()
+        || !text.bytes().all(|b| b.is_ascii_digit())
+        || (text.len() > 1 && text.starts_with('0'))
+    {
+        return None;
+    }
+    text.parse().ok()
 }
 
 fn grant_allows(
