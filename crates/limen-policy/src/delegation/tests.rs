@@ -592,6 +592,20 @@ fn host_patterns_match_whole_labels() {
     }
 }
 
+/// An IPv4-mapped IPv6 network counts its 96 mapped bits in the prefix. Taken
+/// at face value, `32 - 112` underflowed: a panic in debug, a mask of zero
+/// (every IPv4 address in range) in release.
+#[test]
+fn a_mapped_ipv6_cidr_is_an_ipv4_network() {
+    let ip = |s: &str| s.parse::<IpAddr>().expect("ip");
+    let mapped = ["::ffff:10.20.0.0/112".to_owned()];
+    assert!(in_cidrs(ip("10.20.7.7"), &mapped));
+    assert!(!in_cidrs(ip("192.168.1.1"), &mapped));
+    // Shorter than the mapped bits: wider than IPv4, so it covers nothing.
+    let wide = ["::ffff:10.20.0.0/64".to_owned()];
+    assert!(!in_cidrs(ip("192.168.1.1"), &wide));
+}
+
 #[test]
 fn cidrs_and_forbidden_addresses() {
     let ip = |s: &str| s.parse::<IpAddr>().expect("ip");

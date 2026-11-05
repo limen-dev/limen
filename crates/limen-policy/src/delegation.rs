@@ -635,11 +635,15 @@ pub fn in_cidrs(ip: IpAddr, cidrs: &[String]) -> bool {
         .filter_map(|c| parse_cidr(c))
         .any(|(net, prefix)| match (canonical(net), ip) {
             (IpAddr::V4(n), IpAddr::V4(a)) => {
-                let mask = u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0);
+                let mask = u32::MAX
+                    .checked_shl(32_u32.saturating_sub(u32::from(prefix)))
+                    .unwrap_or(0);
                 u32::from(n) & mask == u32::from(a) & mask
             }
             (IpAddr::V6(n), IpAddr::V6(a)) => {
-                let mask = u128::MAX.checked_shl(128 - u32::from(prefix)).unwrap_or(0);
+                let mask = u128::MAX
+                    .checked_shl(128_u32.saturating_sub(u32::from(prefix)))
+                    .unwrap_or(0);
                 u128::from(n) & mask == u128::from(a) & mask
             }
             _ => false,
@@ -651,7 +655,18 @@ fn parse_cidr(cidr: &str) -> Option<(IpAddr, u8)> {
     let addr: IpAddr = addr.parse().ok()?;
     let prefix: u8 = prefix.parse().ok()?;
     let max = if addr.is_ipv4() { 32 } else { 128 };
-    (prefix <= max).then_some((addr, prefix))
+    if prefix > max {
+        return None;
+    }
+    // An IPv4-mapped IPv6 network (`::ffff:10.20.0.0/112`) is an IPv4 network
+    // whose prefix counts the 96 mapped bits; a shorter one covers more than
+    // IPv4 and is refused. (Left as is, `32 - prefix` underflows below.)
+    if let IpAddr::V6(v6) = addr
+        && let Some(v4) = v6.to_ipv4_mapped()
+    {
+        return prefix.checked_sub(96).map(|p| (IpAddr::V4(v4), p));
+    }
+    Some((addr, prefix))
 }
 
 /// An IPv4-mapped IPv6 address as the IPv4 address it carries.
