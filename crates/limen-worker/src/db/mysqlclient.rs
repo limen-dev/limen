@@ -8,6 +8,31 @@ use super::mysql::{self, Login, Packet, is_eof, lenenc, parse_err, read_packet, 
 use super::pgclient::{QueryError, Row};
 use super::target::{BoxedIo, Target};
 
+/// The most a joined run of continuation packets may hold.
+const MAX_LOGICAL_PACKET: usize = 64 * 1024 * 1024;
+
+/// One logical packet: payloads of 0xffffff bytes continue in the next. A
+/// server that keeps sending them is cut off at `max` bytes in all.
+async fn read_logical_packet<R: tokio::io::AsyncRead + Unpin + ?Sized>(
+    r: &mut R,
+    max: usize,
+) -> Result<Packet, QueryError> {
+    let io = |e: std::io::Error| QueryError::Other(e.to_string());
+    let mut packet = read_packet(r).await.map_err(io)?;
+    let mut last = packet.payload.len();
+    while last == 0x00ff_ffff {
+        let more = read_packet(r).await.map_err(io)?;
+        last = more.payload.len();
+        if packet.payload.len().saturating_add(last) > max {
+            return Err(QueryError::Other(
+                "the server's packet is larger than the worker accepts".into(),
+            ));
+        }
+        packet.payload.extend_from_slice(&more.payload);
+    }
+    Ok(packet)
+}
+
 pub struct Client {
     io: BoxedIo,
     connection_id: u32,
@@ -69,15 +94,7 @@ impl Client {
 
     /// One logical packet: payloads of 0xffffff bytes continue in the next.
     async fn recv(&mut self) -> Result<Packet, QueryError> {
-        let io = |e: std::io::Error| QueryError::Other(e.to_string());
-        let mut packet = read_packet(&mut self.io).await.map_err(io)?;
-        let mut last = packet.payload.len();
-        while last == 0x00ff_ffff {
-            let more = read_packet(&mut self.io).await.map_err(io)?;
-            last = more.payload.len();
-            packet.payload.extend_from_slice(&more.payload);
-        }
-        Ok(packet)
+        read_logical_packet(&mut self.io, MAX_LOGICAL_PACKET).await
     }
 
     /// Read one or more results (several for `CALL` or multi-statements) and
@@ -263,6 +280,39 @@ mod tests {
             Some(vec![Some("ab".into()), None, Some(String::new())])
         );
         assert_eq!(parse_row(&payload[..2], 1), None);
+    }
+
+    /// A server that never ends a run of continuation packets is cut off.
+    #[tokio::test]
+    async fn endless_continuation_packets_are_refused() {
+        use tokio::io::AsyncWriteExt;
+        let (mut server, mut client) = tokio::io::duplex(1 << 20);
+        let feeder = tokio::spawn(async move {
+            let chunk = vec![0u8; 0x00ff_ffff];
+            for seq in 0..3u8 {
+                let head = [0xff, 0xff, 0xff, seq];
+                if server.write_all(&head).await.is_err() || server.write_all(&chunk).await.is_err()
+                {
+                    return;
+                }
+            }
+            // The run would end here, but only after 48 MiB.
+            let _ = server.write_all(&[0, 0, 0, 3]).await;
+        });
+        let got = read_logical_packet(&mut client, 20 * 1024 * 1024).await;
+        assert!(got.is_err(), "{got:?}");
+        feeder.abort();
+        // A run that ends within the cap is joined.
+        let (mut server, mut client) = tokio::io::duplex(1 << 20);
+        tokio::spawn(async move {
+            let _ = server.write_all(&[0xff, 0xff, 0xff, 0]).await;
+            let _ = server.write_all(&vec![1u8; 0x00ff_ffff]).await;
+            let _ = server.write_all(&[3, 0, 0, 1, 7, 8, 9]).await;
+        });
+        let joined = read_logical_packet(&mut client, 20 * 1024 * 1024)
+            .await
+            .expect("joined");
+        assert_eq!(joined.payload.len(), 0x00ff_ffff + 3);
     }
 
     /// A target that announces a length near `u64::MAX` (a `0xfe` length-encoded
