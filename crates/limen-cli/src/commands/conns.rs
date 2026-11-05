@@ -63,7 +63,7 @@ fn alive(conn: &Conn) -> bool {
     }
     let ps = |field: &str| {
         std::process::Command::new("ps")
-            .args(["-o", field, "-p", &conn.pid.to_string()])
+            .args(["-ww", "-o", field, "-p", &conn.pid.to_string()])
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
