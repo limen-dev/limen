@@ -631,6 +631,19 @@ mod bots {
             .contains("ref_protected")
         );
         assert!(
+            rejected(
+                "  join:\n    method: gitlab\n    match: { project_path: acme/x, environment: production }\n"
+            )
+            .contains("environment_protected")
+        );
+        assert!(
+            Policy::parse_yaml([(
+                "b.yaml",
+                bot_doc("  join:\n    method: gitlab\n    match: { project_path: acme/x, environment: production, environment_protected: \"true\" }\n").as_str()
+            )])
+            .is_ok()
+        );
+        assert!(
             rejected("  join:\n    method: gitlab\n    match: { project_path: acme/x }\n")
                 .contains("`ref` or `environment`")
         );
