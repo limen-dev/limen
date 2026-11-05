@@ -30,3 +30,6 @@ fbc66c4e1ec4f3c708ccaebe1ca38fe8fff45e4b:deploy/compose/demo-phase5.sh:curl-auth
 # fix/setup-expired-identity, which the full-history scan reads.
 f4993545bdfd131fc26a2c2348fc8270758a4a2c:deploy/compose/scripts/seed.sh:curl-auth-user:25
 f4993545bdfd131fc26a2c2348fc8270758a4a2c:deploy/compose/scripts/seed.sh:curl-auth-user:26
+# Same two lines after the squash merge of #255 (the commit hash changed).
+0bc7da67fd467b13f72c866f868d19588ea25e45:deploy/compose/scripts/seed.sh:curl-auth-user:25
+0bc7da67fd467b13f72c866f868d19588ea25e45:deploy/compose/scripts/seed.sh:curl-auth-user:26
