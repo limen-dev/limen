@@ -391,14 +391,7 @@ async fn start_stream(
         }
         (StreamSubresource::PortForward, true) => ("portforward", StreamKind::PortForwardSpdy),
     };
-    let params = |name: &str| -> Vec<String> {
-        query
-            .split('&')
-            .filter_map(|kv| kv.split_once('='))
-            .filter(|(k, _)| *k == name)
-            .map(|(_, v)| percent_decode(v))
-            .collect()
-    };
+    let params = |name: &str| query_values(query, name);
     let stream_info = StreamInfo {
         kind,
         subresource,
@@ -671,6 +664,17 @@ fn is_channel_protocol(protocol: &str) -> bool {
             && (protocol.ends_with(".channel.k8s.io") || protocol.ends_with(".portforward.k8s.io")))
 }
 
+/// The values of query parameter `name`. Keys are decoded as well as values:
+/// the API server reads `?%63ommand=ls` as `command=ls`, so the audit must too.
+fn query_values(query: &str, name: &str) -> Vec<String> {
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .filter(|(k, _)| percent_decode(k) == name)
+        .map(|(_, v)| percent_decode(v))
+        .collect()
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -716,6 +720,14 @@ fn failure(code: StatusCode, reason: &str, message: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_encoded_query_key_is_still_the_key() {
+        assert_eq!(
+            query_values("%63ommand=rm&command=-rf&other=x", "command"),
+            ["rm", "-rf"]
+        );
+    }
+
     /// `%+f` is not an escape (Go's `url.PathUnescape` refuses it); it must not
     /// decode to a control byte the upstream would never see.
     #[test]
@@ -724,7 +736,7 @@ mod tests {
         assert_eq!(percent_decode("a%2Fb"), "a/b");
     }
 
-    use super::{is_canonical, is_channel_protocol, percent_decode};
+    use super::{is_canonical, is_channel_protocol, percent_decode, query_values};
 
     #[test]
     fn only_canonical_paths_are_forwarded() {

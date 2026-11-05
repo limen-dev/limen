@@ -455,7 +455,13 @@ fn grant_allows(
             }
         }
         "COPY" => {
-            if let Some(at) = args.iter().position(|a| a.eq_ignore_ascii_case(b"DB"))
+            // COPY source destination [DB n] [REPLACE]: the options start at
+            // the fourth argument, so a key named "DB" is not the option.
+            if let Some(at) = args
+                .iter()
+                .skip(3)
+                .position(|a| a.eq_ignore_ascii_case(b"DB"))
+                .map(|i| i + 3)
                 && !selected_database(&args[at..]).is_some_and(|to| opens_database(grant, to))
             {
                 return Err("COPY to a database this role doesn't name".into());
@@ -788,6 +794,9 @@ mod tests {
         assert!(run(&rules, &["MOVE", "k", "9"]).is_err());
         assert!(run(&rules, &["COPY", "a", "b", "DB", "2"]).is_ok());
         assert!(run(&rules, &["COPY", "a", "b", "DB", "9"]).is_err());
+        // Keys named "DB" and "1": the destination database is 9.
+        assert!(run(&rules, &["COPY", "DB", "1", "DB", "9"]).is_err());
+        assert!(run(&rules, &["COPY", "DB", "1", "DB", "2"]).is_ok());
     }
 
     #[test]
