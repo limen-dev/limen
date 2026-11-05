@@ -910,6 +910,18 @@ where
                     .await?;
                     continue;
                 }
+                if statements.iter().any(hides_kill) {
+                    audit.action(Phase::Refused, "kill").await?;
+                    reply(
+                        client,
+                        seq.wrapping_add(1),
+                        1227,
+                        "42000",
+                        "KILL inside a prepared statement is not allowed through Limen",
+                    )
+                    .await?;
+                    continue;
+                }
                 if let Some(rewritten) = kill_target(&statements, cfg, client, seq, audit).await? {
                     match rewritten {
                         Kill::Refused => continue,
@@ -943,6 +955,20 @@ where
                         1044,
                         "42000",
                         "USE is not allowed through Limen",
+                    )
+                    .await?;
+                    continue;
+                }
+                // `KILL n` names a connection id, which Limen only translates for
+                // a plain statement (to the session's own connection).
+                if statement.kind == "kill" || hides_kill(&statement) {
+                    audit.action(Phase::Refused, "kill").await?;
+                    reply(
+                        client,
+                        seq.wrapping_add(1),
+                        1227,
+                        "42000",
+                        "KILL inside a prepared statement is not allowed through Limen",
                     )
                     .await?;
                     continue;
@@ -1061,6 +1087,17 @@ enum Kill {
 /// `KILL [QUERY|CONNECTION] <id>`: the id is the one Limen gave the client,
 /// so it is translated to the target's thread id, and only for the same user.
 /// Every other `KILL` is refused.
+/// A SQL-level `PREPARE name FROM '...'` that could carry a `KILL`: one that
+/// says so, or one whose text is a user variable the worker cannot read.
+/// `KILL` is only safe where `kill_target` rewrites it to this session's own
+/// connection, and that sees plain statements only.
+fn hides_kill(statement: &Statement) -> bool {
+    statement.kind == "prepare" && {
+        let text = statement.text.to_ascii_lowercase();
+        text.contains("kill") || text.contains('@')
+    }
+}
+
 async fn kill_target<S: AsyncWrite + Unpin>(
     statements: &[Statement],
     cfg: &DbSessionConfig,
@@ -1285,6 +1322,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `KILL n` takes a connection id, which is only translated to the
+    /// session's own for a plain statement. Inside a prepared statement the id
+    /// would reach the server as typed, and every session of a role shares one
+    /// database login.
+    #[test]
+    fn kill_cannot_hide_in_a_prepared_statement() {
+        use super::sqltext::{Flavor, split};
+        let first = |sql: &str| split(sql, Flavor::Mysql).into_iter().next().expect("one");
+        assert!(hides_kill(&first("PREPARE s FROM 'KILL 123'")));
+        assert!(hides_kill(&first("prepare s from @q")));
+        assert!(!hides_kill(&first("PREPARE s FROM 'SELECT 1'")));
+        assert!(!hides_kill(&first("SELECT 'kill'")));
+        // COM_STMT_PREPARE carries the bare statement, which is a `kill`.
+        assert_eq!(first("KILL 5").kind, "kill");
+    }
 
     #[test]
     fn lenenc_round_trips() {
