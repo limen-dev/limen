@@ -186,6 +186,10 @@ fn decode(s: &str) -> Option<String> {
     while i < bytes.len() {
         if bytes[i] == b'%' {
             let hex = s.get(i + 1..i + 3)?;
+            // `from_str_radix` also takes a leading `+`; an escape is two hex digits.
+            if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
             out.push(u8::from_str_radix(hex, 16).ok()?);
             i += 3;
         } else {
@@ -250,6 +254,7 @@ mod tests {
             "limen://actor/bot/extra",
             "limen://ci/onlykey",
             "limen://user/%zz",
+            "limen://user/a%+f",
         ] {
             assert_eq!(IdentityUri::parse(bad), None, "{bad}");
         }

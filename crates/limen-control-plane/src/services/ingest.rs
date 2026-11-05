@@ -28,6 +28,12 @@ fn component_name(kind: ComponentKind) -> &'static str {
     }
 }
 
+/// Whether `raw` has no line break (compact JSON never does: line breaks
+/// inside strings are escaped).
+fn is_single_line(raw: &[u8]) -> bool {
+    !raw.iter().any(|b| matches!(b, b'\n' | b'\r'))
+}
+
 #[tonic::async_trait]
 impl AuditIngest for IngestService {
     async fn ingest(
@@ -43,6 +49,14 @@ impl AuditIngest for IngestService {
         }
         // Validate everything before appending anything.
         for raw in &events {
+            // Records are shipped one per line and counted by line. JSON the
+            // components produce is compact; whitespace between tokens would
+            // split one record across lines and break the batch's verification.
+            if !is_single_line(raw) {
+                return Err(Status::invalid_argument(
+                    "malformed event: it must be one line of JSON",
+                ));
+            }
             let event: Event = serde_json::from_slice(raw)
                 .map_err(|e| Status::invalid_argument(format!("malformed event: {e}")))?;
             let own_instance =
@@ -172,5 +186,18 @@ impl AuditIngest for IngestService {
             .map_err(|_| Status::unavailable("audit unavailable"))?;
         tracing::info!(session = %session_id, %uri, bytes, "stored session recording");
         Ok(Response::new(UploadRecordingResponse { uri }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_single_line;
+
+    #[test]
+    fn an_event_is_one_line_of_json() {
+        assert!(is_single_line(br#"{"a":1,"b":"x\ny"}"#), "escaped is fine");
+        assert!(!is_single_line(b"{\"a\":1,\n\"b\":2}"));
+        assert!(!is_single_line(b"{\"a\":1,\r\n\"b\":2}"));
+        assert!(!is_single_line(b"{\"a\":1}\n"));
     }
 }

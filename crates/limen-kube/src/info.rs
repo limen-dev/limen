@@ -31,6 +31,7 @@ pub fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%'
             && let Some(hex) = s.get(i + 1..i + 3)
+            && hex.bytes().all(|b| b.is_ascii_hexdigit())
             && let Ok(b) = u8::from_str_radix(hex, 16)
         {
             out.push(b);
@@ -164,6 +165,14 @@ impl RequestInfo {
 
 #[cfg(test)]
 mod tests {
+    /// `u8::from_str_radix` takes a leading `+`; an escape is two hex digits,
+    /// as in Go's `url.PathUnescape`, which refuses `%+f`.
+    #[test]
+    fn a_signed_escape_is_not_decoded() {
+        assert_eq!(percent_decode("a%+fb"), "a%+fb");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+    }
+
     use super::*;
 
     fn parse(method: &str, uri: &str) -> RequestInfo {
