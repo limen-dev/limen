@@ -28,6 +28,46 @@ fn component_name(kind: ComponentKind) -> &'static str {
     }
 }
 
+/// The event kinds a component may send through `Ingest`. Everything else is
+/// written by the control plane itself, so a compromised worker or proxy
+/// cannot forge a login, a policy change, an access decision or a recording
+/// link. (A worker may still send its own kinds for a session it serves; the
+/// projection keeps the first identity a session was given.)
+fn may_send(kind: ComponentKind, event: EventKind) -> bool {
+    use EventKind::{
+        AuthDenied, DbBootstrap, DbQuery, DbQueryEnd, KafkaRequest, KafkaSummary, KubeRequest,
+        MongoCommand, MongoCommandEnd, MqOperation, MqSummary, RedisCommand, SearchRequest,
+        SearchResponse, SessionEnd, SessionStart, SshExec, WebRequest, WebResponse, WebSocket,
+    };
+    match kind {
+        ComponentKind::ControlPlane => true,
+        ComponentKind::Worker => matches!(
+            event,
+            AuthDenied
+                | DbBootstrap
+                | DbQuery
+                | DbQueryEnd
+                | KafkaRequest
+                | KafkaSummary
+                | KubeRequest
+                | MongoCommand
+                | MongoCommandEnd
+                | MqOperation
+                | MqSummary
+                | RedisCommand
+                | SearchRequest
+                | SearchResponse
+                | SessionEnd
+                | SessionStart
+                | SshExec
+        ),
+        ComponentKind::Proxy => matches!(
+            event,
+            AuthDenied | SessionEnd | SessionStart | WebRequest | WebResponse | WebSocket
+        ),
+    }
+}
+
 /// Whether `raw` has no line break (compact JSON never does: line breaks
 /// inside strings are escaped).
 fn is_single_line(raw: &[u8]) -> bool {
@@ -61,6 +101,12 @@ impl AuditIngest for IngestService {
                 .map_err(|e| Status::invalid_argument(format!("malformed event: {e}")))?;
             let own_instance =
                 event.producer.instance_id.split('/').next() == Some(component.id.as_str());
+            if !may_send(component.kind, event.kind) {
+                return Err(Status::permission_denied(format!(
+                    "{} {} can't submit {:?} events",
+                    component.kind, component.id, event.kind
+                )));
+            }
             if event.producer.component != component_name(component.kind) || !own_instance {
                 return Err(Status::permission_denied(format!(
                     "{} {} can't submit events as {} {}",
@@ -191,7 +237,10 @@ impl AuditIngest for IngestService {
 
 #[cfg(test)]
 mod tests {
-    use super::is_single_line;
+    use limen_audit::EventKind;
+    use limen_core::identity::ComponentKind;
+
+    use super::{is_single_line, may_send};
 
     #[test]
     fn an_event_is_one_line_of_json() {
@@ -199,5 +248,25 @@ mod tests {
         assert!(!is_single_line(b"{\"a\":1,\n\"b\":2}"));
         assert!(!is_single_line(b"{\"a\":1,\r\n\"b\":2}"));
         assert!(!is_single_line(b"{\"a\":1}\n"));
+    }
+
+    #[test]
+    fn components_send_only_their_own_kinds() {
+        for forged in [
+            EventKind::AuthLogin,
+            EventKind::PolicyChange,
+            EventKind::AccessApprove,
+            EventKind::SessionRecording,
+            EventKind::UserUnlock,
+            EventKind::ComponentRevoke,
+        ] {
+            assert!(!may_send(ComponentKind::Worker, forged), "{forged:?}");
+            assert!(!may_send(ComponentKind::Proxy, forged), "{forged:?}");
+        }
+        assert!(may_send(ComponentKind::Worker, EventKind::SshExec));
+        assert!(may_send(ComponentKind::Worker, EventKind::SessionEnd));
+        assert!(!may_send(ComponentKind::Worker, EventKind::WebRequest));
+        assert!(may_send(ComponentKind::Proxy, EventKind::WebRequest));
+        assert!(!may_send(ComponentKind::Proxy, EventKind::DbQuery));
     }
 }

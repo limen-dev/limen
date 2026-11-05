@@ -193,14 +193,18 @@ impl S3Sink {
         })
     }
 
-    /// Upload a recording file to `recordings/dt=YYYY-MM-DD/<session>.cast`.
+    /// Upload a recording file to `recordings/dt=YYYY-MM-DD/<session>-<id>.cast`.
+    /// The key is never reused, so a second upload for a session cannot replace the first.
     pub async fn put_recording(
         &self,
         session_id: &str,
         file: &std::path::Path,
     ) -> anyhow::Result<String> {
         let day = time::OffsetDateTime::now_utc().date();
-        let key = self.key(&format!("recordings/dt={day}/{session_id}.cast"));
+        let key = self.key(&format!(
+            "recordings/dt={day}/{session_id}-{}.cast",
+            uuid::Uuid::now_v7().simple()
+        ));
         let body = ByteStream::from_path(file).await?;
         let mut req = self
             .client
