@@ -42,12 +42,12 @@ Always run fmt + clippy and the tests of crates you touched. Add `deny`/`audit` 
 ## Layout
 - Binaries: `crates/limen-{control-plane,proxy,worker,cli}`. Libraries: `limen-{core,ca,policy,session,audit,tunnel,proto,component,kube}`. Tests: `limen-testkit`, `limen-e2e`.
 - Dev stack: `deploy/compose/` (`setup.sh`; see its README). Demos: `demos/`. Terraform: `deploy/terraform`.
-- Console: `crates/limen-control-plane/src/console/` (`templates/`, `assets/`).
+- Console: Rust in `crates/limen-control-plane/src/console/`; Askama `templates/` and static `assets/` (css, js, icons.svg) sit beside `src/` in the same crate.
 - Dashboards: `python3 deploy/grafana/generate.py`.
 - Dev users: only in `deploy/compose/config/dev-users.toml`; regenerate with `python3 deploy/compose/scripts/gen-dev-users.py`. Tests use `limen_testkit::users`.
 
 ## Gotchas
 - sqlx needs literal SQL: build shared fragments with `macro_rules!` + `concat!`, never `format!`.
 - Askama templates are compiled in: rebuild after editing. Reference static assets with `?v={{ chrome.assets }}` (fingerprinted).
-- Console CSP forbids inline script and third-party origins: use external files and classes; don't loosen without an ADR note.
+- Console CSP forbids inline script and third-party origins: use external files and classes (`style-src-attr 'unsafe-inline'` is allowed, scripts never). The policy is `CSP` in `console/mod.rs`; don't loosen it without an ADR note.
 - macOS: no `timeout` or `sleep`-polling in shell; run long commands in the background.
