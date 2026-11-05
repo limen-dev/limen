@@ -88,7 +88,7 @@ deploy/compose/
     scale.yml                 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
     ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  tracing.yml  bots.yml  kube.yml  tcp.yml  web.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
-  scripts/                  lib.sh (builds the compose command), dev-login.sh, console-login.sh,
+  scripts/                  lib.sh (builds the compose command), seed.sh (per-target setup), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists), test-policy-selection.sh
 ```
 
