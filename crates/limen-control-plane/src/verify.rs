@@ -249,9 +249,13 @@ pub async fn verify_bucket(
                 signature: b64.decode(&signed.signature).unwrap_or_default(),
                 signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
             };
-            if let Err(e) = verify(&envelope, Purpose::AuditManifest, internal_ca) {
-                report.problems.push(problem(format!("signature: {e}")));
-            }
+            let sealed_by = match verify(&envelope, Purpose::AuditManifest, internal_ca) {
+                Ok((by, _)) => Some(by),
+                Err(e) => {
+                    report.problems.push(problem(format!("signature: {e}")));
+                    None
+                }
+            };
             let manifest: Manifest = match serde_json::from_str(&signed.manifest) {
                 Ok(m) => m,
                 Err(e) => {
@@ -266,6 +270,13 @@ pub async fn verify_bucket(
                     "sequence {} found where {expected_seq} was expected (a batch is missing)",
                     manifest.seq
                 )));
+            }
+            // The signer is the writer's own control-plane certificate: another
+            // component's valid signature doesn't make a manifest this writer's.
+            if let Some(by) = &sealed_by
+                && let Some(why) = crate::sinks::signer_problem(&by.id, &manifest.writer)
+            {
+                report.problems.push(problem(why));
             }
             if manifest.writer != writer {
                 report.problems.push(problem(format!(

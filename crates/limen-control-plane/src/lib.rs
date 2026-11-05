@@ -101,7 +101,13 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let snapshot_signer: sinks::SignerSlot = Arc::default();
     // If the start fails from here on, give the id back: a restart (say, of a
     // crash-looping StatefulSet pod) must not wait out the row's 15 seconds.
-    let pipeline = match pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await {
+    let pipeline = match pipeline::Pipeline::open(
+        &config,
+        Arc::clone(&snapshot_signer),
+        cas.internal.cert_der().clone(),
+    )
+    .await
+    {
         Ok(pipeline) => pipeline,
         Err(e) => {
             if let Err(release) = replicas::deregister(&db, &registration).await {

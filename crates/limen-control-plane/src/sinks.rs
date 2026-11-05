@@ -80,6 +80,8 @@ pub struct S3Sink {
     pub kms_key: Option<String>,
     pub writer: String,
     signer: SignerSlot,
+    /// The internal CA, to verify the manifests the chain is resumed from.
+    internal_ca: Option<rustls_pki_types::CertificateDer<'static>>,
     /// `(next seq, sha256 of the last manifest)`; `None` until loaded from S3.
     chain: Arc<Mutex<Option<(u64, String)>>>,
 }
@@ -100,8 +102,16 @@ impl S3Sink {
             kms_key,
             writer,
             signer,
+            internal_ca: None,
             chain: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Verify the signature and signer of the manifest the chain resumes from.
+    #[must_use]
+    pub fn with_internal_ca(mut self, ca: rustls_pki_types::CertificateDer<'static>) -> Self {
+        self.internal_ca = Some(ca);
+        self
     }
 
     fn key(&self, rest: &str) -> String {
@@ -117,7 +127,7 @@ impl S3Sink {
     /// commit never forks the chain.
     async fn chain_head(&self) -> Result<(u64, String), ShipError> {
         let prefix = self.key(&format!("manifests/{}/", self.writer));
-        let mut last: Option<String> = None;
+        let mut keys: Vec<String> = Vec::new();
         let mut pages = self
             .client
             .list_objects_v2()
@@ -132,23 +142,42 @@ impl S3Sink {
                     aws_sdk_s3::error::DisplayErrorContext(&e)
                 ))
             })?;
-            for obj in page.contents() {
-                if let Some(k) = obj.key()
-                    && last.as_deref().is_none_or(|l| k > l)
-                {
-                    last = Some(k.to_owned());
+            keys.extend(
+                page.contents()
+                    .iter()
+                    .filter_map(|o| o.key())
+                    .map(str::to_owned),
+            );
+        }
+        keys.sort_unstable_by(|a, b| b.cmp(a));
+        let highest = keys.first().and_then(|k| key_seq(k));
+        // The newest manifest that verifies. A key that doesn't (planted,
+        // corrupt, signed by another writer) is skipped with an error in the
+        // log rather than stopping the writer for good; the verifier reports
+        // the break it leaves.
+        let mut trusted = None;
+        for key in &keys {
+            let body = self.get(key).await?;
+            let Some(ca) = &self.internal_ca else {
+                // No CA to verify with (tests): trust the newest, as before.
+                let signed: SignedManifest = serde_json::from_slice(&body)
+                    .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
+                let manifest: Manifest = serde_json::from_str(&signed.manifest)
+                    .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
+                trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
+                break;
+            };
+            match trusted_manifest(&body, &self.writer, ca) {
+                Ok(manifest) => {
+                    trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
+                    break;
+                }
+                Err(why) => {
+                    tracing::error!(%key, %why, "skipping a manifest that does not verify when resuming the audit chain");
                 }
             }
         }
-        let Some(key) = last else {
-            return Ok((0, String::new()));
-        };
-        let body = self.get(&key).await?;
-        let signed: SignedManifest = serde_json::from_slice(&body)
-            .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-        let manifest: Manifest = serde_json::from_str(&signed.manifest)
-            .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-        Ok((manifest.seq + 1, hex(&Sha256::digest(&body))))
+        Ok(resume_point(highest, trusted))
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, ShipError> {
@@ -313,6 +342,52 @@ impl S3Sink {
     }
 }
 
+/// `manifests/<writer>/000000000007.json` -> 7.
+fn key_seq(key: &str) -> Option<u64> {
+    key.rsplit('/').next()?.strip_suffix(".json")?.parse().ok()
+}
+
+/// Where the chain continues: after the newest manifest that verified, but
+/// never at a sequence number that already has a key (so nothing is
+/// overwritten). A skipped key beyond it leaves a visible gap for the verifier.
+fn resume_point(highest_key: Option<u64>, trusted: Option<(u64, String)>) -> (u64, String) {
+    let (after_trusted, prev) = trusted.map_or((0, String::new()), |(seq, hash)| (seq + 1, hash));
+    let after_keys = highest_key.map_or(0, |k| k + 1);
+    (after_trusted.max(after_keys), prev)
+}
+
+/// A manifest file whose signature chains to the internal CA, whose signer is
+/// the control plane that is its writer, and which names that writer.
+pub fn trusted_manifest(
+    file: &[u8],
+    writer: &str,
+    internal_ca: &rustls_pki_types::CertificateDer<'_>,
+) -> Result<Manifest, String> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let signed: SignedManifest = serde_json::from_slice(file).map_err(|e| e.to_string())?;
+    let envelope = limen_proto::v1::Signed {
+        payload: signed.manifest.clone().into_bytes(),
+        signature: b64.decode(&signed.signature).unwrap_or_default(),
+        signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
+    };
+    let (by, _) = limen_session::envelope::verify(&envelope, Purpose::AuditManifest, internal_ca)
+        .map_err(|e| format!("signature: {e}"))?;
+    if let Some(problem) = signer_problem(&by.id, writer) {
+        return Err(problem);
+    }
+    let manifest: Manifest = serde_json::from_str(&signed.manifest).map_err(|e| e.to_string())?;
+    if manifest.writer != writer {
+        return Err(format!("manifest names writer {}", manifest.writer));
+    }
+    Ok(manifest)
+}
+
+/// The signer of a manifest is the control plane that wrote it.
+#[must_use]
+pub fn signer_problem(signer_id: &str, writer: &str) -> Option<String> {
+    (signer_id != writer).then(|| format!("signed by {signer_id}, not by its writer {writer}"))
+}
+
 // ---- Datadog ----------------------------------------------------------------
 
 /// Datadog intake limits (<https://docs.datadoghq.com/api/latest/logs/send-logs>).
@@ -467,6 +542,105 @@ pub async fn s3_client(endpoint: Option<&str>, path_style: bool) -> aws_sdk_s3::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn signed_manifest(
+        ca: &limen_ca::CertificateAuthority,
+        signer_id: &str,
+        manifest_writer: &str,
+    ) -> Vec<u8> {
+        use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let csr = CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr");
+        let cert = ca
+            .issue_component(limen_ca::ComponentCertRequest {
+                csr_der: csr.der().to_vec(),
+                kind: limen_core::identity::ComponentKind::ControlPlane,
+                id: signer_id.into(),
+                dns_names: vec![],
+                labels: BTreeMap::new(),
+                ttl: std::time::Duration::from_secs(600),
+            })
+            .await
+            .expect("issue");
+        let signer = EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer");
+        let manifest = Manifest {
+            version: 1,
+            writer: manifest_writer.into(),
+            seq: 3,
+            object: "events/x".into(),
+            sha256: String::new(),
+            count: 0,
+            first_event_id: String::new(),
+            last_event_id: String::new(),
+            prev_manifest_sha256: String::new(),
+            created_at: String::new(),
+        };
+        let json = serde_json::to_string(&manifest).expect("json");
+        let envelope = signer
+            .sign(Purpose::AuditManifest, json.clone().into_bytes())
+            .expect("sign");
+        let b64 = base64::engine::general_purpose::STANDARD;
+        serde_json::to_vec(&SignedManifest {
+            manifest: json,
+            signature: b64.encode(&envelope.signature),
+            signer_cert: b64.encode(&envelope.signer_cert_der),
+        })
+        .expect("file")
+    }
+
+    #[tokio::test]
+    async fn only_a_manifest_signed_by_its_own_writer_is_trusted() {
+        let ca = limen_ca::CertificateAuthority::create_self_signed(
+            limen_ca::CaPurpose::Internal,
+            Arc::new(limen_ca::FileSigner::generate().expect("key")),
+        )
+        .await
+        .expect("ca");
+        let good = signed_manifest(&ca, "cp-a", "cp-a").await;
+        assert_eq!(
+            trusted_manifest(&good, "cp-a", ca.cert_der())
+                .expect("trusted")
+                .seq,
+            3
+        );
+        // Signed by another control plane's certificate.
+        let other = signed_manifest(&ca, "cp-b", "cp-a").await;
+        assert!(trusted_manifest(&other, "cp-a", ca.cert_der()).is_err());
+        // Signed by a CA that is not ours.
+        let rogue = limen_ca::CertificateAuthority::create_self_signed(
+            limen_ca::CaPurpose::Internal,
+            Arc::new(limen_ca::FileSigner::generate().expect("key")),
+        )
+        .await
+        .expect("ca");
+        let forged = signed_manifest(&rogue, "cp-a", "cp-a").await;
+        assert!(trusted_manifest(&forged, "cp-a", ca.cert_der()).is_err());
+        assert!(trusted_manifest(b"garbage", "cp-a", ca.cert_der()).is_err());
+    }
+
+    #[test]
+    fn the_chain_resumes_after_the_newest_verified_manifest_and_overwrites_nothing() {
+        assert_eq!(resume_point(None, None), (0, String::new()));
+        assert_eq!(
+            resume_point(Some(4), Some((4, "h".into()))),
+            (5, "h".into())
+        );
+        // A planted key at 999 is skipped; the chain goes on beyond it.
+        assert_eq!(
+            resume_point(Some(999), Some((4, "h".into()))),
+            (1000, "h".into())
+        );
+        assert_eq!(key_seq("manifests/cp-a/000000000007.json"), Some(7));
+        assert_eq!(key_seq("manifests/cp-a/junk"), None);
+    }
+
+    #[test]
+    fn a_signer_must_be_the_writer() {
+        assert_eq!(signer_problem("cp-a", "cp-a"), None);
+        assert!(signer_problem("cp-b", "cp-a").is_some());
+    }
 
     #[test]
     fn gzip_is_deterministic() {
