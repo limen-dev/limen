@@ -63,6 +63,11 @@ impl HandoffService {
             return Err(Status::invalid_argument("too many events in one batch"));
         }
         for raw in &batch.events {
+            if !super::ingest::is_single_line(raw) {
+                return Err(Status::invalid_argument(
+                    "malformed event: it must be one line of JSON",
+                ));
+            }
             serde_json::from_slice::<Event>(raw)
                 .map_err(|e| Status::invalid_argument(format!("malformed event: {e}")))?;
         }
