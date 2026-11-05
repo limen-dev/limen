@@ -1,6 +1,6 @@
 name: fuzz
 
-# cargo-fuzz on the protocol parsers (fuzz/README.md). It needs a nightly toolchain, which is
+# cargo-fuzz on the protocol parsers, the policy engine and the pure request parsers (fuzz/README.md). It needs a nightly toolchain, which is
 # why it is not part of rust.yml. Weekly and on demand; a crash fails the run and uploads the
 # input that caused it. GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [redis_frames, mongo_wire, amqp_frames, kafka_header, mysql_packets, pg_frames]
+        target: [redis_frames, mongo_wire, amqp_frames, kafka_header, mysql_packets, pg_frames, policy_yaml, policy_eval, policy_scalars, cp_parsers, proxy_web]
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

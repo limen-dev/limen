@@ -23,6 +23,8 @@ pub mod oidc_flow;
 mod pages;
 mod policy_edit;
 mod query;
+#[cfg(fuzzing)]
+pub use query::fuzz as query_fuzz;
 pub mod store;
 mod views;
 pub(crate) mod web_auth;

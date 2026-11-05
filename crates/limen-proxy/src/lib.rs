@@ -9,6 +9,8 @@ pub mod relay;
 mod sessions;
 pub mod tunnels;
 mod web;
+#[cfg(fuzzing)]
+pub use web::fuzz as web_fuzz;
 
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
