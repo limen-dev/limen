@@ -1,9 +1,9 @@
 # Upgrading Limen
 
-Move a deployment to a new release without ending sessions or losing audit events. The policy comes from [ADR-0024](../adr/0024-release-strategy.md); the mechanics of replacing copies are in the [scale-out runbook](scale-out.md). Nothing here has been run against a real AWS or Kubernetes deployment; the steps were checked only against the compose stack and by reading the code and workflows (`unverified`).
+Move a deployment to a new release without ending sessions or losing audit events. The policy comes from [ADR-0024](../adr/0024-release-strategy.md); the mechanics of replacing copies are in the [scale-out runbook](scale-out.md). **Unverified.** Nothing here has been run, not on compose, AWS or Kubernetes. It was written from ADR-0024, the [scale-out runbook](scale-out.md), the deploy guide and the release workflow.
 
 ## Before you start
-1. **Read the release notes**, in particular the *Upgrade notes* section. Before 1.0, a minor release may break things, and that section is where it says so.
+1. **Read the release notes** and the changelog. Before 1.0, a minor release may break things (ADR-0024 says breaking changes must be called out). Changes committed as `feat!:` or with a `BREAKING CHANGE:` footer are the ones release-please marks as breaking.
 2. **Take a database backup or snapshot.** Migrations only move forward, so a backup is the only way back (see *Rolling back*). On Aurora, take a cluster snapshot and note its identifier.
 3. **Check the audit chain is healthy** with [audit verification](audit-verify.md), so a gap you see later is not one you started with.
 4. **Check the drain settings.** The orchestrator's grace period must exceed each component's drain time, or the drain is cut short (table in the [scale-out runbook](scale-out.md#grace-periods-first)).
@@ -44,6 +44,6 @@ Prefer a forward fix to a restore whenever the failure is not data loss.
 | Symptom | Likely cause |
 |---|---|
 | A control plane exits at start with a migration/version error | It is older than the database. Upgrade it instead of rolling back, or restore the database |
-| Proxies or workers can't connect after step 1 | They are more than one version behind. Upgrade them now; don't roll the control plane back |
+| Proxies or workers can't connect after step 1 | `unverified` guess: they are too far behind the control plane (ADR-0024 intends N and N-1 to work). Upgrade them; don't roll the control plane back |
 | Sessions end during step 2 or 3 | The drain was shorter than the sessions. Raise the grace period for the next copy |
 | Audit verification reports a sequence gap | An `ephemeral` spool was lost, or a copy was killed before draining. See [scale-out](scale-out.md#control-planes) |
