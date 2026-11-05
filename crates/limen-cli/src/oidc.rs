@@ -124,6 +124,17 @@ struct Callback {
     error_description: Option<String>,
 }
 
+/// The terminal message for an `error` callback. Any web page can hit the
+/// loopback port first, so both fields are untrusted: no control characters
+/// (escape sequences), bounded length.
+fn callback_error_message(error: &str, description: &str) -> String {
+    format!(
+        "identity provider returned an error: {}: {}",
+        crate::ui::plain_line(error, 200),
+        crate::ui::plain_line(description, 500)
+    )
+}
+
 /// Authorization code flow with PKCE. Opens the browser unless `open_browser`
 /// is false, waits for the redirect to a loopback port, and returns the raw ID token.
 pub async fn pkce_login(
@@ -198,10 +209,10 @@ pub async fn pkce_login(
     waiting.finish();
 
     if let Some(error) = callback.error {
-        bail!(
-            "identity provider returned an error: {error}: {}",
-            callback.error_description.unwrap_or_default()
-        );
+        bail!(callback_error_message(
+            &error,
+            &callback.error_description.unwrap_or_default()
+        ));
     }
     if callback.state.as_deref() != Some(csrf.secret().as_str()) {
         bail!("login callback state did not match; possible CSRF, aborting");
@@ -274,4 +285,19 @@ fn callback_page(heading: &str, detail: &str) -> String {
          <div style=\"width:96px;margin:0 auto\">{LOGO_MARK}</div>\
          <h3>Limen: {heading}</h3><p>{detail}</p></body></html>"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::callback_error_message;
+
+    #[test]
+    fn callback_error_text_cannot_inject_terminal_escapes() {
+        let msg = callback_error_message(
+            "bad\u{1b}[2J",
+            &format!("x\u{1b}]0;pwn\u{7}\n{}", "y".repeat(5000)),
+        );
+        assert!(!msg.chars().any(char::is_control), "{msg:?}");
+        assert!(msg.len() < 1000, "{}", msg.len());
+    }
 }
