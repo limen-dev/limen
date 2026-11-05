@@ -1,7 +1,6 @@
 //! `limen admin review ...`, `limen review ...` and `limen admin evidence`
 //! (ADR-0029).
 
-
 use anyhow::Context as _;
 use clap::Subcommand;
 use limen_proto::v1::reviews_client::ReviewsClient;
