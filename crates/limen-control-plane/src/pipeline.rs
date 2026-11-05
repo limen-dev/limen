@@ -40,7 +40,10 @@ impl RecordingStore {
                 let day = time::OffsetDateTime::now_utc().date();
                 let dest_dir = dir.join(format!("dt={day}"));
                 tokio::fs::create_dir_all(&dest_dir).await?;
-                let dest = dest_dir.join(format!("{session_id}.cast"));
+                let dest = dest_dir.join(format!(
+                    "{session_id}-{}.cast",
+                    uuid::Uuid::now_v7().simple()
+                ));
                 tokio::fs::copy(file, &dest).await?;
                 Ok(format!("file://{}", dest.display()))
             }

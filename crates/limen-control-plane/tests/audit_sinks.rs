@@ -355,7 +355,15 @@ async fn recordings_stream_to_s3() {
     let key = uri
         .strip_prefix(&format!("s3://{bucket}/"))
         .expect("s3 uri");
-    assert!(key.starts_with("recordings/dt=") && key.ends_with("/sess-1.cast"));
+    assert!(
+        key.starts_with("recordings/dt=") && key.contains("/sess-1-") && key.ends_with(".cast")
+    );
+    // A second upload for the same session is a different object.
+    let again = sink
+        .put_recording("sess-1", &path)
+        .await
+        .expect("upload again");
+    assert_ne!(again, uri, "a recording key is never reused");
     let stored = client
         .get_object()
         .bucket(&bucket)
