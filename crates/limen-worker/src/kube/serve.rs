@@ -575,6 +575,7 @@ fn is_canonical(path: &str) -> bool {
         b == b'%'
             && path
                 .get(i + 1..i + 3)
+                .filter(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
                 .and_then(|hex| u8::from_str_radix(hex, 16).ok())
                 .is_some_and(|d| {
                     d.is_ascii_alphanumeric() || matches!(d, b'-' | b'.' | b'_' | b'~')
@@ -678,7 +679,9 @@ fn percent_decode(s: &str) -> String {
         match bytes[i] {
             b'%' if bytes.get(i + 1..i + 3).is_some() => {
                 let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
-                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                if hex.bytes().all(|b| b.is_ascii_hexdigit())
+                    && let Ok(b) = u8::from_str_radix(hex, 16)
+                {
                     out.push(b);
                     i += 3;
                     continue;
@@ -713,6 +716,14 @@ fn failure(code: StatusCode, reason: &str, message: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
+    /// `%+f` is not an escape (Go's `url.PathUnescape` refuses it); it must not
+    /// decode to a control byte the upstream would never see.
+    #[test]
+    fn a_signed_escape_is_not_decoded() {
+        assert_eq!(percent_decode("a%+fb"), "a% fb");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+    }
+
     use super::{is_canonical, is_channel_protocol, percent_decode};
 
     #[test]

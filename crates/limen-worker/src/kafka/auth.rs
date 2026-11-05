@@ -280,8 +280,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && i + 2 < b.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let Some(hex) = b.get(i + 1..i + 3)
+            && hex.iter().all(u8::is_ascii_hexdigit)
+            && let Ok(byte) = u8::from_str_radix(std::str::from_utf8(hex).unwrap_or(""), 16)
         {
             out.push(byte);
             i += 3;

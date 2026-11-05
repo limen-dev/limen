@@ -125,6 +125,7 @@ fn pct_decode(s: &str, plus_is_space: bool) -> Result<String, Refused> {
                 let hex = b
                     .get(i + 1..i + 3)
                     .and_then(|h| std::str::from_utf8(h).ok())
+                    .filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))
                     .and_then(|h| u8::from_str_radix(h, 16).ok());
                 let Some(v) = hex else {
                     return refuse("the request path has an invalid percent escape");
