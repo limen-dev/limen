@@ -685,18 +685,78 @@ fn walk_template(v: &Value, named: &mut Named) -> Result<(), Refused> {
     if map.contains_key("id") {
         named.all = true;
     }
+    // What the source names, collected apart: a placeholder at an index
+    // position is rendered by the engine, so whatever it will be can't be
+    // judged against the grant.
+    let mut found = Named::default();
     match map.get("source") {
         Some(Value::String(text)) => {
             let parsed = serde_json::from_str::<Value>(text).or_else(|_| {
                 refuse("a search template's source must be valid JSON (mustache sections that build JSON can't be checked)")
             })?;
-            walk_refs(&parsed, named, 0)?;
+            plain_tags_only(&parsed, 0)?;
+            walk_refs(&parsed, &mut found, 0)?;
         }
-        Some(other) => walk_refs(other, named, 0)?,
+        Some(other) => {
+            plain_tags_only(other, 0)?;
+            walk_refs(other, &mut found, 0)?;
+        }
         None => {}
     }
+    if found.names.iter().any(|n| n.contains("{{")) {
+        return refuse("a search template names an index through a placeholder");
+    }
+    named.all |= found.all;
+    named.names.extend(found.names);
     if let Some(params) = map.get("params") {
         walk_refs(params, named, 0)?;
+    }
+    Ok(())
+}
+
+/// The engine renders mustache over a template's whole text, keys and string
+/// values alike. Only plain `{{name}}` tags (escaped, in a value) are left to
+/// pass; anything that could build structure (`{{{x}}}`, `{{&x}}`, sections,
+/// delimiter changes) or a key made by a tag can't be read.
+fn plain_tags_only(v: &Value, depth: usize) -> Result<(), Refused> {
+    if depth > 64 {
+        return refuse("the request body is nested too deeply");
+    }
+    match v {
+        Value::Object(map) => {
+            for (k, child) in map {
+                if k.contains("{{") {
+                    return refuse("a search template builds a key with a placeholder");
+                }
+                plain_tags_only(child, depth + 1)?;
+            }
+        }
+        Value::Array(a) => {
+            for child in a {
+                plain_tags_only(child, depth + 1)?;
+            }
+        }
+        Value::String(text) => {
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find("{{") {
+                let after = &rest[at + 2..];
+                let Some(end) = after.find("}}") else {
+                    return refuse("a search template has an unclosed placeholder");
+                };
+                let name = after[..end].trim();
+                let plain = !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+                if !plain || after[end..].starts_with("}}}") {
+                    return refuse(
+                        "a search template uses a placeholder form that can't be checked",
+                    );
+                }
+                rest = &after[end + 2..];
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -1702,6 +1762,39 @@ mod tests {
                 b"{}\n{\"id\":\"t\"}\n"
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn template_placeholders_cannot_build_what_the_grant_checks() {
+        let g = grant(&[Read], &["logs-*"]);
+        let go = |body: &[u8]| allowed(&g, "POST", "/logs-1/_search/template", body);
+        // A key made by a tag, in both forms of source.
+        assert!(go(br#"{"source":"{\"query\":{\"{{k}}\":{\"u\":{\"index\":\"orders\",\"id\":\"1\",\"path\":\"p\"}}}}","params":{"k":"terms"}}"#).is_err());
+        assert!(go(br#"{"source":{"query":{"{{k}}":{"u":{"index":"orders","id":"1","path":"p"}}}},"params":{"k":"terms"}}"#).is_err());
+        // Tags that insert unescaped text or sections.
+        for tag in [
+            "{{{x}}}",
+            "{{&x}}",
+            "{{#x}}y{{/x}}",
+            "{{=<% %>=}}",
+            "{{^x}}y{{/x}}",
+            "{{>p}}",
+        ] {
+            let body = format!(
+                r#"{{"source":{{"query":{{"match":{{"f":"{}"}}}}}},"params":{{}}}}"#,
+                tag.replace('"', "\\\"")
+            );
+            assert!(go(body.as_bytes()).is_err(), "{tag}");
+        }
+        // A placeholder where an index goes.
+        let at_index = br#"{"source":{"query":{"terms":{"u":{"index":"{{i}}","id":"1","path":"p"}}}},"params":{"i":".security"}}"#;
+        assert!(go(at_index).is_err());
+        let star = grant(&[Read], &["*"]);
+        assert!(allowed(&star, "POST", "/logs-1/_search/template", at_index).is_err());
+        // A plain placeholder in a value is fine.
+        assert!(
+            go(br#"{"source":{"query":{"match":{"f":"{{ x }}"}}},"params":{"x":"a"}}"#).is_ok()
         );
     }
 
