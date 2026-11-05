@@ -124,7 +124,7 @@ With several roles granting the same engine role, the session may do whatever an
 
 ### Web app grants
 
-`web: {}` allows access to the selected web resource. Optional `methods` and `path_prefixes` restrict each request; an empty list leaves that dimension unrestricted, and deny rules win. Limen checks the current policy and user lock on every request. See the [web apps guide](guides/web-apps.md).
+`web: {}` allows access to the selected web resource. Optional `methods` and `path_prefixes` restrict each request; an empty list leaves that dimension unrestricted, and deny rules win. `path_prefixes` compare case-sensitively: a rule on `/admin` does not cover `/ADMIN`, so if the app treats paths case-insensitively, deny both spellings or normalise the path upstream. Limen checks the current policy and user lock on every request. See the [web apps guide](guides/web-apps.md).
 
 ### Cloud variants and raw TCP
 
