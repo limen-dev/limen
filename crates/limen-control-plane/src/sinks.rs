@@ -80,6 +80,9 @@ pub struct S3Sink {
     pub kms_key: Option<String>,
     pub writer: String,
     signer: SignerSlot,
+    /// The internal CA, to check the signature of the manifest the chain resumes
+    /// from. `None` (tests) skips that check.
+    internal_ca: Option<Arc<Vec<u8>>>,
     /// `(next seq, sha256 of the last manifest)`; `None` until loaded from S3.
     chain: Arc<Mutex<Option<(u64, String)>>>,
 }
@@ -100,8 +103,17 @@ impl S3Sink {
             kms_key,
             writer,
             signer,
+            internal_ca: None,
             chain: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Check the signature of the manifest a restart resumes from, against
+    /// this CA.
+    #[must_use]
+    pub fn with_internal_ca(mut self, der: Vec<u8>) -> Self {
+        self.internal_ca = Some(Arc::new(der));
+        self
     }
 
     fn key(&self, rest: &str) -> String {
@@ -144,13 +156,15 @@ impl S3Sink {
         // The newest manifest that is consistent with its key and writer. A key
         // that is not (planted, corrupt, another writer's) is skipped with an
         // error in the log rather than stopping the writer for good; the
-        // verifier reports the break it leaves. The signature is not checked
-        // here: the signing certificate lives 24 hours, so a replica restarting
-        // after that could not resume from its own last manifest.
+        // verifier reports the break it leaves. The signature is checked as of
+        // the time the manifest records, so a restart after the signing
+        // certificate's day is over can still resume from its own last manifest.
         let mut trusted = None;
         for key in &keys {
             let body = self.get(key).await?;
-            match consistent_manifest(&body, key, &self.writer) {
+            let checked = consistent_manifest(&body, key, &self.writer)
+                .and_then(|m| self.signature_problem(&body, &m).map_or(Ok(m), Err));
+            match checked {
                 Ok(manifest) => {
                     trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
                     break;
@@ -161,6 +175,32 @@ impl S3Sink {
             }
         }
         Ok(resume_point(highest, trusted))
+    }
+
+    /// Why the manifest's signature does not hold, if it does not (as of the
+    /// time the manifest records, and by this writer's own certificate).
+    #[must_use]
+    pub fn signature_problem(&self, file: &[u8], manifest: &Manifest) -> Option<String> {
+        let ca = self.internal_ca.as_ref()?;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let signed: SignedManifest = serde_json::from_slice(file).ok()?;
+        let envelope = limen_proto::v1::Signed {
+            payload: signed.manifest.clone().into_bytes(),
+            signature: b64.decode(&signed.signature).unwrap_or_default(),
+            signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
+        };
+        let at = match time::OffsetDateTime::parse(
+            &manifest.created_at,
+            &time::format_description::well_known::Rfc3339,
+        ) {
+            Ok(at) => at,
+            Err(e) => return Some(format!("unreadable manifest time: {e}")),
+        };
+        let ca = rustls_pki_types::CertificateDer::from(ca.as_slice());
+        match limen_session::envelope::verify_at(&envelope, Purpose::AuditManifest, &ca, at) {
+            Ok((by, _)) => signer_problem(&by.id, &manifest.writer),
+            Err(e) => Some(format!("signature: {e}")),
+        }
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, ShipError> {

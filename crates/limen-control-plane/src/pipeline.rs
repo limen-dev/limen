@@ -205,7 +205,11 @@ pub fn consumer_names(config: &Config) -> Vec<&'static str> {
 }
 
 impl Pipeline {
-    pub async fn open(config: &Arc<Config>, signer: SignerSlot) -> anyhow::Result<Self> {
+    pub async fn open(
+        config: &Arc<Config>,
+        signer: SignerSlot,
+        internal_ca: Vec<u8>,
+    ) -> anyhow::Result<Self> {
         let consumers = consumer_names(config);
         let s3 = match &config.audit_s3_bucket {
             Some(bucket) => {
@@ -224,14 +228,17 @@ impl Pipeline {
                         }
                     }
                 }
-                Some(S3Sink::new(
-                    client,
-                    bucket.clone(),
-                    config.audit_s3_prefix.clone(),
-                    config.audit_s3_kms_key.clone(),
-                    config.id.clone(),
-                    signer,
-                ))
+                Some(
+                    S3Sink::new(
+                        client,
+                        bucket.clone(),
+                        config.audit_s3_prefix.clone(),
+                        config.audit_s3_kms_key.clone(),
+                        config.id.clone(),
+                        signer,
+                    )
+                    .with_internal_ca(internal_ca),
+                )
             }
             None => None,
         };
