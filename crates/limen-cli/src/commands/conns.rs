@@ -51,17 +51,68 @@ fn signal(pid: u32, sig: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Whether `pid` is a live `limen` process. A bare liveness check isn't enough: after a
-/// reboot or a crash the pid may belong to something else, which `stop` must never signal.
+/// Whether the recorded process is still our detached connection. A bare
+/// liveness check isn't enough: after a reboot or a crash the pid may belong to
+/// something else, which `stop` must never signal. The process must have been
+/// started when we started ours, and its command line must be a `limen` binary
+/// followed by exactly the arguments we recorded.
 #[cfg(unix)]
-fn alive(pid: u32) -> bool {
-    if !signal(pid, "-0") {
+fn alive(conn: &Conn) -> bool {
+    if !signal(conn.pid, "-0") {
         return false;
     }
-    std::process::Command::new("ps")
-        .args(["-o", "command=", "-p", &pid.to_string()])
-        .output()
-        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("limen"))
+    let ps = |field: &str| {
+        std::process::Command::new("ps")
+            .args(["-o", field, "-p", &conn.pid.to_string()])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    };
+    let (Some(command), Some(etime)) = (ps("command="), ps("etime=")) else {
+        return false;
+    };
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    is_our_process(&command, &etime, conn, now)
+}
+
+/// `[[dd-]hh:]mm:ss`, as `ps -o etime` prints it on macOS and Linux.
+fn parse_etime(text: &str) -> Option<i64> {
+    let (days, rest) = match text.split_once('-') {
+        Some((d, r)) => (d.parse::<i64>().ok()?, r),
+        None => (0, text),
+    };
+    let mut secs = 0i64;
+    let mut parts = 0;
+    for part in rest.split(':') {
+        secs = secs
+            .checked_mul(60)?
+            .checked_add(part.parse::<i64>().ok()?)?;
+        parts += 1;
+    }
+    (parts <= 3).then(|| days * 86_400 + secs)
+}
+
+/// Whether a process with this command line and elapsed time is the one
+/// `conn` recorded. `conn.started_unix` is taken after the process printed its
+/// address (up to 20 s after the spawn), so the start may precede it by that much.
+fn is_our_process(command: &str, etime: &str, conn: &Conn, now: i64) -> bool {
+    let Some(elapsed) = parse_etime(etime) else {
+        return false;
+    };
+    let started = now - elapsed;
+    if started < conn.started_unix - 60 || started > conn.started_unix + 5 {
+        return false;
+    }
+    let args = conn.command.join(" ");
+    let Some(program) = command.strip_suffix(args.as_str()) else {
+        return false;
+    };
+    let program = program.trim_end();
+    // The program may contain spaces ("/Users/Jane Doe/..."), so test the basename.
+    program
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("limen"))
 }
 
 /// Ids are the six hex digits we generate; anything else could escape the directory.
@@ -230,7 +281,7 @@ pub fn list(only_proxy: Option<&str>) -> anyhow::Result<Vec<Conn>> {
             continue;
         };
         #[cfg(unix)]
-        if !alive(conn.pid) {
+        if !alive(&conn) {
             forget(&conn.id);
             continue;
         }
@@ -252,7 +303,7 @@ pub fn stop(id: &str) -> anyhow::Result<bool> {
         return Ok(false);
     };
     #[cfg(unix)]
-    if alive(conn.pid) {
+    if alive(&conn) {
         signal(conn.pid, "-TERM");
     }
     forget(id);
@@ -325,6 +376,72 @@ pub fn stop_command(proxy: Option<&str>, ids: &[String], all: bool) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn conn(command: &[&str], started_unix: i64) -> Conn {
+        Conn {
+            id: "abc123".into(),
+            pid: 1,
+            proxy: "p".into(),
+            command: command.iter().map(|s| (*s).to_owned()).collect(),
+            log: PathBuf::new(),
+            started_unix,
+            expires_at_unix: 0,
+        }
+    }
+
+    #[test]
+    fn only_the_recorded_process_is_ours() {
+        let c = conn(&["db", "connect", "orders"], 1_000_000);
+        let now = 1_000_900;
+        // Started 900 s ago, as recorded (we noted it up to a few seconds later).
+        assert!(is_our_process(
+            "/home/a/.local/bin/limen db connect orders",
+            "15:00",
+            &c,
+            now
+        ));
+        assert!(is_our_process(
+            "/Users/Jane Doe/bin/limen db connect orders",
+            "15:00",
+            &c,
+            now
+        ));
+        // A reused pid: some other program whose command line mentions limen.
+        assert!(!is_our_process("vim limen-notes.txt", "15:00", &c, now));
+        assert!(!is_our_process(
+            "/bin/sh -c limen db connect orders; rm",
+            "15:00",
+            &c,
+            now
+        ));
+        // Same words, but the process is much older or younger than the record.
+        assert!(!is_our_process(
+            "/home/a/bin/limen db connect orders",
+            "2-03:04:05",
+            &c,
+            now
+        ));
+        assert!(!is_our_process(
+            "/home/a/bin/limen db connect orders",
+            "00:05",
+            &c,
+            now
+        ));
+        assert!(!is_our_process(
+            "/home/a/bin/limen db connect orders",
+            "garbage",
+            &c,
+            now
+        ));
+    }
+
+    #[test]
+    fn etime_formats() {
+        assert_eq!(parse_etime("05:07"), Some(307));
+        assert_eq!(parse_etime("1:05:07"), Some(3907));
+        assert_eq!(parse_etime("2-01:05:07"), Some(2 * 86_400 + 3907));
+        assert_eq!(parse_etime("x"), None);
+    }
 
     #[test]
     fn drops_the_ctrl_c_hint() {
