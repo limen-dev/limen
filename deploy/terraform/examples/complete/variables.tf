@@ -21,7 +21,7 @@ variable "image_tag" {
 }
 
 variable "image_tags" {
-  description = "Tag for one component, overriding image_tag, to upgrade the components one at a time (see docs/runbooks/upgrading.md). Keys: control-plane, proxy, worker. Leave empty outside an upgrade."
+  description = "Tag for one component, overriding image_tag, to upgrade the components one at a time. Keys: control-plane, proxy, worker. Leave empty outside an upgrade."
   type        = map(string)
   default     = {}
 

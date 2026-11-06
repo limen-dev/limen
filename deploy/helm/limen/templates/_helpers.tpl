@@ -2,7 +2,7 @@
 {{- $reg := .root.Values.image.registry -}}
 {{- /* The release workflow tags images with the git tag, which starts with v. */ -}}
 {{- $base := default (printf "v%s" (trimPrefix "v" .root.Chart.AppVersion)) .root.Values.image.tag -}}
-{{- /* image.componentTags upgrades one component at a time (docs/runbooks/upgrading.md). */ -}}
+{{- /* image.componentTags overrides image.tag for one component. */ -}}
 {{- $tag := default $base (get (default dict .root.Values.image.componentTags) .component) -}}
 {{- if $reg }}{{ $reg }}/{{ end }}limen-{{ .component }}:{{ $tag }}
 {{- end -}}
