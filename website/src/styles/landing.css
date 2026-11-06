@@ -481,10 +481,9 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .eyebrow.reveal, .section h2.reveal, .section .sub.reveal { transition-duration: 0.8s; }
 .section h2.reveal { transform: translateY(26px); }
 .section h2.reveal.in { transform: none; }
-@supports (animation-timeline: scroll()) {
-  body::before { content: ''; position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 60; transform-origin: 0 50%; background: linear-gradient(90deg, var(--lm-accent), var(--lm-accent-2)); animation: progress linear both; animation-timeline: scroll(root block); pointer-events: none; }
-  @keyframes progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-}
+/* The reading-progress bar. Driven by --scroll (set in site.ts), not by a scroll-driven animation: the
+   CSS minifier dropped animation-timeline, which left a bar that was always full. */
+body::before { content: ''; position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 60; transform: scaleX(var(--scroll, 0)); transform-origin: 0 50%; background: linear-gradient(90deg, var(--lm-accent), var(--lm-accent-2)); pointer-events: none; }
 .btn.primary svg { transition: transform 0.2s ease; }
 .btn.primary:hover svg { transform: translateX(4px); }
 .strip .logo { animation: popin 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--k, 0) * 0.05s + 0.7s); }
