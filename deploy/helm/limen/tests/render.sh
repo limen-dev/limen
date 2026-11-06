@@ -32,6 +32,13 @@ grep -q 'limen-worker:old$' <<<"$out" || fail "componentTags.control-plane moved
 out="$(render "${base[@]}" --set image.tag=old --set image.componentTags.worker=)"
 grep -q 'limen-worker:old$' <<<"$out" || fail "an empty componentTags entry did not fall back to image.tag"
 
+# 0c. A proxy can wait for an upgraded control plane (ADR-0045): it never removes a serving pod
+# first, and gets time before the liveness probe starts.
+out="$(render "${base[@]}")"
+proxy="$(doc Deployment proxy-public <<<"$out")"
+grep -q 'maxUnavailable: 0' <<<"$proxy" || fail "proxy rollout may remove a serving pod before its replacement is ready"
+grep -q 'startupProbe:' <<<"$proxy" || fail "proxy has no startupProbe, so liveness would kill a waiting pod"
+
 # 1. A zero value in a group beats a non-zero default.
 out="$(render "${base[@]}" --set workerDefaults.discovery=true --set workers.prod-db.discovery=false)"
 doc Deployment worker-prod-db <<<"$out" | grep -q LIMEN_DISCOVERY && fail "discovery: false on a group did not override the default"
