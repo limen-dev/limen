@@ -333,6 +333,26 @@ Options:
 - `--limit <LIMIT>`: The most hits to return (up to 200). Default: `50`.
 - `--json`: Output JSON instead of text.
 
+#### `limen audit verify`
+
+Check the audit trail in S3, or an evidence pack, without trusting Limen.
+
+For auditors and operators. It does not sign in to Limen and asks it nothing. By default it reads the audit bucket directly with your AWS credentials, so it needs the read-only verifier policy from the audit Terraform module (`verifier_policy_json`); without that, S3 refuses. With --evidence it checks a pack from `limen admin evidence` offline, with only the internal CA certificate. Exits 2 if anything fails.
+
+```text
+Usage: limen audit verify [OPTIONS] --ca-file <CA_FILE>
+```
+
+Options:
+
+- `--evidence <FILE>`: Check a pack from `limen admin evidence` instead of the S3 trail.
+- `--audit-events <FILE>`: With --evidence: an audit JSONL file; the pack's export event must be in it.
+- `--bucket <BUCKET>`: The audit bucket. Environment: `LIMEN_AUDIT_S3_BUCKET`.
+- `--prefix <PREFIX>` Default: ``. Environment: `LIMEN_AUDIT_S3_PREFIX`.
+- `--endpoint <ENDPOINT>` Environment: `LIMEN_AUDIT_S3_ENDPOINT`.
+- `--path-style` Environment: `LIMEN_AUDIT_S3_PATH_STYLE`.
+- `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM): manifests must be signed by a control plane certificate it issued.
+
 ### `limen policy`
 
 Ask a policy questions: test it, who can reach what, what changes

@@ -1,17 +1,17 @@
 # Verifying the audit hash chain
 
-Each control plane writes its S3 batches with a signed manifest that names the previous manifest's hash (ADR-0009). `limen-audit-verify` walks every writer's chain and reports a missing, reordered, modified, or unsigned batch.
+Each control plane writes its S3 batches with a signed manifest that names the previous manifest's hash (ADR-0009). `limen audit verify` walks every writer's chain and reports a missing, reordered, modified, or unsigned batch.
 
 ```sh
 # From the control plane container (it has the CA files):
-docker compose exec control-plane limen-audit-verify \
+docker compose exec control-plane limen audit verify \
   --ca-file /var/lib/limen/ca-public/internal-ca.pem   # bucket and endpoint come from the environment
 
 # From anywhere with read access to the bucket:
-limen-audit-verify --bucket <bucket> [--prefix <p>] --ca-file internal-ca.pem
+limen audit verify --bucket <bucket> [--prefix <p>] --ca-file internal-ca.pem
 ```
 
-Needs the `verifier_policy_json` permissions (read-only on the bucket, `kms:Decrypt`). Exit code 0 and `OK: every batch is present, unmodified, signed, and chained` means the trail is intact. Exit code 2 prints one `PROBLEM:` line per finding.
+**Who can run it.** The check reads the bucket directly and never asks Limen, so only the bucket's own permissions decide: the `verifier_policy_json` Terraform output (read-only on the bucket, `kms:Decrypt`). Give it to auditors and operators. A developer without it gets S3's `AccessDenied` and a hint at the missing policy. Checking an evidence pack (`--evidence`) needs no AWS access at all, only the pack and the CA certificate. Exit code 0 and `OK: every batch is present, unmodified, signed, and chained` means the trail is intact. Exit code 2 prints one `PROBLEM:` line per finding.
 
 | Problem | Likely cause |
 |---|---|

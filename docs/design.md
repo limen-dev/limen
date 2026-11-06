@@ -298,7 +298,7 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - SSE-KMS with a dedicated key
   - optional Object Lock in compliance mode
   - batches close at 5 MiB or 60 s
-  - each batch has a manifest at `manifests/<writer>/<seq>.json`, signed by the control plane's certificate key (`Purpose::AuditManifest`) and chained by the previous manifest's SHA-256. The chain head is recovered from S3 on restart. `limen-audit-verify` (shipped in the control plane image) checks signatures, numbering, chain, and batch hashes. The planned `limen admin audit verify` is not built yet.
+  - each batch has a manifest at `manifests/<writer>/<seq>.json`, signed by the control plane's certificate key (`Purpose::AuditManifest`) and chained by the previous manifest's SHA-256. The chain head is recovered from S3 on restart. `limen audit verify` (shipped in the control plane image) checks signatures, numbering, chain, and batch hashes. The planned `limen admin audit verify` is not built yet.
 
   Parquet is deferred. JSONL with the Glue JSON SerDe and partition projection is enough at the target scale.
 - **Datadog:**
@@ -352,6 +352,7 @@ crates/
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
   limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
+  limen-verify/          # checks the S3 audit chain and evidence packs without the control plane; behind `limen audit verify`
   limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
   limen-tunnel/          # reverse tunnel, peering, ALPN constants, backoff
   limen-kube/            # Kubernetes request classification and exec/port-forward stream decoding

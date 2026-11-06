@@ -36,7 +36,7 @@ Limen can't edit IdP groups, so a flag creates an override for that person and r
 
 ```sh
 limen admin evidence --from 2026-07-01 --to 2026-10-01 --out q3-evidence.json
-limen-audit-verify --evidence q3-evidence.json --ca-file internal-ca.pem \
+limen audit verify --evidence q3-evidence.json --ca-file internal-ca.pem \
                    --audit-events audit.jsonl      # optional: find the export in the trail
 ```
 
@@ -55,7 +55,7 @@ Guidance, not certification:
 | Access is removed when no longer needed (SOC 2 CC6.3, ISO 27001 A.5.18/A.8.2) | grants' `expires_at`/`revoked_at`; flagged items; `locks` |
 | Privileged and emergency access is controlled and monitored (ISO 27001 A.8.2) | break-glass grants, `access.break_glass` events, their reviews |
 | Changes to access rules are controlled (SOC 2 CC8.1) | `policy_changes` with author and source reference |
-| Activity is logged and logs are protected (SOC 2 CC7.2, ISO 27001 A.8.15) | `sessions` with recording hashes; the signed, hash-chained trail verified by `limen-audit-verify` |
+| Activity is logged and logs are protected (SOC 2 CC7.2, ISO 27001 A.8.15) | `sessions` with recording hashes; the signed, hash-chained trail verified by `limen audit verify` |
 
 This maps Limen's records to the questions auditors ask. It doesn't claim that using Limen satisfies a control; your auditor decides that, and the wording should be reviewed before it's shown to one.
 

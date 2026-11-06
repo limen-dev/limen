@@ -149,7 +149,7 @@ A bot is matched on exact claims of its token (for example the repository and th
 
 <table>
   <tr>
-    <td align="center" valign="top" width="25%"><br><img src="assets/icons/scroll-text.svg" height="48" alt=""><br><br><b>S3, signed and chained</b><br><sub>batches signed and linked by hash<br>checked by <code>limen-audit-verify</code></sub><br><br><sub>✅ tested with a local S3<br>⚠️ Amazon S3</sub><br><br></td>
+    <td align="center" valign="top" width="25%"><br><img src="assets/icons/scroll-text.svg" height="48" alt=""><br><br><b>S3, signed and chained</b><br><sub>batches signed and linked by hash<br>checked by <code>limen audit verify</code></sub><br><br><sub>✅ tested with a local S3<br>⚠️ Amazon S3</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/datadog/white"><img src="https://cdn.simpleicons.org/datadog" height="48" alt=""></picture><br><br><b>Datadog</b><br><sub>logs, plus monitors<br>as Terraform</sub><br><br><sub>✅ tested with a fake intake<br>⚠️ real Datadog</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/grafana" height="48" alt=""><br><br><b>Grafana</b><br><sub>optional dashboards<br>over S3 and Athena</sub><br><br><sub>✅ tested with Trino<br>⚠️ Athena</sub><br><br></td>
     <td align="center" valign="top" width="25%"><br><img src="https://cdn.simpleicons.org/opentelemetry" height="48" alt=""><br><br><b>Metrics and traces</b><br><sub>Prometheus <code>/metrics</code>, OpenTelemetry traces,<br>example alerts</sub><br><br><sub>✅ tested locally</sub><br><br></td>
@@ -159,7 +159,7 @@ A bot is matched on exact claims of its token (for example the repository and th
 Audit events are written to S3 in signed batches, and each batch records the hash of the one before it, like links in a chain. If a batch goes missing, is reordered, or is edited, one command finds it:
 
 ```sh
-limen-audit-verify --bucket <your-audit-bucket> --ca-file internal-ca.pem
+limen audit verify --bucket <your-audit-bucket> --ca-file internal-ca.pem
 ```
 
 Traces carry only ids and outcomes, never user names, SQL statements or tokens. To see one locally, start the dev stack with Jaeger: `deploy/compose/setup.sh --yes --stacks ssh,tracing`.

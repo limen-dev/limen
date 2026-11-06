@@ -77,6 +77,6 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | glue\_table | Glue table over the audit events, with partition projection. |
 | kms\_key\_arn | Key for --audit-s3-kms-key. |
 | reader\_policy\_json | IAM policy for Grafana. |
-| verifier\_policy\_json | IAM policy for whoever runs limen-audit-verify. |
+| verifier\_policy\_json | IAM policy for whoever runs limen audit verify. |
 | writer\_policy\_json | IAM policy for the control plane. |
 <!-- END_TF_DOCS -->

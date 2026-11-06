@@ -16,7 +16,7 @@
 # Why the SIGKILL goes to control-plane-1: it runs in durable spool mode, so
 # what it had acked but not shipped is still on its volume when it comes
 # back. An ephemeral replica that is SIGKILLed loses that window (bounded by
-# the S3 flush interval, and reported by limen-audit-verify as a seq gap);
+# the S3 flush interval, and reported by limen audit verify as a seq gap);
 # ephemeral replicas are only ever stopped with SIGTERM here, which drains
 # and hands off. See ADR-0020.
 set -euo pipefail
@@ -55,7 +55,7 @@ wait_for() {
 }
 s3curl() { curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user dev:dev-only-secret "$@"; }
 verify() {
-  "${compose[@]}" exec -T control-plane-0 limen-audit-verify \
+  "${compose[@]}" exec -T control-plane-0 limen audit verify \
     --ca-file /var/lib/limen/ca-public/internal-ca.pem 2>&1
 }
 # Sum of every audit spool backlog on the control planes and proxies.
@@ -357,15 +357,15 @@ sed 's/^/  /' "$state/verify.txt"
 writers="$(sed -n 's/^writers: \([0-9]*\).*/\1/p' "$state/verify.txt")"
 manifest_writers="$(s3curl "$s3?list-type=2&prefix=manifests/&delimiter=/" | grep -o '<Prefix>manifests/[^<]*</Prefix>' | sed 's/<[^>]*>//g; s#manifests/##; s#/$##' | grep . | sort | tr '\n' ' ')"
 if grep -q '^OK: every batch' "$state/verify.txt"; then
-  pass "limen-audit-verify: every chain intact"
+  pass "limen audit verify: every chain intact"
 else
-  fail "limen-audit-verify: chain problems"
+  fail "limen audit verify: chain problems"
 fi
 if grep -q '^OK: no producer has a sequence gap' "$state/verify.txt" \
    && grep -q '^OK: no sequence number is used by two events' "$state/verify.txt"; then
-  pass "limen-audit-verify: no sequence gap or conflict for any producer"
+  pass "limen audit verify: no sequence gap or conflict for any producer"
 else
-  fail "limen-audit-verify: sequence gaps (lost events) or conflicts"
+  fail "limen audit verify: sequence gaps (lost events) or conflicts"
 fi
 if [ "$writers" = "3" ] && [ "$manifest_writers" = "control-plane-0 control-plane-1 control-plane-2 " ]; then
   pass "writers: 3 (control-plane-0, -1, -2), one chain per replica id"

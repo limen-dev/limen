@@ -90,7 +90,7 @@ data "aws_iam_policy_document" "reader" {
   }
 }
 
-# Auditors running limen-audit-verify: read everything, change nothing.
+# Auditors running limen audit verify: read everything, change nothing.
 data "aws_iam_policy_document" "verifier" {
   statement {
     sid       = "Read"

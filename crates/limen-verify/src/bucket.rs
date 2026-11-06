@@ -26,7 +26,7 @@ use limen_session::envelope::{Purpose, verify};
 use rustls_pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 
-use crate::sinks::{Manifest, SignedManifest};
+use crate::manifest::{Manifest, SignedManifest};
 
 #[derive(Debug, Default)]
 pub struct VerifyReport {
@@ -111,7 +111,15 @@ impl std::fmt::Display for SeqConflict {
 #[derive(serde::Deserialize)]
 struct EventSeq {
     event_id: Uuid,
-    producer: limen_audit::Producer,
+    producer: Producer,
+}
+
+/// Who numbered an event: `seq` counts from 0 for each `(component, instance_id)`.
+#[derive(serde::Deserialize)]
+struct Producer {
+    component: String,
+    instance_id: String,
+    seq: u64,
 }
 
 /// Distinct events, and the events seen per producer and `seq`.

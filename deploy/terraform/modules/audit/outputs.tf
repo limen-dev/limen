@@ -39,6 +39,6 @@ output "reader_policy_json" {
 }
 
 output "verifier_policy_json" {
-  description = "IAM policy for whoever runs limen-audit-verify."
+  description = "IAM policy for whoever runs limen audit verify."
   value       = data.aws_iam_policy_document.verifier.json
 }

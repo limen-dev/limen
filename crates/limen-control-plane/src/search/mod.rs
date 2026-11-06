@@ -1,6 +1,6 @@
 //! Searching recent audit events and, when switched on, recording text
 //! (ADR-0026). The index is a convenience copy in PostgreSQL for the console
-//! and the CLI; the audit sinks stay the record and `limen-audit-verify` the
+//! and the CLI; the audit sinks stay the record and `limen audit verify` the
 //! source of truth. **Every search is audited** with who looked for what, and
 //! rate limited, because search is also a way to read a lot at once.
 

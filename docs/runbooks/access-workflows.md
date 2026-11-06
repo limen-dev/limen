@@ -35,7 +35,7 @@ Run `limen admin review start`, or leave `--review-interval` at 90 days. Give ro
 limen admin evidence --from 2026-07-01 --to 2026-10-01 --out q3.json
 ```
 
-Give the auditor the file and `internal-ca.pem`; they run `limen-audit-verify --evidence q3.json --ca-file internal-ca.pem`. Kills and revocations aren't in the pack, so point them at the S3 trail ([verifying it](audit-verify.md)).
+Give the auditor the file and `internal-ca.pem`; they run `limen audit verify --evidence q3.json --ca-file internal-ca.pem`. Kills and revocations aren't in the pack, so point them at the S3 trail ([verifying it](audit-verify.md)).
 
 ## Watching a session
 

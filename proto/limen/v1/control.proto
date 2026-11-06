@@ -823,7 +823,7 @@ message ExportEvidenceRequest {
 
 message ExportEvidenceResponse {
   // JSON, signed by the control plane. Verify offline with
-  // `limen-audit-verify --evidence`.
+  // `limen audit verify --evidence`.
   bytes pack = 1;
   string manifest_sha256 = 2;
 }
