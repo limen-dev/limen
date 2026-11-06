@@ -20,7 +20,9 @@ impl PolicySync for PolicySyncService {
         request: Request<GetPolicySnapshotRequest>,
     ) -> Result<Response<Signed>, Status> {
         // Proxies directly, workers through a proxy. Users don't get the full policy.
-        caller::resolve(&request, &self.0.cas)?.component()?;
+        caller::resolve_checked(&request, &self.0)
+            .await?
+            .component()?;
         let key = self
             .0
             .snapshot_signer

@@ -28,6 +28,20 @@ pub struct Actor<'a> {
     pub via: &'static str,
 }
 
+/// Audit an action that must not take effect without its event: the error
+/// says the change was not made (the caller rolls it back).
+async fn audit_first(
+    state: &AppState,
+    kind: EventKind,
+    actor: Actor<'_>,
+    session_id: Option<Uuid>,
+    data: serde_json::Value,
+) -> Result<(), Status> {
+    audit(state, kind, actor, session_id, data)
+        .await
+        .map_err(|_| Status::unavailable("the change was not made: audit is unavailable"))
+}
+
 /// Audit an admin action. If the event can't be written the error says so:
 /// the change itself has already been applied.
 async fn audit(
@@ -105,7 +119,28 @@ pub async fn unlock_user(
     username: &str,
 ) -> Result<bool, Status> {
     let username = username.trim();
-    let unlocked = db::unlock_user(&state.db, username, actor.username)
+    // Unlocking restores privilege, so it must not stand unless the audit event
+    // is written: the audit write happens inside the transaction, and a failure
+    // drops it (rollback) before anything is committed.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("unlocking user", e))?;
+    let unlocked = db::unlock_user(&mut *tx, username, actor.username)
+        .await
+        .map_err(|e| internal("unlocking user", e))?;
+    if unlocked {
+        audit_first(
+            state,
+            EventKind::UserUnlock,
+            actor,
+            None,
+            json!({ "target_user": username }),
+        )
+        .await?;
+    }
+    tx.commit()
         .await
         .map_err(|e| internal("unlocking user", e))?;
     if unlocked {
@@ -115,14 +150,6 @@ pub async fn unlock_user(
             via = actor.via,
             "user unlocked"
         );
-        audit(
-            state,
-            EventKind::UserUnlock,
-            actor,
-            None,
-            json!({ "target_user": username }),
-        )
-        .await?;
     }
     Ok(unlocked)
 }

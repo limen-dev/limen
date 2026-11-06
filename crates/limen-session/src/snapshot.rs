@@ -94,7 +94,13 @@ impl Restrictions {
     /// one in the user's certificate, `session_id` may be empty before one exists.
     #[must_use]
     pub fn blocks(&self, username: &str, login_id: &str, session_id: &str) -> Option<&'static str> {
-        if self.locked_users.contains(username) {
+        // Locks and approvals compare user names without regard to case (the
+        // database does), so `Lead@x.com` and `lead@x.com` are one person here too.
+        if self
+            .locked_users
+            .iter()
+            .any(|locked| locked.eq_ignore_ascii_case(username))
+        {
             Some("user locked")
         } else if self.revoked_logins.contains(login_id) {
             Some("logged out")
@@ -498,6 +504,19 @@ mod tests {
             "a restart doesn't reset the age"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_lock_covers_every_casing_of_the_name() {
+        let restrictions = Restrictions {
+            locked_users: ["Mallory@Example.com".to_owned()].into(),
+            ..Restrictions::default()
+        };
+        assert_eq!(
+            restrictions.blocks("mallory@example.com", "l", "s"),
+            Some("user locked")
+        );
+        assert_eq!(restrictions.blocks("alice@example.com", "l", "s"), None);
     }
 
     #[tokio::test]

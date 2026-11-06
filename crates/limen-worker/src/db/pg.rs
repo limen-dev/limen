@@ -630,8 +630,9 @@ struct Shared {
     pending: VecDeque<Pending>,
     /// Prepared statements by name: the `Parse` event and the statement.
     statements: HashMap<Vec<u8>, (Uuid, Statement)>,
-    /// Portals by name: the statement name they were bound to.
-    portals: HashMap<Vec<u8>, Vec<u8>>,
+    /// Portals by name: the statement they were bound to, as it was at
+    /// `Bind` (a later `Parse` may reuse the statement's name).
+    portals: HashMap<Vec<u8>, (Vec<u8>, Uuid, Statement)>,
 }
 
 async fn relay<S>(
@@ -822,20 +823,27 @@ async fn inspect(kind: u8, body: &[u8], shared: &Mutex<Shared>, audit: &Auditor)
             if let Some((portal, rest)) = take_cstr(body)
                 && let Some((statement, _)) = take_cstr(rest)
             {
-                lock(shared)
-                    .portals
-                    .insert(portal.to_vec(), statement.to_vec());
+                let mut g = lock(shared);
+                let bound = g
+                    .statements
+                    .get(statement)
+                    .map(|(id, s)| (statement.to_vec(), *id, s.clone()));
+                match bound {
+                    Some(bound) => {
+                        g.portals.insert(portal.to_vec(), bound);
+                    }
+                    // Bound to nothing we saw parsed: audited as unknown.
+                    None => {
+                        g.portals.remove(portal);
+                    }
+                }
             }
         }
         b'E' => {
             let (portal, _) = take_cstr(body).unwrap_or((body, &[]));
             let known = {
                 let g = lock(shared);
-                g.portals.get(portal).and_then(|name| {
-                    g.statements
-                        .get(name)
-                        .map(|(id, s)| (name.clone(), *id, s.clone()))
-                })
+                g.portals.get(portal).cloned()
             };
             let id = if let Some((name, parse_id, statement)) = known {
                 audit
@@ -966,6 +974,52 @@ fn settle(shared: &Mutex<Shared>, f: impl FnOnce(&mut Outcome)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn execute_audits_the_statement_the_portal_was_bound_to() {
+        use limen_audit::{EventKind, FailureMode, MemorySink};
+        let sink = Arc::new(MemorySink::default());
+        let emitter = Emitter::new("worker", "w1", sink.clone(), FailureMode::FailClosed);
+        let audit = Auditor::new(
+            emitter,
+            Uuid::now_v7(),
+            "dev@example.com",
+            "db1",
+            super::super::Engine::Postgres,
+            "app",
+            "app",
+            false,
+        );
+        let shared = Mutex::new(Shared::default());
+        let cstr = |parts: &[&[u8]]| {
+            let mut v = Vec::new();
+            for p in parts {
+                v.extend_from_slice(p);
+                v.push(0);
+            }
+            v
+        };
+        // Parse "" as A, Bind a portal to it, Parse "" again as B, Execute.
+        inspect(b'P', &cstr(&[b"", b"SELECT 'a'"]), &shared, &audit)
+            .await
+            .expect("parse a");
+        inspect(b'B', &cstr(&[b"p", b""]), &shared, &audit)
+            .await
+            .expect("bind");
+        inspect(b'P', &cstr(&[b"", b"SELECT 'b'"]), &shared, &audit)
+            .await
+            .expect("parse b");
+        inspect(b'E', &cstr(&[b"p"]), &shared, &audit)
+            .await
+            .expect("execute");
+        let executes: Vec<_> = sink
+            .events()
+            .into_iter()
+            .filter(|e| e.kind == EventKind::DbQuery && e.data["phase"] == "execute")
+            .collect();
+        assert_eq!(executes.len(), 1);
+        assert_eq!(executes[0].data["statement"], "SELECT 'a'");
+    }
 
     #[test]
     fn error_frames_parse_back() {

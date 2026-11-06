@@ -777,6 +777,11 @@ pub struct MongoTarget {
     pub flavor: MongoFlavor,
     #[serde(default)]
     pub auth: MongoAuth,
+    /// Hosts the worker may follow to when a member names the primary (exact
+    /// names, `*.suffix` patterns, IP literals). Absent: only hosts in the
+    /// same domain as `endpoint` (or the same /16 for an address).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
     /// The database to use when the user doesn't name one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_database: Option<String>,
@@ -881,6 +886,12 @@ pub struct BrokerTarget {
     /// for `aws: true`, else `plain`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sasl: Option<KafkaSasl>,
+    /// Kafka: the broker hosts the worker may connect to when the cluster's
+    /// Metadata names them (exact names, `*.suffix` patterns, IP literals).
+    /// Absent: only hosts in the same domain as `endpoint` (or the same /16
+    /// for an address), because the worker takes its credential along.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
 }
 
 /// The SASL mechanism the worker uses toward a Kafka cluster (ADR-0037).

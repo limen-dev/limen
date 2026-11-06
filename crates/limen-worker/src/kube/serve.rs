@@ -36,7 +36,7 @@ const SEC_WEBSOCKET_PROTOCOL: HeaderName = HeaderName::from_static("sec-websocke
 /// Never forwarded from the client: hop-by-hop headers, anything that names an
 /// identity, and the WebSocket extensions (compression would hide the frames
 /// from the recorder).
-const DROP: [&str; 11] = [
+const DROP: [&str; 13] = [
     "host",
     "authorization",
     "connection",
@@ -48,6 +48,9 @@ const DROP: [&str; 11] = [
     "upgrade",
     "sec-websocket-extensions",
     "forwarded",
+    // The client must not choose the source address the API server logs.
+    "via",
+    "x-real-ip",
 ];
 
 struct Ctx {
@@ -583,6 +586,15 @@ fn is_canonical(path: &str) -> bool {
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
+/// Is this client header kept off the request to the API server?
+fn client_header_dropped(name: &str) -> bool {
+    DROP.contains(&name)
+        || name.starts_with("impersonate-")
+        || name.starts_with("x-limen-")
+        || name.starts_with("x-remote-")
+        || name.starts_with("x-forwarded-")
+}
+
 /// The headers for the API server: the client's, minus anything that names an
 /// identity, plus this worker's credential and the impersonation of the user.
 fn forward_headers(
@@ -594,11 +606,7 @@ fn forward_headers(
     let mut out = HeaderMap::new();
     for (name, value) in client {
         let n = name.as_str();
-        if DROP.contains(&n)
-            || n.starts_with("impersonate-")
-            || n.starts_with("x-limen-")
-            || n.starts_with("x-remote-")
-        {
+        if client_header_dropped(n) {
             continue;
         }
         out.append(name.clone(), value.clone());
@@ -737,6 +745,25 @@ mod tests {
     }
 
     use super::{is_canonical, is_channel_protocol, percent_decode, query_values};
+
+    #[test]
+    fn the_client_cannot_choose_the_forwarding_headers() {
+        for name in [
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip",
+            "via",
+            "authorization",
+            "impersonate-user",
+        ] {
+            assert!(super::client_header_dropped(name), "{name}");
+        }
+        for name in ["content-type", "accept", "user-agent"] {
+            assert!(!super::client_header_dropped(name), "{name}");
+        }
+    }
 
     #[test]
     fn only_canonical_paths_are_forwarded() {

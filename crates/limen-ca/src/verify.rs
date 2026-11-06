@@ -49,7 +49,7 @@ pub fn verify_user(
     cert: &CertificateDer<'_>,
     ca_cert: &CertificateDer<'_>,
 ) -> Result<UserIdentity, VerifyError> {
-    verify_chain(cert, ca_cert, KeyUsage::client_auth())?;
+    verify_chain(cert, ca_cert, KeyUsage::client_auth(), UnixTime::now())?;
     let (uris, not_after) = identity_uris(cert)?;
     user_identity(uris, not_after)
 }
@@ -118,7 +118,13 @@ pub fn verify_component(
     } else {
         KeyUsage::client_auth()
     };
-    verify_chain(cert, ca_cert, usage)?;
+    verify_chain(cert, ca_cert, usage, UnixTime::now())?;
+    component_identity(cert)
+}
+
+/// The component identity a certificate's SAN URIs describe (the chain is
+/// already checked).
+fn component_identity(cert: &CertificateDer<'_>) -> Result<ComponentIdentity, VerifyError> {
     let (uris, not_after) = identity_uris(cert)?;
     let mut found = None;
     let mut labels = std::collections::BTreeMap::new();
@@ -144,10 +150,36 @@ pub fn verify_component(
     })
 }
 
+/// [`verify_component`] as of `at`: was the certificate valid then? For
+/// checking something signed in the past (an audit manifest) after the
+/// signer's short-lived certificate has expired.
+pub fn verify_component_at(
+    cert: &CertificateDer<'_>,
+    ca_cert: &CertificateDer<'_>,
+    server: bool,
+    at: OffsetDateTime,
+) -> Result<ComponentIdentity, VerifyError> {
+    let usage = if server {
+        KeyUsage::server_auth()
+    } else {
+        KeyUsage::client_auth()
+    };
+    let secs = u64::try_from(at.unix_timestamp())
+        .map_err(|_| VerifyError::Chain("a time before 1970".into()))?;
+    verify_chain(
+        cert,
+        ca_cert,
+        usage,
+        UnixTime::since_unix_epoch(std::time::Duration::from_secs(secs)),
+    )?;
+    component_identity(cert)
+}
+
 fn verify_chain(
     cert: &CertificateDer<'_>,
     ca_cert: &CertificateDer<'_>,
     usage: KeyUsage,
+    at: UnixTime,
 ) -> Result<(), VerifyError> {
     let anchor =
         webpki::anchor_from_trusted_cert(ca_cert).map_err(|e| VerifyError::Chain(e.to_string()))?;
@@ -156,7 +188,7 @@ fn verify_chain(
         webpki::ALL_VERIFICATION_ALGS,
         &[anchor],
         &[],
-        UnixTime::now(),
+        at,
         usage,
         None,
         None,

@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use base64::Engine as _;
 use limen_proto::v1::Signed;
-use limen_session::envelope::{Purpose, verify};
+use limen_session::envelope::{Purpose, verify_at};
 use rustls_pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 
@@ -249,9 +249,6 @@ pub async fn verify_bucket(
                 signature: b64.decode(&signed.signature).unwrap_or_default(),
                 signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
             };
-            if let Err(e) = verify(&envelope, Purpose::AuditManifest, internal_ca) {
-                report.problems.push(problem(format!("signature: {e}")));
-            }
             let manifest: Manifest = match serde_json::from_str(&signed.manifest) {
                 Ok(m) => m,
                 Err(e) => {
@@ -261,11 +258,40 @@ pub async fn verify_bucket(
                     break;
                 }
             };
+            // The signer's certificate lives about a day, so it is judged as of
+            // the time the manifest records, not now. (A key stolen from an
+            // expired certificate could backdate a manifest, but not make it
+            // fit the chain: the previous manifest's hash is checked below.)
+            let sealed_by = match time::OffsetDateTime::parse(
+                &manifest.created_at,
+                &time::format_description::well_known::Rfc3339,
+            ) {
+                Ok(at) => match verify_at(&envelope, Purpose::AuditManifest, internal_ca, at) {
+                    Ok((by, _)) => Some(by),
+                    Err(e) => {
+                        report.problems.push(problem(format!("signature: {e}")));
+                        None
+                    }
+                },
+                Err(e) => {
+                    report
+                        .problems
+                        .push(problem(format!("unreadable manifest time: {e}")));
+                    None
+                }
+            };
             if manifest.seq != expected_seq {
                 report.problems.push(problem(format!(
                     "sequence {} found where {expected_seq} was expected (a batch is missing)",
                     manifest.seq
                 )));
+            }
+            // The signer is the writer's own control-plane certificate: another
+            // component's valid signature doesn't make a manifest this writer's.
+            if let Some(by) = &sealed_by
+                && let Some(why) = crate::sinks::signer_problem(&by.id, &manifest.writer)
+            {
+                report.problems.push(problem(why));
             }
             if manifest.writer != writer {
                 report.problems.push(problem(format!(

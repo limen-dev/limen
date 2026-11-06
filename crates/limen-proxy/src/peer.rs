@@ -50,18 +50,49 @@ pub(crate) async fn serve(proxy: &Proxy, tls: TlsStream<TcpStream>, peer: PeerIn
         .map(|leaf| limen_ca::verify::verify_component(leaf, &internal_ca, false));
     match caller {
         Some(Ok(id)) if id.kind == ComponentKind::Proxy => {
+            if is_revoked(proxy, &id.id) {
+                tracing::warn!(peer = %id.id, "rejected peer: the proxy was revoked");
+                return;
+            }
             let routes = tonic::service::Routes::new(WorkerTunnelServer::new(Forwarder {
                 proxy: proxy.clone(),
             }))
             .prepare();
-            if let Err(e) = serve_h2(tls, peer, routes, H2Settings::default()).await {
-                tracing::debug!(error = %e, peer = %id.id, "peer connection ended with error");
+            // A revoked proxy's certificate stays valid until it expires, so
+            // the connection is dropped when the revocation arrives (with the
+            // policy snapshot), as a revoked worker's tunnel is.
+            let revoked = async {
+                let mut tick = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    tick.tick().await;
+                    if is_revoked(proxy, &id.id) {
+                        break;
+                    }
+                }
+            };
+            tokio::select! {
+                result = serve_h2(tls, peer, routes, H2Settings::default()) => {
+                    if let Err(e) = result {
+                        tracing::debug!(error = %e, peer = %id.id, "peer connection ended with error");
+                    }
+                }
+                () = revoked => {
+                    tracing::warn!(peer = %id.id, "peer connection closed: the proxy was revoked");
+                }
             }
         }
         other => {
             tracing::warn!(remote = ?peer.remote_addr, result = ?other.map(|r| r.map(|i| i.kind)), "rejected peer: not a proxy certificate");
         }
     }
+}
+
+/// Whether the cached policy snapshot lists `component_id` as revoked.
+fn is_revoked(proxy: &Proxy, component_id: &str) -> bool {
+    proxy
+        .policy
+        .latest()
+        .is_some_and(|s| s.restrictions.is_revoked(component_id))
 }
 
 struct Forwarder {
@@ -232,6 +263,10 @@ fn peer_channel(proxy: &Proxy, proxy_id: &str, address: &str) -> anyhow::Result<
         .channels
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if is_revoked(proxy, proxy_id) {
+        channels.remove(proxy_id);
+        anyhow::bail!("proxy {proxy_id} was revoked");
+    }
     if let Some(ch) = channels.get(proxy_id) {
         return Ok(ch.clone());
     }

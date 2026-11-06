@@ -72,7 +72,8 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         &config.oidc_client_id,
         config.oidc_username_claim,
         http.clone(),
-    )?;
+    )?
+    .allow_unverified_email(config.oidc_allow_unverified_email);
     let bots = bots::BotVerifier::new(
         &config.bot_audience,
         config.bot_max_token_age,
@@ -100,7 +101,13 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     let snapshot_signer: sinks::SignerSlot = Arc::default();
     // If the start fails from here on, give the id back: a restart (say, of a
     // crash-looping StatefulSet pod) must not wait out the row's 15 seconds.
-    let pipeline = match pipeline::Pipeline::open(&config, Arc::clone(&snapshot_signer)).await {
+    let pipeline = match pipeline::Pipeline::open(
+        &config,
+        Arc::clone(&snapshot_signer),
+        cas.internal.cert_der().to_vec(),
+    )
+    .await
+    {
         Ok(pipeline) => pipeline,
         Err(e) => {
             if let Err(release) = replicas::deregister(&db, &registration).await {
@@ -135,6 +142,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         registration,
         draining: Arc::default(),
         snapshot_signer,
+        revoked: Arc::default(),
     })
 }
 
@@ -174,7 +182,8 @@ fn build_console(
         &config.console_oidc_client_id,
         config.oidc_username_claim,
         http.clone(),
-    )?;
+    )?
+    .allow_unverified_email(config.oidc_allow_unverified_email);
     let oidc = console::BrowserOidc::new(
         &config.oidc_issuer,
         config.oidc_internal_url.as_deref(),

@@ -403,6 +403,14 @@ async fn broker_address(prepared: &Prepared) -> anyhow::Result<(String, Vec<Brok
             c.slot.slot
         )
     })?;
+    // The worker takes the credential to the broker it dials: only where the
+    // resource lets a cluster send it.
+    if !limen_policy::delegation::may_follow(&c.target.endpoint, &b.host, &c.target.hosts) {
+        bail!(
+            "the cluster named {} as a broker, which is outside this resource's `hosts`; list it under `kafka.hosts` if it is right",
+            b.host
+        );
+    }
     Ok((format!("{}:{}", b.host, b.port), brokers))
 }
 

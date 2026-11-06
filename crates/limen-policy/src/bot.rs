@@ -179,7 +179,7 @@ impl BotDoc {
     }
 }
 
-pub(crate) fn validate_bot(bot: &BotDoc) -> Result<(), PolicyError> {
+pub(crate) fn validate_bot(bot: &BotDoc, strict: bool) -> Result<(), PolicyError> {
     let name = &bot.metadata.name;
     validate_name("bot", name, name)?;
     let bad = |message: String| invalid("bot", name, message);
@@ -283,6 +283,14 @@ pub(crate) fn validate_bot(bot: &BotDoc) -> Result<(), PolicyError> {
             if has("ref") && !value_is("ref_protected", "true") {
                 return Err(bad(
                     "matching a gitlab `ref` also needs `ref_protected: \"true\"`: anyone can create an unprotected branch with that name"
+                        .into(),
+                ));
+            }
+            // `environment_protected` is in the token only when the job names an
+            // environment; a rule that names one must require it.
+            if strict && has("environment") && !value_is("environment_protected", "true") {
+                return Err(bad(
+                    "matching a gitlab `environment` also needs `environment_protected: \"true\"`: anyone who can run a job can name an unprotected environment"
                         .into(),
                 ));
             }

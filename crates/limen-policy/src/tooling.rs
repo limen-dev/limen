@@ -58,7 +58,7 @@ type Key = (Subject, String, Via);
 /// Who reaches which resource, as which principals, and how.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectiveAccess {
-    entries: BTreeMap<Key, (ResourceKind, BTreeSet<String>)>,
+    entries: BTreeMap<Key, (ResourceKind, BTreeSet<String>, BTreeSet<String>)>,
 }
 
 impl EffectiveAccess {
@@ -72,7 +72,7 @@ impl EffectiveAccess {
     ) -> Option<&BTreeSet<String>> {
         self.entries
             .get(&(subject.clone(), resource.to_owned(), via))
-            .map(|(_, p)| p)
+            .map(|(_, p, _)| p)
     }
 
     fn add(
@@ -81,6 +81,7 @@ impl EffectiveAccess {
         via: Via,
         res: &AccessibleResource,
         only: Option<&BTreeSet<String>>,
+        scope: BTreeSet<String>,
     ) {
         let principals: BTreeSet<String> = res
             .principals
@@ -93,7 +94,7 @@ impl EffectiveAccess {
         }
         self.entries.insert(
             (subject.clone(), res.name.clone(), via),
-            (res.kind, principals),
+            (res.kind, principals, scope),
         );
     }
 }
@@ -241,6 +242,32 @@ impl AccessDiff {
     }
 }
 
+/// Every leaf of `value` as `<side>:<path>=<leaf>`.
+fn flatten_tokens(side: &str, path: &str, value: &serde_json::Value, out: &mut BTreeSet<String>) {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                let next = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                flatten_tokens(side, &next, inner, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                flatten_tokens(side, path, item, out);
+            }
+        }
+        Value::Null => {}
+        leaf => {
+            out.insert(format!("{side}:{path}={leaf}"));
+        }
+    }
+}
+
 /// One way a resource is reached.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhoCanEntry {
@@ -284,7 +311,13 @@ impl Policy {
                 .collect();
             let subject = Subject::Group(group.clone());
             for res in held.values() {
-                access.add(&subject, Via::Standing, res, None);
+                access.add(
+                    &subject,
+                    Via::Standing,
+                    res,
+                    None,
+                    self.scope(&standing, &res.name),
+                );
             }
             for role in self.requestable_roles() {
                 let name = &role.metadata.name;
@@ -307,23 +340,80 @@ impl Policy {
                     let already = held
                         .get(&res.name)
                         .map(|h| h.principals.iter().cloned().collect());
-                    access.add(&subject, via, &res, already.as_ref());
+                    access.add(
+                        &subject,
+                        via,
+                        &res,
+                        already.as_ref(),
+                        self.scope(&with, &res.name),
+                    );
                 }
             }
         }
         for bot in self.bots() {
             let subject = Subject::Bot(bot.metadata.name.clone());
             for res in self.accessible(&bot.spec.roles) {
-                access.add(&subject, Via::Standing, &res, None);
+                access.add(
+                    &subject,
+                    Via::Standing,
+                    &res,
+                    None,
+                    self.scope(&bot.spec.roles, &res.name),
+                );
             }
         }
         for role in self.roles.values() {
             let subject = Subject::Role(role.metadata.name.clone());
             for res in self.accessible(std::slice::from_ref(&role.metadata.name)) {
-                access.add(&subject, Via::Standing, &res, None);
+                access.add(
+                    &subject,
+                    Via::Standing,
+                    &res,
+                    None,
+                    self.scope(std::slice::from_ref(&role.metadata.name), &res.name),
+                );
             }
         }
         access
+    }
+
+    /// What `roles` say about `resource` besides which principals they open:
+    /// the databases, commands, key patterns, ports and paths of each matching
+    /// rule, as `allow:<path>=<value>` and `deny:<path>=<value>` tokens. The
+    /// principal names alone miss a widening such as `databases: ["*"]`.
+    fn scope(&self, roles: &[String], resource: &str) -> BTreeSet<String> {
+        let mut tokens = BTreeSet::new();
+        let Some(resource) = self.resources.get(resource) else {
+            return tokens;
+        };
+        let roles: Vec<&crate::RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
+        for (side, rules) in [
+            (
+                "allow",
+                roles.iter().flat_map(|r| &r.spec.allow).collect::<Vec<_>>(),
+            ),
+            (
+                "deny",
+                roles.iter().flat_map(|r| &r.spec.deny).collect::<Vec<_>>(),
+            ),
+        ] {
+            for rule in rules {
+                if !crate::selector_matches(&rule.resources, resource) {
+                    continue;
+                }
+                let before = tokens.len();
+                let mut value = serde_json::to_value(rule).unwrap_or_default();
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("resources");
+                }
+                flatten_tokens(side, "", &value, &mut tokens);
+                if tokens.len() == before && side == "deny" {
+                    // A deny rule with no principals closes the whole resource.
+                    tokens.insert("deny:*".to_owned());
+                }
+            }
+        }
+        tokens
     }
 
     /// What changes in effective access going from `self` to `next`.
@@ -340,6 +430,48 @@ impl Policy {
                 before.map_or(&empty, |e| &e.1),
                 after.map_or(&empty, |e| &e.1),
             );
+            // The same principals on the same resource, but a grant that now
+            // reaches more (or less): databases, commands, key patterns, ports,
+            // paths. An allow added or a deny removed widens; the reverse narrows.
+            if let (Some(before), Some(after)) = (before, after) {
+                let (b_scope, a_scope) = (&before.2, &after.2);
+                let widens: Vec<String> = a_scope
+                    .difference(b_scope)
+                    .filter(|t| t.starts_with("allow:"))
+                    .map(|t| format!("scope +{t}"))
+                    .chain(
+                        b_scope
+                            .difference(a_scope)
+                            .filter(|t| t.starts_with("deny:"))
+                            .map(|t| format!("scope -{t}")),
+                    )
+                    .collect();
+                let narrows: Vec<String> = b_scope
+                    .difference(a_scope)
+                    .filter(|t| t.starts_with("allow:"))
+                    .map(|t| format!("scope -{t}"))
+                    .chain(
+                        a_scope
+                            .difference(b_scope)
+                            .filter(|t| t.starts_with("deny:"))
+                            .map(|t| format!("scope +{t}")),
+                    )
+                    .collect();
+                for (change, principals) in
+                    [(ChangeKind::Gain, widens), (ChangeKind::Loss, narrows)]
+                {
+                    if !principals.is_empty() {
+                        changes.push(AccessChange {
+                            change,
+                            subject: key.0.clone(),
+                            resource: key.1.clone(),
+                            kind: after.0,
+                            via: key.2,
+                            principals,
+                        });
+                    }
+                }
+            }
             let kind = after.or(before).map_or(ResourceKind::Ssh, |e| e.0);
             for (change, principals) in [
                 (ChangeKind::Gain, a.difference(b)),

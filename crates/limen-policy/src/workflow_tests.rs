@@ -615,6 +615,31 @@ fn what_can_separates_standing_from_requestable() {
     assert!(policy.what_can(&[], Some("nobody")).is_err());
 }
 
+/// Same principals, wider grant: `databases: [app]` to `['*']` opens every
+/// database to the same role. The diff used to carry principal names only and
+/// reported nothing, so a bot writer's widening was not held (ADR-0042 section 4).
+#[test]
+fn access_diff_sees_a_grant_that_widens_without_new_principals() {
+    let narrow = Policy::parse_yaml([(
+        "n.yaml",
+        BASE.replace("databases: ['*']", "databases: [app]")
+            .as_str(),
+    )])
+    .expect("narrow");
+    let wide = base();
+    let diff = narrow.access_diff(&wide);
+    assert!(diff.widens_standing(), "{}", diff.render_text());
+    assert!(
+        diff.render_text()
+            .contains("scope +allow:db.databases=\"*\"")
+    );
+    let back = wide.access_diff(&narrow);
+    // Going back reports the loss of `*`. It also reports `app` as added: a
+    // changed value cannot be told from a wider one, so it errs on the side of
+    // holding the change for a person.
+    assert!(back.changes.iter().any(|c| c.change == ChangeKind::Loss));
+}
+
 #[test]
 fn access_diff_reads_as_who_gained_what() {
     let old = base();

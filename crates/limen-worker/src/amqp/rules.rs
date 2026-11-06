@@ -52,11 +52,30 @@ pub enum InspectError {
     Malformed,
     /// A method the worker doesn't relay.
     Unsupported,
+    /// A method it relays, but not with these arguments.
+    Refused(&'static str),
 }
 
 impl From<Malformed> for InspectError {
     fn from(_: Malformed) -> Self {
         InspectError::Malformed
+    }
+}
+
+impl Inspected {
+    /// Replace an empty queue name by `last`, the queue most recently declared
+    /// on the channel, which is what the broker takes it to mean. A declare
+    /// keeps its empty name (the server chooses one).
+    pub fn resolve_queue(&mut self, last: Option<&str>) {
+        if self.action == "declare_queue" || self.queue.as_deref() != Some("") {
+            return;
+        }
+        // A server-named queue was recorded as "": it is the session's own.
+        let Some(last) = last else { return };
+        self.queue = Some(last.to_owned());
+        if let Some(first) = self.names.first_mut() {
+            last.clone_into(first);
+        }
     }
 }
 
@@ -89,6 +108,31 @@ fn forward_targets(
         .into_iter()
         .map(|(_, v)| v)
         .collect())
+}
+
+/// What a queue declare's arguments forward dead letters to. A dead-letter
+/// exchange of `""` is the default exchange, which delivers to the queue named
+/// by the dead-letter routing key, so that key is a queue the role must be
+/// able to write to. Without a key the message keeps its own routing key,
+/// which can name any queue: refused.
+fn queue_forwards(a: &mut Args<'_>, read_arguments: bool) -> Result<Vec<String>, InspectError> {
+    if !read_arguments {
+        return Ok(Vec::new());
+    }
+    let table = a.table_strings(&["x-dead-letter-exchange", "x-dead-letter-routing-key"])?;
+    let get = |key: &str| table.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    let Some(exchange) = get("x-dead-letter-exchange") else {
+        return Ok(Vec::new());
+    };
+    if !exchange.is_empty() {
+        return Ok(vec![exchange]);
+    }
+    match get("x-dead-letter-routing-key") {
+        Some(key) if !key.is_empty() => Ok(vec![exchange, key]),
+        _ => Err(InspectError::Refused(
+            "a dead-letter exchange of \"\" needs an x-dead-letter-routing-key",
+        )),
+    }
 }
 
 /// Decode what a client method on a channel asks for.
@@ -161,7 +205,7 @@ pub fn inspect(class: u16, method: u16, args: &[u8]) -> Result<Inspected, Inspec
             a.u16()?;
             let queue = a.shortstr()?;
             let bits = a.u8()?;
-            let forwards_to = forward_targets(&mut a, bits & 1 == 0, "x-dead-letter-exchange")?;
+            let forwards_to = queue_forwards(&mut a, bits & 1 == 0)?;
             Inspected {
                 action: "declare_queue",
                 needs: Some(MqClass::Configure),
@@ -819,5 +863,54 @@ mod tests {
         assert_eq!(denied["action"], "mq");
         assert_eq!(denied["operation"], "publish");
         assert_eq!(denied["reason"], "nope");
+    }
+
+    fn declare_with_dead_letter(
+        exchange: Option<&str>,
+        key: Option<&str>,
+    ) -> Result<Inspected, InspectError> {
+        let mut table = Vec::new();
+        for (name, value) in [
+            ("x-dead-letter-exchange", exchange),
+            ("x-dead-letter-routing-key", key),
+        ] {
+            if let Some(value) = value {
+                table.push(u8::try_from(name.len()).expect("short"));
+                table.extend_from_slice(name.as_bytes());
+                table.push(b'S');
+                table.extend_from_slice(&u32::try_from(value.len()).expect("short").to_be_bytes());
+                table.extend_from_slice(value.as_bytes());
+            }
+        }
+        let args = Out::new()
+            .u16(0)
+            .shortstr("work")
+            .u8(0)
+            .longstr(&table)
+            .finish();
+        inspect(ids::QUEUE, 10, &args)
+    }
+
+    #[test]
+    fn a_default_exchange_dead_letter_key_is_a_queue_the_role_must_write_to() {
+        let g = [grant(&[], &[MqClass::Configure, MqClass::Write], &["work"])];
+        let rules = Rules::new(g.to_vec());
+        // Dead letters go to the queue `secret` through the default exchange.
+        let insp = declare_with_dead_letter(Some(""), Some("secret")).expect("inspect");
+        assert!(
+            rules.check("/", &insp, &none()).is_err(),
+            "{:?}",
+            insp.forwards_to
+        );
+        // A key the role may write to is fine.
+        let insp = declare_with_dead_letter(Some(""), Some("work")).expect("inspect");
+        assert!(rules.check("/", &insp, &none()).is_ok());
+        // Without a key the dead letters keep their own routing keys.
+        assert!(matches!(
+            declare_with_dead_letter(Some(""), None),
+            Err(InspectError::Refused(_))
+        ));
+        // No dead-letter exchange: the key means nothing.
+        assert!(declare_with_dead_letter(None, Some("secret")).is_ok());
     }
 }
