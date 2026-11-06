@@ -66,14 +66,13 @@ spec:
       tags: { limen/managed: ['true'] }
 ";
 
-/// What docs/guides/discovery.md tells operators to grant, and nothing else.
+/// What docs/guides/discovery.md tells operators to grant.
 const DISCOVERY_POLICY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Resource":"*","Action":[
 "ec2:DescribeInstances","ec2:GetConsoleOutput",
 "rds:DescribeDBInstances","rds:DescribeDBClusters","rds:ListTagsForResource",
 "redshift:DescribeClusters",
 "elasticache:DescribeReplicationGroups","elasticache:ListTagsForResource",
 "eks:ListClusters","eks:DescribeCluster"]}]}"#;
-// (The EKS actions are listed for completeness; the Moto that checks policies can't serve EKS.)
 
 const ADMIN_POLICY: &str =
     r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}"#;
@@ -375,7 +374,6 @@ async fn discovery_reads_what_an_aws_emulator_serves() {
     let aws = Aws::new(Some(endpoint)).expect("client");
     let admin = bootstrap_admin(&aws).await;
 
-    // ---- the discovery role: describe-only
     iam(
         &aws,
         &admin,
@@ -400,7 +398,7 @@ async fn discovery_reads_what_an_aws_emulator_serves() {
 
     let (vm_id, address) = seed(&aws, &admin).await;
 
-    // ---- the worker's own path: AssumeRole, then scan with the role's credentials
+    // The worker's path: assume the role, scan with its credentials.
     let (role, _) = aws
         .assume_role(&admin, ROLE, REGION)
         .await
@@ -449,7 +447,7 @@ async fn discovery_reads_what_an_aws_emulator_serves() {
     assert_eq!(ec.len(), 1, "{ec:?}");
     assert_eq!(ec[0].provider_id, "sessions");
 
-    // ---- the role is enough for every scan, and no more than describe
+    // The role can read but not launch.
     let denied = aws
         .query(
             &role,

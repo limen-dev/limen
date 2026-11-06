@@ -26,8 +26,7 @@ LIMEN_TEST_S3_ENDPOINT=http://localhost:8333 \
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 
-# Discovery also runs against two Moto AWS emulators (emulator-tested, not verified against AWS).
-# The first (IAM mode) must be fresh for every run, so recreate it each time:
+# Discovery runs against two Moto AWS emulators; recreate them for every run:
 docker compose --project-directory deploy/compose -f deploy/compose/stacks/aws-emulator.yml up -d --force-recreate
 LIMEN_TEST_AWS_ENDPOINT=http://localhost:15000 LIMEN_TEST_AWS_OPEN_ENDPOINT=http://localhost:15001 \
   cargo test -p limen-worker --lib discovery::emulator
