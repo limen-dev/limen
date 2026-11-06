@@ -1,6 +1,5 @@
-# Two Moto AWS emulators for the discovery tests (crates/limen-worker/src/discovery/emulator_tests.rs,
-# which says how to run them and why there are two). A test fixture, not a dev stack: setup.sh
-# doesn't start it. `aws` must be recreated before each run (`up -d --force-recreate`).
+# Moto AWS emulators for the discovery tests; emulator_tests.rs says how to run them.
+# A test fixture: setup.sh doesn't start it. Recreate `aws` before each run.
 name: limen-aws-emulator
 services:
   aws:

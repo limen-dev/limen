@@ -115,7 +115,7 @@ Limen is one stack, and everything it connects to or reports to is another: a co
 | `tracing` | `stacks/tracing.yml` | `jaeger-dev` (http://localhost:16686, memory storage); components export via `LIMEN_OTLP_ENDPOINT` |
 | `bots` | `stacks/bots.yml` | `ci-issuer-fake-dev`; the control plane trusts its plain-http issuer |
 
-`stacks/aws-emulator.yml` is not a stack: it is a test fixture (two Moto AWS emulators for the discovery tests) that `setup.sh` doesn't start. Its header says how to run it.
+`stacks/aws-emulator.yml` is a test fixture (Moto AWS emulators for the discovery tests), not a stack: `setup.sh` doesn't start it.
 
 Limen itself isn't an environment (one deployment reaches all of them), so its containers have plain names. Stand-in targets carry the environment they represent, `-dev` here. A second copy beside the dev stack (scaled, or a demo) uses its own environment name: `limen-proxy-scale`, `postgres-orders-dbdemo`. `limen-*` images are built from this repository (`deploy/docker/Dockerfile`); others take their version from `.env`.
 

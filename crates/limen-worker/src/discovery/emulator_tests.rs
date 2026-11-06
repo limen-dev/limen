@@ -11,24 +11,21 @@
 //!   cargo test -p limen-worker --lib discovery::emulator
 //! ```
 //!
-//! **This is emulator-tested, not verified against AWS** (#123). It proves the
-//! worker's requests are accepted by a second implementation of the APIs, that
-//! it reads answers shaped by code other than our own fake, that Moto's IAM
-//! mode refuses a request signed with the wrong secret, and that the
-//! describe-only role from the discovery guide is enough for the EC2, RDS,
-//! Redshift and ElastiCache scans (dropping one permission fails a scan) and
-//! is denied `ec2:RunInstances`. It doesn't prove what the real services do:
-//! Moto is lenient about input, its console output has no SSH host keys, and
-//! it has no real engines behind the endpoints.
+//! **Emulator-tested, not verified against AWS** (#123). It shows that another
+//! implementation of the APIs accepts the worker's signed requests (Moto's IAM
+//! mode refuses a wrong secret), that the worker reads answers it didn't shape
+//! itself, and that the describe-only role from the discovery guide is enough
+//! for the EC2, RDS, Redshift and ElastiCache scans and can't launch an
+//! instance. Moto is lenient about input, has no real engines, and its console
+//! output has no SSH host keys.
 //!
-//! EKS is the exception: Moto answers botocore's own signed EKS `GET`s with
-//! `SignatureDoesNotMatch`, so EKS is read from a second Moto without IAM mode.
-//! Its signing and the role's EKS permissions are not covered here.
+//! EKS is read from a second Moto without IAM mode: the first answers even
+//! botocore's signed EKS `GET`s with `SignatureDoesNotMatch`. EKS signing and
+//! the role's EKS permissions are therefore not covered.
 //!
-//! Moto's IAM mode lets the first `INITIAL_NO_AUTH_ACTION_COUNT` calls
-//! through unauthenticated (we use exactly the three that create the admin
-//! user), then checks every signature. Nothing resets that counter but a
-//! restart, so the emulator must be fresh for each run.
+//! The IAM-mode Moto lets the first `INITIAL_NO_AUTH_ACTION_COUNT` calls
+//! through unauthenticated (exactly the three that create the admin user) and
+//! only a restart resets it, so it must be fresh for each run.
 
 use limen_core::secret::Secret;
 use limen_policy::discovery::Source;
@@ -66,7 +63,7 @@ spec:
       tags: { limen/managed: ['true'] }
 ";
 
-/// What docs/guides/discovery.md tells operators to grant.
+/// The permissions docs/guides/discovery.md tells operators to grant.
 const DISCOVERY_POLICY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Resource":"*","Action":[
 "ec2:DescribeInstances","ec2:GetConsoleOutput",
 "rds:DescribeDBInstances","rds:DescribeDBClusters","rds:ListTagsForResource",
@@ -181,8 +178,7 @@ async fn iam(aws: &Aws, c: &Credentials, action: &str, params: Vec<(String, Stri
         .unwrap_or_else(|e| panic!("iam {action}: {e}"))
 }
 
-/// The admin user, created inside the emulator's unauthenticated window; from the
-/// next call on, every signature is checked.
+/// The admin user, created in the emulator's unauthenticated window.
 async fn bootstrap_admin(aws: &Aws) -> Credentials {
     let nobody = Credentials {
         access_key: "AKIAUNKNOWN".into(),
@@ -229,7 +225,6 @@ async fn bootstrap_admin(aws: &Aws) -> Credentials {
     )
     .await;
 
-    // From here on every call is checked. Signing with the wrong key fails.
     let wrong = Credentials {
         secret_key: Secret::new("not-the-secret".into()),
         ..admin.clone()
@@ -249,8 +244,7 @@ async fn bootstrap_admin(aws: &Aws) -> Credentials {
     admin
 }
 
-/// One managed resource of each kind (and one unmanaged instance); returns the managed
-/// instance's id and private address.
+/// One managed resource of each kind; returns the managed instance's id and address.
 async fn seed(aws: &Aws, admin: &Credentials) -> (String, String) {
     let mut run = vec![
         p("ImageId", "ami-12c6146b"),
@@ -398,7 +392,6 @@ async fn discovery_reads_what_an_aws_emulator_serves() {
 
     let (vm_id, address) = seed(&aws, &admin).await;
 
-    // The worker's path: assume the role, scan with its credentials.
     let (role, _) = aws
         .assume_role(&admin, ROLE, REGION)
         .await
@@ -447,7 +440,6 @@ async fn discovery_reads_what_an_aws_emulator_serves() {
     assert_eq!(ec.len(), 1, "{ec:?}");
     assert_eq!(ec[0].provider_id, "sessions");
 
-    // The role can read but not launch.
     let denied = aws
         .query(
             &role,
@@ -470,7 +462,6 @@ fn err_is_denied(e: &str) -> bool {
     e.contains("UnauthorizedOperation") || e.contains("AccessDenied") || e.contains("403")
 }
 
-/// EKS, from a Moto that doesn't check signatures (see the header).
 #[tokio::test]
 async fn eks_clusters_are_read_from_an_aws_emulator() {
     let Ok(endpoint) = std::env::var("LIMEN_TEST_AWS_OPEN_ENDPOINT") else {
