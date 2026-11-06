@@ -112,6 +112,21 @@ pub fn hint(message: &str) {
     anstream::println!("{}", dim(&format!("  {message}")));
 }
 
+/// Untrusted text for one line of terminal output: control characters
+/// (including escape sequences) become spaces and the length is bounded.
+#[must_use]
+pub fn plain_line(s: &str, max_chars: usize) -> String {
+    let mut out: String = s
+        .chars()
+        .take(max_chars)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if s.chars().nth(max_chars).is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// The error and its causes, with the usual fixes as hints.
 pub fn error(err: &anyhow::Error) {
     anstream::eprintln!("{}", render_error(err));

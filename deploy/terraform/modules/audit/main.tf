@@ -50,7 +50,7 @@ resource "aws_s3_bucket_public_access_block" "audit" {
 }
 
 # Overwrites keep the previous version, so a replaced batch is still found
-# (and `limen-audit-verify` reports the hash mismatch).
+# (and `limen audit verify` reports the hash mismatch).
 resource "aws_s3_bucket_versioning" "audit" {
   bucket = aws_s3_bucket.audit.id
   versioning_configuration {

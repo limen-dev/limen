@@ -27,7 +27,15 @@ async fn main() -> anyhow::Result<()> {
         let _ = tx.send(true);
     });
     let listener = tokio::net::TcpListener::bind(args.config.listen).await?;
-    let (proxy, creds_tx) = Proxy::start(args.config).await?;
+    // Starting can wait for the control plane to be upgraded (ADR-0045): a stop signal ends that wait.
+    let mut stop = rx.clone();
+    let (proxy, creds_tx) = tokio::select! {
+        started = Proxy::start(args.config) => started?,
+        _ = stop.wait_for(|stopped| *stopped) => {
+            tracing::info!("stopped before starting");
+            return Ok(());
+        }
+    };
     limen_proxy::run(proxy, creds_tx, listener, rx).await?;
     tracing::info!("proxy stopped");
     Ok(())

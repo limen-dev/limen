@@ -56,6 +56,11 @@ pub enum BodyKind {
     Query,
     Bulk,
     Msearch,
+    /// `_search/template`: a `source` (JSON text or an object) or a stored
+    /// template `id`, and `params`.
+    Template,
+    /// `_msearch/template`: header lines, then template bodies.
+    MsearchTemplate,
     /// `_mget` and `_mtermvectors`: `docs[]._index`.
     Mget,
     Reindex,
@@ -125,6 +130,7 @@ fn pct_decode(s: &str, plus_is_space: bool) -> Result<String, Refused> {
                 let hex = b
                     .get(i + 1..i + 3)
                     .and_then(|h| std::str::from_utf8(h).ok())
+                    .filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))
                     .and_then(|h| u8::from_str_radix(h, 16).ok());
                 let Some(v) = hex else {
                     return refuse("the request path has an invalid percent escape");
@@ -378,12 +384,15 @@ fn dispatch(m: &str, segs: &[String]) -> Result<Route, Refused> {
             route("search", Read, idx()).body(BodyKind::Query)
         }
         (Some("_search"), Some("template"), None) if search_methods(m) => {
-            route("search", Read, idx()).body(BodyKind::Query)
+            route("search", Read, idx()).body(BodyKind::Template)
         }
         (Some("_search"), Some("point_in_time"), None) if m == "POST" => route("pit", Read, idx()),
         (Some("_pit"), None, _) if m == "POST" => route("pit", Read, idx()),
-        (Some("_msearch"), None | Some("template"), None) if search_methods(m) => {
+        (Some("_msearch"), None, None) if search_methods(m) => {
             route("msearch", Read, idx()).body(BodyKind::Msearch)
+        }
+        (Some("_msearch"), Some("template"), None) if search_methods(m) => {
+            route("msearch", Read, idx()).body(BodyKind::MsearchTemplate)
         }
         (Some("_count" | "_field_caps" | "_rank_eval" | "_knn_search"), None, _)
             if search_methods(m) =>
@@ -441,15 +450,18 @@ fn top_level(m: &str, segs: &[String], first: &str) -> Route {
             route("search", Read, Scope::All).body(BodyKind::Query)
         }
         ("_search", Some("template"), None) if search_methods(m) => {
-            route("search", Read, Scope::All).body(BodyKind::Query)
+            route("search", Read, Scope::All).body(BodyKind::Template)
         }
         ("_search", Some("scroll"), _) if matches!(m, "GET" | "POST" | "DELETE") => {
             route("scroll", Read, Scope::None)
         }
         ("_search", Some("point_in_time"), _) if m == "DELETE" => route("pit", Read, Scope::None),
         ("_pit", None, _) if m == "DELETE" => route("pit", Read, Scope::None),
-        ("_msearch", None | Some("template"), None) if search_methods(m) => {
+        ("_msearch", None, None) if search_methods(m) => {
             route("msearch", Read, Scope::All).body(BodyKind::Msearch)
+        }
+        ("_msearch", Some("template"), None) if search_methods(m) => {
+            route("msearch", Read, Scope::All).body(BodyKind::MsearchTemplate)
         }
         ("_count" | "_field_caps" | "_rank_eval", None, _) if search_methods(m) => {
             route("search", Read, Scope::All).body(BodyKind::Query)
@@ -657,6 +669,98 @@ fn walk_refs(v: &Value, named: &mut Named, depth: usize) -> Result<(), Refused> 
     Ok(())
 }
 
+/// Look in a search template request for references to other indices. The
+/// `source` is JSON text whose structure is read like a query body; text
+/// that isn't JSON (mustache sections that build structure) can't be judged
+/// and is refused. A stored template (`id`) can't be seen at all, so it
+/// counts as naming every index.
+fn walk_template(v: &Value, named: &mut Named) -> Result<(), Refused> {
+    let Value::Object(map) = v else {
+        return if v.is_null() {
+            Ok(())
+        } else {
+            refuse("a search template request must be an object")
+        };
+    };
+    if map.contains_key("id") {
+        named.all = true;
+    }
+    // What the source names, collected apart: a placeholder at an index
+    // position is rendered by the engine, so whatever it will be can't be
+    // judged against the grant.
+    let mut found = Named::default();
+    match map.get("source") {
+        Some(Value::String(text)) => {
+            let parsed = serde_json::from_str::<Value>(text).or_else(|_| {
+                refuse("a search template's source must be valid JSON (mustache sections that build JSON can't be checked)")
+            })?;
+            plain_tags_only(&parsed, 0)?;
+            walk_refs(&parsed, &mut found, 0)?;
+        }
+        Some(other) => {
+            plain_tags_only(other, 0)?;
+            walk_refs(other, &mut found, 0)?;
+        }
+        None => {}
+    }
+    if found.names.iter().any(|n| n.contains("{{")) {
+        return refuse("a search template names an index through a placeholder");
+    }
+    named.all |= found.all;
+    named.names.extend(found.names);
+    if let Some(params) = map.get("params") {
+        walk_refs(params, named, 0)?;
+    }
+    Ok(())
+}
+
+/// The engine renders mustache over a template's whole text, keys and string
+/// values alike. Only plain `{{name}}` tags (escaped, in a value) are left to
+/// pass; anything that could build structure (`{{{x}}}`, `{{&x}}`, sections,
+/// delimiter changes) or a key made by a tag can't be read.
+fn plain_tags_only(v: &Value, depth: usize) -> Result<(), Refused> {
+    if depth > 64 {
+        return refuse("the request body is nested too deeply");
+    }
+    match v {
+        Value::Object(map) => {
+            for (k, child) in map {
+                if k.contains("{{") {
+                    return refuse("a search template builds a key with a placeholder");
+                }
+                plain_tags_only(child, depth + 1)?;
+            }
+        }
+        Value::Array(a) => {
+            for child in a {
+                plain_tags_only(child, depth + 1)?;
+            }
+        }
+        Value::String(text) => {
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find("{{") {
+                let after = &rest[at + 2..];
+                let Some(end) = after.find("}}") else {
+                    return refuse("a search template has an unclosed placeholder");
+                };
+                let name = after[..end].trim();
+                let plain = !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+                if !plain || after[end..].starts_with("}}}") {
+                    return refuse(
+                        "a search template uses a placeholder form that can't be checked",
+                    );
+                }
+                rest = &after[end + 2..];
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn parse_json(bytes: &[u8]) -> Result<Value, Refused> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Ok(Value::Null);
@@ -690,6 +794,9 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
         BodyKind::None => {}
         BodyKind::Query => {
             walk_refs(&parse_json(body)?, &mut facts.named, 0)?;
+        }
+        BodyKind::Template => {
+            walk_template(&parse_json(body)?, &mut facts.named)?;
         }
         BodyKind::Bulk => {
             let default_index: Option<&Vec<String>> = match &shape.scope {
@@ -750,7 +857,7 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
             }
             facts.named = named;
         }
-        BodyKind::Msearch => {
+        BodyKind::Msearch | BodyKind::MsearchTemplate => {
             let mut named = Named::default();
             let mut lines = ndjson_lines(body).into_iter();
             while let Some(header) = lines.next() {
@@ -762,15 +869,24 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
                 let Some(search) = lines.next() else {
                     return refuse("an _msearch header has no body line");
                 };
-                match h.get("index") {
-                    Some(v) => {
+                // Elasticsearch accepts `indices` as well as `index`; both count.
+                let mut listed = false;
+                for key in ["index", "indices"] {
+                    if let Some(v) = h.get(key) {
+                        listed = true;
                         for n in token_names(v, "an _msearch index")? {
                             add_expr(&mut named, &n)?;
                         }
                     }
-                    None => named.add_scope(&shape.scope),
                 }
-                walk_refs(&parse_json(search)?, &mut named, 0)?;
+                if !listed {
+                    named.add_scope(&shape.scope);
+                }
+                if shape.body == BodyKind::MsearchTemplate {
+                    walk_template(&parse_json(search)?, &mut named)?;
+                } else {
+                    walk_refs(&parse_json(search)?, &mut named, 0)?;
+                }
                 facts.items += 1;
             }
             if facts.items == 0 {
@@ -813,6 +929,23 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
             };
             for n in token_names(src_index, "source.index")? {
                 add_expr(&mut named, &n)?;
+            }
+            // The query can hold lookups into other indices.
+            if let Some(q) = source.get("query") {
+                walk_refs(q, &mut named, 0)?;
+            }
+            // A script or an ingest pipeline can rewrite `_index` (a script
+            // with `ctx._index`, a `set` processor), so the destination the
+            // path names is not the one written to. Neither can be judged.
+            if v.get("script").is_some() || v.pointer("/dest/script").is_some() {
+                return refuse(
+                    "_reindex with a script is not allowed: it could change the destination index",
+                );
+            }
+            if v.pointer("/dest/pipeline").is_some() {
+                return refuse(
+                    "_reindex with dest.pipeline is not allowed: a pipeline could change the destination index",
+                );
             }
             let Some(dest) = v.pointer("/dest/index") else {
                 return refuse("_reindex needs dest.index");
@@ -1596,5 +1729,94 @@ mod tests {
         let bomb = enc.finish().expect("finish");
         assert!(bomb.len() < 64 * 1024);
         assert!(decode_body(&bomb, Some("gzip"), 1024 * 1024).is_err());
+    }
+
+    #[test]
+    fn search_templates_are_read_like_queries() {
+        let g = grant(&[Read], &["logs-*"]);
+        let ok = br#"{"source":"{\"query\":{\"match\":{\"f\":\"{{x}}\"}}}","params":{"x":"a"}}"#;
+        assert!(allowed(&g, "POST", "/logs-1/_search/template", ok).is_ok());
+        // A terms lookup hidden in the source text.
+        let lookup = br#"{"source":"{\"query\":{\"terms\":{\"u\":{\"index\":\"orders\",\"id\":\"1\",\"path\":\"p\"}}}}","params":{}}"#;
+        assert!(allowed(&g, "POST", "/logs-1/_search/template", lookup).is_err());
+        // The same as an object.
+        let object =
+            br#"{"source":{"query":{"terms":{"u":{"index":"orders","id":"1","path":"p"}}}}}"#;
+        assert!(allowed(&g, "POST", "/logs-1/_search/template", object).is_err());
+        // Source that builds JSON with mustache can't be judged.
+        let built = br#"{"source":"{\"query\":{{#toJson}}q{{/toJson}}}","params":{"q":{}}}"#;
+        assert!(allowed(&g, "POST", "/logs-1/_search/template", built).is_err());
+        // A stored template can't be seen: it needs a grant that covers everything.
+        let stored = br#"{"id":"t1","params":{}}"#;
+        assert!(allowed(&g, "POST", "/logs-1/_search/template", stored).is_err());
+        let all = grant(&[Read], &["*"]);
+        assert!(allowed(&all, "POST", "/logs-1/_search/template", stored).is_ok());
+        // The same through _msearch/template.
+        let multi = b"{\"index\":\"logs-1\"}\n{\"source\":\"{\\\"query\\\":{\\\"terms\\\":{\\\"u\\\":{\\\"index\\\":\\\"orders\\\",\\\"id\\\":\\\"1\\\",\\\"path\\\":\\\"p\\\"}}}}\"}\n";
+        assert!(allowed(&g, "POST", "/_msearch/template", multi).is_err());
+        assert!(
+            allowed(
+                &g,
+                "POST",
+                "/logs-1/_msearch/template",
+                b"{}\n{\"id\":\"t\"}\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn template_placeholders_cannot_build_what_the_grant_checks() {
+        let g = grant(&[Read], &["logs-*"]);
+        let go = |body: &[u8]| allowed(&g, "POST", "/logs-1/_search/template", body);
+        // A key made by a tag, in both forms of source.
+        assert!(go(br#"{"source":"{\"query\":{\"{{k}}\":{\"u\":{\"index\":\"orders\",\"id\":\"1\",\"path\":\"p\"}}}}","params":{"k":"terms"}}"#).is_err());
+        assert!(go(br#"{"source":{"query":{"{{k}}":{"u":{"index":"orders","id":"1","path":"p"}}}},"params":{"k":"terms"}}"#).is_err());
+        // Tags that insert unescaped text or sections.
+        for tag in [
+            "{{{x}}}",
+            "{{&x}}",
+            "{{#x}}y{{/x}}",
+            "{{=<% %>=}}",
+            "{{^x}}y{{/x}}",
+            "{{>p}}",
+        ] {
+            let body = format!(
+                r#"{{"source":{{"query":{{"match":{{"f":"{}"}}}}}},"params":{{}}}}"#,
+                tag.replace('"', "\\\"")
+            );
+            assert!(go(body.as_bytes()).is_err(), "{tag}");
+        }
+        // A placeholder where an index goes.
+        let at_index = br#"{"source":{"query":{"terms":{"u":{"index":"{{i}}","id":"1","path":"p"}}}},"params":{"i":".security"}}"#;
+        assert!(go(at_index).is_err());
+        let star = grant(&[Read], &["*"]);
+        assert!(allowed(&star, "POST", "/logs-1/_search/template", at_index).is_err());
+        // A plain placeholder in a value is fine.
+        assert!(
+            go(br#"{"source":{"query":{"match":{"f":"{{ x }}"}}},"params":{"x":"a"}}"#).is_ok()
+        );
+    }
+
+    #[test]
+    fn msearch_headers_may_say_indices() {
+        let g = grant(&[Read], &["logs-*"]);
+        let bad = b"{\"indices\":\"orders\"}\n{}\n";
+        assert!(allowed(&g, "POST", "/logs-1/_msearch", bad).is_err());
+        let ok = b"{\"indices\":[\"logs-2\"]}\n{}\n";
+        assert!(allowed(&g, "POST", "/_msearch", ok).is_ok());
+    }
+
+    #[test]
+    fn reindex_query_script_and_pipeline_cannot_reach_other_indices() {
+        let g = grant(&[Read, Write], &["logs-*"]);
+        let go = |body: &[u8]| allowed(&g, "POST", "/_reindex", body);
+        assert!(go(br#"{"source":{"index":"logs-1","query":{"match_all":{}}},"dest":{"index":"logs-2"}}"#).is_ok());
+        assert!(go(br#"{"source":{"index":"logs-1","query":{"terms":{"u":{"index":"orders","id":"1","path":"p"}}}},"dest":{"index":"logs-2"}}"#).is_err());
+        assert!(go(br#"{"source":{"index":"logs-1"},"dest":{"index":"logs-2"},"script":{"source":"ctx._index='orders'"}}"#).is_err());
+        assert!(
+            go(br#"{"source":{"index":"logs-1"},"dest":{"index":"logs-2","pipeline":"p"}}"#)
+                .is_err()
+        );
     }
 }

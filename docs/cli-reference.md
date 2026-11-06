@@ -333,6 +333,24 @@ Options:
 - `--limit <LIMIT>`: The most hits to return (up to 200). Default: `50`.
 - `--json`: Output JSON instead of text.
 
+#### `limen audit verify`
+
+Check that the audit trail is intact: signed, chained, with nothing missing or altered.
+
+For auditors and admins (`limen:auditor` or `limen:admin`). Limen decides who may, records that you did, and gives your session short-lived read-only access to the audit bucket. The check itself runs on your machine, against the CA you pinned at login, so it does not rest on Limen's word. Exits 2 if anything fails.
+
+With --evidence it checks a pack from `limen admin evidence` offline instead, with no login: give it the pack and the CA certificate.
+
+```text
+Usage: limen audit verify [OPTIONS]
+```
+
+Options:
+
+- `--evidence <FILE>`: Check a pack from `limen admin evidence`, offline.
+- `--audit-events <FILE>`: With --evidence: an audit JSONL file; the pack's export event must be in it.
+- `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM). Defaults to the CA pinned when you logged in. Needed with --evidence if you are not logged in.
+
 ### `limen policy`
 
 Ask a policy questions: test it, who can reach what, what changes
@@ -460,6 +478,16 @@ Options:
 
 - `--all`: End all of them.
 
+### `limen mcp`
+
+Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents (ADR-0032, spike 0).
+
+Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+
+```text
+Usage: limen mcp [OPTIONS]
+```
+
 ### `limen completions`
 
 Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`
@@ -522,6 +550,14 @@ Options:
 - `--install`: Include Limen's generated ssh_config from ~/.ssh/config, kept up to date on every login.
 - `--uninstall`: Remove the Include from ~/.ssh/config and delete the generated ssh_config.
 - `--file <FILE>`: The OpenSSH config to change, instead of ~/.ssh/config.
+
+#### `limen config mcp`
+
+Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files
+
+```text
+Usage: limen config mcp [OPTIONS]
+```
 
 ### `limen db`
 

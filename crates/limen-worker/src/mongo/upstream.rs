@@ -21,6 +21,8 @@ use crate::db::target::{BoxedIo, Target};
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Most iterations a server may ask SCRAM for. MongoDB defaults to 15,000.
 const MAX_ITERATIONS: u32 = 1_000_000;
+/// Fewest iterations accepted (MongoDB's own minimum is 4096 for SCRAM-SHA-1).
+const MIN_ITERATIONS: u32 = 4096;
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpstreamError {
@@ -267,7 +269,7 @@ impl Scram {
             return Err(protocol("the server's SCRAM nonce doesn't extend ours"));
         }
         let rounds = std::num::NonZeroU32::new(iterations)
-            .filter(|n| n.get() <= MAX_ITERATIONS)
+            .filter(|n| (MIN_ITERATIONS..=MAX_ITERATIONS).contains(&n.get()))
             .ok_or_else(|| {
                 protocol("the server asked for an unreasonable SCRAM iteration count")
             })?;
@@ -413,6 +415,13 @@ pub async fn connect(
         if !info.writable_primary {
             match (&info.primary, hop) {
                 (Some(primary), 0) if *primary != target.endpoint => {
+                    // The worker takes the credential along: only where the
+                    // resource lets a server send it.
+                    if !target.may_follow(primary) {
+                        return Err(protocol(format!(
+                            "the server named {primary} as the primary, which is outside this resource's `hosts`; list it under `mongodb.hosts` if it is right"
+                        )));
+                    }
                     target = target.with_endpoint(primary).map_err(protocol)?;
                     continue;
                 }

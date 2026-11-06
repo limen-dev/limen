@@ -50,24 +50,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.please.outputs.pr_branch }}
-          persist-credentials: true
+          persist-credentials: false
 
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
 
       - name: Refresh the lock file
         run: cargo update --workspace
 
+      # A commit made with git in the runner is unsigned. One made through the GraphQL API
+      # is signed by GitHub, and the repository requires verified signatures.
       - name: Commit it, if it changed
         env:
+          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.please.outputs.pr_branch }}
         run: |
           set -euo pipefail
           if git diff --quiet -- Cargo.lock; then echo "Cargo.lock is current"; exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git commit -m "chore: refresh Cargo.lock for the release"
-          git push origin "HEAD:${BRANCH}"
+          # The lock file is too big for an argument, so the request goes in as a file.
+          base64 -w0 Cargo.lock > Cargo.lock.b64
+          jq -n --rawfile contents Cargo.lock.b64 \
+            --arg repo "$GITHUB_REPOSITORY" --arg branch "$BRANCH" --arg head "$(git rev-parse HEAD)" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $head,
+                message: {headline: "chore: refresh Cargo.lock for the release"},
+                fileChanges: {additions: [{path: "Cargo.lock", contents: ($contents | rtrimstr("\n"))}]}
+              }}}' > request.json
+          gh api graphql --input request.json
 
       - name: Run CI on the release branch
         env:
@@ -159,7 +169,7 @@ jobs:
           set -euo pipefail
           name="limen-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          for bin in limen limen-control-plane limen-proxy limen-worker limen-audit-verify; do
+          for bin in limen limen-control-plane limen-proxy limen-worker; do
             cp "target/${{ matrix.target }}/release/${bin}" "dist/${name}/"
           done
           cp LICENSE README.md "dist/${name}/"

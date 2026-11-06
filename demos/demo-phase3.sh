@@ -34,10 +34,9 @@ wait_for() {
 trino() { "${compose[@]}" exec -T trino trino --output-format CSV_UNQUOTED --execute "$1" 2>/dev/null; }
 # The panel or alert query with this title, with Grafana's macros filled in.
 query() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$root/deploy/grafana/queries.json" "$1"; }
-verify() {
-  "${compose[@]}" exec -T control-plane limen-audit-verify \
-    --ca-file /var/lib/limen/ca-public/internal-ca.pem "$@" 2>&1
-}
+# Verification runs from the host as an admin, in its own profile: Limen hands
+# it read-only access to the bucket, and the check runs here.
+verify() { LIMEN_HOME="$state/verifier-home" limen audit verify "$@" 2>&1; }
 # Signed with the dev identity in s3/s3.json.
 s3curl() { curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user dev:dev-only-secret "$@"; }
 s3_keys() { s3curl "$s3?list-type=2&prefix=$1" | grep -o '<Key>[^<]*</Key>' | sed 's/<[^>]*>//g'; }
@@ -55,6 +54,7 @@ mkdir -p "$state"
 "${compose[@]}" cp control-plane:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
+rm -rf "$state/verifier-home"; LIMEN_HOME="$state/verifier-home" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase3 >/dev/null
 wait_for "worker tunnels" sh -c "curl -sf http://localhost:3444/tunnels | grep -q worker_id"
 sleep 11 # proxy and worker refresh policy every 10s
@@ -107,7 +107,7 @@ s3_keys recordings/ | grep -q '\.cast$' || fail "no recordings in S3"
 echo "  $(s3_keys recordings/ | wc -l | tr -d ' ') recordings in S3"
 verify | tee "$state/verify.txt"
 grep -q '^OK' "$state/verify.txt" || fail "audit trail should verify"
-pass "limen-audit-verify: chain intact"
+pass "limen audit verify: chain intact"
 
 step "Tamper with a batch: verification catches it"
 # curl's SigV4 signs "=" in the path only when it's percent-encoded.

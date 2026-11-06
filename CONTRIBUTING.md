@@ -25,6 +25,11 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
 LIMEN_TEST_S3_ENDPOINT=http://localhost:8333 \
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
+
+# Discovery runs against two Moto AWS emulators; recreate them for every run:
+docker compose --project-directory deploy/compose -f deploy/compose/stacks/aws-emulator.yml up -d --force-recreate
+LIMEN_TEST_AWS_ENDPOINT=http://localhost:15000 LIMEN_TEST_AWS_OPEN_ENDPOINT=http://localhost:15001 \
+  cargo test -p limen-worker --lib discovery::emulator
 ```
 
 The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade).

@@ -1,0 +1,31 @@
+/* Moving between pages: the homepage and the docs slide, one doc to the next rises in.
+   Native cross-document view transitions: no router, no framework. A browser that does not
+   support them just navigates as before. The direction is chosen in public/page-transitions.js. */
+@view-transition { navigation: auto; }
+
+::view-transition-group(root) { animation-duration: 0.4s; }
+
+/* the homepage to the docs: the page goes left, the docs come in from the right */
+:root:active-view-transition-type(to-docs)::view-transition-old(root) { animation: vt-out-left 0.3s cubic-bezier(0.4, 0, 0.6, 1) both; }
+:root:active-view-transition-type(to-docs)::view-transition-new(root) { animation: vt-in-right 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+/* the docs back to the homepage: the other way */
+:root:active-view-transition-type(to-home)::view-transition-old(root) { animation: vt-out-right 0.3s cubic-bezier(0.4, 0, 0.6, 1) both; }
+:root:active-view-transition-type(to-home)::view-transition-new(root) { animation: vt-in-left 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+/* one doc to another: a short fade and a small rise, with the header and sidebar held still */
+:root:active-view-transition-type(doc-to-doc)::view-transition-old(root) { animation: vt-fade-out 0.16s ease-in both; }
+:root:active-view-transition-type(doc-to-doc)::view-transition-new(root) { animation: vt-rise-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) 0.05s both; }
+/* a reload, or the same page again */
+:root:active-view-transition-type(none)::view-transition-group(*),
+:root:active-view-transition-type(none)::view-transition-old(*),
+:root:active-view-transition-type(none)::view-transition-new(*) { animation: none; }
+
+@keyframes vt-out-left { to { opacity: 0; transform: translateX(-9%); } }
+@keyframes vt-in-right { from { opacity: 0; transform: translateX(9%); } }
+@keyframes vt-out-right { to { opacity: 0; transform: translateX(9%); } }
+@keyframes vt-in-left { from { opacity: 0; transform: translateX(-9%); } }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-rise-in { from { opacity: 0; transform: translateY(10px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}

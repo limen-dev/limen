@@ -13,6 +13,7 @@ Runbooks are added as each component ships. Rows without a link are planned:
 | [SSH target onboarding (`TrustedUserCAKeys`)](ssh-target-onboarding.md) | 2 ✅ |
 | [Audit pipeline backlog / spool full](audit-spool-full.md) | 3 ✅ |
 | [Releasing](releasing.md) | ADR-0024; first release pending |
+| [Upgrading a deployment, and rolling back](upgrading.md) | ADR-0024 |
 | [Scaling out, replacing, and upgrading copies](scale-out.md) | 5 ✅ |
 | [Verifying the audit hash chain](audit-verify.md) | 3 ✅ |
 | [Onboarding a database; role bootstrap and drift](database-onboarding.md) | 6 ✅ |

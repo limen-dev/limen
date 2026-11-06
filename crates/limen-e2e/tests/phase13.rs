@@ -783,7 +783,8 @@ impl Browser {
     }
 
     async fn get_once(&mut self, url: &str) -> Page {
-        let req = self.http.get(url);
+        // A browser says where a request comes from; the console checks it on GETs with effects.
+        let req = self.http.get(url).header("sec-fetch-site", "same-origin");
         self.send(req).await
     }
 
@@ -1038,6 +1039,8 @@ async fn the_console_pages_for_the_workflows() {
             admin.base
         ))
         .header("cookie", admin.cookie_header())
+        // What a browser sends for the page's own EventSource.
+        .header("sec-fetch-site", "same-origin")
         .send()
         .await
         .expect("stream");

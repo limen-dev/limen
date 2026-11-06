@@ -45,6 +45,6 @@ spec:
 - **Every search is audited** (`audit.search`) with who looked for what: the query and its filters, never the results. A search that cannot be audited does not run. These events are not themselves indexed, so searching for a word does not find the searches for it.
 - **Rate limited** to 30 a minute per person, bursts of 10.
 - **Bounded:** at most 20 words and filters, 512 bytes, 200 hits; the query is parsed into a typed filter and every value is bound as a parameter; a search that takes more than 10 seconds is cancelled and asks you to narrow it.
-- **The index is a copy.** It is built from the same events as the sinks; `limen-audit-verify` stays the source of truth.
+- **The index is a copy.** It is built from the same events as the sinks; `limen audit verify` stays the source of truth.
 
 Metrics: `limen_audit_searches_total`.

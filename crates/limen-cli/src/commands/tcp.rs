@@ -11,19 +11,8 @@ pub async fn connect(
     resource: &str,
     listen: Option<&str>,
 ) -> anyhow::Result<()> {
-    let address = listen.unwrap_or("127.0.0.1:0");
-    // Refuse before binding so a non-loopback address is never briefly exposed.
-    for candidate in tokio::net::lookup_host(address)
-        .await
-        .with_context(|| format!("resolving {address}"))?
-    {
-        ensure_loopback(candidate)?;
-    }
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .with_context(|| format!("listening on {address}"))?;
+    let listener = bind_loopback(listen.unwrap_or("127.0.0.1:0")).await?;
     let local = listener.local_addr()?;
-    ensure_loopback(local)?;
 
     ui::success(&format!("Forwarding TCP for {}.", ui::bold(resource)));
     ui::info(&format!("Connect with: nc {} {}", local.ip(), local.port()));
@@ -77,6 +66,23 @@ pub async fn connect(
     Ok(())
 }
 
+/// Bind a TCP listener on a loopback address only. Every address the name
+/// resolves to is checked before binding, so a non-loopback address is never
+/// briefly exposed; the bound address is checked again.
+pub(crate) async fn bind_loopback(address: &str) -> anyhow::Result<tokio::net::TcpListener> {
+    for candidate in tokio::net::lookup_host(address)
+        .await
+        .with_context(|| format!("resolving {address}"))?
+    {
+        ensure_loopback(candidate)?;
+    }
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .with_context(|| format!("listening on {address}"))?;
+    ensure_loopback(listener.local_addr()?)?;
+    Ok(listener)
+}
+
 fn ensure_loopback(address: std::net::SocketAddr) -> anyhow::Result<()> {
     if !address.ip().is_loopback() {
         bail!("--listen must be a loopback address: anyone who can reach it would act as you");
@@ -86,7 +92,19 @@ fn ensure_loopback(address: std::net::SocketAddr) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_loopback;
+    use super::{bind_loopback, ensure_loopback};
+
+    #[tokio::test]
+    async fn bind_loopback_refuses_wildcard_before_binding() {
+        // A held port proves the refusal came from the check, not from the
+        // bind failing (binding the wildcard on a used port would also fail).
+        let held = bind_loopback("127.0.0.1:0").await.expect("loopback binds");
+        let port = held.local_addr().expect("addr").port();
+        let err = bind_loopback(&format!("0.0.0.0:{port}"))
+            .await
+            .expect_err("wildcard must be refused");
+        assert!(err.to_string().contains("loopback"), "{err:#}");
+    }
 
     #[test]
     fn listener_must_be_loopback() {

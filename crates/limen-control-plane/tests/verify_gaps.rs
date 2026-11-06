@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};
 use limen_control_plane::sinks::S3Sink;
-use limen_control_plane::verify::{SeqGap, verify_bucket};
 use limen_core::identity::ComponentKind;
 use limen_session::envelope::EnvelopeSigner;
+use limen_verify::bucket::{SeqGap, verify_bucket};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 
 fn event(component: &str, instance_id: &str, seq: u64) -> Vec<u8> {
@@ -49,7 +49,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let client = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let client = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     client
         .create_bucket()
@@ -64,23 +64,29 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
     )
     .await
     .expect("ca");
-    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
-    let csr = CertificateParams::default()
-        .serialize_request(&key)
-        .expect("csr");
-    let cert = ca
-        .issue_component(ComponentCertRequest {
-            csr_der: csr.der().to_vec(),
-            kind: ComponentKind::ControlPlane,
-            id: "cp-test".into(),
-            dns_names: vec![],
-            labels: BTreeMap::new(),
-            ttl: Duration::from_secs(600),
-        })
-        .await
-        .expect("issue");
-    let signer = EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer");
-    let slot = Arc::new(RwLock::new(Some(Arc::new(signer))));
+    // Each writer signs with its own control-plane certificate (the verifier
+    // requires the signer to be the writer).
+    let signer_for = async |id: &str| {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let csr = CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr");
+        let cert = ca
+            .issue_component(ComponentCertRequest {
+                csr_der: csr.der().to_vec(),
+                kind: ComponentKind::ControlPlane,
+                id: id.into(),
+                dns_names: vec![],
+                labels: BTreeMap::new(),
+                ttl: Duration::from_secs(600),
+            })
+            .await
+            .expect("issue");
+        let signer = EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer");
+        Arc::new(RwLock::new(Some(Arc::new(signer))))
+    };
+    let slot_a = signer_for("cp-a").await;
+    let slot_b = signer_for("cp-b").await;
 
     // Two writers (as after a handoff). Producer proxy-1/a: seq 0, 1, 2, 4 with
     // seq 2 shipped twice (same event, by both writers): one gap, 3..=3.
@@ -93,7 +99,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
         String::new(),
         None,
         "cp-a".into(),
-        slot.clone(),
+        slot_a,
     );
     ship(
         &a,
@@ -113,7 +119,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
         String::new(),
         None,
         "cp-b".into(),
-        slot,
+        slot_b,
     );
     ship(
         &b,

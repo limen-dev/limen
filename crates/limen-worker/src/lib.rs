@@ -310,6 +310,17 @@ impl Worker {
             },
         )
         .await?;
+        // Do not serve while the control plane is older than this worker (ADR-0045). The call
+        // goes through the proxy, like the worker's other calls to the control plane.
+        limen_component::gate::wait_for_control_plane(limen_core::VERSION, || {
+            let tls = client_config(
+                &[creds.internal_ca()?],
+                Some(creds.tls_identity()?),
+                &[alpn::H2],
+            )?;
+            Ok(channel(&addr, &name, SharedClientConfig::new(tls)))
+        })
+        .await;
         let policy = limen_session::snapshot::PolicyCache::new(
             config.policy_grace,
             Some(config.data_dir.join("policy.snapshot")),
@@ -477,6 +488,15 @@ impl Worker {
 
     /// A channel to the control plane through the proxy, presenting this
     /// worker's certificate (which the proxy forwards).
+    /// The control plane's version, asked through this worker's proxy (what the upgrade gate
+    /// asks, ADR-0045).
+    pub async fn control_plane_version(&self) -> Result<String, tonic::Code> {
+        limen_component::gate::control_plane_version(
+            self.control_plane().map_err(|_| tonic::Code::Unavailable)?,
+        )
+        .await
+    }
+
     pub(crate) fn control_plane(&self) -> anyhow::Result<limen_tunnel::connect::TracedChannel> {
         let creds = self.credentials();
         let tls = client_config(

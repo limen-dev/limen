@@ -300,7 +300,10 @@ pub mod api {
         (PRODUCE, 3, 8),
         (FETCH, 4, 11),
         (LIST_OFFSETS, 1, 5),
-        (METADATA, 1, 8),
+        // From v4: the request has `allow_auto_topic_creation`, which the worker
+        // clears for a role that cannot create topics. Older versions have no
+        // such flag, so the broker would create a topic a request names.
+        (METADATA, 4, 8),
         (OFFSET_COMMIT, 2, 7),
         (OFFSET_FETCH, 1, 5),
         (FIND_COORDINATOR, 0, 2),

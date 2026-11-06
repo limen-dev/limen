@@ -37,6 +37,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | Connect brokers | `mq connect`, `kafka connect` | [Messaging](messaging.md) |
 | Use Kubernetes | `kube config`, `kube login` | [Kubernetes](kubernetes.md) |
 | Open a web app or a raw TCP target | `web open`, `tcp` | [Web apps](web-apps.md), [TCP](tcp.md) |
+| Let an AI agent see what you can reach (read-only) | `mcp`, `config mcp` | [AI agents](ai-agents.md) |
 | Ask for, approve or revoke access | `request`, `requests`, `approve`, `deny`, `cancel`, `admin grants` | [Access requests](access-requests.md) |
 | Test and question policy | `policy test`, `who-can`, `what-can`, `diff`, `explain` | [Policy tooling](policy-tooling.md) |
 | Search the audit trail | `audit search` | [Audit search](audit-search.md) |

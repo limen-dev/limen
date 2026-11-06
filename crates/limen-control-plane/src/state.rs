@@ -39,6 +39,8 @@ pub struct AppState {
     /// Tells people an access request needs them (ADR-0025). Does nothing
     /// unless a notifier is configured.
     pub notifier: crate::access::notify::Notifier,
+    /// Revoked component ids, read from the database at most once a second.
+    pub revoked: Arc<RevokedCache>,
 }
 
 impl AppState {
@@ -50,6 +52,47 @@ impl AppState {
             ));
         }
         Ok(())
+    }
+}
+
+/// The ids of revoked components, refreshed from the database when older than
+/// [`RevokedCache::TTL`]. A revoked component's certificate stays valid until
+/// it expires, so every API call checks this.
+#[derive(Debug, Default)]
+pub struct RevokedCache {
+    inner: std::sync::Mutex<Option<(std::time::Instant, std::collections::HashSet<String>)>>,
+}
+
+impl RevokedCache {
+    pub const TTL: Duration = Duration::from_secs(1);
+
+    /// Whether `id` is revoked. `load` reads the current set; it runs only
+    /// when the cached copy is missing or older than [`Self::TTL`]. When it
+    /// fails, the error is returned (callers fail closed).
+    pub async fn is_revoked<F, Fut, E>(&self, id: &str, load: F) -> Result<bool, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<String>, E>>,
+    {
+        {
+            let guard = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((at, set)) = guard.as_ref()
+                && at.elapsed() < Self::TTL
+            {
+                return Ok(set.contains(id));
+            }
+        }
+        let set: std::collections::HashSet<String> = load().await?.into_iter().collect();
+        let revoked = set.contains(id);
+        *self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((std::time::Instant::now(), set));
+        Ok(revoked)
     }
 }
 
@@ -186,7 +229,7 @@ impl PolicyStore {
             return Ok(known);
         };
         let docs: Vec<limen_policy::Document> = serde_json::from_value(row.documents)?;
-        let policy = Policy::from_documents(docs)?;
+        let policy = Policy::from_stored_documents(docs)?;
         tracing::info!(version = row.version, digest = %row.digest, "loaded policy");
         let loaded = LoadedPolicy {
             version: row.version,
@@ -334,5 +377,34 @@ mod limit_tests {
             .filter(|_| limits.check_console_login(Some(ip)).is_ok())
             .count();
         assert_eq!(ok, 6);
+    }
+}
+
+#[cfg(test)]
+mod revoked_cache_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::RevokedCache;
+
+    #[tokio::test]
+    async fn a_revoked_component_is_found_and_the_set_is_cached() {
+        let cache = RevokedCache::default();
+        let loads = AtomicUsize::new(0);
+        let load = || async {
+            loads.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, String>(vec!["worker-9".to_owned()])
+        };
+        assert!(cache.is_revoked("worker-9", load).await.expect("load"));
+        assert!(!cache.is_revoked("worker-1", load).await.expect("cached"));
+        assert_eq!(loads.load(Ordering::SeqCst), 1, "read once within the TTL");
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_fails_closed() {
+        let cache = RevokedCache::default();
+        let result = cache
+            .is_revoked("worker-1", || async { Err::<Vec<String>, _>("db down") })
+            .await;
+        assert_eq!(result, Err("db down"));
     }
 }

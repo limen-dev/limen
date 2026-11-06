@@ -19,6 +19,7 @@ limen-core = { path = "crates/limen-core" }
 limen-policy = { path = "crates/limen-policy" }
 limen-ca = { path = "crates/limen-ca" }
 limen-audit = { path = "crates/limen-audit" }
+limen-verify = { path = "crates/limen-verify" }
 limen-tunnel = { path = "crates/limen-tunnel" }
 limen-testkit = { path = "crates/limen-testkit" }
 limen-component = { path = "crates/limen-component" }
@@ -28,7 +29,7 @@ limen-proxy = { path = "crates/limen-proxy" }
 limen-worker = { path = "crates/limen-worker" }
 
 # Runtime and errors
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "io-std", "time", "sync", "fs"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "io-std", "time", "sync", "fs", "process"] }
 anyhow = "1.0.104"
 thiserror = "2.0.21"
 
@@ -42,12 +43,14 @@ time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macr
 
 # RPC and networking
 prost = "0.14.4"
+semver = "1.0"
 tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router", "server", "channel"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tonic-types = "0.14.6"
 hyper = { version = "1.12", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2", "service"] }
+h2 = "0.4.20"
 http = "1.5"
 http-body = "1.0"
 http-body-util = "0.1.5"
@@ -121,6 +124,7 @@ sqlparser = { version = "0.63", default-features = false }
 # Audit pipeline
 crc32fast = "1.5.2"
 flate2 = "1.1.10"
+aws-sdk-sts = { version = "1.122", default-features = false, features = ["rt-tokio", "default-https-client"] }
 aws-sdk-s3 = { version = "1.152", default-features = false, features = ["rt-tokio", "default-https-client"] }
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }

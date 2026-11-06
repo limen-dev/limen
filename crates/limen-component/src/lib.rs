@@ -2,6 +2,7 @@
 //! with a join token, and certificate renewal at half-life.
 
 pub mod audit;
+pub mod gate;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -144,8 +145,16 @@ fn validity(cert_pem: &str) -> anyhow::Result<(OffsetDateTime, OffsetDateTime)> 
 fn write_atomic(path: &Path, contents: &str, private: bool) -> std::io::Result<()> {
     use std::io::Write;
     let tmp: PathBuf = path.with_extension("tmp");
+    // A leftover `.tmp` (or a link someone put there) is removed, not opened:
+    // `create_new` then makes a fresh file with the mode asked for, and never
+    // follows a link to write somewhere else.
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -505,5 +514,30 @@ mod tests {
     fn a_name_conflict_is_not_retried() {
         let e = classify("enrollment", &tonic::Status::already_exists("name taken"));
         assert!(matches!(e, CallError::Rejected(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_or_linked_tmp_file_is_replaced_not_followed() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "keep me").expect("victim");
+        let target = dir.path().join("key.pem");
+        // A symlink where the temporary file goes.
+        std::os::unix::fs::symlink(&victim, target.with_extension("tmp")).expect("link");
+        write_atomic(&target, "secret", true).expect("write");
+        assert_eq!(std::fs::read_to_string(&victim).expect("read"), "keep me");
+        assert_eq!(std::fs::read_to_string(&target).expect("read"), "secret");
+        // A stale temporary file with a loose mode does not decide the mode.
+        let stale = target.with_extension("tmp");
+        std::fs::write(&stale, "old").expect("stale");
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        write_atomic(&target, "secret2", true).expect("write");
+        let mode = std::fs::metadata(&target)
+            .expect("meta")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

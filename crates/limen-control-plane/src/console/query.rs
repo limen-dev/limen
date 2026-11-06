@@ -140,3 +140,14 @@ mod tests {
         assert_eq!(ignored.len(), 1);
     }
 }
+
+/// Entry points for `fuzz/` (fuzz/README.md). Compiled only under cargo-fuzz's `--cfg fuzzing`.
+#[cfg(fuzzing)]
+pub mod fuzz {
+    /// The console's date filters, on any text.
+    pub fn dates(text: &str) {
+        let _ = super::parse_when(text, false);
+        let _ = super::parse_when(text, true);
+        let _ = super::parse_range(Some(text), Some(text));
+    }
+}

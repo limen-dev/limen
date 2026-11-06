@@ -158,6 +158,10 @@ pub enum EventKind {
     /// identity and filters, never its results.
     #[serde(rename = "audit.search")]
     AuditSearch,
+    /// Someone was given short-lived, read-only access to the audit bucket
+    /// to verify the trail (ADR-0009 amendment). Never holds credentials.
+    #[serde(rename = "audit.verify_access")]
+    AuditVerifyAccess,
     /// A worker reported a resource no policy document names (ADR-0027).
     /// It waits for an admin.
     #[serde(rename = "resource.discovered")]

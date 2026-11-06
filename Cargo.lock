@@ -2718,6 +2718,7 @@ dependencies = [
  "limen-policy",
  "limen-proto",
  "limen-tunnel",
+ "limen-verify",
  "openidconnect",
  "rand 0.10.3",
  "rcgen",
@@ -2750,6 +2751,7 @@ dependencies = [
  "rand 0.10.3",
  "rcgen",
  "rustls-pki-types",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2770,6 +2772,7 @@ dependencies = [
  "aws-lc-rs",
  "aws-sdk-kms",
  "aws-sdk-s3",
+ "aws-sdk-sts",
  "axum",
  "base64 0.23.1",
  "clap",
@@ -2785,6 +2788,7 @@ dependencies = [
  "limen-session",
  "limen-testkit",
  "limen-tunnel",
+ "limen-verify",
  "metrics",
  "openidconnect",
  "prost",
@@ -2844,10 +2848,12 @@ version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
+ "h2",
  "http",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "limen-component",
  "limen-control-plane",
  "limen-core",
  "limen-kube",
@@ -3023,6 +3029,27 @@ dependencies = [
  "tonic",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "limen-verify"
+version = "0.1.0-rc.1"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-s3",
+ "base64 0.23.1",
+ "flate2",
+ "limen-audit",
+ "limen-proto",
+ "limen-session",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "time",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

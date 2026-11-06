@@ -85,3 +85,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "start_after" {
+  description = "Values the groups wait for, such as the names of the ECS services that run the control planes and proxies."
+  type        = list(string)
+  default     = []
+}

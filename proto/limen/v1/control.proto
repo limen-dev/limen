@@ -77,6 +77,10 @@ service Admin {
 // limen:admin or limen:auditor role. Every search is audited and rate limited.
 service AuditSearch {
   rpc Search(SearchRequest) returns (SearchResponse);
+  // Short-lived, read-only access to the audit bucket, for `limen audit verify`
+  // (ADR-0009 amendment). The caller reads the bucket and checks the chain
+  // itself; Limen only decides who may, and records that it did. Same roles.
+  rpc VerifierAccess(VerifierAccessRequest) returns (VerifierAccessResponse);
 }
 
 service Enrollment {
@@ -610,6 +614,24 @@ message SearchResponse {
   string history_url = 3;
 }
 
+message VerifierAccessRequest {}
+
+message VerifierAccessResponse {
+  string bucket = 1;
+  string prefix = 2;
+  // Set for S3-compatible stores in development; empty on AWS.
+  string endpoint = 3;
+  bool path_style = 4;
+  string region = 5;
+  // Read-only credentials for the bucket. Never log or print these.
+  string access_key_id = 6;
+  string secret_access_key = 7;
+  string session_token = 8;
+  // When they stop working. 0 means they do not expire (a static key from an
+  // S3-compatible store without STS; development only).
+  int64 expires_unix = 9;
+}
+
 // Cloud discovery (ADR-0027). Workers describe a cloud account with a
 // describe-only role and report facts. The control plane never calls the
 // customer's account, and a report can only add a *pending* resource.
@@ -823,7 +845,7 @@ message ExportEvidenceRequest {
 
 message ExportEvidenceResponse {
   // JSON, signed by the control plane. Verify offline with
-  // `limen-audit-verify --evidence`.
+  // `limen audit verify --evidence`.
   bytes pack = 1;
   string manifest_sha256 = 2;
 }

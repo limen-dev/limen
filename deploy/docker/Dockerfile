@@ -31,9 +31,9 @@ ARG LIMEN_BUILD_CACHE=limen-target
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,id=${LIMEN_BUILD_CACHE} \
     cargo build --release --locked \
-      --bin limen-control-plane --bin limen-audit-verify --bin limen-spool-adopt --bin limen-proxy --bin limen-worker --bin limen --bin fake-datadog --bin fake-ci-issuer \
+      --bin limen-control-plane --bin limen-spool-adopt --bin limen-proxy --bin limen-worker --bin limen --bin fake-datadog --bin fake-ci-issuer \
  && mkdir -p /out /state/ca /state/ca-public /state/audit /state/spool /state/recordings /state/proxy /state/worker /state/db-secrets /state/db-tls \
- && cp target/release/limen-control-plane target/release/limen-audit-verify target/release/limen-spool-adopt target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog target/release/fake-ci-issuer /out/
+ && cp target/release/limen-control-plane target/release/limen-spool-adopt target/release/limen-proxy target/release/limen-worker target/release/limen target/release/fake-datadog target/release/fake-ci-issuer /out/
 
 # Distroless: no shell, no package manager, runs as uid 65532.
 FROM ${DISTROLESS_IMAGE} AS runtime-base
@@ -45,7 +45,6 @@ USER nonroot:nonroot
 
 FROM runtime-base AS control-plane
 COPY --from=builder /out/limen-control-plane /usr/local/bin/limen-control-plane
-COPY --from=builder /out/limen-audit-verify /usr/local/bin/limen-audit-verify
 COPY --from=builder /out/limen-spool-adopt /usr/local/bin/limen-spool-adopt
 EXPOSE 3080 3081
 ENTRYPOINT ["/usr/local/bin/limen-control-plane"]

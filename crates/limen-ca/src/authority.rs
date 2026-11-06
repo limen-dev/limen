@@ -579,6 +579,43 @@ mod tests {
         }
     }
 
+    /// Proof of possession: a CSR whose signature does not verify under its own
+    /// public key (a swapped key, or a damaged signature) must be refused, or
+    /// anyone could get a certificate for a key they do not hold.
+    #[tokio::test]
+    async fn a_csr_must_prove_possession_of_its_key() {
+        let users = ca(CaPurpose::UserX509).await;
+        let good = csr();
+        // A damaged signature (the last bytes of a CSR are the signature).
+        let mut bad_sig = good.clone();
+        let last = bad_sig.len() - 1;
+        bad_sig[last] ^= 0x01;
+        // Another key's public key in this CSR's request body.
+        let other = csr();
+        let spki = |der: &[u8]| {
+            let csr =
+                CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(der))
+                    .expect("csr");
+            rcgen::PublicKeyData::subject_public_key_info(&csr.public_key)
+        };
+        let (mine, theirs) = (spki(&good), spki(&other));
+        assert_eq!(mine.len(), theirs.len());
+        let at = good
+            .windows(mine.len())
+            .position(|w| w == mine.as_slice())
+            .expect("spki in csr");
+        let mut swapped = good.clone();
+        swapped[at..at + mine.len()].copy_from_slice(&theirs);
+        for der in [bad_sig, swapped] {
+            let mut req = user("alice", Duration::from_secs(60));
+            req.csr_der = der;
+            assert!(matches!(
+                users.issue_user(req).await,
+                Err(CaError::InvalidCsr(_))
+            ));
+        }
+    }
+
     #[tokio::test]
     async fn an_existing_ca_cert_must_match_its_key() {
         let a = ca(CaPurpose::UserX509).await;

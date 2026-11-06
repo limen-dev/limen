@@ -33,6 +33,9 @@ variable "services" {
     admin_ingress_cidrs        = optional(list(string), [])
     target_group_arn           = optional(string)
     task_role_policy_arns      = optional(map(string), {})
+    # Proxies only: a proxy may wait for the control plane (ADR-0045), failing health checks.
+    health_check_grace_seconds = optional(number, 900)
+    wait_for_steady_state      = optional(bool, true)
   }))
 
   validation {

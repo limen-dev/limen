@@ -70,7 +70,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let direct = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let direct = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     direct
         .create_bucket()
@@ -124,7 +124,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
                 let event = limen_audit::Event::new(
                     limen_audit::EventKind::SessionStart,
                     producer,
-                    serde_json::json!({ "resource": "web-1", "i": i }),
+                    serde_json::json!({ "kind": "ssh", "resource": "web-1", "proxy_id": proxy_id, "i": i }),
                 );
                 serde_json::to_vec(&event).expect("json")
             })
@@ -216,7 +216,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
 
     // The trail verifies...
     let ca = h.internal_ca();
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -246,7 +246,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
         .send()
         .await
         .expect("tamper");
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -270,7 +270,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
         .send()
         .await
         .expect("delete");
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -325,7 +325,7 @@ async fn recordings_stream_to_s3() {
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let client = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let client = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     client
         .create_bucket()
@@ -355,7 +355,19 @@ async fn recordings_stream_to_s3() {
     let key = uri
         .strip_prefix(&format!("s3://{bucket}/"))
         .expect("s3 uri");
-    assert!(key.starts_with("recordings/dt=") && key.ends_with("/sess-1.cast"));
+    assert!(
+        key.starts_with("recordings/dt=")
+            && key.contains("/sess-1-")
+            && std::path::Path::new(key)
+                .extension()
+                .is_some_and(|e| e == "cast")
+    );
+    // A second upload for the same session is a different object.
+    let again = sink
+        .put_recording("sess-1", &path)
+        .await
+        .expect("upload again");
+    assert_ne!(again, uri, "a recording key is never reused");
     let stored = client
         .get_object()
         .bucket(&bucket)

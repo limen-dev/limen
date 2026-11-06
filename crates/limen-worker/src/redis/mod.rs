@@ -23,7 +23,7 @@ mod tests;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::bail;
@@ -50,6 +50,8 @@ const COALESCE: usize = 64 * 1024;
 /// How long what is already queued for a client gets to go out after an error.
 const ERROR_FLUSH_WAIT: Duration = Duration::from_secs(2);
 const HALF_CLOSE_WAIT: Duration = Duration::from_secs(10);
+/// How long to wait for the target to answer a `SELECT`.
+const SELECT_WAIT: Duration = Duration::from_secs(30);
 /// ElastiCache drops an IAM connection after 12 hours unless it is re-authenticated.
 const REAUTH_AFTER: Duration = Duration::from_hours(11);
 /// Past this, a connection that couldn't re-authenticate ends.
@@ -134,6 +136,9 @@ pub async fn prepare(
 enum Pending {
     /// A command the target will answer; pass its reply on.
     Forwarded,
+    /// A `SELECT` of this database: the worker's view of the selected
+    /// database changes only when the target answers `+OK`.
+    Select(u32),
     /// The worker's own reply, to send once everything before it has answered.
     Local(Vec<u8>),
     /// The worker's own request to the target (re-login): swallow the reply.
@@ -166,6 +171,10 @@ struct Shared {
     to_target: mpsc::Sender<Vec<u8>>,
     subscribed: AtomicBool,
     in_multi: AtomicBool,
+    /// The database the target has confirmed (`+OK` to a `SELECT`).
+    confirmed_db: AtomicU32,
+    /// `SELECT`s sent and not yet answered.
+    selects_pending: AtomicUsize,
     bytes_in: AtomicU64,
     bytes_out: AtomicU64,
 }
@@ -208,6 +217,30 @@ impl Shared {
             .send(bytes)
             .await
             .map_err(|_| anyhow::anyhow!("the Redis connection closed"))
+    }
+
+    /// Hand a `SELECT` to the target; the database is taken over only once
+    /// the target has answered `+OK`.
+    async fn forward_select(&self, bytes: Vec<u8>, db: u32) -> anyhow::Result<()> {
+        let _order = self.order.lock().await;
+        self.selects_pending.fetch_add(1, Ordering::SeqCst);
+        self.out().queue.push_back(Pending::Select(db));
+        self.to_target
+            .send(bytes)
+            .await
+            .map_err(|_| anyhow::anyhow!("the Redis connection closed"))
+    }
+
+    /// Wait until every `SELECT` sent has been answered.
+    async fn selects_settled(&self) -> anyhow::Result<()> {
+        let started = tokio::time::Instant::now();
+        while self.selects_pending.load(Ordering::SeqCst) > 0 {
+            if started.elapsed() > SELECT_WAIT {
+                bail!("the Redis server did not answer SELECT");
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        Ok(())
     }
 
     /// Hand a `SUBSCRIBE` to the target. First every reply owed for earlier
@@ -281,6 +314,8 @@ where
         to_target,
         subscribed: AtomicBool::new(false),
         in_multi: AtomicBool::new(false),
+        confirmed_db: AtomicU32::new(0),
+        selects_pending: AtomicUsize::new(0),
         bytes_in: AtomicU64::new(0),
         bytes_out: AtomicU64::new(0),
     });
@@ -397,7 +432,12 @@ where
     let mut scanner = RequestScanner::new();
     // The database the connection has selected, as far as policy allowed it.
     let mut db = 0u32;
+    // Whether a `MULTI` is open, as far as policy allowed it.
+    let mut multi = false;
     loop {
+        // A `SELECT` ends the batch: what follows is judged against the
+        // database the target confirms, not the one asked for.
+        let mut stopped_at_select = false;
         // Everything already read may hold many pipelined commands. Plan them
         // all, write their audit events together (the spool's group commit
         // makes that one fsync, not one per command), then act in order.
@@ -421,8 +461,13 @@ where
             shared.bytes_in.fetch_add(len as u64, Ordering::SeqCst);
             match parse_command(&frame) {
                 Ok(command) => {
-                    if let Some(planned) = plan(rules, config, frame, command, &mut db) {
+                    if let Some(planned) = plan(rules, config, frame, command, db, &mut multi) {
+                        let select = planned.refused.is_none() && planned.name == "SELECT";
                         batch.push(planned);
+                        if select {
+                            stopped_at_select = true;
+                            break;
+                        }
                     }
                 }
                 Err(e) => {
@@ -444,6 +489,13 @@ where
         if let Some(why) = bad_request {
             let _ = shared.reply_locally(error_reply(&format!("ERR {why}")));
             bail!("{why}");
+        }
+        if stopped_at_select {
+            shared.selects_settled().await?;
+            db = shared.confirmed_db.load(Ordering::SeqCst);
+            if !buf.is_empty() {
+                continue; // frames already read wait for the confirmed database
+            }
         }
         if buf.len() > MAX_FRAME {
             let _ = shared.reply_locally(error_reply("ERR request too large"));
@@ -474,19 +526,26 @@ fn plan(
     config: &SessionConfig,
     frame: Vec<u8>,
     command: Command,
-    db: &mut u32,
+    db: u32,
+    multi: &mut bool,
 ) -> Option<Planned> {
     let Command { args } = command;
     if args.is_empty() {
         return None; // a blank line
     }
     let insp = rules.inspect(&args);
-    let refused = rules.check(&args, &insp, *db).err();
-    if refused.is_none()
-        && insp.name == "SELECT"
-        && let Some(selected) = rules::selected_database(&args)
-    {
-        *db = selected;
+    let mut refused = rules.check(&args, &insp, db).err();
+    // A `SELECT` inside `MULTI` only queues; `EXEC` could then move the
+    // connection to a database the worker never judged against.
+    if refused.is_none() && insp.name == "SELECT" && *multi {
+        refused = Some("SELECT inside MULTI is not allowed".into());
+    }
+    if refused.is_none() {
+        match insp.name.as_str() {
+            "MULTI" => *multi = true,
+            "EXEC" | "DISCARD" => *multi = false,
+            _ => {}
+        }
     }
     let event = match &refused {
         Some(reason) => (
@@ -551,6 +610,33 @@ async fn apply(shared: &Shared, planned: Planned, audited: bool) -> anyhow::Resu
             shared.poison_transaction().await?;
         }
         return Ok(());
+    }
+    if name == "SELECT" {
+        // Backstops for what the plan could not know: a `MULTI` whose `EXEC`
+        // was never sent on, or a subscription (replies unmatched).
+        let wanted = rules::selected_database(&args);
+        let why = if shared.in_multi.load(Ordering::SeqCst) {
+            Some("SELECT inside MULTI is not allowed")
+        } else if shared.subscribed.load(Ordering::SeqCst) {
+            Some("SELECT while subscribed is not allowed")
+        } else if wanted.is_none() {
+            Some("SELECT of an invalid database")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            shared.reply_locally(error_reply(&format!("NOPERM Limen: {why}")))?;
+            if shared.in_multi.load(Ordering::SeqCst) {
+                shared.poison_transaction().await?;
+            }
+            return Ok(());
+        }
+        let bytes = if frame.first() == Some(&b'*') {
+            frame
+        } else {
+            encode_command(&args)
+        };
+        return shared.forward_select(bytes, wanted.unwrap_or(0)).await;
     }
     match (name.as_str(), sub.as_deref()) {
         // The client is already authenticated below Redis. The worker's own
@@ -618,6 +704,12 @@ where
                     Some(Pending::Swallow) => {
                         shared.flush_local(&mut out)?;
                         continue;
+                    }
+                    Some(Pending::Select(wanted)) => {
+                        if frame == codec::OK {
+                            shared.confirmed_db.store(wanted, Ordering::SeqCst);
+                        }
+                        shared.selects_pending.fetch_sub(1, Ordering::SeqCst);
                     }
                     // A reply nobody asked for: pass it on rather than guess.
                     Some(Pending::Forwarded) | None => {}

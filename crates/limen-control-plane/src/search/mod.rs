@@ -1,6 +1,6 @@
 //! Searching recent audit events and, when switched on, recording text
 //! (ADR-0026). The index is a convenience copy in PostgreSQL for the console
-//! and the CLI; the audit sinks stay the record and `limen-audit-verify` the
+//! and the CLI; the audit sinks stay the record and `limen audit verify` the
 //! source of truth. **Every search is audited** with who looked for what, and
 //! rate limited, because search is also a way to read a lot at once.
 
@@ -58,7 +58,12 @@ pub struct Results {
 /// A snippet around the first place any term matches, case-insensitively.
 #[must_use]
 pub fn snippet(text: &str, terms: &[String]) -> Snippet {
-    let chars: Vec<char> = text.chars().collect();
+    // Control characters (an ESC or BEL typed into a command) would reach the
+    // page as raw bytes: show a space instead, one for one so offsets hold.
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     // One lowered char per original char keeps the two aligned for any text.
     let lower: Vec<char> = chars
         .iter()
@@ -326,6 +331,17 @@ pub fn history_link(template: &str, raw: &str, q: &Query) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snippet_carries_no_control_characters() {
+        let s = snippet(
+            "echo \u{1b}]0;title\u{7} \u{1b}[31mdrop table\u{1b}[0m\nx",
+            &["drop table".to_owned()],
+        );
+        let all = format!("{}{}{}", s.before, s.hit, s.after);
+        assert!(!all.chars().any(char::is_control), "{all:?}");
+        assert_eq!(s.hit, "drop table");
+    }
 
     #[test]
     fn snippets_mark_the_first_match_and_trim_the_rest() {

@@ -117,7 +117,7 @@ pub async fn resolve_current<T>(
     request: &tonic::Request<T>,
     state: &AppState,
 ) -> Result<Caller, Status> {
-    let caller = resolve(request, &state.cas)?;
+    let caller = resolve_checked(request, state).await?;
     let Caller::User { identity, addr } = &caller else {
         return Ok(caller);
     };
@@ -147,16 +147,47 @@ pub async fn resolve_current<T>(
     Err(Status::permission_denied(message))
 }
 
+/// Resolve the caller of `request` and refuse a component (or the proxy
+/// relaying for someone) that has been revoked, while its certificate is still
+/// valid. Every service a component calls uses this.
+pub async fn resolve_checked<T>(
+    request: &tonic::Request<T>,
+    state: &AppState,
+) -> Result<Caller, Status> {
+    let (caller, direct) = resolve_with_peer(request, &state.cas)?;
+    let mut ids: Vec<&str> = direct.as_deref().into_iter().collect();
+    if let Caller::Component { identity, .. } = &caller {
+        ids.push(&identity.id);
+    }
+    for id in ids {
+        let revoked = state
+            .revoked
+            .is_revoked(id, || crate::db::revoked_components(&state.db))
+            .await
+            .map_err(|e| internal("checking revoked components", e))?;
+        if revoked {
+            tracing::warn!(component = %id, "API call refused: the component was revoked");
+            return Err(Status::permission_denied("this component was revoked"));
+        }
+    }
+    Ok(caller)
+}
+
 /// Resolve the caller of `request`.
 pub fn resolve<T>(request: &tonic::Request<T>, cas: &Cas) -> Result<Caller, Status> {
+    resolve_with_peer(request, cas).map(|(caller, _)| caller)
+}
+
+/// [`resolve`], and the id of the component on the other end of the TLS
+/// connection (the proxy, when it relays for someone).
+fn resolve_with_peer<T>(
+    request: &tonic::Request<T>,
+    cas: &Cas,
+) -> Result<(Caller, Option<String>), Status> {
     let peer = request
         .extensions()
         .get::<PeerInfo>()
         .ok_or_else(|| Status::internal("missing peer info"))?;
-    let direct_addr = peer.remote_addr.map(|a: SocketAddr| a.ip());
-    let metadata = request.metadata();
-    let forwarded = metadata.get(relay::FORWARDED).is_some();
-
     let direct = match peer.leaf() {
         // The listener trusts only the internal CA, so any presented cert is a component's.
         Some(leaf) => Some(
@@ -165,6 +196,19 @@ pub fn resolve<T>(request: &tonic::Request<T>, cas: &Cas) -> Result<Caller, Stat
         ),
         None => None,
     };
+    let direct_id = direct.as_ref().map(|d| d.id.clone());
+    let caller = resolve_caller(peer, request.metadata(), cas, direct)?;
+    Ok((caller, direct_id))
+}
+
+fn resolve_caller(
+    peer: &PeerInfo,
+    metadata: &tonic::metadata::MetadataMap,
+    cas: &Cas,
+    direct: Option<ComponentIdentity>,
+) -> Result<Caller, Status> {
+    let direct_addr = peer.remote_addr.map(|a: SocketAddr| a.ip());
+    let forwarded = metadata.get(relay::FORWARDED).is_some();
 
     match (direct, forwarded) {
         (None, false) => Ok(Caller::Anonymous { addr: direct_addr }),

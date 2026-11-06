@@ -386,6 +386,11 @@ async fn admit(worker: &Worker, signed: &Signed) -> Result<Admitted, Status> {
         .policy
         .fresh(now)
         .map_err(|e| Status::unavailable(format!("can't decide: {e}")))?;
+    // A revoked proxy's certificate is no longer honoured (threat model TB2):
+    // its grants stop here even though they verify.
+    if snapshot.restrictions.is_revoked(&verified.proxy.id) {
+        return Err(Status::permission_denied("the proxy has been revoked"));
+    }
     let roles = snapshot
         .roles_for(
             &verified.user.username,

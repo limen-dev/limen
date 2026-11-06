@@ -782,6 +782,8 @@ where
 {
     let config = &prepared.config;
     let mut held: HashMap<u16, HeldPublish> = HashMap::new();
+    // Per channel, the queue an empty queue name means (the last one declared).
+    let mut last_queue: HashMap<u16, String> = HashMap::new();
     loop {
         let first = match read_with_idle(&mut reader, idle).await {
             Ok(Some(f)) => f,
@@ -812,7 +814,14 @@ where
                 .bytes_in
                 .fetch_add(frame.payload.len() as u64 + 8, Ordering::SeqCst);
             plan_frame(
-                frame, &shared, prepared, &vhost, &mut held, &mut local, &mut plan,
+                frame,
+                &shared,
+                prepared,
+                &vhost,
+                &mut held,
+                &mut last_queue,
+                &mut local,
+                &mut plan,
             );
         }
         let written = futures::future::join_all(plan.iter().map(|p| async {
@@ -843,13 +852,14 @@ fn effective(shared: &Shared, local: &HashMap<u16, Refused>, channel: u16) -> Op
 /// Decide what one client frame means.
 /// Channel 0 and the content frames are
 /// handled here; method frames go to the rules.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn plan_frame(
     frame: Frame,
     shared: &Shared,
     prepared: &Prepared,
     vhost: &str,
     held: &mut HashMap<u16, HeldPublish>,
+    last_queue: &mut HashMap<u16, String>,
     local: &mut HashMap<u16, Refused>,
     plan: &mut Vec<Planned>,
 ) {
@@ -912,7 +922,7 @@ fn plan_frame(
                 );
                 return;
             };
-            let inspected = match rules::inspect(class, method, args) {
+            let mut inspected = match rules::inspect(class, method, args) {
                 Ok(i) => i,
                 Err(InspectError::Malformed) => {
                     push(
@@ -921,9 +931,18 @@ fn plan_frame(
                     );
                     return;
                 }
-                Err(InspectError::Unsupported) => {
+                Err(e @ (InspectError::Unsupported | InspectError::Refused(_))) => {
                     local.insert(channel, Refused::default());
-                    let reason = format!("method {class}.{method} is not supported through Limen");
+                    let (code, name, reason) = match e {
+                        InspectError::Refused(why) => {
+                            (ACCESS_REFUSED, "ACCESS_REFUSED", why.into())
+                        }
+                        _ => (
+                            NOT_IMPLEMENTED,
+                            "NOT_IMPLEMENTED",
+                            format!("method {class}.{method} is not supported through Limen"),
+                        ),
+                    };
                     let insp = Inspected {
                         action: "unsupported",
                         ..Inspected::default()
@@ -942,8 +961,8 @@ fn plan_frame(
                         )),
                         action: Action::Refuse {
                             channel,
-                            code: NOT_IMPLEMENTED,
-                            text: format!("NOT_IMPLEMENTED - {reason}"),
+                            code,
+                            text: format!("{name} - {reason}"),
                             class,
                             method,
                         },
@@ -951,8 +970,22 @@ fn plan_frame(
                     return;
                 }
             };
+            // An empty queue name means the queue last declared on the
+            // channel: judge the operation against that queue's name.
+            if inspected.action == "channel_open" {
+                last_queue.remove(&channel);
+            } else {
+                inspected.resolve_queue(last_queue.get(&channel).map(String::as_str));
+            }
             let owned = Shared::lock(&shared.owned).clone();
-            match prepared.rules.check(vhost, &inspected, &owned) {
+            let checked = prepared.rules.check(vhost, &inspected, &owned);
+            if checked.is_ok()
+                && inspected.action == "declare_queue"
+                && let Some(queue) = &inspected.queue
+            {
+                last_queue.insert(channel, queue.clone());
+            }
+            match checked {
                 Err(reason) => {
                     local.insert(channel, Refused::default());
                     plan.push(Planned {
@@ -1010,6 +1043,51 @@ fn plan_frame(
             }
             match held.remove(&channel) {
                 Some(HeldPublish { method, inspected }) => {
+                    // `CC` and `BCC` route copies under more keys. On the
+                    // default exchange a key is a queue name, which the role
+                    // must be able to write to.
+                    let mut extended = inspected.clone();
+                    match frame.routing_extras() {
+                        Ok(extras) if inspected.exchange.as_deref() == Some("") => {
+                            extended.names.extend(extras);
+                        }
+                        Ok(_) => {}
+                        Err(_) => {
+                            push(
+                                plan,
+                                Action::Fail(
+                                    FRAME_ERROR,
+                                    "FRAME_ERROR - malformed content header".into(),
+                                ),
+                            );
+                            return;
+                        }
+                    }
+                    let owned = Shared::lock(&shared.owned).clone();
+                    if let Err(reason) = prepared.rules.check(vhost, &extended, &owned) {
+                        local.insert(channel, Refused::default());
+                        plan.push(Planned {
+                            event: Some((
+                                EventKind::AuthDenied,
+                                rules::denied_data(
+                                    &extended,
+                                    &config.resource,
+                                    &config.mq_user,
+                                    vhost,
+                                    channel,
+                                    &reason,
+                                ),
+                            )),
+                            action: Action::Refuse {
+                                channel,
+                                code: ACCESS_REFUSED,
+                                text: format!("ACCESS_REFUSED - {reason}"),
+                                class: ids::BASIC,
+                                method: 40,
+                            },
+                        });
+                        return;
+                    }
                     let size = frame.body_size().unwrap_or(0);
                     shared.published.fetch_add(1, Ordering::SeqCst);
                     shared.published_bytes.fetch_add(size, Ordering::SeqCst);

@@ -262,7 +262,7 @@
 <tspan x="846" dy="0">Verify any time</tspan>
 </text>
 <text x="846" y="728" font-size="11" font-weight="normal" fill="#232F3E" text-anchor="start">
-<tspan x="846" dy="0">limen-audit-verify walks every writer's chain and reports a missing, reordered, modified or unsigned batch.</tspan>
+<tspan x="846" dy="0">limen audit verify walks every writer's chain and reports a missing, reordered, modified or unsigned batch.</tspan>
 </text>
 <rect x="30" y="790" width="1540" height="440" rx="10" fill="#fff" stroke="#CBD5E1" stroke-width="1.4"/>
 <text x="50" y="820" font-size="16" font-weight="bold" fill="#1F2A44" text-anchor="start">

@@ -13,6 +13,13 @@
           "description": "`host:port` of one broker or bootstrap address.",
           "type": "string"
         },
+        "hosts": {
+          "description": "Kafka: the broker hosts the worker may connect to when the cluster's\nMetadata names them (exact names, `*.suffix` patterns, IP literals).\nAbsent: only hosts in the same domain as `endpoint` (or the same /16\nfor an address), because the worker takes its credential along.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "region": {
           "type": [
             "string",
@@ -349,6 +356,13 @@
           "default": false,
           "description": "Keep the values of commands in the audit trail (`audit.full_commands`).\nThe default replaces every value in a filter, document, or pipeline\nwith `?` and keeps the shape.",
           "type": "boolean"
+        },
+        "hosts": {
+          "description": "Hosts the worker may follow to when a member names the primary (exact\nnames, `*.suffix` patterns, IP literals). Absent: only hosts in the\nsame domain as `endpoint` (or the same /16 for an address).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "insecure_dev": {
           "default": false,

@@ -124,7 +124,7 @@ With several roles granting the same engine role, the session may do whatever an
 
 ### Web app grants
 
-`web: {}` allows access to the selected web resource. Optional `methods` and `path_prefixes` restrict each request; an empty list leaves that dimension unrestricted, and deny rules win. Limen checks the current policy and user lock on every request. See the [web apps guide](guides/web-apps.md).
+`web: {}` allows access to the selected web resource. Optional `methods` and `path_prefixes` restrict each request; an empty list leaves that dimension unrestricted, and deny rules win. `path_prefixes` compare case-sensitively: a rule on `/admin` does not cover `/ADMIN`, so if the app treats paths case-insensitively, deny both spellings or normalise the path upstream. Limen checks the current policy and user lock on every request. See the [web apps guide](guides/web-apps.md).
 
 ### Cloud variants and raw TCP
 
@@ -214,7 +214,7 @@ spec:
 The bot logs in as `bot:<name>`. Rules the validator enforces, so a bot can't be written too broadly:
 - `match` is **exact**: no wildcards, anywhere.
 - `github_actions` must match `repository` **and** `ref` or `environment`, and never names a pull request ref (`refs/pull/…`) or the `pull_request` and `pull_request_target` events. Independently of the rule, **tokens from pull request runs never match** a GitHub bot, so a rule that names neither can't be used to let them in.
-- `gitlab` must match `project_path` and `ref` or `environment`, and a matched `ref` also needs `ref_protected: "true"`.
+- `gitlab` must match `project_path` and `ref` or `environment`, a matched `ref` also needs `ref_protected: "true"`, and a matched `environment` also needs `environment_protected: "true"` (GitLab sets it only when the job names an environment).
 - `oidc` needs `issuer` and an exact `sub`.
 - `roles` must exist, and can't be built-in (`limen:…`). At most one hour of lifetime.
 - When a token matches more than one bot the login is refused, so an overlap can't pick a winner.

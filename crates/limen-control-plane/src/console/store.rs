@@ -98,7 +98,7 @@ macro_rules! user_select {
     () => {
         "SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
         l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci
-     FROM users u LEFT JOIN user_locks l ON l.username = u.username AND l.released_at IS NULL"
+     FROM users u LEFT JOIN user_locks l ON lower(l.username) = lower(u.username) AND l.released_at IS NULL"
     };
 }
 
@@ -612,6 +612,8 @@ fn cut(text: &str, max: usize) -> (&str, bool) {
 /// Apply session events to the `sessions` table. Idempotent and
 /// order-independent: every column is filled by exactly one kind of event
 /// and never overwritten by another, so redelivery and reordering are safe.
+/// A session keeps the identity, recording link and recording hash it was
+/// first given: a later event for the same session cannot replace them.
 #[allow(clippy::too_many_lines)] // one arm per audit event kind
 pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<(), sqlx::Error> {
     use limen_audit::EventKind;
@@ -637,14 +639,50 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         let Some(session_id) = e.session_id else {
             continue;
         };
+        // Who may speak for a session: a proxy opens every session but a
+        // Kubernetes stream, which only its worker writes. So a worker's event
+        // is ignored for a session a proxy declared as some other kind, and a
+        // proxy's start replaces what a worker wrote first for the same id
+        // (that row can only be a forgery, since a proxy never starts a kube
+        // stream).
+        if matches!(e.kind, EventKind::SessionStart | EventKind::SessionEnd) {
+            let existing: Option<Option<String>> =
+                sqlx::query_scalar("SELECT kind FROM sessions WHERE session_id = $1")
+                    .bind(session_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            let existing = existing.flatten();
+            if e.producer.component == "worker" {
+                if existing.as_deref().is_some_and(|k| k != "kube") {
+                    continue;
+                }
+            } else if e.kind == EventKind::SessionStart && existing.as_deref() == Some("kube") {
+                sqlx::query(
+                    "UPDATE sessions SET username = NULL, kind = NULL, resource = NULL, login = NULL,
+                       worker_id = NULL, proxy_id = NULL, client_addr = NULL, recording_uri = NULL,
+                       recording_sha256 = NULL, ended_at = NULL, end_reason = NULL, duration_ms = NULL,
+                       bytes_in = NULL, bytes_out = NULL
+                     WHERE session_id = $1",
+                )
+                .bind(session_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
                     "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group, request_ids)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                     ON CONFLICT (session_id) DO UPDATE SET username = EXCLUDED.username, kind = EXCLUDED.kind,
-                       resource = EXCLUDED.resource, login = EXCLUDED.login, worker_id = EXCLUDED.worker_id,
-                       proxy_id = EXCLUDED.proxy_id, client_addr = EXCLUDED.client_addr, started_at = EXCLUDED.started_at,
+                     ON CONFLICT (session_id) DO UPDATE SET
+                       username = COALESCE(sessions.username, EXCLUDED.username),
+                       kind = COALESCE(sessions.kind, EXCLUDED.kind),
+                       resource = COALESCE(sessions.resource, EXCLUDED.resource),
+                       login = COALESCE(sessions.login, EXCLUDED.login),
+                       worker_id = COALESCE(sessions.worker_id, EXCLUDED.worker_id),
+                       proxy_id = COALESCE(sessions.proxy_id, EXCLUDED.proxy_id),
+                       client_addr = COALESCE(sessions.client_addr, EXCLUDED.client_addr),
+                       started_at = EXCLUDED.started_at,
                        actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci,
                        conn_group = EXCLUDED.conn_group, request_ids = EXCLUDED.request_ids",
                 )
@@ -674,7 +712,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                      ON CONFLICT (session_id) DO UPDATE SET ended_at = EXCLUDED.ended_at, end_reason = EXCLUDED.end_reason,
                        duration_ms = EXCLUDED.duration_ms, bytes_in = EXCLUDED.bytes_in, bytes_out = EXCLUDED.bytes_out,
-                       recording_sha256 = EXCLUDED.recording_sha256,
+                       recording_sha256 = COALESCE(sessions.recording_sha256, EXCLUDED.recording_sha256),
                        username = COALESCE(sessions.username, EXCLUDED.username),
                        resource = COALESCE(sessions.resource, EXCLUDED.resource),
                        login = COALESCE(sessions.login, EXCLUDED.login),
@@ -789,7 +827,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
             EventKind::SessionRecording => {
                 sqlx::query(
                     "INSERT INTO sessions (session_id, username, recording_uri) VALUES ($1, $2, $3)
-                     ON CONFLICT (session_id) DO UPDATE SET recording_uri = EXCLUDED.recording_uri",
+                     ON CONFLICT (session_id) DO UPDATE SET recording_uri = COALESCE(sessions.recording_uri, EXCLUDED.recording_uri)",
                 )
                 .bind(session_id)
                 .bind(&e.user)

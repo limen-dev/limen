@@ -11,6 +11,7 @@ pub mod kafka;
 pub mod kube;
 pub mod login;
 pub mod manage;
+pub mod mcp;
 pub mod mongo;
 pub mod mq;
 pub mod policy;
