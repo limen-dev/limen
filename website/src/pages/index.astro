@@ -9,7 +9,7 @@ const steps = [
   { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. Your login is tied to a key that never leaves your machine.', c: 'limen login' },
   { n: '02', t: 'Policy decides', d: 'Your IdP groups become roles, and roles reach resources by label. Anything no rule allows is denied, and you can ask why.', c: 'limen explain orders-prod' },
   { n: '03', t: 'Connect', d: 'You get a certificate that lasts an hour, or less if you choose. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
-  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. An auditor can check it, and Limen only lends the read access.', c: 'limen audit verify' },
+  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Auditors can search it, and check that nothing in it was changed.', c: 'limen audit search user:alice' },
 ];
 
 import postgresql from '../assets/logos/postgresql.svg?raw';
