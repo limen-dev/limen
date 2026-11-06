@@ -50,7 +50,7 @@ Values without a default fail the install with a message naming them: the OIDC i
 |-----|------|---------|-------------|
 | image.registry | string | `"ghcr.io/limen-dev"` | Registry the images are pulled from. They are named limen-control-plane, limen-proxy and limen-worker. |
 | image.tag | string | `""` | Limen release to run, as the image tag (v0.1.0). Empty runs the chart's appVersion, the release it was published with. |
-| image.componentTags | object | `{}` | Tag for one component, overriding `tag`, to upgrade the components one at a time. Keys: `control-plane`, `proxy`, `worker`. Leave empty outside an upgrade. |
+| image.componentTags | object | `{}` | Tag per component (`control-plane`, `proxy`, `worker`), overriding `tag`. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | imagePullSecrets | list | `[]` | Pull secrets for a private mirror of the images. |
 | existingSecrets.database | string | `"limen-database"` | Secret with the database URL, key `url`. |

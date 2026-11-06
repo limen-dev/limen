@@ -212,8 +212,6 @@ module "ecs" {
 module "ec2" {
   source = "../../modules/ec2"
 
-  # Workers roll after the control planes and proxies have finished (the ECS services wait for a
-  # steady state), so one apply upgrades in order.
   start_after = [for s in module.ecs.services : s.name]
 
   name        = var.name

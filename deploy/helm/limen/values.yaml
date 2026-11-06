@@ -13,7 +13,7 @@ image:
   registry: ghcr.io/limen-dev
   # -- Limen release to run, as the image tag (v0.1.0). Empty runs the chart's appVersion, the release it was published with.
   tag: ""
-  # -- Tag for one component, overriding `tag`, to upgrade the components one at a time. Keys: `control-plane`, `proxy`, `worker`. Leave empty outside an upgrade.
+  # -- Tag per component (`control-plane`, `proxy`, `worker`), overriding `tag`.
   componentTags: {}
   # -- Image pull policy.
   pullPolicy: IfNotPresent

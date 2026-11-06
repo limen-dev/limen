@@ -21,7 +21,7 @@ variable "image_tag" {
 }
 
 variable "image_tags" {
-  description = "Tag for one component, overriding image_tag, to upgrade the components one at a time. Keys: control-plane, proxy, worker. Leave empty outside an upgrade."
+  description = "Tag per component (control-plane, proxy, worker), overriding image_tag."
   type        = map(string)
   default     = {}
 

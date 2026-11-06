@@ -51,9 +51,7 @@ resource "aws_cloudwatch_log_group" "this" {
   tags              = var.tags
 }
 
-# Orders the groups after what `start_after` waits on. A resource, not `depends_on` on the module:
-# that would defer the data sources above (the AMI among them) to apply time whenever the
-# dependency has changes, and plan the launch templates as unknown.
+# Not `depends_on` on the module: that would defer the AMI lookup above to apply.
 resource "terraform_data" "start_after" {
   input = var.start_after
 }
