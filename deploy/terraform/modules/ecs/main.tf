@@ -37,7 +37,7 @@ module "service" {
   deployment_maximum_percent         = 150
 
   wait_for_steady_state             = each.value.wait_for_steady_state
-  health_check_grace_period_seconds = each.value.target_group_arn == null ? null : each.value.health_check_grace_seconds
+  health_check_grace_period_seconds = each.value.target_group_arn == null || each.value.component != "proxy" ? null : each.value.health_check_grace_seconds
 
   container_definitions = merge(
     {

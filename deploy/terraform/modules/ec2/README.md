@@ -39,6 +39,7 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | [aws_iam_role_policy.read_secrets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.write_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [terraform_data.preflight](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
+| [terraform_data.start_after](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [aws_iam_policy_document.read_secrets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.write_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
@@ -54,6 +55,7 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | ami\_ssm\_parameter | SSM parameter holding the AMI id, read at every plan: the default follows the latest Amazon Linux 2023, so a new AMI replaces the launch template and rolls every instance on the next apply. Set ami\_id to pin. Must match the instance types' architecture (arm64 default). | `string` | `"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"` | no |
 | internal\_ca | Pass { secret\_arn = ... }: the Secrets Manager secret for the Limen internal CA certificate (the<br/>foundation module creates it). Control plane instances publish the<br/>certificate they export into it; proxy and worker instances wait for it<br/>and write it to the file LIMEN\_CA\_FILE points at. | <pre>object({<br/>    secret_arn = string<br/>  })</pre> | `null` | no |
 | log\_retention\_days | Retention of each group's CloudWatch log group. | `number` | `90` | no |
+| start\_after | Values the groups must wait for, such as the names of the ECS services that run the control planes and proxies. Terraform creates or updates the Auto Scaling groups only after whatever produces these values is done, without deferring this module's data sources (which `depends_on` on the module would). Leave empty to start independently. | `list(string)` | `[]` | no |
 | tags | Tags added to every resource. | `map(string)` | `{}` | no |
 
 ## Outputs

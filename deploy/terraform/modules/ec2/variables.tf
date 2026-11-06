@@ -85,3 +85,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "start_after" {
+  description = "Values the groups must wait for, such as the names of the ECS services that run the control planes and proxies. Terraform creates or updates the Auto Scaling groups only after whatever produces these values is done, without deferring this module's data sources (which `depends_on` on the module would). Leave empty to start independently."
+  type        = list(string)
+  default     = []
+}

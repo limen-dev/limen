@@ -34,7 +34,8 @@ variable "services" {
     target_group_arn           = optional(string)
     task_role_policy_arns      = optional(map(string), {})
     # A proxy task can wait for an upgraded control plane before it serves (ADR-0045), and
-    # its load balancer health check fails meanwhile. Ignore that for this long after start.
+    # its load balancer health check fails meanwhile. Ignore that for this long after start
+    # (proxies only; a control plane that does not become healthy should be replaced at once).
     health_check_grace_seconds = optional(number, 900)
     # Make `terraform apply` wait until the service has finished its rollout, so what depends
     # on it starts afterwards.
