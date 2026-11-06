@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.1.0-rc.2](https://github.com/limen-dev/limen/compare/v0.1.0-rc.1...v0.1.0-rc.2) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **audit:** the limen-audit-verify binary no longer exists; use limen audit verify.
+
+### Features
+
+* **audit:** limen audit verify with Limen-lent access, plus a refreshed homepage and docs ([#274](https://github.com/limen-dev/limen/issues/274)) ([9f13081](https://github.com/limen-dev/limen/commit/9f13081c96295d6fb96784b60c0990ecf2da4e3c))
+* **cli:** limen config mcp, and a guide for using Limen from an AI agent ([#275](https://github.com/limen-dev/limen/issues/275)) ([44ef892](https://github.com/limen-dev/limen/commit/44ef89264d21784698fce9c349878269abcf6f52))
+* **cli:** limen mcp, a read-only MCP server (ADR-0032 spike 0) ([#268](https://github.com/limen-dev/limen/issues/268)) ([9a2bba4](https://github.com/limen-dev/limen/commit/9a2bba491f32df9139d16746a4715915de3ac793))
+* **console:** a read-only Integrations page for admins ([#125](https://github.com/limen-dev/limen/issues/125)) ([#251](https://github.com/limen-dev/limen/issues/251)) ([22de5f0](https://github.com/limen-dev/limen/commit/22de5f0385390d793d246d9329c246d52a4200b8))
+* **console:** logo cards on the Integrations page ([#256](https://github.com/limen-dev/limen/issues/256)) ([bf6cf51](https://github.com/limen-dev/limen/commit/bf6cf51225f611dad8848faa18de028c48c6ab80))
+* **control-plane:** GetDocument reads past policy versions ([#225](https://github.com/limen-dev/limen/issues/225)) ([a2de176](https://github.com/limen-dev/limen/commit/a2de176a5d8535ed83d038800f4325e2226b47bf))
+* **control-plane:** GetSchema serves each kind's JSON Schema ([#228](https://github.com/limen-dev/limen/issues/228)) ([5fb0719](https://github.com/limen-dev/limen/commit/5fb07197220e89ca0af62fa43b287c72924edbcd))
+* **control-plane:** store policy documents once by digest, and refresh by digest ([#208](https://github.com/limen-dev/limen/issues/208)) ([1722325](https://github.com/limen-dev/limen/commit/172232546752bd1f8b5ca6c1897586f3d0069dec))
+* **deploy:** Helm chart and Terraform modules for Limen on AWS and Kubernetes ([#105](https://github.com/limen-dev/limen/issues/105)) ([957541b](https://github.com/limen-dev/limen/commit/957541b9ae993131f08635c4d5041f0be77db5ab))
+* limen doctor, plain ssh/scp/rsync/git via ssh_config, one kubeconfig, denial hints ([#127](https://github.com/limen-dev/limen/issues/127)) ([3febf66](https://github.com/limen-dev/limen/commit/3febf66148ead9250cd081a9fc5109ee377d475c))
+* upgrade in one step (proxies and workers wait for an upgraded control plane); upgrade runbook for Helm, Terraform and the CLI ([#260](https://github.com/limen-dev/limen/issues/260)) ([efad5ca](https://github.com/limen-dev/limen/commit/efad5ca53380a776e5490bf9eb002bf5f92aca06)), closes [#17](https://github.com/limen-dev/limen/issues/17)
+* **website:** filter integrations by verification, fill short rows ([#223](https://github.com/limen-dev/limen/issues/223)) ([e97329d](https://github.com/limen-dev/limen/commit/e97329d0ae30a7711273359f02e5becc3363f4c1))
+* **website:** integration logos, grouped by category ([#217](https://github.com/limen-dev/limen/issues/217)) ([8b450a3](https://github.com/limen-dev/limen/commit/8b450a3e90d5288067791b7e3fbc93bfd4fab2a1))
+* **website:** link the logo strip, bolder hero stats, scroll hint on code, shorter sidebar labels ([#222](https://github.com/limen-dev/limen/issues/222)) ([6383996](https://github.com/limen-dev/limen/commit/63839965d6af16c8079cb07aecdfbb9ea7b3e276))
+
+
+### Bug Fixes
+
+* audit fixes for proxy header panic and CLI path/permissions ([#244](https://github.com/limen-dev/limen/issues/244)) ([70a19a0](https://github.com/limen-dev/limen/commit/70a19a09c21d5b062885dc0c5b0f8d8abe0466e7))
+* audit hardening (spool corruption, sign-in validators, CA and access tests) ([#237](https://github.com/limen-dev/limen/issues/237)) ([910eb44](https://github.com/limen-dev/limen/commit/910eb44b48d1992c2039fa82d1e255c09181e080))
+* audit hardening, day 2 (spool fsync failure, credential file modes, bot login timeout) ([#242](https://github.com/limen-dev/limen/issues/242)) ([98e2c91](https://github.com/limen-dev/limen/commit/98e2c9186e9b0812511236c07a009b2f12d59f8b))
+* **ci:** sign the release PR's Cargo.lock commit by committing through the API ([#271](https://github.com/limen-dev/limen/issues/271)) ([346adbb](https://github.com/limen-dev/limen/commit/346adbb669a2b8172337c4d0b75f9bd078fe1120))
+* **compose:** setup.sh on a stack with expired identities, and OpenSearch dev passwords ([#255](https://github.com/limen-dev/limen/issues/255)) ([0bc7da6](https://github.com/limen-dev/limen/commit/0bc7da67fd467b13f72c866f868d19588ea25e45))
+* **console:** 44px touch targets on touch screens, and the browser check fails below that ([#248](https://github.com/limen-dev/limen/issues/248)) ([fb63ebf](https://github.com/limen-dev/limen/commit/fb63ebf72c8803637b9dae16079ef16865437e05))
+* **console:** dashboards chooser overflow, and a browser check on saved pages in CI ([#145](https://github.com/limen-dev/limen/issues/145)) ([#243](https://github.com/limen-dev/limen/issues/243)) ([e120dba](https://github.com/limen-dev/limen/commit/e120dba4d6fba268108cffc5e6e78423272c1442))
+* **console:** no control characters in an audit search snippet ([#266](https://github.com/limen-dev/limen/issues/266)) ([f5cc462](https://github.com/limen-dev/limen/commit/f5cc4623aa82eb6c971c6b281cc86ae26e762775))
+* **console:** wrap long values on phones: bots, policy and session detail ([#145](https://github.com/limen-dev/limen/issues/145)) ([#210](https://github.com/limen-dev/limen/issues/210)) ([3f4f604](https://github.com/limen-dev/limen/commit/3f4f604269cde1533d5dc651d8f986aac8ae5757))
+* **control-plane:** refuse locked users and ended logins on the API ([#246](https://github.com/limen-dev/limen/issues/246)) ([cf08a35](https://github.com/limen-dev/limen/commit/cf08a350d3ebb2fe64bf61442d1560f25da334c7))
+* **deps:** bump pageant to 0.2.5 (GHSA-662x-8wvj-2276) ([#214](https://github.com/limen-dev/limen/issues/214)) ([e9d1614](https://github.com/limen-dev/limen/commit/e9d16143c586d5df1763d8498f309a1a7d3234d8))
+* **deps:** bump pulldown-cmark to 0.13.6 (RUSTSEC-2026-0433) ([#234](https://github.com/limen-dev/limen/issues/234)) ([f5668f8](https://github.com/limen-dev/limen/commit/f5668f86b41736af3dcb1c33a3056802ca628594))
+* **examples:** database role names, and the first live run of pentest section 3 (refs [#66](https://github.com/limen-dev/limen/issues/66)) ([#264](https://github.com/limen-dev/limen/issues/264)) ([2619f58](https://github.com/limen-dev/limen/commit/2619f58d7190d1239f1818316b8e769495dfa0f9))
+* pentest section 4 code review, fixes and results (refs [#66](https://github.com/limen-dev/limen/issues/66)) ([#263](https://github.com/limen-dev/limen/issues/263)) ([74435f2](https://github.com/limen-dev/limen/commit/74435f27ecc2715e709c3d9b2a7faa77987f058c))
+* release PR checks (chart render with unquoted appVersion, gitleaks fingerprints) ([#258](https://github.com/limen-dev/limen/issues/258)) ([09dfac0](https://github.com/limen-dev/limen/commit/09dfac02c0f6e87dab865082a689f73a334c2144))
+* repo audit, four small fixes (deep-link sign-in, duration overflow, zero-duration typos, lost audit log) ([#254](https://github.com/limen-dev/limen/issues/254)) ([3fb1aa3](https://github.com/limen-dev/limen/commit/3fb1aa33f9772f8caba4e81ada390ad3ef1f8320))
+* **site:** pass the cross-browser matrix on a Linux runner ([#211](https://github.com/limen-dev/limen/issues/211)) ([535362e](https://github.com/limen-dev/limen/commit/535362e11473ea38924877f464f353c15ef2f104))
+* **website:** accessible names for the logo icons and the scrollable audit list ([#224](https://github.com/limen-dev/limen/issues/224)) ([45ed888](https://github.com/limen-dev/limen/commit/45ed8881382dddedb28615ceaa4fb3df8329cb3f))
+* **website:** dark logo tiles in dark theme ([#220](https://github.com/limen-dev/limen/issues/220)) ([0de5036](https://github.com/limen-dev/limen/commit/0de5036a9b2e1dead9ed5da2ea1dd9486df63971))
+* **website:** docs table of contents on the introduction, right-edge alignment, wrapped code ([#231](https://github.com/limen-dev/limen/issues/231)) ([07ce32c](https://github.com/limen-dev/limen/commit/07ce32c3aab17f47126229ed5ffb74823fab062a))
+* **website:** robots.txt, canonical URL, real descriptions on every page, legible MySQL logo ([#226](https://github.com/limen-dev/limen/issues/226)) ([0c3c864](https://github.com/limen-dev/limen/commit/0c3c86482f85bf9c6602d926c061a0b50d54f096))
+* **website:** size the homepage headline for its longer text ([#233](https://github.com/limen-dev/limen/issues/233)) ([0f68d0a](https://github.com/limen-dev/limen/commit/0f68d0aafe90725611519151e6f64fa71ce81cdb))
+* **worker:** refuse an enormous MySQL row length; pentest arithmetic triage (refs [#66](https://github.com/limen-dev/limen/issues/66)) ([#259](https://github.com/limen-dev/limen/issues/259)) ([dadf897](https://github.com/limen-dev/limen/commit/dadf8972874964bf78c02a256c51dcf71fe16d04))
+* **worker:** two length overflows found by the weekly fuzz run (RESP map count, MySQL auth length) ([#249](https://github.com/limen-dev/limen/issues/249)) ([0cbf122](https://github.com/limen-dev/limen/commit/0cbf12236cd227eabba9ff921e65df4876ba85cc))
+
+
+### Performance Improvements
+
+* **website:** preload the fonts and stop per-frame style reads on the homepage ([#227](https://github.com/limen-dev/limen/issues/227)) ([75d4da5](https://github.com/limen-dev/limen/commit/75d4da5b1978b9d8c439572596326ab40d25eed8))
+
 ## 0.1.0-rc.1 (2026-11-01)
 
 
