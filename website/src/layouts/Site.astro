@@ -48,6 +48,7 @@ const palette = paletteFor(base);
         document.documentElement.dataset.theme = t;
       } catch (e) {}
     </script>
+    <noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
@@ -58,10 +59,11 @@ const palette = paletteFor(base);
         <span>limen</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href={`${home ? '' : base}#session`}>Live demo</a>
+        <a href={`${home ? '' : base}#session`}>See it work</a>
         <a href={`${home ? '' : base}#how`}>How it works</a>
         <a href={`${home ? '' : base}#who`}>Who it's for</a>
-        <a href={`${home ? '' : base}#protocols`}>Protocols</a>
+        <a href={`${home ? '' : base}#why`}>Why Limen</a>
+        <a href={`${home ? '' : base}#protocols`}>Integrations</a>
         <a href={docs('')}>Docs</a>
       </nav>
       <div class="nav-actions">
