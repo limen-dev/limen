@@ -1,0 +1,23 @@
+# Two Moto AWS emulators for the discovery tests (crates/limen-worker/src/discovery/emulator_tests.rs).
+# A test fixture, not a dev stack: setup.sh doesn't start it. Emulator-tested is not verified
+# against AWS (#123): Moto is lenient about input and has no real engines behind its endpoints.
+#
+#   docker compose --project-directory deploy/compose -f deploy/compose/stacks/aws-emulator.yml up -d
+#   LIMEN_TEST_AWS_ENDPOINT=http://localhost:15000 LIMEN_TEST_AWS_OPEN_ENDPOINT=http://localhost:15001 \
+#     cargo test -p limen-worker --lib discovery::emulator
+#
+# `aws` checks every signature after its first three calls (the test creates its admin user
+# with them), and nothing resets that counter: restart it before each run
+# (`docker compose ... restart aws`). `aws-open` checks nothing; it serves EKS, which `aws`
+# can't (Moto refuses even botocore's own signed EKS requests).
+services:
+  aws:
+    container_name: limen-aws${LIMEN_SUFFIX:-}
+    image: ${MOTO_IMAGE}
+    environment: { INITIAL_NO_AUTH_ACTION_COUNT: "3" }
+    ports: ["127.0.0.1:${LIMEN_PORT_AWS:-15000}:5000"]
+
+  aws-open:
+    container_name: limen-aws-open${LIMEN_SUFFIX:-}
+    image: ${MOTO_IMAGE}
+    ports: ["127.0.0.1:${LIMEN_PORT_AWS_OPEN:-15001}:5000"]
