@@ -397,6 +397,8 @@ enum ConfigCommand {
         #[arg(long, value_name = "FILE")]
         file: Option<PathBuf>,
     },
+    /// Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
+    Mcp,
 }
 
 #[derive(Debug, Subcommand)]
@@ -839,6 +841,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 commands::ssh::config(proxy)
             }
         }
+        Command::Config {
+            command: ConfigCommand::Mcp,
+        } => commands::mcp::config(proxy),
         Command::Db {
             command:
                 DbCommand::Connect {

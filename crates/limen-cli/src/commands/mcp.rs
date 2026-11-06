@@ -134,6 +134,58 @@ fn bounded_text(bytes: &[u8]) -> String {
     )
 }
 
+/// `limen config mcp`: how to add this server to an agent. Prints only; it
+/// changes no file, because an agent's config is the person's to edit.
+pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
+    let exe = std::env::current_exe()?;
+    let exe = exe
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("the path of this program is not valid UTF-8"))?;
+    let text = config_text(exe, proxy);
+    // Render first: writing straight to a closed pipe (`| head`) would panic.
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), text.as_bytes());
+    Ok(())
+}
+
+/// The setup text. The program is named by its full path, because desktop
+/// agents often start servers without the shell's `PATH`.
+fn config_text(exe: &str, proxy: Option<&str>) -> String {
+    let mut args = Vec::new();
+    if let Some(proxy) = proxy {
+        args.extend(["--proxy", proxy]);
+    }
+    args.push("mcp");
+    let json = serde_json::to_string_pretty(&json!({
+        "mcpServers": { "limen": { "command": exe, "args": args } }
+    }))
+    .unwrap_or_default();
+    let shell = args
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "# Claude Code\nclaude mcp add limen -- {exe} {shell}\n\n\
+         # Any client that reads an `mcpServers` block (.mcp.json, and similar)\n{json}\n\n\
+         # The server is read-only and acts as you, with your Limen login.\n\
+         # Sign in first with `limen login`; when it expires, run it again.\n",
+        exe = shell_quote(exe),
+    )
+}
+
+/// Single-quote for a POSIX shell unless the text is plainly safe.
+fn shell_quote(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':' | '=' | '@')
+        });
+    if plain {
+        s.to_owned()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 /// Serve MCP on stdin and stdout until stdin closes.
 pub async fn serve(proxy: Option<&str>) -> anyhow::Result<()> {
     let runner = SelfRunner {
@@ -764,6 +816,29 @@ mod tests {
         let out = run_bounded(cmd).await.unwrap();
         assert!(out.is_error);
         assert_eq!(out.text, "bad\n");
+    }
+
+    #[test]
+    fn config_text_is_valid_json_and_quotes_awkward_paths() {
+        let text = config_text("/opt/my tools/limen", Some("limen.example.com:443"));
+        assert!(text.contains(
+            "claude mcp add limen -- '/opt/my tools/limen' --proxy limen.example.com:443 mcp"
+        ));
+        let start = text.find('{').unwrap();
+        let end = text.rfind('}').unwrap();
+        let parsed: Value = serde_json::from_str(&text[start..=end]).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["limen"]["command"],
+            "/opt/my tools/limen"
+        );
+        assert_eq!(
+            parsed["mcpServers"]["limen"]["args"],
+            json!(["--proxy", "limen.example.com:443", "mcp"])
+        );
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        let plain = config_text("/usr/bin/limen", None);
+        assert!(plain.contains("claude mcp add limen -- /usr/bin/limen mcp\n"));
+        assert!(!plain.contains("--proxy"));
     }
 
     #[test]

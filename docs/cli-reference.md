@@ -533,6 +533,14 @@ Options:
 - `--uninstall`: Remove the Include from ~/.ssh/config and delete the generated ssh_config.
 - `--file <FILE>`: The OpenSSH config to change, instead of ~/.ssh/config.
 
+#### `limen config mcp`
+
+Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files
+
+```text
+Usage: limen config mcp [OPTIONS]
+```
+
 ### `limen db`
 
 PostgreSQL, MySQL, Aurora, and Redshift
