@@ -414,7 +414,9 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 
 /* THE CONSOLE */
 .shotbox { margin-top: 2.5rem; border: 1px solid var(--lm-line-strong); border-radius: 16px; overflow: hidden; background: var(--lm-surface); box-shadow: var(--lm-shadow); }
-.shotbox .term-bar { border-bottom: 1px solid var(--lm-line); }
+.shotbox .term-bar { border-bottom: 1px solid var(--lm-line); align-items: flex-start; }
+.shotbox .tabs { flex-wrap: wrap; overflow: visible; }
+.shotbox .lights { margin-top: 0.5rem; }
 .shot { margin: 0; }
 .shot[hidden] { display: none; }
 .shot img { display: block; width: 100%; height: auto; }

@@ -80,6 +80,19 @@ const groups: Group[] = [
     ],
   },
 ];
+const consolePages = [
+  { id: 'overview', t: 'Overview', alt: 'The console overview: live counts, and every resource you can reach with a copy-paste command.', cap: 'Who you are, what you can reach, and a copy-paste command for each resource. Admins also get live counts.' },
+  { id: 'resources', t: 'Resources', alt: 'The console Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it.', cap: 'Everything Limen can reach, with the roles that grant access and the live workers that can serve it.' },
+  { id: 'sessions', t: 'Sessions', alt: 'The console Sessions page: live and past sessions with filters, and a Replay link on SSH sessions.', cap: 'Live and past sessions, filtered by person, resource, kind or outcome. SSH sessions have a recording to replay.' },
+  { id: 'commands', t: 'Commands', alt: 'A Redis session in the console: the command that was sent and that policy refused it.', cap: 'Database, Redis and other sessions list every command, including the ones policy refused. Values are never kept.' },
+  { id: 'access', t: 'Access', alt: 'The console Access page: a request waiting for the approver, with the reason and duration.', cap: 'Approvers decide here, signed in, with the reason and the duration in front of them. Break-glass grants are flagged for review.' },
+  { id: 'reviews', t: 'Reviews', alt: 'The console Reviews page: an access review in progress, a role withheld, and the evidence pack download.', cap: 'Check who holds which role, withhold what should not be there, and download a signed evidence pack for an auditor.' },
+  { id: 'users', t: 'Users', alt: 'The console Users page: who has signed in, their roles, and a locked user with the reason.', cap: 'Who has signed in, and their roles. Lock a user and their open sessions end, with the reason audited.' },
+  { id: 'workers', t: 'Workers', alt: 'The console Workers page: enrolled proxies and workers with their tunnels and certificate expiry.', cap: 'Enrolled proxies and workers, their tunnels and certificate expiry. Revoke one and its tunnels drop within about ten seconds.' },
+  { id: 'audit', t: 'Audit trail', alt: 'The console Audit trail page: filters by kind, user and time, and a list of events.', cap: 'The last 30 days of sign-ins, denials, locks and policy changes, with search across commands and statements. Every search is recorded too.' },
+  { id: 'policy', t: 'Policy', alt: 'The console Policy page: the active version and digest, and every role.', cap: 'Every policy document with its owner. Check a change before applying it: the diff, who gains or loses access, and the policy tests.' },
+  { id: 'dashboards', t: 'Dashboards', alt: 'The console Dashboards page: sessions over time, sign-ins and denials, and the busiest resources and people.', cap: 'Sessions over time, sign-ins and denials, and the busiest resources and people, from the console\'s own records.' },
+];
 const consoleFeatures = [
   { t: 'Replay a session', d: 'Watch an SSH recording once the control plane has checked its hash. SQL, Redis and other sessions list what ran.' },
   { t: 'Approve with context', d: 'Approvers see the reason, the duration, and what the requester did on that resource in the past 30 days.' },
@@ -211,26 +224,16 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             <div class="term-bar">
               <span class="lights"><i></i><i></i><i></i></span>
               <div class="tabs" role="tablist" aria-label="Console pages">
-                <button role="tab" aria-selected="true" data-pg="resources" type="button">Resources</button>
-                <button role="tab" aria-selected="false" data-pg="audit" type="button">Audit trail</button>
-                <button role="tab" aria-selected="false" data-pg="policy" type="button">Policy</button>
+                {consolePages.map((pg, i) => <button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-pg={pg.id} type="button">{pg.t}</button>)}
               </div>
             </div>
-            <figure class="shot" data-panel="resources">
-              <img class="dark" src={`${base}console/resources-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it." />
-              <img class="light" src={`${base}console/resources-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it." />
-              <figcaption>Everything Limen can reach, with the roles that grant access and the live workers that can serve it. A "none" means no worker can, so sessions would fail.</figcaption>
-            </figure>
-            <figure class="shot" data-panel="audit" hidden>
-              <img class="dark" src={`${base}console/audit-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Audit trail page: filters by kind, user and time, and a list of events." />
-              <img class="light" src={`${base}console/audit-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Audit trail page: filters by kind, user and time, and a list of events." />
-              <figcaption>The last 30 days of sign-ins, denials, locks and policy changes, with search across commands and statements. Every search is recorded too.</figcaption>
-            </figure>
-            <figure class="shot" data-panel="policy" hidden>
-              <img class="dark" src={`${base}console/policy-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Policy page: the active version and digest, and every role." />
-              <img class="light" src={`${base}console/policy-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Policy page: the active version and digest, and every role." />
-              <figcaption>Every policy document with its owner. Check a change before applying it: the diff, who gains or loses access, and the policy tests.</figcaption>
-            </figure>
+            {consolePages.map((pg, i) => (
+              <figure class="shot" data-panel={pg.id} hidden={i > 0}>
+                <img class="dark" src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                <img class="light" src={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                <figcaption>{pg.cap}</figcaption>
+              </figure>
+            ))}
             <p class="shot-note">The real console, with sample data.</p>
           </div>
 
