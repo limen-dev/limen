@@ -112,6 +112,11 @@ services:
       LIMEN_AUDIT_S3_PATH_STYLE: "true"
       LIMEN_AUDIT_S3_CREATE_BUCKET: "true"
       LIMEN_AUDIT_S3_FLUSH: 10s
+      # `limen audit verify` reads the bucket with this read-only identity
+      # (s3/s3.json), from the host. In AWS this is a role the control plane assumes.
+      LIMEN_AUDIT_VERIFIER_ACCESS_KEY_ID: verifier
+      LIMEN_AUDIT_VERIFIER_SECRET_ACCESS_KEY: verifier-dev-only-secret
+      LIMEN_AUDIT_VERIFIER_S3_ENDPOINT: http://localhost:${LIMEN_PORT_S3:-8333}
       # The dev identity in s3/s3.json.
       AWS_ACCESS_KEY_ID: dev
       AWS_SECRET_ACCESS_KEY: dev-only-secret

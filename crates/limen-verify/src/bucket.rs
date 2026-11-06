@@ -26,7 +26,7 @@ use limen_session::envelope::{Purpose, verify_at};
 use rustls_pki_types::CertificateDer;
 use sha2::{Digest, Sha256};
 
-use crate::sinks::{Manifest, SignedManifest};
+use crate::manifest::{Manifest, SignedManifest};
 
 #[derive(Debug, Default)]
 pub struct VerifyReport {
@@ -111,7 +111,15 @@ impl std::fmt::Display for SeqConflict {
 #[derive(serde::Deserialize)]
 struct EventSeq {
     event_id: Uuid,
-    producer: limen_audit::Producer,
+    producer: Producer,
+}
+
+/// Who numbered an event: `seq` counts from 0 for each `(component, instance_id)`.
+#[derive(serde::Deserialize)]
+struct Producer {
+    component: String,
+    instance_id: String,
+    seq: u64,
 }
 
 /// Distinct events, and the events seen per producer and `seq`.
@@ -289,7 +297,7 @@ pub async fn verify_bucket(
             // The signer is the writer's own control-plane certificate: another
             // component's valid signature doesn't make a manifest this writer's.
             if let Some(by) = &sealed_by
-                && let Some(why) = crate::sinks::signer_problem(&by.id, &manifest.writer)
+                && let Some(why) = crate::manifest::signer_problem(&by.id, &manifest.writer)
             {
                 report.problems.push(problem(why));
             }

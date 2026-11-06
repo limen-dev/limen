@@ -70,7 +70,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let direct = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let direct = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     direct
         .create_bucket()
@@ -216,7 +216,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
 
     // The trail verifies...
     let ca = h.internal_ca();
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -246,7 +246,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
         .send()
         .await
         .expect("tamper");
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -270,7 +270,7 @@ async fn no_event_lost_when_s3_and_datadog_go_away_and_trail_is_tamper_evident()
         .send()
         .await
         .expect("delete");
-    let report = limen_control_plane::verify::verify_bucket(&direct, &bucket, "", &ca)
+    let report = limen_verify::bucket::verify_bucket(&direct, &bucket, "", &ca)
         .await
         .expect("verify");
     assert!(
@@ -325,7 +325,7 @@ async fn recordings_stream_to_s3() {
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let client = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let client = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     client
         .create_bucket()

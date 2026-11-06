@@ -22,7 +22,7 @@ Audit lives in S3 and Datadog, recordings in S3, and the console keeps a 30-day 
 - **Search as an exfiltration channel:** it exposes everything the auditors may see. Mitigations: the narrow `limen:auditor` role, audited queries, rate limits, retention limits, and an off-by-default recording index.
 - **Secrets in recordings and statements:** masked at index time on a best-effort basis (documented as such, not a guarantee). The unmasked originals stay where they already are, under the sinks' controls.
 - **Query injection or expensive queries:** the query is parsed into a typed filter set and a sanitized tsquery, always parameterized; statement timeouts and result limits apply.
-- **Index diverging from the record:** the index is a copy built from the same events; the console says so, and verification (`limen-audit-verify`) stays the source of truth.
+- **Index diverging from the record:** the index is a copy built from the same events; the console says so, and verification (`limen audit verify`) stays the source of truth.
 
 ## Consequences
 - Storage grows with text; sizing guidance and the retention setting are part of the work.

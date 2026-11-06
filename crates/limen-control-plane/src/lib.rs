@@ -26,7 +26,7 @@ pub mod server;
 pub mod services;
 pub mod sinks;
 pub mod state;
-pub mod verify;
+pub mod verifier_access;
 
 use std::sync::Arc;
 

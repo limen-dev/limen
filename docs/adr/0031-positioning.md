@@ -14,7 +14,7 @@ Identity-aware access platforms are a crowded space, and the usual way to compet
 The one-sentence version: *Limen makes access short-lived, justified, and provable.*
 
 ### Pillars
-1. **Provable.** The audit trail is signed and hash-chained (ADR-0009). The step beyond that is the **access receipt**: for any session, one bundle holding the recording, its events, the chain proof, the policy version and digest in force, the identity and roles, and the approval that allowed it (ADR-0025). `limen-audit-verify` checks a receipt **offline**, so an auditor, a customer, or a court needs no access to Limen.
+1. **Provable.** The audit trail is signed and hash-chained (ADR-0009). The step beyond that is the **access receipt**: for any session, one bundle holding the recording, its events, the chain proof, the policy version and digest in force, the identity and roles, and the approval that allowed it (ADR-0025). `limen audit verify` checks a receipt **offline**, so an auditor, a customer, or a court needs no access to Limen.
 2. **Explainable.** Every decision, allow or deny, can say why: which role, which rule, which label did not match, which lock or expired grant applied (`explain`, ADR-0028). Users get the reason for their own denials; admins get the full trace. Policy changes show their effect on *effective access* before they land (`policy diff`), and tests run in CI (`policy test`).
 3. **Justified and short-lived.** No standing credentials anywhere: certificates in minutes, access requests with a reason, approvals, break-glass that is loud (ADR-0025). The approver sees context, and later can be given more (an open incident, the on-call rota, a ticket's state) so that routine approvals are automatic and unusual ones are not. Risky statements (for example `DELETE` without `WHERE`) can require a second person, because the wire-level audit already sees them.
 4. **Machines and agents are principals too.** CI jobs (ADR-0019) and, next, **AI agents** get scoped, short-lived, approved, recorded access under the same rules as people, with their full transcript kept and individual risky actions approvable by a human. This is the part of the product that looks furthest ahead.
@@ -23,7 +23,7 @@ The one-sentence version: *Limen makes access short-lived, justified, and provab
 ### What each pillar rests on (built, decided, or still to do)
 | Pillar | Built today | Decided (ADR) | To add |
 |---|---|---|---|
-| Provable | Signed hash-chained audit, `limen-audit-verify`, recording hashes checked before playback | ADR-0029 evidence packs | **Access receipts** per session; offline verification of a receipt; policy digest recorded on every session event |
+| Provable | Signed hash-chained audit, `limen audit verify`, recording hashes checked before playback | ADR-0029 evidence packs | **Access receipts** per session; offline verification of a receipt; policy digest recorded on every session event |
 | Explainable | Dry run with a diff; denials audited with a reason | ADR-0028 | Decision traces, `explain`, effective-access diff, `policy test` |
 | Justified | Short-lived certificates (1 hour by default), locks, kills, revokes | ADR-0025 | Requests, approvals, break-glass; context sources for approvers; statement-level second approval (needs the Phase 6 protocol work) |
 | Machines and agents | None yet | ADR-0019 (bots) | **Agent principals**: a bot kind for AI agents, per-action approval, transcript recording; an ADR when Phase 4 starts |

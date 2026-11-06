@@ -333,6 +333,24 @@ Options:
 - `--limit <LIMIT>`: The most hits to return (up to 200). Default: `50`.
 - `--json`: Output JSON instead of text.
 
+#### `limen audit verify`
+
+Check that the audit trail is intact: signed, chained, with nothing missing or altered.
+
+For auditors and admins (`limen:auditor` or `limen:admin`). Limen decides who may, records that you did, and gives your session short-lived read-only access to the audit bucket. The check itself runs on your machine, against the CA you pinned at login, so it does not rest on Limen's word. Exits 2 if anything fails.
+
+With --evidence it checks a pack from `limen admin evidence` offline instead, with no login: give it the pack and the CA certificate.
+
+```text
+Usage: limen audit verify [OPTIONS]
+```
+
+Options:
+
+- `--evidence <FILE>`: Check a pack from `limen admin evidence`, offline.
+- `--audit-events <FILE>`: With --evidence: an audit JSONL file; the pack's export event must be in it.
+- `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM). Defaults to the CA pinned when you logged in. Needed with --evidence if you are not logged in.
+
 ### `limen policy`
 
 Ask a policy questions: test it, who can reach what, what changes

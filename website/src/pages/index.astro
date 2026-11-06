@@ -9,7 +9,7 @@ const steps = [
   { n: '01', t: 'Sign in', d: 'Through the identity provider you already run. Your login is tied to a key that never leaves your machine.', c: 'limen login' },
   { n: '02', t: 'Policy decides', d: 'Your IdP groups become roles, and roles reach resources by label. Anything no rule allows is denied, and you can ask why.', c: 'limen explain orders-prod' },
   { n: '03', t: 'Connect', d: 'You get a certificate that lasts an hour, or less if you choose. A worker inside your network dials out to Limen, so your targets open no inbound port.', c: 'limen db connect orders-staging' },
-  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Anyone who can read the bucket can check it.', c: 'limen-audit-verify --bucket …' },
+  { n: '04', t: 'Prove', d: 'Every session is recorded or audited into a signed, hash-chained trail. Auditors can search it, and check that nothing in it was changed.', c: 'limen audit search user:alice' },
 ];
 
 import postgresql from '../assets/logos/postgresql.svg?raw';
@@ -31,6 +31,22 @@ const line = (d: string, label: string): Logo => ({ svg: `<svg viewBox="0 0 24 2
 const terminal = line('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/>', 'Terminal');
 const globe = line('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>', 'Web');
 const plug = line('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4"/>', 'TCP');
+
+const svg = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const svgp = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ico = {
+  chain: svg('<rect x="2.5" y="8" width="7" height="8" rx="2"/><rect x="14.5" y="8" width="7" height="8" rx="2"/><path d="M9.5 12h5"/>'),
+  test: svg('<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 18l-5-9V3"/><path d="m9.5 15 1.8 1.8 3.2-3.6"/>'),
+  clock: svg('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>'),
+  bot: svg('<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4M9 13v1M15 13v1"/><circle cx="12" cy="3.5" r="1"/>'),
+  rec: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" fill="currentColor"/>'),
+  pack: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M9 14.5l2 2 4-4"/>'),
+  stop: svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
+  dev: svgp('<rect pathLength="1" x="3" y="4" width="18" height="16" rx="2.5"/><path pathLength="1" d="m7 9 3 3-3 3M13 15h4"/>'),
+  ops: svgp('<rect pathLength="1" x="3" y="3.5" width="18" height="7" rx="2"/><rect pathLength="1" x="3" y="13.5" width="18" height="7" rx="2"/><path pathLength="1" d="M7 7h.01M7 17h.01M12 7h5M12 17h5"/>'),
+  sec: svgp('<path pathLength="1" d="M12 3 4.5 6v5.5c0 4.6 3.2 8 7.5 9.5 4.3-1.5 7.5-4.9 7.5-9.5V6L12 3Z"/><path pathLength="1" d="m9 12 2.2 2.2L15.5 10"/>'),
+  open: svg('<path d="M8 8 3.5 12 8 16M16 8l4.5 4-4.5 4M13.5 5l-3 14"/>'),
+};
 
 type Proto = { logos: Logo[]; name: string; sub: string; warn?: string; href: string };
 type Group = { id: string; title: string; blurb: string; items: Proto[] };
@@ -68,6 +84,27 @@ const groups: Group[] = [
     ],
   },
 ];
+const consolePages = [
+  { id: 'overview', t: 'Overview', alt: 'The console overview: live counts, and every resource you can reach with a copy-paste command.', cap: 'Who you are, what you can reach, and a copy-paste command for each resource. Admins also get live counts.' },
+  { id: 'resources', t: 'Resources', alt: 'The console Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it.', cap: 'Everything Limen can reach, with the roles that grant access and the live workers that can serve it.' },
+  { id: 'sessions', t: 'Sessions', alt: 'The console Sessions page: live and past sessions with filters, and a Replay link on SSH sessions.', cap: 'Live and past sessions, filtered by person, resource, kind or outcome. SSH sessions have a recording to replay.' },
+  { id: 'commands', t: 'Commands', alt: 'A Redis session in the console: the command that was sent and that policy refused it.', cap: 'Database, Redis and other sessions list every command, including the ones policy refused. Values are never kept.' },
+  { id: 'access', t: 'Access', alt: 'The console Access page: a request waiting for the approver, with the reason and duration.', cap: 'Approvers decide here, signed in, with the reason and the duration in front of them. Break-glass grants are flagged for review.' },
+  { id: 'reviews', t: 'Reviews', alt: 'The console Reviews page: an access review in progress, a role withheld, and the evidence pack download.', cap: 'Check who holds which role, withhold what should not be there, and download a signed evidence pack for an auditor.' },
+  { id: 'users', t: 'Users', alt: 'The console Users page: who has signed in, their roles, and a locked user with the reason.', cap: 'Who has signed in, and their roles. Lock a user and their open sessions end, with the reason audited.' },
+  { id: 'workers', t: 'Workers', alt: 'The console Workers page: enrolled proxies and workers with their tunnels and certificate expiry.', cap: 'Enrolled proxies and workers, their tunnels and certificate expiry. Revoke one and its tunnels drop within about ten seconds.' },
+  { id: 'audit', t: 'Audit trail', alt: 'The console Audit trail page: filters by kind, user and time, and a list of events.', cap: 'The last 30 days of sign-ins, denials, locks and policy changes, with search across commands and statements. Every search is recorded too.' },
+  { id: 'policy', t: 'Policy', alt: 'The console Policy page: the active version and digest, and every role.', cap: 'Every policy document with its owner. Check a change before applying it: the diff, who gains or loses access, and the policy tests.' },
+  { id: 'dashboards', t: 'Dashboards', alt: 'The console Dashboards page: sessions over time, sign-ins and denials, and the busiest resources and people.', cap: 'Sessions over time, sign-ins and denials, and the busiest resources and people, from the console\'s own records.' },
+];
+const consoleFeatures = [
+  { t: 'Replay a session', d: 'Watch an SSH recording once the control plane has checked its hash. SQL, Redis and other sessions list what ran.' },
+  { t: 'Approve with context', d: 'Approvers see the reason, the duration, and what the requester did on that resource in the past 30 days.' },
+  { t: 'Reviews and evidence', d: 'Run access reviews and download a signed evidence pack for an auditor.' },
+  { t: 'Lock and end', d: 'Lock a user or end a live session, always with a reason that goes into the audit trail.' },
+  { t: 'Dashboards', d: 'Sessions over time, denials, bot sessions by repository, out-of-hours access and sessions without a recording.' },
+  { t: 'Edit policy safely', d: 'Edit the documents the console owns, after checking the diff, who gains access and the policy tests.' },
+];
 const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l) => l.color.startsWith('#')).map((l) => ({ l, href: i.href }))));
 
 // The ⌘K palette. Plain data, no third-party search.
@@ -88,7 +125,10 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             </a>
             <h1>No more static keys. Access that <span class="grad">expires in an hour</span>.</h1>
             <p class="lede">
-              Limen replaces SSH keys, shared database passwords and CI secrets with a sign-in through your identity provider. Engineers and CI jobs get <b><span class="nb">short-lived</span>, audited access</b> to SSH, databases, Kubernetes and internal apps, and every session leaves a trail <b>you can verify yourself</b>.
+              Limen replaces SSH keys, shared database passwords and CI secrets with <b>one sign-in</b> through your identity provider.
+            </p>
+            <p class="lede lede2">
+              Engineers and CI jobs get <b><span class="nb">short-lived</span>, audited access</b> to SSH, databases, Kubernetes and internal apps. Every session leaves a trail <b>you can verify yourself</b>.
             </p>
             <div class="cta">
               <a class="btn primary" href={docs('quickstart/')}>Try it on your laptop
@@ -135,9 +175,9 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
       <!-- LIVE SESSION -->
       <section class="section" id="session">
         <div class="wrap">
-          <div class="eyebrow">See it work</div>
-          <h2>A session, and the proof it leaves.</h2>
-          <p class="sub">Every command below writes an audit event, and each event's hash includes the one before it. Edit anything in the past and the chain stops verifying. Press the tamper button and see.</p>
+          <div class="eyebrow reveal">See it work</div>
+          <h2 class="reveal">A session, and the proof it leaves.</h2>
+          <p class="sub reveal">Every command below writes an audit event, and each event's hash includes the one before it. Edit anything in the past and the chain stops verifying. Press the tamper button and see.</p>
 
           <div class="theater" id="theater">
             <div class="term" role="group" aria-label="Terminal demo">
@@ -147,6 +187,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                   <button role="tab" aria-selected="true" data-scn="ssh" type="button">SSH</button>
                   <button role="tab" aria-selected="false" data-scn="pg" type="button">Postgres</button>
                   <button role="tab" aria-selected="false" data-scn="k8s" type="button">Kubernetes</button>
+                  <button role="tab" aria-selected="false" data-scn="redis" type="button">Redis</button>
                   <button role="tab" aria-selected="false" data-scn="req" type="button">Ask for access</button>
                 </div>
                 <button class="replay" id="replay" type="button" aria-label="Replay">↻ replay</button>
@@ -154,7 +195,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
               <p class="sr-only">A replayed terminal session. The audit events it produces appear in the list beside it.</p>
               <pre class="term-body" id="term" aria-hidden="true"></pre>
               <noscript><p class="noscript">Turn on JavaScript to replay this session.</p></noscript>
-              <div class="term-foot">Illustrative output. The commands are real; see the <a href={docs('guides/cli/')}>CLI guide</a>.</div>
+              <div class="term-foot">Illustrative output. The commands are real; see the <a href={docs('guides/cli/')}>CLI guide</a>. The same trail covers MySQL, MongoDB, Redis, search, Kafka, RabbitMQ, web apps and TCP: <a href="#protocols">see the integrations</a>.</div>
             </div>
 
             <div class="ledger" aria-label="Audit trail demo">
@@ -171,17 +212,93 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                 <button class="btn small danger" id="tamper" type="button" disabled>✎ Tamper with an event</button>
                 <button class="btn small" id="restore" type="button" disabled>Restore</button>
               </div>
-              <p class="ledger-note">A simplified picture of the idea. The real trail is batched, signed, and chained per writer in S3, and <code>limen-audit-verify</code> walks it.</p>
+              <p class="ledger-note">A simplified picture of the idea. The real trail is batched, signed, and chained per writer in S3, and <code>limen audit verify</code> walks it.</p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- CONSOLE -->
+      <section class="section" id="console">
+        <div class="wrap">
+          <div class="eyebrow reveal">The console</div>
+          <h2 class="reveal">Prefer a browser? The console has it.</h2>
+          <p class="sub reveal">The same identity provider and the same policy, in a web console the proxy serves. Look around, replay sessions, approve requests and make the occasional admin change. Your roles decide what you see, and everything you change is audited as you.</p>
+
+          <div class="shotbox reveal">
+            <div class="term-bar">
+              <span class="lights"><i></i><i></i><i></i></span>
+              <div class="tabs" role="tablist" aria-label="Console pages">
+                {consolePages.map((pg, i) => <button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-pg={pg.id} type="button">{pg.t}</button>)}
+              </div>
+            </div>
+            {consolePages.map((pg, i) => (
+              <figure class="shot" data-panel={pg.id} hidden={i > 0}>
+                <div class="shot-img">
+                  {i === 0 && <noscript><img src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" alt={pg.alt} /></noscript>}
+                  <img class="shot-pic" data-dark={`${base}console/${pg.id}-dark.jpg`} data-light={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading="lazy" decoding="async" alt={pg.alt} />
+                </div>
+                <figcaption>{pg.cap}</figcaption>
+              </figure>
+            ))}
+            <p class="shot-note">The real console, with sample data.<span class="swipe"> Swipe the picture to look around.</span></p>
+          </div>
+
+          <ul class="cfeat">
+            {consoleFeatures.map((f) => (
+              <li class="reveal"><b>{f.t}</b><span>{f.d}</span></li>
+            ))}
+          </ul>
+          <div class="diagram-link reveal"><a href={docs('guides/console/')}>The console guide →</a></div>
+        </div>
+      </section>
+
+      <!-- MCP -->
+      <section class="section" id="mcp">
+        <div class="wrap">
+          <div class="eyebrow reveal">AI assistants</div>
+          <h2 class="reveal">Ask your assistant what you can reach.</h2>
+          <p class="sub reveal"><code>limen mcp</code> is a read-only MCP server built into the CLI. It uses your own login, so it grants nothing you don't already have.</p>
+          <div class="mcp">
+            <div class="mcp-text">
+              <div class="mcp-col reveal">
+                <h3>It can answer</h3>
+                <ul class="plist">
+                  <li>Who you are, your roles, and when your login ends.</li>
+                  <li>What you can reach, and how to connect to it.</li>
+                  <li>Why you can't reach something, and what would let you.</li>
+                </ul>
+              </div>
+              <div class="mcp-col reveal">
+                <h3>It cannot</h3>
+                <ul class="plist no">
+                  <li>Connect, request, approve, lock or change anything. To get access you run <code>limen request</code> yourself, and a person approves it.</li>
+                  <li>Sign in for you. When your login expires it says <code>run limen login</code>.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="mcp-side reveal">
+              <div class="install">
+                <div class="install-bar"><span>terminal</span></div>
+<pre tabindex="0"><span class="p">$</span> limen login
+<span class="p">$</span> claude mcp add --scope user \
+    limen -- limen mcp</pre>
+              </div>
+              <ul class="chips tools" aria-label="The five read-only tools">
+                <li>limen_status</li><li>limen_ls</li><li>limen_show</li><li>limen_explain</li><li>limen_requests</li>
+              </ul>
+              <p class="mcp-note">Early and read-only. The audit trail shows you, not the assistant: its calls are your calls.</p>
+            </div>
+          </div>
+          <div class="diagram-link reveal"><a href={docs('guides/ai-agents/')}>Use Limen from an AI assistant →</a></div>
         </div>
       </section>
 
       <!-- HOW -->
       <section class="section" id="how">
         <div class="wrap">
-          <div class="eyebrow">How it works</div>
-          <h2>What happens when you connect.</h2>
+          <div class="eyebrow reveal">How it works</div>
+          <h2 class="reveal">What happens when you connect.</h2>
           <ol class="steps" id="steps">
             {steps.map((s) => (
               <li class="step reveal">
@@ -189,6 +306,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                 <h3>{s.t}</h3>
                 <p>{s.d}</p>
                 <code>{s.c}</code>
+                {s.n === '04' && <div class="minichain" aria-hidden="true"><i></i><i></i><i></i><i></i><i class="head"></i></div>}
               </li>
             ))}
           </ol>
@@ -201,25 +319,39 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
       <!-- WHO -->
       <section class="section" id="who">
         <div class="wrap">
-          <div class="eyebrow">Who it is for</div>
-          <h2>For the people who get paged, and the people who get audited.</h2>
+          <div class="eyebrow reveal">Who it is for</div>
+          <h2 class="reveal">For the people who get paged, and the people who get audited.</h2>
           <div class="people">
             <article class="person reveal">
-              <div class="who-tag">Developers</div>
+              <div class="person-top"><span class="pico" set:html={ico.dev} /><span class="who-tag">Developers</span></div>
               <h3>Get in, get on with it.</h3>
-              <p>Sign in once. <code>limen ls</code> shows what you can reach. Keep using <code>ssh</code>, <code>psql</code> and <code>kubectl</code>, with no passwords or keys to look after. When you need more, ask for it, with a reason.</p>
+              <ul class="plist">
+                <li>Sign in once. <code>limen ls</code> shows what you can reach.</li>
+                <li>Keep using <code>ssh</code>, <code>psql</code> and <code>kubectl</code>, with no keys or passwords to look after.</li>
+                <li>Need more? Ask for it, with a reason.</li>
+              </ul>
               <a class="more" href={docs('guides/cli/')}>The CLI →</a>
             </article>
             <article class="person reveal">
-              <div class="who-tag">Platform and SRE</div>
+              <div class="person-top"><span class="pico" set:html={ico.ops} /><span class="who-tag">Platform and SRE</span></div>
               <h3>Run it like the rest of your stack.</h3>
-              <p>Policy in Git, tested in CI. Workers dial out, so you open no inbound holes. Run several copies of each part behind a load balancer. Prometheus metrics, OpenTelemetry traces and ready-made alerts.</p>
+              <ul class="plist">
+                <li>Policy in Git, tested in CI.</li>
+                <li>Workers dial out, so you open no inbound holes.</li>
+                <li>Several copies of each part behind a load balancer.</li>
+                <li>Prometheus metrics, OpenTelemetry traces, ready-made alerts.</li>
+              </ul>
               <a class="more" href={docs('guides/scale-out/')}>Running at scale →</a>
             </article>
             <article class="person reveal">
-              <div class="who-tag">Security and compliance</div>
+              <div class="person-top"><span class="pico" set:html={ico.sec} /><span class="who-tag">Security and compliance</span></div>
               <h3>Evidence, not promises.</h3>
-              <p>A signed, hash-chained trail. Recordings that are checked before playback. Access reviews with signed evidence packs. A threat model and pen-test plan you can read before you trust it.</p>
+              <ul class="plist">
+                <li>A signed, hash-chained trail.</li>
+                <li>Recordings checked before playback.</li>
+                <li>Access reviews with signed evidence packs.</li>
+                <li>A threat model you can read before you trust it.</li>
+              </ul>
               <a class="more" href={docs('architecture/threat-model/')}>The threat model →</a>
             </article>
           </div>
@@ -229,47 +361,63 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
       <!-- PILLARS -->
       <section class="section" id="why">
         <div class="wrap">
-          <div class="eyebrow">Why Limen</div>
-          <h2>A door that keeps a record you can check.</h2>
-          <p class="sub">Knowing who connected is the start. Limen is built so that every grant, every decision and every session can be checked by someone who doesn't have to trust Limen.</p>
+          <div class="eyebrow reveal">Why Limen</div>
+          <h2 class="reveal">A door that keeps a record you can check.</h2>
+          <p class="sub reveal">Knowing who got in is the easy part. Limen leaves evidence that someone who doesn't trust it can check.</p>
           <div class="bento">
             <article class="card w4 reveal">
-              <h3><span class="ico">▣</span> Provable</h3>
-              <p>The audit trail is signed and hash-chained. Each control plane's S3 batches name the previous batch's hash, so a missing, reordered or altered batch is found by one command.</p>
-              <pre class="snip"><span class="c"># walks every writer's chain</span>
-<span class="p">$</span> limen-audit-verify --bucket audit --ca-file internal-ca.pem
-<span class="ok">✔</span> chain intact</pre>
+              <div class="pillar">Provable</div>
+              <h3><span class="ico" set:html={ico.chain} /> A trail you can check yourself</h3>
+              <p>Audit events are signed and chained. Delete or alter one, and verification fails.</p>
+              <pre class="snip one"><span class="p">$</span> limen audit verify
+<span class="ok out">OK: every batch is present, unmodified, signed, and chained</span></pre>
               <div class="minichain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i class="head"></i></div>
               <a class="more" href={docs('runbooks/audit-verify/')}>Verifying the chain →</a>
             </article>
             <article class="card reveal">
-              <h3><span class="ico">?</span> Explainable and testable</h3>
-              <p>Policy is YAML in Git, with tests that run in CI. Ask who can reach what, diff <i>effective</i> access, and get the reason for a denial.</p>
-              <pre class="snip"><span class="c">kind: policy_test</span>
-- name: devs cannot ssh to prod as root
-  resource: orders-prod
-  expect: <span class="ok">deny</span></pre>
+              <div class="pillar">Explainable</div>
+              <h3><span class="ico" set:html={ico.test} /> Know why, before anyone asks</h3>
+              <p>Policy is YAML in Git, tested in CI. See how a change widens access before it ships.</p>
+              <pre class="snip one"><span class="p">$</span> limen policy test policy/
+<span class="p">$</span> limen explain orders-prod</pre>
               <a class="more" href={docs('guides/policy-tooling/')}>Policy tooling →</a>
             </article>
             <article class="card half reveal">
-              <h3><span class="ico">⏱</span> Short-lived and justified</h3>
-              <p>Access you ask for, with a reason. The approver sees what you did on that resource in the past 30 days. When the grant expires, so do the sessions it allowed.</p>
-              <pre class="snip"><span class="p">$</span> limen request orders-prod --for 30m \
-    --reason "INC-123: orders is locked" --wait</pre>
+              <div class="pillar">Short-lived</div>
+              <h3><span class="ico" set:html={ico.clock} /> Access that ends when the need does</h3>
+              <p>Ask with a reason. When the grant ends, so do the sessions it allowed.</p>
+              <pre class="snip one"><span class="p">$</span> limen request orders-prod --for 30m</pre>
+              <div class="grant" aria-hidden="true"><div class="grant-track"><i></i></div><div class="grant-row"><span>30m grant</span><span class="grant-end">0:00 · sessions close</span></div></div>
               <a class="more" href={docs('guides/access-requests/')}>Requests and break-glass →</a>
             </article>
             <article class="card half reveal">
-              <h3><span class="ico">⚙</span> CI jobs are principals too</h3>
-              <p>A GitHub Actions or GitLab CI job signs in with its own token and gets a scoped, short-lived bot login. The run is named in every audit event. No secret lives in the repository.</p>
-              <pre class="snip"><span class="p">$</span> limen login --bot github_actions
-<span class="p">$</span> limen ssh web-staging-1 -- ./deploy.sh</pre>
+              <div class="pillar">Machines are principals too</div>
+              <h3><span class="ico" set:html={ico.bot} /> Pipelines get identities, not secrets</h3>
+              <p>A CI job signs in with its own token and gets a short-lived bot login. Nothing long-lived sits in the repository.</p>
+              <pre class="snip one"><span class="p">$</span> limen login --bot github_actions</pre>
+              <ol class="flow" aria-hidden="true"><li>CI token</li><li>bot login</li><li>audit event <small>+ run id</small></li></ol>
               <a class="more" href={docs('guides/bots/')}>Bots →</a>
             </article>
+            <article class="card mini reveal">
+              <h3><span class="ico" set:html={ico.rec} /> Replays you can trust</h3>
+              <p>Each recording's hash is in the audit trail, and checked before playback.</p>
+              <a class="more" href={docs('guides/console/')}>Replaying a session →</a>
+            </article>
+            <article class="card mini reveal">
+              <h3><span class="ico" set:html={ico.pack} /> Evidence in one file</h3>
+              <p>Export a signed pack. An auditor checks it offline, with just your CA certificate.</p>
+              <a class="more" href={docs('guides/access-reviews/')}>Reviews and evidence →</a>
+            </article>
+            <article class="card mini reveal">
+              <h3><span class="ico" set:html={ico.stop} /> Cut access off, and say why</h3>
+              <p>Lock a user and their sessions end within about ten seconds. Or end one live session. The reason is audited.</p>
+              <a class="more" href={docs('guides/console/')}>The console →</a>
+            </article>
             <article class="card full reveal plain">
-              <h3><span class="ico">◇</span> Open and plain to run</h3>
-              <p>Everything on this page is in the Apache-2.0 build. Static binaries, PostgreSQL as the only required store, workers that dial out. No paid tier for approvals, auditing or discovery.</p>
+              <h3><span class="ico" set:html={ico.open} /> The whole thing, in the open</h3>
+              <p>Approvals, auditing, discovery and reviews are all in the Apache-2.0 build, with no paid tier.</p>
               <ul class="chips">
-                <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose, Terraform for audit</li><li>Terraform and OpenTofu provider</li><li>Prometheus and OpenTelemetry</li>
+                <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose to try it</li><li>Terraform modules <em>(unverified on AWS)</em></li><li>Prometheus and OpenTelemetry</li>
               </ul>
             </article>
           </div>
@@ -279,13 +427,13 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
       <!-- PROTOCOLS -->
       <section class="section" id="protocols">
         <div class="wrap">
-          <div class="eyebrow">What it connects to</div>
-          <h2>One policy and one audit trail for all of it.</h2>
-          <p class="sub">Each tile says where it stands. <span class="chip ok">built</span> means it works and is tested against a local copy of the software. <span class="chip warn">unverified</span> marks a cloud-specific path that is written but has not yet run against the real service.</p>
+          <div class="eyebrow reveal">What it connects to</div>
+          <h2 class="reveal">One policy and one audit trail for all of it.</h2>
+          <p class="sub reveal">Every tile is tested against a local copy of the software. A tile marked <span class="chip warn">unverified</span> also has a cloud-specific path that is written but has not yet run against the real service.</p>
           <div class="pfilter" role="group" aria-label="Filter integrations by what has been verified">
             <button type="button" aria-pressed="true" data-f="all">All</button>
-            <button type="button" aria-pressed="false" data-f="verified">Tested, nothing unverified</button>
-            <button type="button" aria-pressed="false" data-f="unverified">Has an unverified cloud path</button>
+            <button type="button" aria-pressed="false" data-f="verified">Nothing unverified</button>
+            <button type="button" aria-pressed="false" data-f="unverified">Has unverified paths</button>
             <span class="pcount" id="pcount" aria-live="polite"></span>
           </div>
           {groups.map((g) => (
@@ -298,11 +446,10 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                       <span class="logos">
                         {p.logos.map((l) => <span class={`logo${l.wide ? ' wide' : ''}`} style={`--brand:${l.color}`} role="img" aria-label={l.label} set:html={l.svg} />)}
                       </span>
-                      <span class="chip ok">built</span>
                     </span>
                     <span class="pname">{p.name}</span>
                     <span class="psub">{p.sub}</span>
-                    {p.warn && <span class="pwarn"><i aria-hidden="true"></i><span><b>Unverified:</b> {p.warn}</span></span>}
+                    {p.warn ? <span class="pwarn"><i aria-hidden="true"></i><span><b>Unverified:</b> {p.warn}</span></span> : <span class="pwarn ok"><i aria-hidden="true"></i><span>Tested locally</span></span>}
                   </a>
                 ))}
               </div>
@@ -337,8 +484,8 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
       <!-- START -->
       <section class="section start" id="start">
         <div class="wrap narrow">
-          <div class="eyebrow">Try it</div>
-          <h2>From clone to a recorded session, on your laptop.</h2>
+          <div class="eyebrow reveal">Try it</div>
+          <h2 class="reveal">From clone to a recorded session, on your laptop.</h2>
           <div class="install">
             <div class="install-bar"><span>terminal</span><button class="copy" id="copy" type="button">Copy</button></div>
 <pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/limen-dev/limen &amp;&amp; cd limen

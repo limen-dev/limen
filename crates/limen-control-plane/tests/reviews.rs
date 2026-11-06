@@ -8,7 +8,7 @@ mod common;
 
 use common::{Harness, forwarded};
 use limen_audit::EventKind;
-use limen_control_plane::{evidence, reviews};
+use limen_control_plane::reviews;
 use limen_proto::v1::policy_sync_client::PolicySyncClient;
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::reviews_client::ReviewsClient;
@@ -588,7 +588,7 @@ async fn an_evidence_pack_is_signed_anchored_and_cannot_be_edited_quietly() {
     let pack = export(&r.auditor).await.expect("auditor exports");
     let ca = r.h.state.cas.internal.cert_der().clone();
 
-    let v = evidence::verify_pack(&pack.pack, &ca);
+    let v = limen_verify::pack::verify_pack(&pack.pack, &ca);
     assert!(v.ok(), "{:?}", v.problems);
     assert_eq!(v.manifest_sha256, pack.manifest_sha256);
     let parsed: serde_json::Value = serde_json::from_slice(&pack.pack).expect("json");
@@ -621,7 +621,7 @@ async fn an_evidence_pack_is_signed_anchored_and_cannot_be_edited_quietly() {
     // Edit a section: caught. Edit the manifest: caught. Add a section: caught.
     let mut edited = parsed.clone();
     edited["sections"]["sessions"][0]["user"] = serde_json::json!("someone-else@example.com");
-    let v = evidence::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca);
+    let v = limen_verify::pack::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca);
     assert!(
         v.problems
             .iter()
@@ -631,17 +631,21 @@ async fn an_evidence_pack_is_signed_anchored_and_cannot_be_edited_quietly() {
     );
     let mut edited = parsed.clone();
     edited["sections"]["extra"] = serde_json::json!([]);
-    assert!(!evidence::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca).ok());
+    assert!(
+        !limen_verify::pack::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca).ok()
+    );
     let mut edited = parsed.clone();
     let m = edited["manifest_json"]
         .as_str()
         .expect("m")
         .replace("\"from\":", "\"from\": ");
     edited["manifest_json"] = serde_json::json!(m);
-    assert!(!evidence::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca).ok());
+    assert!(
+        !limen_verify::pack::verify_pack(&serde_json::to_vec(&edited).expect("json"), &ca).ok()
+    );
     // A different CA doesn't vouch for it.
     let other = rig_ca().await;
-    assert!(!evidence::verify_pack(&pack.pack, &other).ok());
+    assert!(!limen_verify::pack::verify_pack(&pack.pack, &other).ok());
 }
 
 /// A certificate from a different CA.

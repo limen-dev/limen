@@ -169,7 +169,7 @@ jobs:
           set -euo pipefail
           name="limen-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          for bin in limen limen-control-plane limen-proxy limen-worker limen-audit-verify; do
+          for bin in limen limen-control-plane limen-proxy limen-worker; do
             cp "target/${{ matrix.target }}/release/${bin}" "dist/${name}/"
           done
           cp LICENSE README.md "dist/${name}/"

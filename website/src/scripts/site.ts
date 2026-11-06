@@ -17,6 +17,34 @@ $('#theme')?.addEventListener('click', () => {
   }
 });
 
+/* ---------- smooth scrolling for links within the page, and only those ---------- */
+document.addEventListener('click', (e) => {
+  const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href*="#"]');
+  if (!a || reduce) return;
+  const url = new URL(a.href, location.href);
+  if (url.pathname !== location.pathname || url.origin !== location.origin) return;
+  root.classList.add('smooth');
+  setTimeout(() => root.classList.remove('smooth'), 1500);
+});
+
+/* ---------- the menu on small screens ---------- */
+{
+  const nav = $('#nav');
+  const btn = $<HTMLButtonElement>('#menu');
+  const set = (open: boolean) => {
+    nav?.classList.toggle('open', open);
+    btn?.setAttribute('aria-expanded', String(open));
+  };
+  btn?.addEventListener('click', () => set(btn.getAttribute('aria-expanded') !== 'true'));
+  $('#nav-links')?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('a')) set(false);
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') set(false);
+  });
+  matchMedia('(min-width: 981px)').addEventListener('change', (e) => e.matches && set(false));
+}
+
 /* ---------- nav shadow, reveal on scroll, card spotlight ---------- */
 const nav = $('#nav');
 const onScroll = () => nav?.classList.toggle('scrolled', scrollY > 8);

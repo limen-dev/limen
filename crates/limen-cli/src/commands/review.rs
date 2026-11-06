@@ -306,7 +306,7 @@ pub async fn evidence(
         ui::dim(&r.manifest_sha256)
     ));
     ui::hint(
-        "Check it anywhere with `limen-audit-verify --evidence <file> --ca-file internal-ca.pem`.",
+        "Check it anywhere with `limen audit verify --evidence <file> --ca-file internal-ca.pem`.",
     );
     Ok(())
 }

@@ -10,7 +10,9 @@ use base64::Engine as _;
 use limen_audit::ship::ShipError;
 use limen_core::secret::Secret;
 use limen_session::envelope::{EnvelopeSigner, Purpose};
-use serde::{Deserialize, Serialize};
+pub use limen_verify::manifest::{Manifest, SignedManifest, signer_problem};
+pub use limen_verify::s3_client;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
@@ -46,31 +48,6 @@ struct EventHead {
 }
 
 // ---- S3 ---------------------------------------------------------------------
-
-/// What a manifest records about one batch object. Manifests chain: each
-/// names the SHA-256 of the previous manifest file from the same writer, so
-/// a deleted, reordered, or altered batch breaks the chain.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Manifest {
-    pub version: u32,
-    pub writer: String,
-    pub seq: u64,
-    pub object: String,
-    pub sha256: String,
-    pub count: usize,
-    pub first_event_id: String,
-    pub last_event_id: String,
-    pub prev_manifest_sha256: String,
-    pub created_at: String,
-}
-
-/// The manifest file in S3: the manifest JSON, its signature, and the signer.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignedManifest {
-    pub manifest: String,
-    pub signature: String,
-    pub signer_cert: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct S3Sink {
@@ -392,12 +369,6 @@ fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest,
     Ok(manifest)
 }
 
-/// The signer of a manifest is the control plane that wrote it.
-#[must_use]
-pub fn signer_problem(signer_id: &str, writer: &str) -> Option<String> {
-    (signer_id != writer).then(|| format!("signed by {signer_id}, not by its writer {writer}"))
-}
-
 // ---- Datadog ----------------------------------------------------------------
 
 /// Datadog intake limits (<https://docs.datadoghq.com/api/latest/logs/send-logs>).
@@ -535,18 +506,6 @@ impl DatadogSink {
 enum Outcome {
     Accepted,
     Rejected(reqwest::StatusCode),
-}
-
-/// Build an S3 client, honoring an endpoint override and path-style addressing.
-pub async fn s3_client(endpoint: Option<&str>, path_style: bool) -> aws_sdk_s3::Client {
-    let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .load()
-        .await;
-    let mut builder = aws_sdk_s3::config::Builder::from(&shared).force_path_style(path_style);
-    if let Some(endpoint) = endpoint {
-        builder = builder.endpoint_url(endpoint);
-    }
-    aws_sdk_s3::Client::from_conf(builder.build())
 }
 
 #[cfg(test)]

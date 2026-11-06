@@ -21,7 +21,7 @@ Limen answers both by never handing out a long-lived credential in the first pla
 1. **You sign in.** `limen login` opens your identity provider in a browser. Limen gives back a certificate that lasts an hour (less if your policy says so), tied to a key that never leaves your machine.
 2. **Policy decides.** Your identity provider's groups become roles. A policy file in Git says which roles reach which resources, chosen by label. Anything no rule allows is denied, and `limen explain` tells you why.
 3. **You connect with your usual tools.** `ssh`, `psql`, `kubectl`, `redis-cli` and the rest. A Limen worker runs next to the target and signs in to it with credentials you never see. The worker dials out to Limen, so the target needs no open inbound port.
-4. **Everything is written down.** SSH sessions are recorded and can be replayed. Databases, caches, search and brokers are audited command by command. The trail is signed and chained by hash, so `limen-audit-verify` finds any event that was removed, reordered or changed.
+4. **Everything is written down.** SSH sessions are recorded and can be replayed. Databases, caches, search and brokers are audited command by command. The trail is signed and chained by hash, so `limen audit verify` finds any event that was removed, reordered or changed.
 
 When you need more than your roles allow, `limen request` asks an approver for time-limited access, with a reason. CI jobs sign in with their platform's own token, so no secret has to sit in your pipelines.
 

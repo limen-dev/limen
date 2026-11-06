@@ -16,6 +16,7 @@ limen-core.workspace = true
 limen-policy.workspace = true
 limen-proto.workspace = true
 limen-tunnel.workspace = true
+limen-verify.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 base64.workspace = true

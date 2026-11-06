@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};
 use limen_control_plane::sinks::S3Sink;
-use limen_control_plane::verify::{SeqGap, verify_bucket};
 use limen_core::identity::ComponentKind;
 use limen_session::envelope::EnvelopeSigner;
+use limen_verify::bucket::{SeqGap, verify_bucket};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 
 fn event(component: &str, instance_id: &str, seq: u64) -> Vec<u8> {
@@ -49,7 +49,7 @@ async fn seq_gaps_are_reported_and_duplicates_are_not() {
     let Some(endpoint) = limen_testkit::s3_endpoint() else {
         return;
     };
-    let client = limen_control_plane::sinks::s3_client(Some(&endpoint), true).await;
+    let client = limen_verify::s3_client(Some(&endpoint), true).await;
     let bucket = format!("limen-test-{}", uuid::Uuid::now_v7().simple());
     client
         .create_bucket()

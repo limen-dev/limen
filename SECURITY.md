@@ -31,13 +31,13 @@ There is no tagged release yet. Fixes go to the `main` branch only. Once release
 
 ## Scope
 
-**In scope:** the code in this repository. That means the control plane, proxy, worker and CLI, the console, the audit pipeline and `limen-audit-verify`, the Terraform modules in `deploy/terraform`, and the Kubernetes examples in `deploy/kubernetes`.
+**In scope:** the code in this repository. That means the control plane, proxy, worker and CLI, the console, the audit pipeline and `limen audit verify`, the Terraform modules in `deploy/terraform`, and the Kubernetes examples in `deploy/kubernetes`.
 
 Examples of what we especially want to hear about:
 
 - getting access that policy doesn't grant, or keeping access after a lock, a logout, or a grant's expiry
 - obtaining a certificate, a join token or a target credential you shouldn't have
-- a session that isn't audited or recorded when it should be, or audit that can be altered or dropped without `limen-audit-verify` noticing
+- a session that isn't audited or recorded when it should be, or audit that can be altered or dropped without `limen audit verify` noticing
 - secrets, tokens or session content appearing in logs, traces, metrics or the audit trail where the docs say they don't
 
 **Out of scope:**

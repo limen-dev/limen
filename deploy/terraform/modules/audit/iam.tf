@@ -90,7 +90,7 @@ data "aws_iam_policy_document" "reader" {
   }
 }
 
-# Auditors running limen-audit-verify: read everything, change nothing.
+# Auditors running limen audit verify: read everything, change nothing.
 data "aws_iam_policy_document" "verifier" {
   statement {
     sid       = "Read"
@@ -106,5 +106,45 @@ data "aws_iam_policy_document" "verifier" {
     sid       = "Decrypt"
     actions   = ["kms:Decrypt"]
     resources = [local.kms_arn]
+  }
+}
+
+# The role `limen audit verify` reads the bucket with. The control plane
+# assumes it for an auditor or admin and hands over short-lived credentials, so
+# nobody holds standing AWS access to the audit bucket just to check it.
+data "aws_iam_policy_document" "verifier_trust" {
+  count = length(var.verifier_trusted_principal_arns) > 0 ? 1 : 0
+  statement {
+    sid     = "ControlPlaneAssumes"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = var.verifier_trusted_principal_arns
+    }
+  }
+}
+
+resource "aws_iam_role" "verifier" {
+  count                = length(var.verifier_trusted_principal_arns) > 0 ? 1 : 0
+  name                 = "${var.name}-audit-verifier"
+  assume_role_policy   = data.aws_iam_policy_document.verifier_trust[0].json
+  max_session_duration = 3600
+  tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "verifier" {
+  count  = length(var.verifier_trusted_principal_arns) > 0 ? 1 : 0
+  name   = "read-audit-bucket"
+  role   = aws_iam_role.verifier[0].id
+  policy = data.aws_iam_policy_document.verifier.json
+}
+
+# For the control plane's own role: permission to assume the verifier role.
+data "aws_iam_policy_document" "assume_verifier" {
+  count = length(var.verifier_trusted_principal_arns) > 0 ? 1 : 0
+  statement {
+    sid       = "AssumeVerifier"
+    actions   = ["sts:AssumeRole"]
+    resources = [aws_iam_role.verifier[0].arn]
   }
 }

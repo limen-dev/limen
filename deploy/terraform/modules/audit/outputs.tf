@@ -39,6 +39,16 @@ output "reader_policy_json" {
 }
 
 output "verifier_policy_json" {
-  description = "IAM policy for whoever runs limen-audit-verify."
+  description = "Read-only IAM policy for the audit bucket. Attached to the verifier role when verifier_trusted_principal_arns is set."
   value       = data.aws_iam_policy_document.verifier.json
+}
+
+output "verifier_role_arn" {
+  description = "Role for the control plane's LIMEN_AUDIT_VERIFIER_ROLE_ARN. Null when verifier_trusted_principal_arns is empty."
+  value       = try(aws_iam_role.verifier[0].arn, null)
+}
+
+output "assume_verifier_policy_json" {
+  description = "IAM policy for the control plane's role, letting it assume the verifier role. Null when no verifier role exists."
+  value       = try(data.aws_iam_policy_document.assume_verifier[0].json, null)
 }

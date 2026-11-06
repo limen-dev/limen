@@ -236,6 +236,17 @@ const scenarios: Record<string, Step[]> = {
     { ev: { ty: 'session.end', who: ME, detail: 'exec ended · 18s' } },
     { o: 'Impersonation means the cluster sees you, not a shared admin.', cls: 'dim' },
   ],
+  redis: [
+    { c: 'limen redis connect cache-staging' },
+    { o: '✔ Listening for cache-staging as read. No password needed.', cls: 'ok' },
+    { ev: { ty: 'session.start', who: ME, detail: 'cache-staging as read' } },
+    { c: 'redis-cli -h 127.0.0.1 -p 56950 GET app:config:region' },
+    { ev: { ty: 'redis.command', who: ME, detail: 'GET app:config:region · allowed' } },
+    { c: 'redis-cli -h 127.0.0.1 -p 56950 GET billing:secret' },
+    { o: 'NOPERM Limen: key 1 of 1 is outside the keys this role allows', cls: 'warn' },
+    { ev: { ty: 'redis.command', who: ME, detail: 'GET billing:secret · refused by policy' } },
+    { ev: { ty: 'session.end', who: ME, detail: 'cache-staging · values are never kept' } },
+  ],
   req: [
     { c: 'limen request orders-prod --for 30m --reason "INC-123: orders table is locked" --wait' },
     { o: '⏳ Waiting for sre-leads to decide…', cls: 'dim' },
@@ -418,6 +429,36 @@ const scenarios: Record<string, Step[]> = {
   } else start();
 }
 
+
+// CONSOLE TABS: one page of the console at a time.
+// On a phone the picture scrolls sideways; start past the sidebar, on the page itself.
+// Each panel has one picture. Its address is set for the current theme only when the panel is shown,
+// so a visitor downloads one screenshot, not all twenty-two.
+const showPic = (fig: HTMLElement | null | undefined, now = false) => {
+  const img = fig?.querySelector<HTMLImageElement>('img.shot-pic');
+  const want = img?.dataset[document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'];
+  if (!img || !want || img.getAttribute('src') === want) return;
+  if (now) img.loading = 'eager'; // the visitor asked for this one: do not wait for the lazy-load heuristics
+  img.src = want;
+};
+const focusShot = (box: HTMLElement | null) => {
+  if (!box || !matchMedia('(max-width: 560px)').matches) return;
+  box.querySelectorAll<HTMLElement>('.shot-img').forEach((el) => (el.scrollLeft = el.scrollWidth * 0.17));
+};
+{
+  const box = $('.shotbox');
+  box?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-pg]');
+    if (!b) return;
+    box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+    box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
+    showPic(box.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+    focusShot(box);
+  });
+  showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'));
+  new MutationObserver(() => showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'))).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  focusShot(box);
+}
 
 // PROTOCOL FILTER: show all tiles, only fully tested ones, or only those with an unverified cloud path.
 {
