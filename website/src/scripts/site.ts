@@ -51,6 +51,19 @@ const onScroll = () => nav?.classList.toggle('scrolled', scrollY > 8);
 addEventListener('scroll', onScroll, { passive: true });
 onScroll();
 
+/* the reading-progress bar */
+{
+  let queued = false;
+  const paint = () => {
+    queued = false;
+    const max = root.scrollHeight - innerHeight;
+    root.style.setProperty('--scroll', String(max > 0 ? Math.min(1, Math.max(0, scrollY / max)) : 0));
+  };
+  addEventListener('scroll', () => queued || ((queued = true), requestAnimationFrame(paint)), { passive: true });
+  addEventListener('resize', paint);
+  paint();
+}
+
 const reveals = document.querySelectorAll<HTMLElement>('.reveal');
 if ('IntersectionObserver' in window && !reduce) {
   const io = new IntersectionObserver(
