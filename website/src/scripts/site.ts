@@ -17,6 +17,24 @@ $('#theme')?.addEventListener('click', () => {
   }
 });
 
+/* ---------- the menu on small screens ---------- */
+{
+  const nav = $('#nav');
+  const btn = $<HTMLButtonElement>('#menu');
+  const set = (open: boolean) => {
+    nav?.classList.toggle('open', open);
+    btn?.setAttribute('aria-expanded', String(open));
+  };
+  btn?.addEventListener('click', () => set(btn.getAttribute('aria-expanded') !== 'true'));
+  $('#nav-links')?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('a')) set(false);
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') set(false);
+  });
+  matchMedia('(min-width: 981px)').addEventListener('change', (e) => e.matches && set(false));
+}
+
 /* ---------- nav shadow, reveal on scroll, card spotlight ---------- */
 const nav = $('#nav');
 const onScroll = () => nav?.classList.toggle('scrolled', scrollY > 8);

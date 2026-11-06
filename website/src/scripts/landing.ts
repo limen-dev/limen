@@ -420,6 +420,11 @@ const scenarios: Record<string, Step[]> = {
 
 
 // CONSOLE TABS: one page of the console at a time.
+// On a phone the picture scrolls sideways; start past the sidebar, on the page itself.
+const focusShot = (box: HTMLElement | null) => {
+  if (!box || !matchMedia('(max-width: 560px)').matches) return;
+  box.querySelectorAll<HTMLElement>('.shot-img').forEach((el) => (el.scrollLeft = el.scrollWidth * 0.17));
+};
 {
   const box = $('.shotbox');
   box?.addEventListener('click', (e) => {
@@ -427,7 +432,9 @@ const scenarios: Record<string, Step[]> = {
     if (!b) return;
     box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
     box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
+    focusShot(box);
   });
+  focusShot(box);
 }
 
 // PROTOCOL FILTER: show all tiles, only fully tested ones, or only those with an unverified cloud path.

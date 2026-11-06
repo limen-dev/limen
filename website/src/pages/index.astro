@@ -233,12 +233,14 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             </div>
             {consolePages.map((pg, i) => (
               <figure class="shot" data-panel={pg.id} hidden={i > 0}>
-                <img class="dark" src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
-                <img class="light" src={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                <div class="shot-img">
+                  <img class="dark" src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                  <img class="light" src={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                </div>
                 <figcaption>{pg.cap}</figcaption>
               </figure>
             ))}
-            <p class="shot-note">The real console, with sample data.</p>
+            <p class="shot-note">The real console, with sample data.<span class="swipe"> Swipe the picture to look around.</span></p>
           </div>
 
           <ul class="cfeat">
@@ -247,6 +249,47 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             ))}
           </ul>
           <div class="diagram-link reveal"><a href={docs('guides/console/')}>The console guide →</a></div>
+        </div>
+      </section>
+
+      <!-- MCP -->
+      <section class="section" id="mcp">
+        <div class="wrap">
+          <div class="eyebrow reveal">AI assistants</div>
+          <h2 class="reveal">Ask your assistant what you can reach.</h2>
+          <p class="sub reveal"><code>limen mcp</code> is a read-only MCP server built into the CLI. It uses your own login, so it grants nothing you don't already have.</p>
+          <div class="mcp">
+            <div class="mcp-text">
+              <div class="mcp-col reveal">
+                <h3>It can answer</h3>
+                <ul class="plist">
+                  <li>Who you are, your roles, and when your login ends.</li>
+                  <li>What you can reach, and how to connect to it.</li>
+                  <li>Why you can't reach something, and what would let you.</li>
+                </ul>
+              </div>
+              <div class="mcp-col reveal">
+                <h3>It cannot</h3>
+                <ul class="plist no">
+                  <li>Connect, request, approve, lock or change anything. To get access you run <code>limen request</code> yourself, and a person approves it.</li>
+                  <li>Sign in for you. When your login expires it says <code>run limen login</code>.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="mcp-side reveal">
+              <div class="install">
+                <div class="install-bar"><span>terminal</span></div>
+<pre tabindex="0"><span class="p">$</span> limen login
+<span class="p">$</span> claude mcp add --scope user \
+    limen -- limen mcp</pre>
+              </div>
+              <ul class="chips tools" aria-label="The five read-only tools">
+                <li>limen_status</li><li>limen_ls</li><li>limen_show</li><li>limen_explain</li><li>limen_requests</li>
+              </ul>
+              <p class="mcp-note">Early and read-only. The audit trail shows you, not the assistant: its calls are your calls.</p>
+            </div>
+          </div>
+          <div class="diagram-link reveal"><a href={docs('guides/ai-agents/')}>Use Limen from an AI assistant →</a></div>
         </div>
       </section>
 
