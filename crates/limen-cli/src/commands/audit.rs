@@ -169,18 +169,6 @@ fn one_line(s: &str) -> String {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::one_line;
-
-    #[test]
-    fn terminal_escapes_are_not_printed() {
-        let out = one_line("a\u{1b}[2Kb\u{1b}]0;title\u{7}c\nd\r");
-        assert!(!out.chars().any(char::is_control), "{out:?}");
-        assert!(out.starts_with('a') && out.contains('d'));
-    }
-}
-
 /// The CA manifests and packs must be signed under: `--ca-file`, else the one
 /// pinned at login. Never anything Limen sends along with the data.
 fn trusted_ca(
@@ -323,5 +311,17 @@ fn verify_evidence(
             eprintln!("PROBLEM: {p}");
         }
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::one_line;
+
+    #[test]
+    fn terminal_escapes_are_not_printed() {
+        let out = one_line("a\u{1b}[2Kb\u{1b}]0;title\u{7}c\nd\r");
+        assert!(!out.chars().any(char::is_control), "{out:?}");
+        assert!(out.starts_with('a') && out.contains('d'));
     }
 }

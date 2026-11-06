@@ -297,7 +297,7 @@ pub async fn verify_bucket(
             // The signer is the writer's own control-plane certificate: another
             // component's valid signature doesn't make a manifest this writer's.
             if let Some(by) = &sealed_by
-                && let Some(why) = crate::sinks::signer_problem(&by.id, &manifest.writer)
+                && let Some(why) = crate::manifest::signer_problem(&by.id, &manifest.writer)
             {
                 report.problems.push(problem(why));
             }

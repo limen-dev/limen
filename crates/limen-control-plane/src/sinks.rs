@@ -10,7 +10,7 @@ use base64::Engine as _;
 use limen_audit::ship::ShipError;
 use limen_core::secret::Secret;
 use limen_session::envelope::{EnvelopeSigner, Purpose};
-pub use limen_verify::manifest::{Manifest, SignedManifest};
+pub use limen_verify::manifest::{Manifest, SignedManifest, signer_problem};
 pub use limen_verify::s3_client;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -367,12 +367,6 @@ fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest,
         return Err(format!("manifest has seq {}, not its key's", manifest.seq));
     }
     Ok(manifest)
-}
-
-/// The signer of a manifest is the control plane that wrote it.
-#[must_use]
-pub fn signer_problem(signer_id: &str, writer: &str) -> Option<String> {
-    (signer_id != writer).then(|| format!("signed by {signer_id}, not by its writer {writer}"))
 }
 
 // ---- Datadog ----------------------------------------------------------------

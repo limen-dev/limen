@@ -26,3 +26,9 @@ pub struct SignedManifest {
     pub signature: String,
     pub signer_cert: String,
 }
+
+/// The signer of a manifest is the control plane that wrote it.
+#[must_use]
+pub fn signer_problem(signer_id: &str, writer: &str) -> Option<String> {
+    (signer_id != writer).then(|| format!("signed by {signer_id}, not by its writer {writer}"))
+}
