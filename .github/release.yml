@@ -3,6 +3,9 @@ changelog:
   exclude:
     labels: [chore, ignore-for-release]
   categories:
+    # First, so a breaking change is listed here and not under Features or Fixes (ADR-0024).
+    - title: Upgrade notes
+      labels: [upgrade-notes, api-breaking-approved]
     - title: Security
       labels: [security]
     - title: Features
