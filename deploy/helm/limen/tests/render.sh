@@ -23,6 +23,15 @@ grep -q "limen-proxy:v${app}\$" <<<"$out" || fail "image.tag unset did not defau
 out="$(render "${base[@]}" --set image.tag=custom)"
 grep -q 'limen-proxy:custom$' <<<"$out" || fail "an explicit image.tag was ignored"
 
+# 0b. image.componentTags moves one component and leaves the others on image.tag (staged upgrades,
+# docs/runbooks/upgrading.md); an empty entry falls back to image.tag.
+out="$(render "${base[@]}" --set image.tag=old --set image.componentTags.control-plane=new)"
+grep -q 'limen-control-plane:new$' <<<"$out" || fail "componentTags.control-plane was ignored"
+grep -q 'limen-proxy:old$' <<<"$out" || fail "componentTags.control-plane moved the proxy"
+grep -q 'limen-worker:old$' <<<"$out" || fail "componentTags.control-plane moved the worker"
+out="$(render "${base[@]}" --set image.tag=old --set image.componentTags.worker=)"
+grep -q 'limen-worker:old$' <<<"$out" || fail "an empty componentTags entry did not fall back to image.tag"
+
 # 1. A zero value in a group beats a non-zero default.
 out="$(render "${base[@]}" --set workerDefaults.discovery=true --set workers.prod-db.discovery=false)"
 doc Deployment worker-prod-db <<<"$out" | grep -q LIMEN_DISCOVERY && fail "discovery: false on a group did not override the default"
