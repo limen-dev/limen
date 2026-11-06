@@ -15,6 +15,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 tokio-rustls.workspace = true
 limen-control-plane.workspace = true
+limen-component.workspace = true
 limen-core.workspace = true
 limen-policy.workspace = true
 limen-proxy = { workspace = true, features = ["test-hooks"] }

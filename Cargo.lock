@@ -2849,6 +2849,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "limen-component",
  "limen-control-plane",
  "limen-core",
  "limen-kube",

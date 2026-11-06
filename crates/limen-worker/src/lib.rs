@@ -488,6 +488,15 @@ impl Worker {
 
     /// A channel to the control plane through the proxy, presenting this
     /// worker's certificate (which the proxy forwards).
+    /// The control plane's version, asked through this worker's proxy (what the upgrade gate
+    /// asks, ADR-0045).
+    pub async fn control_plane_version(&self) -> Result<String, tonic::Code> {
+        limen_component::gate::control_plane_version(
+            self.control_plane().map_err(|_| tonic::Code::Unavailable)?,
+        )
+        .await
+    }
+
     pub(crate) fn control_plane(&self) -> anyhow::Result<limen_tunnel::connect::TracedChannel> {
         let creds = self.credentials();
         let tls = client_config(

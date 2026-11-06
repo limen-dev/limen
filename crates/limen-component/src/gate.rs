@@ -15,6 +15,9 @@ use limen_tunnel::connect::TracedChannel as Channel;
 use semver::Version;
 use tonic::Code;
 
+/// How long one poll may take before it counts as no answer.
+const POLL_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// What the control plane's answer means for a component at version `own`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Verdict {
@@ -68,7 +71,11 @@ where
     let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(15));
     let mut waited = false;
     loop {
-        let answer = ask().await;
+        // The channel connects within 10 s but sets no request timeout, and a blackholed
+        // address must not hold a restarting component back: an expired poll counts as no answer.
+        let answer = tokio::time::timeout(POLL_TIMEOUT, ask())
+            .await
+            .unwrap_or(Err(Code::DeadlineExceeded));
         match verdict(own, answer.as_deref().map_err(|c| *c)) {
             Verdict::Go => {
                 if waited {
@@ -95,16 +102,20 @@ where
     }
 }
 
+/// Ask the control plane behind `channel` for its version. `Err` is the status code of the failed call.
+pub async fn control_plane_version(channel: Channel) -> Result<String, Code> {
+    PolicySyncClient::new(channel)
+        .get_server_version(GetServerVersionRequest {})
+        .await
+        .map(|r| r.into_inner().version)
+        .map_err(|s| s.code())
+}
+
 /// [`wait_until_current`] against the control plane behind `channel` (a proxy's own channel, or a
 /// worker's through its proxy). `channel` must present the component's certificate.
 pub async fn wait_for_control_plane(own: &str, channel: impl Fn() -> anyhow::Result<Channel>) {
     wait_until_current(own, || async {
-        let channel = channel().map_err(|_| Code::Unavailable)?;
-        PolicySyncClient::new(channel)
-            .get_server_version(GetServerVersionRequest {})
-            .await
-            .map(|r| r.into_inner().version)
-            .map_err(|s| s.code())
+        control_plane_version(channel().map_err(|_| Code::Unavailable)?).await
     })
     .await;
 }
@@ -199,6 +210,15 @@ mod tests {
         })
         .await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_poll_that_never_answers_ends_the_wait() {
+        // A blackholed control plane: the call never returns. After the poll timeout it counts
+        // as no answer, and the component starts.
+        let started = tokio::time::Instant::now();
+        wait_until_current("0.2.0", std::future::pending::<Result<String, Code>>).await;
+        assert_eq!(started.elapsed(), POLL_TIMEOUT);
     }
 
     #[tokio::test(start_paused = true)]
