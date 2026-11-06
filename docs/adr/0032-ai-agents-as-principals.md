@@ -23,3 +23,14 @@ How an agent proves who it is (a platform-issued token, a signed attestation fro
 - ADR-0019's `bot` document and the certificate marker (`limen://actor/…`) are the base; an `agent` actor type extends them without a new login path.
 - Approvals (ADR-0025) and recordings stay the controls that matter most, which is why they come before this.
 - Nothing in Phase 4 implements this; it is listed so the bot design isn't narrowed in a way that blocks it.
+
+## Amendment: spike 0 and desk analysis of the open questions (2026-11-06)
+The status stays Proposed. This records what was built and what reading Limen at `0bc7da6` (ADR-0019, ADR-0025, ADR-0042 as built) suggests for the questions above. **Nothing below was run against a real agent runtime**; each answer is a recommendation for the owner, and spikes 1 to 3 are still to do.
+
+- **Spike 0 is built:** `limen mcp` (#268), a read-only stdio server in the CLI with five tools (`status`, `ls`, `show`, `explain`, `requests`). It runs the CLI with `--json` as the logged-in person, so it grants nothing new and has no agent identity. It has not been tested against a live login. Threat model: TB15. `policy who-can` and `what-can` are left out because they read local policy files or need `limen:admin`.
+- **Where the server lives:** in the CLI first (`limen mcp`). A separate component is justified only by a remote, multi-tenant server that many agents connect to, which has a larger attack surface and no demand yet. The separate `mcp-server-limen` repository was archived for this reason.
+- **How an agent proves who it is:** a platform-issued OIDC token through the existing bot join (ADR-0019), with no new login path. A signed attestation needs a trust root nobody has defined. Approval by the accountable person at start-up is an additional control, not the proof. A local desktop agent has no workload identity; today it can only use the person's own login, which is not an agent identity. The accountable person must come from something the issuer vouches for or from the `bot` document, never from a claim the agent makes about itself.
+- **Transcripts:** SSH is the best understood (the session recording plus the tool call and stated reason, linked by session id, redacted before storage). For databases, statements and row counts, not result rows (ADR-0033 already audits one `db.query` per statement without parameter values). Kubernetes and web apps are undecided.
+- **Blocker found:** bots cannot request access (ADR-0025, as built), so approval per action for an agent is impossible until Limen lets agents request. Bots also never hold built-in roles, which should stay true for agents.
+- **First action tool, when allowed:** a wrapper over `limen request --wait`, because approval is the control that matters most; then SSH.
+- **Stop condition (unchanged):** if `limen mcp` proves little used, drop the idea.
