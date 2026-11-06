@@ -335,23 +335,21 @@ Options:
 
 #### `limen audit verify`
 
-Check the audit trail in S3, or an evidence pack, without trusting Limen.
+Check that the audit trail is intact: signed, chained, with nothing missing or altered.
 
-For auditors and operators. It does not sign in to Limen and asks it nothing. By default it reads the audit bucket directly with your AWS credentials, so it needs the read-only verifier policy from the audit Terraform module (`verifier_policy_json`); without that, S3 refuses. With --evidence it checks a pack from `limen admin evidence` offline, with only the internal CA certificate. Exits 2 if anything fails.
+For auditors and admins (`limen:auditor` or `limen:admin`). Limen decides who may, records that you did, and gives your session short-lived read-only access to the audit bucket. The check itself runs on your machine, against the CA you pinned at login, so it does not rest on Limen's word. Exits 2 if anything fails.
+
+With --evidence it checks a pack from `limen admin evidence` offline instead, with no login: give it the pack and the CA certificate.
 
 ```text
-Usage: limen audit verify [OPTIONS] --ca-file <CA_FILE>
+Usage: limen audit verify [OPTIONS]
 ```
 
 Options:
 
-- `--evidence <FILE>`: Check a pack from `limen admin evidence` instead of the S3 trail.
+- `--evidence <FILE>`: Check a pack from `limen admin evidence`, offline.
 - `--audit-events <FILE>`: With --evidence: an audit JSONL file; the pack's export event must be in it.
-- `--bucket <BUCKET>`: The audit bucket. Environment: `LIMEN_AUDIT_S3_BUCKET`.
-- `--prefix <PREFIX>` Default: ``. Environment: `LIMEN_AUDIT_S3_PREFIX`.
-- `--endpoint <ENDPOINT>` Environment: `LIMEN_AUDIT_S3_ENDPOINT`.
-- `--path-style` Environment: `LIMEN_AUDIT_S3_PATH_STYLE`.
-- `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM): manifests must be signed by a control plane certificate it issued.
+- `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM). Defaults to the CA pinned when you logged in. Needed with --evidence if you are not logged in.
 
 ### `limen policy`
 

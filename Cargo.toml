@@ -122,6 +122,7 @@ sqlparser = { version = "0.63", default-features = false }
 # Audit pipeline
 crc32fast = "1.5.2"
 flate2 = "1.1.10"
+aws-sdk-sts = { version = "1.122", default-features = false, features = ["rt-tokio", "default-https-client"] }
 aws-sdk-s3 = { version = "1.152", default-features = false, features = ["rt-tokio", "default-https-client"] }
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }

@@ -45,8 +45,6 @@ USER nonroot:nonroot
 
 FROM runtime-base AS control-plane
 COPY --from=builder /out/limen-control-plane /usr/local/bin/limen-control-plane
-# The CLI, so `limen audit verify` can run next to the control plane.
-COPY --from=builder /out/limen /usr/local/bin/limen
 COPY --from=builder /out/limen-spool-adopt /usr/local/bin/limen-spool-adopt
 EXPOSE 3080 3081
 ENTRYPOINT ["/usr/local/bin/limen-control-plane"]

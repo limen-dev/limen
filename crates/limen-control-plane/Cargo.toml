@@ -33,6 +33,7 @@ aws-config.workspace = true
 aws-lc-rs.workspace = true
 aws-sdk-kms.workspace = true
 aws-sdk-s3.workspace = true
+aws-sdk-sts.workspace = true
 flate2.workspace = true
 metrics.workspace = true
 askama.workspace = true

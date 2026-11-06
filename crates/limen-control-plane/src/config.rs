@@ -230,6 +230,30 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_S3_CREATE_BUCKET")]
     pub audit_s3_create_bucket: bool,
 
+    /// IAM role that `limen audit verify` may use to read the audit bucket
+    /// (the `verifier_policy_json` permissions). The control plane assumes it
+    /// and hands the caller short-lived credentials. Needs `sts:AssumeRole`.
+    #[arg(long, env = "LIMEN_AUDIT_VERIFIER_ROLE_ARN")]
+    pub audit_verifier_role_arn: Option<String>,
+
+    /// The S3 endpoint verifiers should use, if it differs from the control
+    /// plane's own (a VPC endpoint for the control plane, a public one for
+    /// people). Defaults to `--audit-s3-endpoint`.
+    #[arg(long, env = "LIMEN_AUDIT_VERIFIER_S3_ENDPOINT")]
+    pub audit_verifier_s3_endpoint: Option<String>,
+
+    /// How long verifier credentials last (AWS allows 15 minutes to 12 hours).
+    #[arg(long, env = "LIMEN_AUDIT_VERIFIER_TTL", value_parser = parse_duration, default_value = "15m")]
+    pub audit_verifier_ttl: Duration,
+
+    /// For an S3-compatible store without STS (development): a fixed
+    /// read-only key to hand to verifiers instead of a role. It does not expire.
+    #[arg(long, env = "LIMEN_AUDIT_VERIFIER_ACCESS_KEY_ID")]
+    pub audit_verifier_access_key_id: Option<String>,
+
+    #[arg(long, env = "LIMEN_AUDIT_VERIFIER_SECRET_ACCESS_KEY", value_parser = parse_secret)]
+    pub audit_verifier_secret_access_key: Option<Secret<String>>,
+
     /// Close an S3 batch after this long, even if it isn't full.
     #[arg(long, env = "LIMEN_AUDIT_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
     pub audit_s3_flush: Duration,

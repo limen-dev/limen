@@ -37,7 +37,7 @@ CI jobs are first-class principals. A **bot** joins with a GitHub Actions or Git
 Workers and proxies write events to a disk spool first, then deliver them at least once to S3 and Datadog. A session that cannot be audited is not allowed to start, because audit **fails closed**. Each control plane writes its S3 batches with a signed manifest naming the previous manifest's hash, so a missing, reordered, or altered batch shows up when you run:
 
 ```sh
-limen audit verify --bucket <bucket> --ca-file internal-ca.pem
+limen audit verify
 ```
 
 SSH sessions are recorded and replayable. Databases, Redis, MongoDB, search, and brokers are audited as commands or requests, and values that are secret by nature (Redis values, message bodies, record values) are redacted or never logged. See [verifying the audit chain](../runbooks/audit-verify/) and [access reviews and evidence](../guides/access-reviews/).

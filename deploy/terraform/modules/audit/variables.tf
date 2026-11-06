@@ -54,3 +54,14 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "verifier_trusted_principal_arns" {
+  description = <<-EOT
+    IAM principals allowed to assume the verifier role: the control plane's task
+    or instance role. The control plane assumes it to give auditors short-lived,
+    read-only access for `limen audit verify`. Leave empty to create no role and
+    attach verifier_policy_json yourself.
+  EOT
+  type        = list(string)
+  default     = []
+}

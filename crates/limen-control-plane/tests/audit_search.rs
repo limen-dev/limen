@@ -10,8 +10,8 @@ use common::{Harness, forwarded};
 use limen_audit::{Event, EventKind, Producer};
 use limen_control_plane::console::store::project_events;
 use limen_control_plane::search;
-use limen_proto::v1::SearchRequest;
 use limen_proto::v1::audit_search_client::AuditSearchClient;
+use limen_proto::v1::{SearchRequest, VerifierAccessRequest};
 use limen_testkit::users::{ADMIN, AUDITOR, DEVELOPER};
 use limen_tunnel::connect::TracedChannel as Channel;
 use rustls_pki_types::CertificateDer;
@@ -431,5 +431,86 @@ async fn the_history_link_is_offered_when_configured() {
     assert_eq!(
         resp.history_url,
         "https://athena.example/q?u=a%40b.c&q=user%3Aa%40b.c+drop"
+    );
+}
+
+impl Rig {
+    async fn verifier_access(
+        &self,
+        who: &CertificateDer<'static>,
+    ) -> Result<limen_proto::v1::VerifierAccessResponse, tonic::Status> {
+        AuditSearchClient::new(self.ch.clone())
+            .verifier_access(forwarded(VerifierAccessRequest {}, Some(who)))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+}
+
+#[tokio::test]
+async fn only_admins_and_auditors_get_verifier_access_and_each_grant_is_audited() {
+    let Some(r) = rig(&[
+        "--audit-s3-bucket=audit-bucket".to_owned(),
+        "--audit-s3-prefix=limen/".to_owned(),
+        "--audit-verifier-access-key-id=verifier-key".to_owned(),
+        "--audit-verifier-secret-access-key=verifier-secret-value".to_owned(),
+    ])
+    .await
+    else {
+        return;
+    };
+    let err = r
+        .verifier_access(&r.dev)
+        .await
+        .expect_err("developers can't verify");
+    assert_eq!(err.code(), Code::PermissionDenied);
+
+    let grant = r.verifier_access(&r.auditor).await.expect("auditor");
+    assert_eq!(
+        (grant.bucket.as_str(), grant.prefix.as_str()),
+        ("audit-bucket", "limen/")
+    );
+    assert_eq!(grant.access_key_id, "verifier-key");
+    assert_eq!(grant.expires_unix, 0, "a fixed key does not expire");
+    r.verifier_access(&r.admin).await.expect("admin");
+
+    let grants: Vec<Event> =
+        r.h.audit_events()
+            .await
+            .into_iter()
+            .filter(|e| e.kind == EventKind::AuditVerifyAccess)
+            .collect();
+    assert_eq!(grants.len(), 2, "the refused attempt is not a grant");
+    assert_eq!(grants[0].user.as_deref(), Some(AUDITOR));
+    let logged = serde_json::to_string(&grants).expect("json");
+    assert!(
+        !logged.contains("verifier-secret-value") && !logged.contains("verifier-key"),
+        "credentials never reach the audit trail"
+    );
+}
+
+#[tokio::test]
+async fn verifier_access_needs_a_bucket_and_a_way_to_read_it() {
+    // No bucket at all.
+    let Some(r) = rig(&[]).await else { return };
+    let err = r
+        .verifier_access(&r.auditor)
+        .await
+        .expect_err("nothing to verify");
+    assert_eq!(err.code(), Code::FailedPrecondition);
+    // A bucket, but no verifier role or key.
+    let Some(r2) = rig(&["--audit-s3-bucket=audit-bucket".to_owned()]).await else {
+        return;
+    };
+    let err = r2
+        .verifier_access(&r2.auditor)
+        .await
+        .expect_err("no way to read it");
+    assert_eq!(err.code(), Code::FailedPrecondition);
+    assert!(
+        r2.h.audit_events()
+            .await
+            .iter()
+            .all(|e| e.kind != EventKind::AuditVerifyAccess),
+        "nothing was granted, so nothing is recorded as granted"
     );
 }

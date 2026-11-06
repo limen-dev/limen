@@ -9,4 +9,4 @@ mod client;
 pub mod manifest;
 pub mod pack;
 
-pub use client::s3_client;
+pub use client::{Access, s3_client, s3_client_with};

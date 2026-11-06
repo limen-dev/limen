@@ -159,7 +159,7 @@ A bot is matched on exact claims of its token (for example the repository and th
 Audit events are written to S3 in signed batches, and each batch records the hash of the one before it, like links in a chain. If a batch goes missing, is reordered, or is edited, one command finds it:
 
 ```sh
-limen audit verify --bucket <your-audit-bucket> --ca-file internal-ca.pem
+limen audit verify
 ```
 
 Traces carry only ids and outcomes, never user names, SQL statements or tokens. To see one locally, start the dev stack with Jaeger: `deploy/compose/setup.sh --yes --stacks ssh,tracing`.

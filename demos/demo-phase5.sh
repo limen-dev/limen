@@ -54,10 +54,9 @@ wait_for() {
   die "timed out waiting for $what"
 }
 s3curl() { curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user dev:dev-only-secret "$@"; }
-verify() {
-  "${compose[@]}" exec -T control-plane-0 limen audit verify \
-    --ca-file /var/lib/limen/ca-public/internal-ca.pem 2>&1
-}
+# Verification runs from the host as an admin, in its own profile: Limen hands
+# it read-only access to the bucket, and the check runs here.
+verify() { LIMEN_HOME="$state/verifier-home" limen audit verify "$@" 2>&1; }
 # Sum of every audit spool backlog on the control planes and proxies.
 pending() {
   local total=0 port v
@@ -103,6 +102,7 @@ mkdir -p "$state"
 "${compose[@]}" cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem "$state/internal-ca.pem" >/dev/null
 rm -rf "$LIMEN_HOME"
 "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
+rm -rf "$state/verifier-home"; LIMEN_HOME="$state/verifier-home" "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
 limen admin apply "$root/examples/policy" --source-ref demo-phase5 >/dev/null
 # Distinct workers with a tunnel to any proxy (each worker opens several).
 workers_up() {

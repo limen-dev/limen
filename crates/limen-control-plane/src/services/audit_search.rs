@@ -2,7 +2,9 @@
 //! [`crate::search`].
 
 use limen_proto::v1::audit_search_server::AuditSearch;
-use limen_proto::v1::{SearchHit, SearchRequest, SearchResponse};
+use limen_proto::v1::{
+    SearchHit, SearchRequest, SearchResponse, VerifierAccessRequest, VerifierAccessResponse,
+};
 use tonic::{Request, Response, Status};
 
 use crate::caller;
@@ -46,6 +48,18 @@ impl AuditSearch for AuditSearchService {
             truncated: results.truncated,
             history_url,
         }))
+    }
+
+    async fn verifier_access(
+        &self,
+        request: Request<VerifierAccessRequest>,
+    ) -> Result<Response<VerifierAccessResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        // Admins and auditors only; anyone else reads as not allowed.
+        let user = caller.reader()?;
+        Ok(Response::new(
+            crate::verifier_access::grant(&self.0, &user.username).await?,
+        ))
     }
 }
 
