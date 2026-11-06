@@ -388,7 +388,7 @@ impl Spool {
 
     /// Record a failed fsync and wake every append waiting on one.
     fn mark_broken(&self, e: &std::io::Error) -> SpoolError {
-        tracing::error!(error = %e, "spool fsync failed; refusing appends until restart");
+        tracing::error!(error = %e, "spool write or fsync failed; refusing appends until restart");
         let why = e.to_string();
         self.broken.send_replace(Some(why.clone()));
         SpoolError::Broken(why)
@@ -458,7 +458,13 @@ impl Spool {
             );
             buf.extend_from_slice(&crc32fast::hash(payload).to_be_bytes());
             buf.extend_from_slice(payload);
-            st.active.write_all(&buf)?;
+            // A failed write (a full disk can leave part of the record behind)
+            // breaks the spool: later appends would land after the partial
+            // bytes and make the segment unreadable mid-file. A restart
+            // truncates the torn tail, as after a crash.
+            if let Err(e) = st.active.write_all(&buf) {
+                return Err(self.mark_broken(&e));
+            }
             let index = st.next;
             st.next += 1;
             st.dirty = true;
@@ -635,6 +641,37 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A write that fails (a full disk can leave a partial record) must break
+    /// the spool, not return an error and let the next record land after the
+    /// damage.
+    #[tokio::test]
+    async fn a_failed_write_breaks_the_spool() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        spool.append(b"before").await.expect("append");
+        let segment = std::fs::read_dir(dir.path().join("segments"))
+            .expect("ls")
+            .next()
+            .expect("a segment")
+            .expect("entry")
+            .path();
+        // A read-only handle: every write to it fails.
+        spool.lock().active = File::open(&segment).expect("open read-only");
+        assert!(spool.append(b"lost").await.is_err());
+        assert!(
+            spool.check_broken().is_err(),
+            "the failed write itself broke the spool"
+        );
+        assert!(
+            matches!(spool.append(b"after").await, Err(SpoolError::Broken(_))),
+            "later appends are refused until a restart"
+        );
+        drop(spool);
+        let reopened = Spool::open(config(dir.path())).expect("reopen");
+        assert_eq!(reopened.read("a", 10).expect("read").len(), 1);
+    }
 
     fn config(dir: &Path) -> SpoolConfig {
         let mut c = SpoolConfig::new(dir, &["a", "b"]);

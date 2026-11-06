@@ -180,9 +180,33 @@ pub fn verify<'a>(
     purpose: Purpose,
     internal_ca: &CertificateDer<'_>,
 ) -> Result<(ComponentIdentity, &'a [u8]), SessionError> {
+    verify_as_of(signed, purpose, internal_ca, None)
+}
+
+/// [`verify`], with the signer's certificate judged as of `at` instead of now:
+/// for something signed in the past, such as an audit manifest, whose signer's
+/// short-lived certificate has since expired.
+pub fn verify_at<'a>(
+    signed: &'a Signed,
+    purpose: Purpose,
+    internal_ca: &CertificateDer<'_>,
+    at: time::OffsetDateTime,
+) -> Result<(ComponentIdentity, &'a [u8]), SessionError> {
+    verify_as_of(signed, purpose, internal_ca, Some(at))
+}
+
+fn verify_as_of<'a>(
+    signed: &'a Signed,
+    purpose: Purpose,
+    internal_ca: &CertificateDer<'_>,
+    at: Option<time::OffsetDateTime>,
+) -> Result<(ComponentIdentity, &'a [u8]), SessionError> {
     let cert = CertificateDer::from(signed.signer_cert_der.as_slice());
-    let signed_by = verify_component(&cert, internal_ca, false)
-        .map_err(|e| SessionError::Signature(e.to_string()))?;
+    let signed_by = match at {
+        None => verify_component(&cert, internal_ca, false),
+        Some(at) => limen_ca::verify::verify_component_at(&cert, internal_ca, false, at),
+    }
+    .map_err(|e| SessionError::Signature(e.to_string()))?;
     if signed_by.kind != purpose.signer_kind() {
         return Err(SessionError::Signature(format!(
             "a {} may not sign {purpose:?}",

@@ -317,3 +317,102 @@ async fn a_full_audit_spool_refuses_new_sessions_instead_of_running_unrecorded()
         "the policy was still fresh, so this is not the grace period: {reasons:?}"
     );
 }
+
+/// The other audit failure mode (ADR-0009, design section 8): with `degrade` a full spool does not
+/// stop the session. The same tiny spool and window as the `fail_closed` test, so the only
+/// difference is the mode.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_full_audit_spool_in_degrade_mode_lets_new_sessions_run() {
+    if limen_testkit::database_url().is_none() {
+        return;
+    }
+    let window = Duration::from_millis(1500);
+    let (allowed, closed_at, reasons) = Box::pin(new_sessions_during_an_outage(
+        &[
+            "--audit-spool-max-bytes=1500",
+            "--audit-failure-mode=degrade",
+        ],
+        window,
+    ))
+    .await;
+    eprintln!("degrade: allowed {allowed}, closed at {closed_at:?}, refusals {reasons:?}");
+    assert!(
+        closed_at.is_none() && allowed > 0,
+        "degrade keeps sessions running with a full spool (allowed {allowed}, refusals {reasons:?})"
+    );
+}
+
+/// When a control plane comes back, a session allowed during the outage has its audit events
+/// delivered (the proxy spooled them, delivery is at-least-once), and new sessions that the
+/// stale policy had refused work again, without restarting the proxy or the worker.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_returning_control_plane_gets_the_outage_audit_and_new_sessions_work_again() {
+    let Some(mut deployment) = Box::pin(Deployment::start_scaled(&[])).await else {
+        return;
+    };
+    let worker = tcp_deployment_ready(&deployment).await;
+    let developer = deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect("developer login");
+    let (listener, refused) = listener_for(&deployment, &developer).await;
+
+    deployment.stop_control_plane().await;
+
+    // Allowed inside the grace period, with the control plane down.
+    let mut during = TcpStream::connect(listener).await.expect("local listener");
+    assert!(echoes(&mut during, b"during the outage").await);
+    drop(during);
+
+    // Past the grace period the same request is refused.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let mut late = TcpStream::connect(listener).await.expect("local listener");
+    let _ = late.write_all(b"never echoed").await;
+    eventually(
+        Duration::from_secs(10),
+        "refusal past the grace",
+        || async { !refused.lock().expect("refusal list").is_empty() },
+    )
+    .await;
+    drop(late);
+
+    // A replacement control plane on the same database; the name proxies dial now points to it.
+    let second = deployment.start_extra_control_plane("cp-e2e-2").await;
+    limen_tunnel::connect::set_test_resolution(&deployment.cp_dial, vec![second.addr]);
+
+    // The outage's audit reaches the new control plane's trail.
+    let trail = deployment.dir.path().join("audit/cp-e2e-2.jsonl");
+    eventually(
+        Duration::from_secs(40),
+        "the outage session in the new control plane's audit",
+        || async {
+            std::fs::read_to_string(&trail)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .any(|e| e["kind"] == "session.start" && e["data"]["kind"] == "tcp")
+        },
+    )
+    .await;
+
+    // Policy is fresh again, so a new session is allowed.
+    let mut again = None;
+    for _ in 0..40 {
+        let mut c = TcpStream::connect(listener).await.expect("local listener");
+        if echoes(&mut c, b"back").await {
+            again = Some(c);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        again.is_some(),
+        "new sessions work once a control plane is back"
+    );
+    deployment
+        .login(DEVELOPER, &["tcp-users"])
+        .await
+        .expect("logins work again");
+    worker.stop().await;
+    second.stop().await;
+}

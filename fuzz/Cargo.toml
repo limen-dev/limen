@@ -9,7 +9,12 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+limen-control-plane = { path = "../crates/limen-control-plane" }
+limen-policy = { path = "../crates/limen-policy" }
+limen-proxy = { path = "../crates/limen-proxy" }
 limen-worker = { path = "../crates/limen-worker" }
+time = "0.3"
 tokio = { version = "1", features = ["rt"] }
 
 # Not part of the main workspace: it needs nightly, and its dependencies are built with
@@ -54,6 +59,41 @@ bench = false
 [[bin]]
 name = "pg_frames"
 path = "fuzz_targets/pg_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_yaml"
+path = "fuzz_targets/policy_yaml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_eval"
+path = "fuzz_targets/policy_eval.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_scalars"
+path = "fuzz_targets/policy_scalars.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cp_parsers"
+path = "fuzz_targets/cp_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proxy_web"
+path = "fuzz_targets/proxy_web.rs"
 test = false
 doc = false
 bench = false

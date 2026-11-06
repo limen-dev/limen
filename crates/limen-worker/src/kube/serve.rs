@@ -36,7 +36,7 @@ const SEC_WEBSOCKET_PROTOCOL: HeaderName = HeaderName::from_static("sec-websocke
 /// Never forwarded from the client: hop-by-hop headers, anything that names an
 /// identity, and the WebSocket extensions (compression would hide the frames
 /// from the recorder).
-const DROP: [&str; 11] = [
+const DROP: [&str; 13] = [
     "host",
     "authorization",
     "connection",
@@ -48,6 +48,9 @@ const DROP: [&str; 11] = [
     "upgrade",
     "sec-websocket-extensions",
     "forwarded",
+    // The client must not choose the source address the API server logs.
+    "via",
+    "x-real-ip",
 ];
 
 struct Ctx {
@@ -391,14 +394,7 @@ async fn start_stream(
         }
         (StreamSubresource::PortForward, true) => ("portforward", StreamKind::PortForwardSpdy),
     };
-    let params = |name: &str| -> Vec<String> {
-        query
-            .split('&')
-            .filter_map(|kv| kv.split_once('='))
-            .filter(|(k, _)| *k == name)
-            .map(|(_, v)| percent_decode(v))
-            .collect()
-    };
+    let params = |name: &str| query_values(query, name);
     let stream_info = StreamInfo {
         kind,
         subresource,
@@ -575,6 +571,7 @@ fn is_canonical(path: &str) -> bool {
         b == b'%'
             && path
                 .get(i + 1..i + 3)
+                .filter(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
                 .and_then(|hex| u8::from_str_radix(hex, 16).ok())
                 .is_some_and(|d| {
                     d.is_ascii_alphanumeric() || matches!(d, b'-' | b'.' | b'_' | b'~')
@@ -589,6 +586,15 @@ fn is_canonical(path: &str) -> bool {
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
+/// Is this client header kept off the request to the API server?
+fn client_header_dropped(name: &str) -> bool {
+    DROP.contains(&name)
+        || name.starts_with("impersonate-")
+        || name.starts_with("x-limen-")
+        || name.starts_with("x-remote-")
+        || name.starts_with("x-forwarded-")
+}
+
 /// The headers for the API server: the client's, minus anything that names an
 /// identity, plus this worker's credential and the impersonation of the user.
 fn forward_headers(
@@ -600,11 +606,7 @@ fn forward_headers(
     let mut out = HeaderMap::new();
     for (name, value) in client {
         let n = name.as_str();
-        if DROP.contains(&n)
-            || n.starts_with("impersonate-")
-            || n.starts_with("x-limen-")
-            || n.starts_with("x-remote-")
-        {
+        if client_header_dropped(n) {
             continue;
         }
         out.append(name.clone(), value.clone());
@@ -670,6 +672,17 @@ fn is_channel_protocol(protocol: &str) -> bool {
             && (protocol.ends_with(".channel.k8s.io") || protocol.ends_with(".portforward.k8s.io")))
 }
 
+/// The values of query parameter `name`. Keys are decoded as well as values:
+/// the API server reads `?%63ommand=ls` as `command=ls`, so the audit must too.
+fn query_values(query: &str, name: &str) -> Vec<String> {
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .filter(|(k, _)| percent_decode(k) == name)
+        .map(|(_, v)| percent_decode(v))
+        .collect()
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -678,7 +691,9 @@ fn percent_decode(s: &str) -> String {
         match bytes[i] {
             b'%' if bytes.get(i + 1..i + 3).is_some() => {
                 let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
-                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                if hex.bytes().all(|b| b.is_ascii_hexdigit())
+                    && let Ok(b) = u8::from_str_radix(hex, 16)
+                {
                     out.push(b);
                     i += 3;
                     continue;
@@ -713,7 +728,42 @@ fn failure(code: StatusCode, reason: &str, message: &str) -> Response<Body> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_canonical, is_channel_protocol, percent_decode};
+    #[test]
+    fn an_encoded_query_key_is_still_the_key() {
+        assert_eq!(
+            query_values("%63ommand=rm&command=-rf&other=x", "command"),
+            ["rm", "-rf"]
+        );
+    }
+
+    /// `%+f` is not an escape (Go's `url.PathUnescape` refuses it); it must not
+    /// decode to a control byte the upstream would never see.
+    #[test]
+    fn a_signed_escape_is_not_decoded() {
+        assert_eq!(percent_decode("a%+fb"), "a% fb");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+    }
+
+    use super::{is_canonical, is_channel_protocol, percent_decode, query_values};
+
+    #[test]
+    fn the_client_cannot_choose_the_forwarding_headers() {
+        for name in [
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip",
+            "via",
+            "authorization",
+            "impersonate-user",
+        ] {
+            assert!(super::client_header_dropped(name), "{name}");
+        }
+        for name in ["content-type", "accept", "user-agent"] {
+            assert!(!super::client_header_dropped(name), "{name}");
+        }
+    }
 
     #[test]
     fn only_canonical_paths_are_forwarded() {

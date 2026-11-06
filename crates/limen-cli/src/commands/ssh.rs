@@ -54,8 +54,18 @@ async fn default_login(proxy: Option<&str>, resource: &str) -> anyhow::Result<St
         .into_iter()
         .find(|r| r.name == resource && r.kind == "ssh")
         .with_context(|| format!("you have no SSH access to {resource:?}; see `limen ls`"))?;
-    match found.principals.as_slice() {
-        [only] => Ok(only.clone()),
+    pick_login(&found.principals, resource)
+}
+
+/// The one login policy allows, if it is safe to hand to `ssh`. The login
+/// comes from the server, and OpenSSH substitutes it (`%r`) into a shell
+/// command line for `ProxyCommand`, so `x$(cmd)` would run `cmd` here.
+fn pick_login(principals: &[String], resource: &str) -> anyhow::Result<String> {
+    match principals {
+        [only] if super::tools::safe_name(only) => Ok(only.clone()),
+        [only] => bail!(
+            "the login policy allows on {resource} ({only:?}) has characters `limen ssh` will not pass to ssh; name one yourself: limen ssh <login>@{resource}"
+        ),
         many => {
             let options: Vec<String> = many
                 .iter()
@@ -269,6 +279,22 @@ pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_login_from_the_server_must_be_safe_for_the_shell() {
+        let one = |l: &str| pick_login(&[l.to_owned()], "web-1");
+        assert_eq!(one("ubuntu").expect("plain login"), "ubuntu");
+        for bad in [
+            "x$(touch /tmp/p)",
+            "a;b",
+            "`id`",
+            "a b",
+            "-oProxyCommand=x",
+            "a|b",
+        ] {
+            assert!(one(bad).is_err(), "{bad}");
+        }
+    }
+
     use super::*;
 
     #[test]

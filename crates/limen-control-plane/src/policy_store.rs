@@ -952,7 +952,7 @@ fn writer_resource(head: &Head) -> Result<WriterResource, StoreError> {
 fn reconcile(heads: BTreeMap<Key, Head>, latest: &LoadedPolicy) -> BTreeMap<Key, Head> {
     let agrees = effective(&heads)
         .ok()
-        .and_then(|docs| Policy::from_documents(docs).ok())
+        .and_then(|docs| Policy::from_stored_documents(docs).ok())
         .is_some_and(|p| p.digest() == latest.policy.digest());
     if agrees {
         return heads;

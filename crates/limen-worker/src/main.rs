@@ -28,7 +28,15 @@ async fn main() -> anyhow::Result<()> {
     });
     let once = args.config.db_bootstrap_once;
     let check = args.config.db_bootstrap_check;
-    let (worker, creds_tx) = Worker::start(args.config).await?;
+    // Starting can wait for the control plane to be upgraded (ADR-0045): a stop signal ends that wait.
+    let mut stop = rx.clone();
+    let (worker, creds_tx) = tokio::select! {
+        started = Worker::start(args.config) => started?,
+        _ = stop.wait_for(|stopped| *stopped) => {
+            tracing::info!("stopped before starting");
+            return Ok(());
+        }
+    };
     if once {
         // A one-shot task: enroll, fetch policy, reconcile, report, exit.
         let version = worker.fetch_policy_once().await?;

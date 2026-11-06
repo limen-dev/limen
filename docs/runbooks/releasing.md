@@ -3,7 +3,7 @@
 Releases are made by merging a pull request. Read [ADR-0024](../adr/0024-release-strategy.md) for the why.
 
 ## Normal flow
-1. Work lands on `main` with conventional commit messages (`feat:`, `fix:`, `docs:` ...). Breaking changes use `feat!:` or a `BREAKING CHANGE:` footer.
+1. Work lands on `main` with conventional commit messages (`feat:`, `fix:`, `docs:` ...). Breaking changes use `feat!:` or a `BREAKING CHANGE:` footer; release-please carries them into the changelog, which is where ADR-0024's "Upgrade notes" come from. The release body is built from `CHANGELOG.md`, so `.github/release.yml` (GitHub's generated notes) does not apply to it.
 2. release-please keeps a pull request titled *chore(main): release X.Y.Z* up to date. It holds the version bump and the changelog. A job refreshes `Cargo.lock` on it and runs CI on its branch.
 3. When a roadmap milestone closes and the PR's checks are green, **merge it**. That is the release.
 4. The `release` workflow then tests the release commit, builds the binaries and the three multi-arch images, makes the SBOM and the deploy bundle, smoke-tests them, and attaches everything to a **draft** GitHub release.
@@ -16,7 +16,7 @@ Releases are made by merging a pull request. Read [ADR-0024](../adr/0024-release
 `scripts/smoke-release.sh vX.Y.Z` (or `--dir DIR` with the assets of a draft) verifies `SHA256SUMS`, runs the CLI from the tarball for your OS, pulls the three images by digest, and runs the Phase 3.5 demo against them. It needs `gh`, and `docker` signed in to `ghcr.io` while the repository is private. It is the check ADR-0024 asks for before a pre-release becomes a release.
 
 ## Upgrading a deployment
-Control plane first, then proxies, then workers. Database migrations run when the control plane starts and only move forward, so a rollback means restoring a backup.
+See [Upgrading](upgrading.md): control plane first, then proxies, then workers. Database migrations run when the control plane starts and only move forward, so a rollback means restoring a backup.
 
 ## If something fails
 - **No release PR appears:** the repository setting *Actions > General > Allow GitHub Actions to create and approve pull requests* must be on.

@@ -101,7 +101,28 @@ pub struct IdpSettings {
     pub scopes: Vec<String>,
 }
 
+/// Refuse a URL the proxy or the identity provider handed us unless it is
+/// `https`, or `http` to a loopback host (the dev stack). The CLI opens these
+/// in a browser, so `file:`, `javascript:` and custom schemes must not pass.
+fn require_secure_url(raw: &str, what: &str) -> anyhow::Result<()> {
+    let url = reqwest::Url::parse(raw).with_context(|| format!("{what} is not a valid URL"))?;
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if loopback => Ok(()),
+        other => bail!(
+            "refusing {what}: scheme `{other}` is not https (http is allowed only for loopback hosts)"
+        ),
+    }
+}
+
 async fn discover(settings: &IdpSettings, http: &HttpClient) -> anyhow::Result<Metadata> {
+    require_secure_url(&settings.issuer, "the identity provider issuer")?;
     let issuer = IssuerUrl::new(settings.issuer.clone()).context("invalid issuer URL")?;
     Metadata::discover_async(issuer, http)
         .await
@@ -122,6 +143,17 @@ struct Callback {
     state: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
+}
+
+/// The terminal message for an `error` callback. Any web page can hit the
+/// loopback port first, so both fields are untrusted: no control characters
+/// (escape sequences), bounded length.
+fn callback_error_message(error: &str, description: &str) -> String {
+    format!(
+        "identity provider returned an error: {}: {}",
+        crate::ui::plain_line(error, 200),
+        crate::ui::plain_line(description, 500)
+    )
 }
 
 /// Authorization code flow with PKCE. Opens the browser unless `open_browser`
@@ -156,6 +188,8 @@ pub async fn pkce_login(
         .add_scopes(scopes(settings))
         .set_pkce_challenge(challenge)
         .url();
+
+    require_secure_url(url.as_str(), "the authorization URL")?;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<Callback>();
     let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -198,10 +232,10 @@ pub async fn pkce_login(
     waiting.finish();
 
     if let Some(error) = callback.error {
-        bail!(
-            "identity provider returned an error: {error}: {}",
-            callback.error_description.unwrap_or_default()
-        );
+        bail!(callback_error_message(
+            &error,
+            &callback.error_description.unwrap_or_default()
+        ));
     }
     if callback.state.as_deref() != Some(csrf.secret().as_str()) {
         bail!("login callback state did not match; possible CSRF, aborting");
@@ -274,4 +308,41 @@ fn callback_page(heading: &str, detail: &str) -> String {
          <div style=\"width:96px;margin:0 auto\">{LOGO_MARK}</div>\
          <h3>Limen: {heading}</h3><p>{detail}</p></body></html>"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{callback_error_message, require_secure_url};
+
+    #[test]
+    fn callback_error_text_cannot_inject_terminal_escapes() {
+        let msg = callback_error_message(
+            "bad\u{1b}[2J",
+            &format!("x\u{1b}]0;pwn\u{7}\n{}", "y".repeat(5000)),
+        );
+        assert!(!msg.chars().any(char::is_control), "{msg:?}");
+        assert!(msg.len() < 1000, "{}", msg.len());
+    }
+
+    #[test]
+    fn only_https_or_loopback_http_urls_pass() {
+        for ok in [
+            "https://idp.example.com/auth",
+            "http://localhost:5556/dex",
+            "http://127.0.0.1:5556/",
+            "http://[::1]:5556/",
+        ] {
+            assert!(require_secure_url(ok, "x").is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://idp.example.com/auth",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "myapp://open?x=1",
+            "http://localhost.evil.com/",
+            "not a url",
+        ] {
+            assert!(require_secure_url(bad, "x").is_err(), "{bad}");
+        }
+    }
 }

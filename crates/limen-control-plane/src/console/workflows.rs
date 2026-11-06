@@ -860,9 +860,18 @@ pub async fn deny_lift(
 pub async fn evidence(
     State(state): State<AppState>,
     auth: Auth,
+    headers: HeaderMap,
     Query(q): Query<PageQuery>,
 ) -> Response {
     if let Err(r) = auth.reader() {
+        return r;
+    }
+    // It writes an audit event and exports the record: not on a cross-site GET.
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = Auth::check_same_origin_get(console, &headers) {
         return r;
     }
     let day = |s: &Option<String>| {
@@ -1123,9 +1132,17 @@ pub async fn watch_page(
 pub async fn watch_stream(
     State(state): State<AppState>,
     auth: Auth,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
     if !may_watch(&state, &auth) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    // It records a watch and tells the user: not on a cross-site GET.
+    let Ok(console) = console(&state) else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    if Auth::check_same_origin_get(console, &headers).is_err() {
         return StatusCode::FORBIDDEN.into_response();
     }
     let Ok(sid) = Uuid::parse_str(&id) else {

@@ -115,9 +115,20 @@ message SessionResponse {
 // Served by the control plane. Proxies call it directly, workers through a proxy.
 service PolicySync {
   rpc GetPolicySnapshot(GetPolicySnapshotRequest) returns (Signed);
+  // The control plane's release version. A proxy or worker waits at start until the control
+  // plane is at least its own version, so an upgrade needs no manual ordering (ADR-0045).
+  // A control plane that predates this call answers UNIMPLEMENTED, which means "older".
+  rpc GetServerVersion(GetServerVersionRequest) returns (GetServerVersionResponse);
 }
 
 message GetPolicySnapshotRequest {}
+
+message GetServerVersionRequest {}
+
+message GetServerVersionResponse {
+  // Semantic version of the answering replica, without a leading "v" (for example "0.1.0-rc.2").
+  string version = 1;
+}
 
 // Served by the control plane. Workers call it through a proxy.
 service SshCertificates {

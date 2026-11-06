@@ -7,8 +7,11 @@ mod kube;
 mod peer;
 pub mod relay;
 mod sessions;
+mod source;
 pub mod tunnels;
 mod web;
+#[cfg(fuzzing)]
+pub use web::fuzz as web_fuzz;
 
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
@@ -43,6 +46,11 @@ use tunnels::{Tunnel, Tunnels};
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONNECTIONS: usize = 20_000;
+/// Open connections one source (an IPv4 address, or an IPv6 /64) may hold.
+const MAX_CONNECTIONS_PER_SOURCE: usize = 2_000;
+/// An unauthenticated HTTP/2 connection (login, enrollment) is short; one
+/// that has not ended by then is closed, so idle ones cannot pile up.
+const ANONYMOUS_API_MAX_AGE: Duration = Duration::from_secs(120);
 /// After the last connection is gone, how long the proxy may spend shipping
 /// its audit spool to the control plane before it exits.
 const FINAL_FLUSH: Duration = Duration::from_secs(10);
@@ -57,6 +65,7 @@ pub struct Proxy {
     pub tunnels: Tunnels,
     accept_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
     active: Arc<AtomicUsize>,
+    sources: source::SourceCounts,
     last_report_ok: Arc<AtomicI64>,
     pub(crate) policy: limen_session::snapshot::PolicyCache,
     signer: Arc<RwLock<Arc<limen_session::envelope::EnvelopeSigner>>>,
@@ -97,6 +106,11 @@ impl Proxy {
             },
         )
         .await?;
+        // Do not serve while the control plane is older than this proxy (ADR-0045).
+        limen_component::gate::wait_for_control_plane(limen_core::VERSION, || {
+            build_cp_channel(&config, &creds)
+        })
+        .await;
         let tls = Arc::new(RwLock::new(Arc::new(build_server_config(&creds)?)));
         let cp = Arc::new(RwLock::new(build_cp_channel(&config, &creds)?));
         let signer = Arc::new(RwLock::new(Arc::new(build_signer(&creds)?)));
@@ -126,6 +140,7 @@ impl Proxy {
                 tunnels: Tunnels::default(),
                 accept_limiter: Arc::new(RateLimiter::keyed(quota)),
                 active: Arc::new(AtomicUsize::new(0)),
+                sources: source::SourceCounts::default(),
                 last_report_ok: Arc::new(AtomicI64::new(0)),
                 policy,
                 signer,
@@ -276,6 +291,24 @@ pub async fn run(
 
     tracing::info!(addr = %listener.local_addr()?, id = %proxy.id(), name = proxy.name().as_deref(), "proxy listening");
     let mut connections = tokio::task::JoinSet::new();
+    // Forget sources that are back under their rate, or the limiter grows with
+    // every address ever seen.
+    {
+        let limiter = Arc::clone(&proxy.accept_limiter);
+        let mut stop = shutdown.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        limiter.retain_recent();
+                        limiter.shrink_to_fit();
+                    }
+                    _ = stop.changed() => break,
+                }
+            }
+        });
+    }
     loop {
         let (tcp, remote) = tokio::select! {
             accepted = listener.accept() => match accepted {
@@ -287,7 +320,17 @@ pub async fn run(
             },
             _ = shutdown.changed() => break,
         };
-        if proxy.accept_limiter.check_key(&remote.ip()).is_err()
+        let Some(source_slot) = proxy
+            .sources
+            .acquire(remote.ip(), MAX_CONNECTIONS_PER_SOURCE)
+        else {
+            tracing::debug!(%remote, "connection rejected: the source holds its share of connections");
+            continue;
+        };
+        if proxy
+            .accept_limiter
+            .check_key(&source::source_key(remote.ip()))
+            .is_err()
             || proxy.active.load(Ordering::Relaxed) >= MAX_CONNECTIONS
         {
             tracing::debug!(%remote, "connection rejected by rate limit");
@@ -302,6 +345,7 @@ pub async fn run(
             // Boxed: the connection's state is large and lives as long as it does.
             Box::pin(handle_connection(&proxy, tcp, remote, conn_shutdown)).await;
             proxy.active.fetch_sub(1, Ordering::SeqCst);
+            drop(source_slot);
         });
     }
     tracing::info!(
@@ -390,6 +434,7 @@ async fn handle_connection(
         Some(p) if p == alpn::H2 => {
             let mut shutdown = shutdown;
             let drain = Duration::from_secs(proxy.config.drain_timeout_secs);
+            let anonymous = peer.leaf().is_none();
             let serve = serve_h2(
                 tls,
                 peer,
@@ -397,11 +442,23 @@ async fn handle_connection(
                 H2Settings::default(),
             );
             tokio::pin!(serve);
+            // A caller with no certificate gets a bounded connection; the
+            // keepalive ping alone would hold an idle one open forever.
+            let max_age = async {
+                if anonymous {
+                    tokio::time::sleep(ANONYMOUS_API_MAX_AGE).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            };
             tokio::select! {
                 result = &mut serve => {
                     if let Err(e) = result {
                         tracing::debug!(error = %e, %remote, "API connection ended with error");
                     }
+                }
+                () = max_age => {
+                    tracing::debug!(%remote, "closing an unauthenticated API connection that outlived its time");
                 }
                 _ = shutdown.changed() => {
                     let _ = tokio::time::timeout(drain, serve).await;

@@ -218,11 +218,9 @@ async fn serve_socket(
     plan: &Plan,
     database: Option<&str>,
 ) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    let _ = std::fs::remove_file(path);
-    let listener =
-        tokio::net::UnixListener::bind(path).with_context(|| format!("binding {path}"))?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    // The same checks as the other commands: a private directory, and only an
+    // old socket is replaced.
+    let listener = super::redis::bind_unix_socket(std::path::Path::new(path))?;
     announce(plan, "", None, Some(path), database, &session.resource);
     loop {
         let accepted = tokio::time::timeout(IDLE, listener.accept()).await;
@@ -286,6 +284,41 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::client_command;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_socket_directory_must_be_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777))
+            .expect("chmod");
+        let tls = rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        let session = std::sync::Arc::new(super::Session {
+            proxy_addr: "127.0.0.1:1".into(),
+            tls: std::sync::Arc::new(tls),
+            resource: "r".into(),
+            role: "limen_read".into(),
+            database: String::new(),
+        });
+        let plan = super::Plan {
+            kind: "postgres".into(),
+            role: "limen_read".into(),
+            default_database: None,
+        };
+        let path = dir.path().join("db.sock");
+        let served = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::serve_socket(session, path.to_str().expect("utf8"), &plan, None),
+        )
+        .await;
+        let err = served
+            .expect("must refuse at once, not serve")
+            .expect_err("a world-writable directory is refused");
+        assert!(err.to_string().contains("open to other users"), "{err:#}");
+        assert!(!path.exists());
+    }
 
     #[test]
     fn prints_a_command_without_a_password() {

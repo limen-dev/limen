@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, bail};
 use limen_core::broker::{KafkaSlot, MAX_LISTENERS};
 use tokio::io::AsyncWriteExt;
 
@@ -69,13 +68,7 @@ pub async fn connect(
         } else {
             "127.0.0.1:0"
         };
-        let l = tokio::net::TcpListener::bind(addr)
-            .await
-            .with_context(|| format!("listening on {addr}"))?;
-        if !l.local_addr()?.ip().is_loopback() {
-            bail!("--listen must be a loopback address: anyone who can reach it would act as you");
-        }
-        listeners.push(l);
+        listeners.push(super::tcp::bind_loopback(addr).await?);
     }
     let ports: Vec<u16> = listeners
         .iter()
