@@ -49,11 +49,10 @@ done
 ## The CLI, last
 An older CLI keeps working against the same minor, so users can update when they like.
 ```sh
-grep "limen-$NEW-<target>.tar.gz" SHA256SUMS | shasum -a 256 -c     # Linux: sha256sum -c
-tar -xzf limen-$NEW-<target>.tar.gz && install -m 0755 limen-$NEW-<target>/limen ~/.local/bin/limen
+brew update && brew upgrade limen-dev/tap/limen      # first install: brew install limen-dev/tap/limen
 limen --version && limen doctor
 ```
-From a checkout, `scripts/install-cli.sh` builds and installs it. Then [verify the audit chain](audit-verify.md) again; it must verify across the upgrade.
+The tap follows the latest release within about an hour, so right after a release `limen --version` may still show the old one; run the two commands again later. Without Homebrew, take the archive for your platform from the release (it ships `SHA256SUMS`; check it) or run `scripts/install-cli.sh` from a checkout. Then [verify the audit chain](audit-verify.md) again; it must verify across the upgrade.
 
 ## Pausing between components (optional)
 To check each component before the next, keep the single tag on `OLD` and move one component at a time with an override, widening it from `control-plane` to `proxy` to `worker`. At the end set the single tag to `NEW` and drop the overrides; that last step must change nothing.
