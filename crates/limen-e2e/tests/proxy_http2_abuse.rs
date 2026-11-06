@@ -61,6 +61,8 @@ async fn rapid_stream_resets_do_not_wedge_the_proxy() {
     };
     let (mut send, _conn) = connect_h2(&d).await;
 
+    // Far more resets than a legitimate client sends on one connection, so a per-connection
+    // reset limit, if the proxy has one, is what ends the loop.
     let attempted = 3_000;
     let mut opened = 0usize;
     for _ in 0..attempted {
@@ -86,6 +88,8 @@ async fn rapid_stream_resets_do_not_wedge_the_proxy() {
         .await
         .expect("the proxy answers within 5s of the abusive connection")
         .expect("a response, not a connection error");
+    // Only that it answers matters, not which route: an unauthenticated "/" may redirect to
+    // sign-in or be unknown.
     assert!(
         response.status().is_success()
             || response.status().is_redirection()
