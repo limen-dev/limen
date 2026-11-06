@@ -69,53 +69,50 @@ impl SelfRunner {
         if let Some(proxy) = &self.proxy {
             cmd.arg("--proxy").arg(proxy);
         }
-        // Never prompt, never colour, never open a browser: output is for a program.
+        // Never colour: output is for a program. (No tool here can prompt or open a browser.)
         cmd.args(["--color", "never"]).args(argv);
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = cmd.spawn()?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .map(|s| s.take(MAX_OUTPUT_BYTES as u64 + 1));
-        let mut stderr = child
-            .stderr
-            .take()
-            .map(|s| s.take(MAX_OUTPUT_BYTES as u64 + 1));
-        let collect = async {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let read_out = async {
-                if let Some(s) = stdout.as_mut() {
-                    let _ = s.read_to_end(&mut out).await;
-                }
-            };
-            let read_err = async {
-                if let Some(s) = stderr.as_mut() {
-                    let _ = s.read_to_end(&mut err).await;
-                }
-            };
-            tokio::join!(read_out, read_err);
-            // Dropping the pipes before waiting lets a chatty child get SIGPIPE
-            // instead of blocking on a full buffer.
-            drop((stdout.take(), stderr.take()));
-            let status = child.wait().await;
-            (out, err, status)
-        };
-        match tokio::time::timeout(TOOL_TIMEOUT, collect).await {
-            Err(_) => Ok(ToolOutput {
-                text: format!("timed out after {} seconds", TOOL_TIMEOUT.as_secs()),
-                is_error: true,
-            }),
-            Ok((out, err, status)) => {
-                let ok = status?.success();
-                let bytes = if ok || err.is_empty() { out } else { err };
-                Ok(ToolOutput {
-                    text: bounded_text(&bytes),
-                    is_error: !ok,
-                })
-            }
+        run_bounded(cmd).await
+    }
+}
+
+/// Read at most `MAX_OUTPUT_BYTES + 1` bytes, then throw the rest away. The
+/// extra byte is how `bounded_text` knows the output was cut. The rest is
+/// drained, not left unread, so a chatty child finishes instead of blocking on
+/// a full pipe; closing the pipe early would make it fail with a broken pipe.
+async fn read_capped(pipe: Option<impl AsyncReadExt + Unpin>) -> Vec<u8> {
+    let mut kept = Vec::new();
+    if let Some(pipe) = pipe {
+        let mut capped = pipe.take(MAX_OUTPUT_BYTES as u64 + 1);
+        let _ = capped.read_to_end(&mut kept).await;
+        let _ = tokio::io::copy(&mut capped.into_inner(), &mut tokio::io::sink()).await;
+    }
+    kept
+}
+
+/// Run a command with no stdin, collect bounded output, and give up after `TOOL_TIMEOUT`.
+async fn run_bounded(mut cmd: tokio::process::Command) -> std::io::Result<ToolOutput> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd.spawn()?;
+    let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
+    let collect = async {
+        let (out, err) = tokio::join!(read_capped(stdout), read_capped(stderr));
+        (out, err, child.wait().await)
+    };
+    match tokio::time::timeout(TOOL_TIMEOUT, collect).await {
+        Err(_) => Ok(ToolOutput {
+            text: format!("timed out after {} seconds", TOOL_TIMEOUT.as_secs()),
+            is_error: true,
+        }),
+        Ok((out, err, status)) => {
+            let ok = status?.success();
+            let bytes = if ok || err.is_empty() { out } else { err };
+            Ok(ToolOutput {
+                text: bounded_text(&bytes),
+                is_error: !ok,
+            })
         }
     }
 }
@@ -189,10 +186,23 @@ async fn handle_line(line: &str, runner: &impl Runner) -> Option<Value> {
     let Ok(message) = serde_json::from_str::<Value>(line) else {
         return Some(error_reply(&Value::Null, -32700, "parse error"));
     };
-    if !message.is_object() {
-        return Some(error_reply(&Value::Null, -32600, "invalid request"));
+    match message {
+        // Batches are required by the 2025-03-26 revision and dropped by 2025-06-18.
+        Value::Array(items) if !items.is_empty() => {
+            let mut replies = Vec::new();
+            for item in &items {
+                let reply = if item.is_object() {
+                    handle(item, runner).await
+                } else {
+                    Some(error_reply(&Value::Null, -32600, "invalid request"))
+                };
+                replies.extend(reply);
+            }
+            (!replies.is_empty()).then_some(Value::Array(replies))
+        }
+        Value::Object(_) => handle(&message, runner).await,
+        _ => Some(error_reply(&Value::Null, -32600, "invalid request")),
     }
-    handle(&message, runner).await
 }
 
 /// Answer one message. `None` for notifications and for replies from the client.
@@ -601,10 +611,26 @@ mod tests {
             handle_line("{nope", &fake).await.unwrap()["error"]["code"],
             -32700
         );
-        assert_eq!(
-            handle_line("[1]", &fake).await.unwrap()["error"]["code"],
-            -32600
-        );
+        for line in ["[]", "7", "\"x\""] {
+            assert_eq!(
+                handle_line(line, &fake).await.unwrap()["error"]["code"],
+                -32600,
+                "{line}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn batches_are_answered_in_one_array_and_notifications_are_dropped() {
+        let fake = Fake::default();
+        let batch = r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},5]"#;
+        let reply = handle_line(batch, &fake).await.unwrap();
+        let items = reply.as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["id"], 1);
+        assert_eq!(items[1]["error"]["code"], -32600);
+        let only_notes = r#"[{"jsonrpc":"2.0","method":"notifications/initialized"}]"#;
+        assert!(handle_line(only_notes, &fake).await.is_none());
     }
 
     #[test]
@@ -719,6 +745,25 @@ mod tests {
             -32602
         );
         assert!(fake.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_child_with_huge_output_finishes_and_is_cut_not_timed_out() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "head -c 3000000 /dev/zero | tr '\\0' x"]);
+        let out = run_bounded(cmd).await.unwrap();
+        assert!(!out.is_error);
+        assert!(out.text.contains("output cut"), "{}", &out.text[..80]);
+        assert!(out.text.len() < MAX_OUTPUT_BYTES + 100);
+    }
+
+    #[tokio::test]
+    async fn a_failing_child_reports_stderr_as_an_error() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "echo out; echo bad >&2; exit 3"]);
+        let out = run_bounded(cmd).await.unwrap();
+        assert!(out.is_error);
+        assert_eq!(out.text, "bad\n");
     }
 
     #[test]
