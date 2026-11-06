@@ -10,6 +10,7 @@
 # with them), and nothing resets that counter: restart it before each run
 # (`docker compose ... restart aws`). `aws-open` checks nothing; it serves EKS, which `aws`
 # can't (Moto refuses even botocore's own signed EKS requests).
+name: limen-aws-emulator
 services:
   aws:
     container_name: limen-aws${LIMEN_SUFFIX:-}
