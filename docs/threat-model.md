@@ -287,6 +287,20 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 | T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
 | Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |
 
+### TB15: AI agent ↔ `limen mcp` (ADR-0032, spike 0)
+*Built: a read-only stdio server in the CLI. There is no agent identity yet; the agent borrows the logged-in person's own login. Tested without a live session only.*
+
+| Threat | Mitigation |
+|---|---|
+| E: prompt injection makes the agent do more than read | The server offers five read-only tools (`status`, `ls`, `show`, `explain`, `requests`) and no tool that connects, requests, approves, locks or writes; a test fails if one with such a name is added. It can't reach more than the person's login already can, so a person with `limen:admin` hands that read access to the agent |
+| E: a tool argument becomes a CLI option or runs a command | Arguments are separate `argv` entries to this binary, never a shell; free text follows `--`; types, labels and `as` values are checked; unknown arguments are refused |
+| S: the agent approves its own request | No approve, deny or request tool exists. Approval stays a person's, in a Limen session (ADR-0025) |
+| I: results leave the network for a model provider | Output is cut at 256 KiB, a call at 30 s, and a request line at 1 MiB. Results are what the person could read with `--json`: resource names and labels, roles, request reasons. Document this to anyone who enables the server |
+| I: a credential reaches the model's context | Tools return only what `limen --json` prints for these commands, which holds no key; the server stores nothing |
+| T: a result's text (a label, a reason) is read as instructions | The server's instructions tell the model to treat fields as data; this is advice to a model, not a control |
+| D: an agent loops on tools | Calls run one at a time with a timeout; no rate limit yet. A person's login still expires on its own |
+| R: the agent's actions are attributed to the person | They are, by design of spike 0: audit shows the person, not the agent. Attributable agent identity is the point of ADR-0032 and is not built |
+
 ## 5. Cross-cutting
 
 | Threat | Mitigation |
