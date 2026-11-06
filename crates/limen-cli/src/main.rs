@@ -242,6 +242,10 @@ enum Command {
         #[command(subcommand)]
         command: ConnsCommand,
     },
+    /// Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents (ADR-0032, spike 0).
+    ///
+    /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+    Mcp,
     /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
     Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
@@ -709,6 +713,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
+        Command::Mcp => commands::mcp::serve(proxy).await,
         Command::Completions { shell } => {
             // Render first: writing straight to a closed pipe (`| head`) would panic.
             let mut script = Vec::new();

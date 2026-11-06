@@ -460,6 +460,16 @@ Options:
 
 - `--all`: End all of them.
 
+### `limen mcp`
+
+Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents (ADR-0032, spike 0).
+
+Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+
+```text
+Usage: limen mcp [OPTIONS]
+```
+
 ### `limen completions`
 
 Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`
