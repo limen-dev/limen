@@ -138,6 +138,10 @@ fn bounded_text(bytes: &[u8]) -> String {
 /// changes no file, because an agent's config is the person's to edit.
 pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
+    // Prefer the `PATH` entry when it is this same file: on Linux `current_exe`
+    // resolves symlinks, which would name a versioned directory (Homebrew's
+    // Cellar) that an upgrade deletes.
+    let exe = on_path_same_file(&exe, std::env::var_os("PATH").as_deref()).unwrap_or(exe);
     let exe = exe
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("the path of this program is not valid UTF-8"))?;
@@ -145,6 +149,17 @@ pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
     // Render first: writing straight to a closed pipe (`| head`) would panic.
     let _ = std::io::Write::write_all(&mut std::io::stdout(), text.as_bytes());
     Ok(())
+}
+
+/// The first `limen` on `path_var` that is the same file as `exe`.
+fn on_path_same_file(
+    exe: &std::path::Path,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Option<std::path::PathBuf> {
+    let real = std::fs::canonicalize(exe).ok()?;
+    std::env::split_paths(path_var?)
+        .map(|dir| dir.join("limen"))
+        .find(|candidate| std::fs::canonicalize(candidate).is_ok_and(|c| c == real))
 }
 
 /// The setup text. The program is named by its full path, because desktop
@@ -165,7 +180,7 @@ fn config_text(exe: &str, proxy: Option<&str>) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        "# Claude Code\nclaude mcp add limen -- {exe} {shell}\n\n\
+        "# Claude Code (--scope user makes it available in every project)\nclaude mcp add --scope user limen -- {exe} {shell}\n\n\
          # Any client that reads an `mcpServers` block (.mcp.json, and similar)\n{json}\n\n\
          # The server is read-only and acts as you, with your Limen login.\n\
          # Sign in first with `limen login`; when it expires, run it again.\n",
@@ -822,7 +837,7 @@ mod tests {
     fn config_text_is_valid_json_and_quotes_awkward_paths() {
         let text = config_text("/opt/my tools/limen", Some("limen.example.com:443"));
         assert!(text.contains(
-            "claude mcp add limen -- '/opt/my tools/limen' --proxy limen.example.com:443 mcp"
+            "claude mcp add --scope user limen -- '/opt/my tools/limen' --proxy limen.example.com:443 mcp"
         ));
         let start = text.find('{').unwrap();
         let end = text.rfind('}').unwrap();
@@ -837,8 +852,32 @@ mod tests {
         );
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
         let plain = config_text("/usr/bin/limen", None);
-        assert!(plain.contains("claude mcp add limen -- /usr/bin/limen mcp\n"));
+        assert!(plain.contains("claude mcp add --scope user limen -- /usr/bin/limen mcp\n"));
         assert!(!plain.contains("--proxy"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_entry_is_preferred_only_when_it_is_the_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("cellar").join("limen");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, b"x").unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&real, bin.join("limen")).unwrap();
+        let path = std::env::join_paths([&bin]).unwrap();
+        assert_eq!(
+            on_path_same_file(&real, Some(&path)),
+            Some(bin.join("limen"))
+        );
+        // A different file called limen earlier on PATH is not this program.
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("limen"), b"y").unwrap();
+        let path = std::env::join_paths([&other]).unwrap();
+        assert_eq!(on_path_same_file(&real, Some(&path)), None);
+        assert_eq!(on_path_same_file(&real, None), None);
     }
 
     #[test]

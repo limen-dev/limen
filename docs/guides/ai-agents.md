@@ -14,12 +14,14 @@ limen config mcp
 `limen config mcp` prints the setup and changes no file. For Claude Code it is one command:
 
 ```sh
-claude mcp add limen -- /path/to/limen mcp
+claude mcp add --scope user limen -- /path/to/limen mcp
 ```
+
+`--scope user` makes it available in every project. Without it, Claude Code adds the server only to the directory you ran the command in.
 
 Any client that reads an `mcpServers` block (a `.mcp.json`, for example) takes the JSON that the command prints. If you use a proxy other than the last one you logged in to, run `limen --proxy host:port config mcp` so the snippet carries it.
 
-The snippet names the program by its full path, because desktop agents often start servers without your shell's `PATH`. If you upgrade or move `limen`, run `limen config mcp` again and update the client if the path changed.
+The snippet names the program by its full path, because desktop agents often start servers without your shell's `PATH`. The command prefers the `limen` found on your `PATH` when it is the same file, so a Homebrew install keeps a path that survives upgrades. If you move `limen`, run `limen config mcp` again and update the client.
 
 Logins are short-lived. When yours expires, every tool answers `run limen login`. The agent cannot sign in for you, and that is deliberate.
 
