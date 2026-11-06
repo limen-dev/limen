@@ -310,6 +310,17 @@ impl Worker {
             },
         )
         .await?;
+        // Do not serve while the control plane is older than this worker (ADR-0045). The call
+        // goes through the proxy, like the worker's other calls to the control plane.
+        limen_component::gate::wait_for_control_plane(limen_core::VERSION, || {
+            let tls = client_config(
+                &[creds.internal_ca()?],
+                Some(creds.tls_identity()?),
+                &[alpn::H2],
+            )?;
+            Ok(channel(&addr, &name, SharedClientConfig::new(tls)))
+        })
+        .await;
         let policy = limen_session::snapshot::PolicyCache::new(
             config.policy_grace,
             Some(config.data_dir.join("policy.snapshot")),

@@ -42,6 +42,7 @@ time = { version = "0.3.55", features = ["serde", "formatting", "parsing", "macr
 
 # RPC and networking
 prost = "0.14.4"
+semver = "1.0"
 tonic = { version = "0.14.6", default-features = false, features = ["transport", "codegen", "router", "server", "channel"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"

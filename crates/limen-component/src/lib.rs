@@ -2,6 +2,7 @@
 //! with a join token, and certificate renewal at half-life.
 
 pub mod audit;
+pub mod gate;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
