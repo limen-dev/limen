@@ -21,4 +21,5 @@ See [Upgrading](upgrading.md): control plane first, then proxies, then workers. 
 ## If something fails
 - **No release PR appears:** the repository setting *Actions > General > Allow GitHub Actions to create and approve pull requests* must be on.
 - **The workflow failed after the merge:** the tag and draft release already exist. Fix the cause, then re-run the failed jobs from the Actions page. Uploads use `--clobber`, so re-running is safe.
-- **Wrong version proposed:** the PR's title can't be edited by hand; add a commit with the right type, or set `release-as` in `release-please-config.json` for one release.
+- **Wrong version proposed:** the PR's title can't be edited by hand; add a commit with the right type, or set `release-as` in `release-please-config.json` for one release. Remove `release-as` right after that release ships, or every later release PR proposes the same version again.
+- **Going from rc to final:** set `release-as` to the final version (for example `0.1.0`) for that one release. After it ships, remove `release-as`, `versioning` and `prerelease-type`, and set `prerelease` to `false`.
