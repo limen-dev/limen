@@ -233,7 +233,7 @@ Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestone
 - [What is built and what is verified](website/src/content/docs/docs/status.mdx), item by item
 
 **Connect**
-- [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md)
+- [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md) · [AI agents](docs/guides/ai-agents.md)
 
 **Control access**
 - [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API (Terraform)](docs/guides/management-api.md) · [resource discovery](docs/guides/discovery.md)

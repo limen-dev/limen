@@ -1,8 +1,7 @@
 //! `limen admin review ...`, `limen review ...` and `limen admin evidence`
 //! (ADR-0029).
 
-use std::path::PathBuf;
-
+use anyhow::Context as _;
 use clap::Subcommand;
 use limen_proto::v1::reviews_client::ReviewsClient;
 use limen_proto::v1::{
@@ -280,7 +279,7 @@ pub async fn evidence(
     proxy: Option<&str>,
     from: &str,
     to: &str,
-    out: &PathBuf,
+    out: &std::path::Path,
 ) -> anyhow::Result<()> {
     let parse = |s: &str| -> anyhow::Result<i64> {
         let d = time::Date::parse(
@@ -299,7 +298,7 @@ pub async fn evidence(
         .await
         .map_err(|s| api::status_error(&s))?
         .into_inner();
-    std::fs::write(out, &r.pack)?;
+    write_pack(out, &r.pack).with_context(|| format!("writing {}", out.display()))?;
     ui::success(&format!(
         "Wrote {} ({} bytes), signed. Manifest {}.",
         out.display(),
@@ -310,4 +309,30 @@ pub async fn evidence(
         "Check it anywhere with `limen audit verify --evidence <file> --ca-file internal-ca.pem`.",
     );
     Ok(())
+}
+
+/// The pack names people and what they did, so it is readable by its owner
+/// only. It replaces the path (a symlink there is replaced, not written
+/// through).
+fn write_pack(out: &std::path::Path, pack: &[u8]) -> std::io::Result<()> {
+    crate::profile::atomic_write(out, pack, 0o600)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn the_pack_is_private_and_does_not_follow_a_symlink() {
+        let dir = tempfile::tempdir().expect("dir");
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "keep").expect("victim");
+        let out = dir.path().join("pack.tar");
+        std::os::unix::fs::symlink(&victim, &out).expect("link");
+        super::write_pack(&out, b"evidence").expect("write");
+        assert_eq!(std::fs::read_to_string(&victim).expect("read"), "keep");
+        assert_eq!(std::fs::read(&out).expect("read"), b"evidence");
+        let mode = std::fs::metadata(&out).expect("stat").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 }

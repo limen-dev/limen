@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, bail};
+use anyhow::Context as _;
 use tokio::io::AsyncWriteExt;
 
 use super::redis::{Io, default_principal};
@@ -46,13 +46,8 @@ pub async fn connect(
     let _anchor = open_anchor(proxy, resource, &user, &group).await?;
 
     let addr = listen.unwrap_or("127.0.0.1:0");
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("listening on {addr}"))?;
+    let listener = super::tcp::bind_loopback(addr).await?;
     let local = listener.local_addr()?;
-    if !local.ip().is_loopback() {
-        bail!("--listen must be a loopback address: anyone who can reach it would act as you");
-    }
     ui::success(&format!(
         "Listening for {} as {}.",
         ui::bold(resource),

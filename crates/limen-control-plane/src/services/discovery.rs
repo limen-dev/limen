@@ -19,7 +19,7 @@ impl Discovery for DiscoveryService {
         request: Request<ReportDiscoveryRequest>,
     ) -> Result<Response<ReportDiscoveryResponse>, Status> {
         self.0.refuse_if_draining()?;
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
             return Err(Status::permission_denied("only workers report discoveries"));

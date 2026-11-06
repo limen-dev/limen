@@ -478,6 +478,16 @@ Options:
 
 - `--all`: End all of them.
 
+### `limen mcp`
+
+Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents (ADR-0032, spike 0).
+
+Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+
+```text
+Usage: limen mcp [OPTIONS]
+```
+
 ### `limen completions`
 
 Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`
@@ -540,6 +550,14 @@ Options:
 - `--install`: Include Limen's generated ssh_config from ~/.ssh/config, kept up to date on every login.
 - `--uninstall`: Remove the Include from ~/.ssh/config and delete the generated ssh_config.
 - `--file <FILE>`: The OpenSSH config to change, instead of ~/.ssh/config.
+
+#### `limen config mcp`
+
+Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files
+
+```text
+Usage: limen config mcp [OPTIONS]
+```
 
 ### `limen db`
 

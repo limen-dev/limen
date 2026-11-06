@@ -783,7 +783,7 @@ pub async fn lock_user(
     by: &str,
 ) -> Result<bool, sqlx::Error> {
     let inserted = sqlx::query(
-        "INSERT INTO user_locks (id, username, reason, locked_by) VALUES ($1, $2, $3, $4) ON CONFLICT (username) WHERE released_at IS NULL DO NOTHING",
+        "INSERT INTO user_locks (id, username, reason, locked_by) VALUES ($1, $2, $3, $4) ON CONFLICT (lower(username)) WHERE released_at IS NULL DO NOTHING",
     )
     .bind(uuid::Uuid::now_v7())
     .bind(username)
@@ -795,9 +795,13 @@ pub async fn lock_user(
 }
 
 /// Release a user's active lock. `false` if they weren't locked.
-pub async fn unlock_user(db: &Db, username: &str, by: &str) -> Result<bool, sqlx::Error> {
+pub async fn unlock_user<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    username: &str,
+    by: &str,
+) -> Result<bool, sqlx::Error> {
     let updated = sqlx::query(
-        "UPDATE user_locks SET released_at = now(), released_by = $2 WHERE username = $1 AND released_at IS NULL",
+        "UPDATE user_locks SET released_at = now(), released_by = $2 WHERE lower(username) = lower($1) AND released_at IS NULL",
     )
     .bind(username)
     .bind(by)
@@ -826,7 +830,7 @@ pub async fn active_locks(db: &Db) -> Result<Vec<LockRow>, sqlx::Error> {
 
 pub async fn is_locked(db: &Db, username: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE username = $1 AND released_at IS NULL)",
+        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE lower(username) = lower($1) AND released_at IS NULL)",
     )
     .bind(username)
     .fetch_one(db)
@@ -921,7 +925,7 @@ pub async fn lock_and_logout(
     login_id: &str,
 ) -> Result<(bool, bool), sqlx::Error> {
     sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE username = $1 AND released_at IS NULL),
+        "SELECT EXISTS (SELECT 1 FROM user_locks WHERE lower(username) = lower($1) AND released_at IS NULL),
                 EXISTS (SELECT 1 FROM login_revocations WHERE login_id = $2)",
     )
     .bind(username)

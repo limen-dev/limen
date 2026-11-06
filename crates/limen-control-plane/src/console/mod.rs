@@ -23,6 +23,8 @@ pub mod oidc_flow;
 mod pages;
 mod policy_edit;
 mod query;
+#[cfg(fuzzing)]
+pub use query::fuzz as query_fuzz;
 pub mod store;
 mod views;
 pub(crate) mod web_auth;
@@ -326,6 +328,22 @@ impl Auth {
         }
     }
 
+    /// For GETs that do something (record a watch, export the record): the
+    /// request must come from our own pages, or from the person typing the
+    /// address. A `SameSite=Lax` cookie still goes with a link followed from
+    /// another site, which must not be able to trigger these.
+    pub fn check_same_origin_get(console: &Console, headers: &HeaderMap) -> Result<(), Response> {
+        if same_origin_get(&console.origin, headers) {
+            Ok(())
+        } else {
+            Err(views::error_page(
+                StatusCode::FORBIDDEN,
+                "Request refused",
+                "This page can only be opened from the console itself. Open the console and follow the link there.",
+            ))
+        }
+    }
+
     /// For POSTs: the CSRF token must match and the request must come from
     /// our own origin.
     pub fn check_post(
@@ -355,6 +373,23 @@ impl Auth {
             ))
         }
     }
+}
+
+/// Whether a GET came from the console's own pages (`Sec-Fetch-Site:
+/// same-origin`) or from the address bar or a bookmark (`none`). Without
+/// `Sec-Fetch-Site`, `Origin` or `Referer` must name the console. A request
+/// that says nothing is refused.
+fn same_origin_get(origin: &str, headers: &HeaderMap) -> bool {
+    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        return site == "same-origin" || site == "none";
+    }
+    if let Some(o) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) {
+        return o == origin;
+    }
+    headers
+        .get(REFERER)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|r| r.starts_with(&format!("{origin}/")))
 }
 
 impl FromRequestParts<AppState> for Auth {

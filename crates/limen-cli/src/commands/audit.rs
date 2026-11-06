@@ -159,8 +159,26 @@ async fn search(proxy: Option<&str>, query: &str, limit: u32, json: bool) -> any
 }
 
 /// Newlines in a snippet would break the layout.
+/// One printable line: any control character (line breaks, and the escape
+/// that starts a terminal sequence) becomes a space. The text comes from
+/// events other people caused, and an auditor's terminal is not theirs to
+/// rewrite.
 fn one_line(s: &str) -> String {
-    s.replace(['\n', '\r'], " ")
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::one_line;
+
+    #[test]
+    fn terminal_escapes_are_not_printed() {
+        let out = one_line("a\u{1b}[2Kb\u{1b}]0;title\u{7}c\nd\r");
+        assert!(!out.chars().any(char::is_control), "{out:?}");
+        assert!(out.starts_with('a') && out.contains('d'));
+    }
 }
 
 /// The CA manifests and packs must be signed under: `--ca-file`, else the one

@@ -16,6 +16,7 @@ anyhow.workspace = true
 rand.workspace = true
 rcgen.workspace = true
 rustls-pki-types.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -27,7 +28,7 @@ x509-parser.workspace = true
 
 [dev-dependencies]
 limen-testkit.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 
 [lints]
 workspace = true

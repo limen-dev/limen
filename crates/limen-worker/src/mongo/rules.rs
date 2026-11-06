@@ -222,20 +222,34 @@ pub fn judge(command: &Inspected<'_>, access: &Access, cursors: &HashSet<i64>) -
             ),
         ));
     }
-    if CROSS_DATABASE.contains(&lower)
-        && let Some(other) = referenced_databases(command.body)
+    if CROSS_DATABASE.contains(&lower) {
+        // A command the walk cannot read to the end may name a database it
+        // never reached: refuse it rather than guess.
+        let Some(referenced) = referenced_databases(command.body) else {
+            return Verdict::Refuse(refuse(
+                13,
+                "Unauthorized",
+                "database_not_granted",
+                format!(
+                    "Limen cannot tell which databases the {} command reaches",
+                    command.name
+                ),
+            ));
+        };
+        if let Some(other) = referenced
             .into_iter()
             .find(|db| *db != database && !access.database_allowed(db))
-    {
-        return Verdict::Refuse(refuse(
-            13,
-            "Unauthorized",
-            "database_not_granted",
-            format!(
-                "not authorized on {other} to execute command {}",
-                command.name
-            ),
-        ));
+        {
+            return Verdict::Refuse(refuse(
+                13,
+                "Unauthorized",
+                "database_not_granted",
+                format!(
+                    "not authorized on {other} to execute command {}",
+                    command.name
+                ),
+            ));
+        }
     }
     if let Some(unknown) = unowned_cursor(command, cursors) {
         return Verdict::Refuse(refuse(
@@ -253,30 +267,36 @@ pub fn judge(command: &Inspected<'_>, access: &Access, cursors: &HashSet<i64>) -
 /// (`into`), `$lookup` and `$graphLookup` (`from`), or `mapReduce` (`out`),
 /// at any depth (`$facet` nests pipelines). A field of a filter that happens
 /// to look the same is refused too: the safe side of a false match.
-fn referenced_databases(body: Doc<'_>) -> Vec<&str> {
-    fn walk<'a>(doc: Doc<'a>, depth: usize, out: &mut Vec<&'a str>) {
+///
+/// `None` when the walk could not finish (a malformed element, or nesting past
+/// the limit): the caller refuses the command.
+fn referenced_databases(body: Doc<'_>) -> Option<Vec<&str>> {
+    fn walk<'a>(doc: Doc<'a>, depth: usize, out: &mut Vec<&'a str>) -> Option<()> {
         if depth > 32 {
-            return;
+            return None;
         }
         for element in doc {
-            let Ok((key, value)) = element else { return };
+            let (key, value) = element.ok()?;
             match value {
                 Value::Doc(inner) => {
-                    if TARGET_KEYS.contains(&key)
-                        && let Ok(Some(Value::Str(db))) = inner.get("db")
-                    {
-                        out.push(db);
+                    if TARGET_KEYS.contains(&key) {
+                        match inner.get("db") {
+                            Ok(Some(Value::Str(db))) => out.push(db),
+                            Ok(_) => {}
+                            Err(_) => return None,
+                        }
                     }
-                    walk(inner, depth + 1, out);
+                    walk(inner, depth + 1, out)?;
                 }
-                Value::Array(items) => walk(items, depth + 1, out),
+                Value::Array(items) => walk(items, depth + 1, out)?,
                 _ => {}
             }
         }
+        Some(())
     }
     let mut out = Vec::new();
-    walk(body, 0, &mut out);
-    out
+    walk(body, 0, &mut out)?;
+    Some(out)
 }
 
 /// A cursor id a `getMore` or `killCursors` names that this session wasn't
@@ -285,7 +305,12 @@ fn referenced_databases(body: Doc<'_>) -> Vec<&str> {
 fn unowned_cursor(command: &Inspected<'_>, cursors: &HashSet<i64>) -> Option<i64> {
     match command.lower.as_str() {
         "getmore" => {
-            let id = command.body.first().ok()??.1.as_i64()?;
+            // A cursor id that is not an integer this check can read (a
+            // Decimal128, a huge double) is refused: the server may still
+            // take it for a long.
+            let Some(id) = command.body.first().ok()??.1.as_i64() else {
+                return Some(i64::MIN);
+            };
             (!cursors.contains(&id)).then_some(id)
         }
         "killcursors" => {
@@ -293,7 +318,7 @@ fn unowned_cursor(command: &Inspected<'_>, cursors: &HashSet<i64>) -> Option<i64
                 return None;
             };
             ids.iter()
-                .filter_map(|e| e.ok()?.1.as_i64())
+                .map(|e| e.ok().and_then(|(_, v)| v.as_i64()).unwrap_or(i64::MIN))
                 .find(|id| !cursors.contains(id))
         }
         _ => None,
@@ -553,5 +578,33 @@ spec:
         raw[..4].copy_from_slice(&len.to_le_bytes());
         assert!(matches!(verdict("read", &raw, &[42]), Verdict::Refuse(_)));
         assert_eq!(verdict("read", &raw, &[42, 99]), Verdict::Forward);
+    }
+
+    #[test]
+    fn what_the_walk_cannot_read_is_refused() {
+        // Nesting past the walk's limit could hide a `$out` target database.
+        let mut inner = Builder::new().str("x", "y");
+        for _ in 0..40 {
+            inner = Builder::new().doc("a", &inner);
+        }
+        let deep = Builder::new()
+            .str("aggregate", "customers")
+            .doc("pipeline", &inner)
+            .str("$db", "orders")
+            .finish();
+        let r = refused(verdict("read", &deep, &[]));
+        assert_eq!(r.reason, "database_not_granted");
+    }
+
+    #[test]
+    fn a_cursor_id_the_check_cannot_read_is_refused() {
+        // A double past 2^53 is not an i64 here, but the server may take it for one.
+        let get_more = Builder::new()
+            .f64("getMore", 1.0e16)
+            .str("collection", "customers")
+            .str("$db", "orders")
+            .finish();
+        let r = refused(verdict("read", &get_more, &[42]));
+        assert_eq!(r.reason, "unknown_cursor");
     }
 }

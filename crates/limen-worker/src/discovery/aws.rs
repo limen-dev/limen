@@ -14,6 +14,26 @@ use crate::db::sigv4::{self, Credentials};
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 
+/// Read a response body, giving up as soon as it passes `max` bytes rather
+/// than after buffering all of it.
+async fn capped_body(mut resp: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    const TOO_LARGE: &str = "the response is too large";
+    if resp
+        .content_length()
+        .is_some_and(|n| n > u64::try_from(max).unwrap_or(u64::MAX))
+    {
+        return Err(TOO_LARGE.into());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if out.len().saturating_add(chunk.len()) > max {
+            return Err(TOO_LARGE.into());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone)]
 pub struct Aws {
     http: reqwest::Client,
@@ -48,10 +68,7 @@ impl Aws {
     async fn finish(&self, req: reqwest::RequestBuilder) -> Result<String, String> {
         let resp = req.send().await.map_err(|e| e.to_string())?;
         let status = resp.status();
-        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-        if bytes.len() > MAX_RESPONSE {
-            return Err("the response is too large".into());
-        }
+        let bytes = capped_body(resp, MAX_RESPONSE).await?;
         let body = String::from_utf8_lossy(&bytes).into_owned();
         if status.is_success() {
             return Ok(body);
@@ -245,4 +262,46 @@ pub fn indexed(prefix: &str, values: &[String]) -> Vec<(String, String)> {
         .enumerate()
         .map(|(i, v)| (format!("{prefix}.{}", i + 1), v.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A server that sends a little more than the limit and then goes quiet
+    /// with the connection open: the worker must answer at the limit, not
+    /// wait for the end of the body (which never comes).
+    #[tokio::test]
+    async fn a_response_is_cut_off_at_the_limit_not_after_it_ends() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let Ok((mut s, _)) = listener.accept().await else {
+                return;
+            };
+            let mut req = [0u8; 4096];
+            let _ = s.read(&mut req).await;
+            let _ = s
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await;
+            let mut sent = 0;
+            while sent < MAX_RESPONSE + 64 * 1024 {
+                let chunk = format!("{:x}\r\n{}\r\n", 65536, "a".repeat(65536));
+                if s.write_all(chunk.as_bytes()).await.is_err() {
+                    return;
+                }
+                sent += 65536;
+            }
+            // Hold the socket open, say nothing.
+            tokio::time::sleep(Duration::from_secs(120)).await;
+        });
+        let aws = Aws::new(None).expect("client");
+        let started = std::time::Instant::now();
+        let got = aws.finish(aws.http.get(format!("http://{addr}/"))).await;
+        assert_eq!(got, Err("the response is too large".to_owned()), "{got:?}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
 }

@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::future::Future;
 use std::io;
+use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -127,6 +128,10 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         }
     };
     let peer = req.extensions().get::<limen_tunnel::PeerInfo>().cloned();
+    let source = peer
+        .as_ref()
+        .and_then(|p| p.remote_addr)
+        .map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |a| a.ip());
     let route = match resolve_route(
         &snapshot.policy,
         peer.as_ref(),
@@ -136,10 +141,9 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         Ok(Some(route)) => route,
         Ok(None) => return plain(StatusCode::MISDIRECTED_REQUEST, "web host mismatch"),
         Err(()) => {
-            return audit_denied(
+            return audit_denied_preauth(
                 proxy,
-                None,
-                None,
+                source,
                 "invalid_authority",
                 StatusCode::MISDIRECTED_REQUEST,
                 "web host mismatch",
@@ -152,10 +156,9 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
     };
     let uri = req.uri().clone();
     if !safe_uri(&uri) || req.method() == Method::CONNECT {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "invalid_request_target",
             StatusCode::BAD_REQUEST,
             "invalid request target",
@@ -172,10 +175,9 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
 
     let websocket = is_websocket_request(&req);
     if req.headers().contains_key(header::UPGRADE) && !websocket {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "unsupported_upgrade",
             StatusCode::NOT_IMPLEMENTED,
             "unsupported protocol upgrade",
@@ -186,10 +188,9 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         .await;
     }
     if websocket && req.version() != http::Version::HTTP_11 {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "unsupported_upgrade",
             StatusCode::BAD_REQUEST,
             "WebSocket upgrades require HTTP/1.1",
@@ -205,10 +206,9 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
     if websocket
         && !websocket_origin_allowed(req.headers(), &route.target.host, web_public_port(proxy))
     {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "websocket_origin_denied",
             StatusCode::FORBIDDEN,
             "origin not allowed",
@@ -221,12 +221,11 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
 
     let claims = match read_app_session(proxy, &req, &route) {
         Ok(Some((claims, identity))) => (claims, identity),
-        Ok(None) => return login_redirect(proxy, &route, &uri, req.method()).await,
+        Ok(None) => return login_redirect(proxy, source, &route, &uri, req.method()).await,
         Err(()) => {
-            let denied = audit_denied(
+            let denied = audit_denied_preauth(
                 proxy,
-                None,
-                None,
+                source,
                 "invalid_app_session",
                 StatusCode::FORBIDDEN,
                 "sign-in required",
@@ -764,28 +763,35 @@ fn websocket_origin_allowed(headers: &HeaderMap, host: &str, public_port: u16) -
 
 async fn login_redirect(
     proxy: &Proxy,
+    source: IpAddr,
     route: &WebRoute,
     uri: &Uri,
     method: &Method,
 ) -> ProxyResponse {
-    if let Err(error) = proxy
-        .audit
-        .emit(
-            EventKind::AuthDenied,
-            AuditContext {
-                user: None,
-                session_id: None,
-            },
-            json!({
-                "action": "web",
-                "reason": "web_login_required",
-                "actor_type": "unknown",
-                "resource": route.resource,
-                "method": method.as_str(),
-                "path": uri.path(),
-            }),
-        )
-        .await
+    // A redirect to sign in grants nothing, so a flood of them is summarized.
+    let write = match preauth_allowed(proxy, source).await {
+        Ok(write) => write,
+        Err(refused) => return *refused,
+    };
+    if write
+        && let Err(error) = proxy
+            .audit
+            .emit(
+                EventKind::AuthDenied,
+                AuditContext {
+                    user: None,
+                    session_id: None,
+                },
+                json!({
+                    "action": "web",
+                    "reason": "web_login_required",
+                    "actor_type": "unknown",
+                    "resource": route.resource,
+                    "method": method.as_str(),
+                    "path": uri.path(),
+                }),
+            )
+            .await
     {
         tracing::error!(error = %error, "failed to audit web sign-in redirect");
         return plain(StatusCode::SERVICE_UNAVAILABLE, "audit is unavailable");
@@ -1325,6 +1331,122 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
     destination
 }
 
+/// Per source address, the denials of requests that carry no valid sign-in
+/// are audited at a bounded rate: a burst, then one a second. What is skipped
+/// is counted and reported as one `suppressed` event at the next one that is
+/// written. A skipped denial still gets its refusal; nothing is let through,
+/// and the paths of signed-in users are not limited.
+#[derive(Debug)]
+struct PreAuthDenials {
+    limiter: governor::DefaultKeyedRateLimiter<IpAddr>,
+    suppressed: std::sync::Mutex<std::collections::HashMap<IpAddr, u64>>,
+    checks: AtomicU64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PreAuth {
+    /// Write the event; `suppressed` earlier ones were skipped.
+    Audit {
+        suppressed: u64,
+    },
+    Skip,
+}
+
+/// Addresses with a pending count; beyond this, new ones are not tracked.
+const MAX_TRACKED_SOURCES: usize = 10_000;
+
+impl PreAuthDenials {
+    fn new(quota: governor::Quota) -> Self {
+        Self {
+            limiter: governor::RateLimiter::keyed(quota),
+            suppressed: std::sync::Mutex::default(),
+            checks: AtomicU64::new(0),
+        }
+    }
+
+    fn check(&self, source: IpAddr) -> PreAuth {
+        if self.checks.fetch_add(1, Ordering::Relaxed) % 4096 == 4095 {
+            self.limiter.retain_recent();
+        }
+        let mut counts = self
+            .suppressed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.limiter.check_key(&source).is_ok() {
+            return PreAuth::Audit {
+                suppressed: counts.remove(&source).unwrap_or(0),
+            };
+        }
+        if counts.len() < MAX_TRACKED_SOURCES || counts.contains_key(&source) {
+            let count = counts.entry(source).or_insert(0);
+            *count = count.saturating_add(1);
+        }
+        PreAuth::Skip
+    }
+}
+
+static PREAUTH_DENIALS: std::sync::LazyLock<PreAuthDenials> = std::sync::LazyLock::new(|| {
+    let burst = std::num::NonZeroU32::new(20).unwrap_or(std::num::NonZeroU32::MIN);
+    PreAuthDenials::new(governor::Quota::per_second(std::num::NonZeroU32::MIN).allow_burst(burst))
+});
+
+/// Whether a pre-auth denial from `source` is written: `Ok(true)` yes (after
+/// the summary of skipped ones, if any), `Ok(false)` skip it, `Err` when the
+/// summary could not be written (fail closed).
+async fn preauth_allowed(proxy: &Proxy, source: IpAddr) -> Result<bool, Box<ProxyResponse>> {
+    match PREAUTH_DENIALS.check(source) {
+        PreAuth::Skip => Ok(false),
+        PreAuth::Audit { suppressed: 0 } => Ok(true),
+        PreAuth::Audit { suppressed } => proxy
+            .audit
+            .emit(
+                EventKind::AuthDenied,
+                AuditContext {
+                    user: None,
+                    session_id: None,
+                },
+                json!({
+                    "action": "web",
+                    "reason": "web_denials_suppressed",
+                    "actor_type": "unknown",
+                    "suppressed": suppressed,
+                }),
+            )
+            .await
+            .map(|_| true)
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to audit suppressed web denials");
+                Box::new(plain(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "audit is unavailable",
+                ))
+            }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Carries the bounded fields for one denial event.
+async fn audit_denied_preauth(
+    proxy: &Proxy,
+    source: IpAddr,
+    reason: &'static str,
+    status: StatusCode,
+    body: &'static str,
+    resource: Option<&str>,
+    method: Option<&str>,
+    path: Option<&str>,
+) -> ProxyResponse {
+    match preauth_allowed(proxy, source).await {
+        Ok(true) => {
+            audit_denied(
+                proxy, None, None, reason, status, body, resource, method, path,
+            )
+            .await
+        }
+        Ok(false) => plain(status, body),
+        Err(refused) => *refused,
+    }
+}
+
 #[allow(clippy::too_many_arguments)] // Carries the bounded fields for one denial event.
 async fn audit_denied(
     proxy: &Proxy,
@@ -1622,8 +1744,56 @@ impl Drop for AuditResponseBody {
     }
 }
 
+/// Entry points for `fuzz/` (fuzz/README.md). Compiled only under cargo-fuzz's `--cfg fuzzing`.
+#[cfg(fuzzing)]
+pub mod fuzz {
+    use super::*;
+
+    /// The pure request-parsing helpers, on any bytes: the `Host` authority, the request
+    /// URI, the `Cookie` header, and identity text going into a header value.
+    pub fn request_parts(data: &[u8], public_port: u16) {
+        if let Ok(text) = std::str::from_utf8(data) {
+            let _ = parse_authority(text, public_port);
+            let _ = header_text(text);
+        }
+        if let Ok(uri) = Uri::try_from(data) {
+            let _ = safe_uri(&uri);
+            let _ = return_path_for(&uri);
+        }
+        let mut headers = HeaderMap::new();
+        for line in data.split(|b| *b == b'\n').take(8) {
+            if let Ok(value) = HeaderValue::from_bytes(line) {
+                headers.append(header::COOKIE, value);
+            }
+        }
+        let _ = cookie_value(&headers, APP_COOKIE);
+        let _ = filtered_cookie(&headers);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preauth_denials_are_limited_per_source_and_counted() {
+        use super::{PreAuth, PreAuthDenials};
+        use std::net::IpAddr;
+        use std::num::NonZeroU32;
+        let quota = governor::Quota::with_period(std::time::Duration::from_millis(100))
+            .expect("period")
+            .allow_burst(NonZeroU32::new(2).expect("burst"));
+        let limiter = PreAuthDenials::new(quota);
+        let a: IpAddr = "192.0.2.1".parse().expect("ip");
+        let b: IpAddr = "192.0.2.2".parse().expect("ip");
+        assert_eq!(limiter.check(a), PreAuth::Audit { suppressed: 0 });
+        assert_eq!(limiter.check(a), PreAuth::Audit { suppressed: 0 });
+        assert_eq!(limiter.check(a), PreAuth::Skip);
+        assert_eq!(limiter.check(a), PreAuth::Skip);
+        // Another source has its own bucket.
+        assert_eq!(limiter.check(b), PreAuth::Audit { suppressed: 0 });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert_eq!(limiter.check(a), PreAuth::Audit { suppressed: 2 });
+    }
+
     #[test]
     fn header_text_never_panics_on_identity_provider_text() {
         use super::header_text;

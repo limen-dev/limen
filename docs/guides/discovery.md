@@ -2,7 +2,7 @@
 
 Hosts, databases and clusters come and go, and writing them by hand doesn't survive autoscaling. Discovery finds them in your AWS accounts **without ever granting access by itself** ([ADR-0027](../adr/0027-resource-discovery.md)).
 
-> **Unverified against real AWS.** The parsers follow AWS's documented response shapes and are tested against a stand-in (`limen-testkit`'s `fake_aws`) that insists on signed, read-only calls. Tracked in #123.
+> **Unverified against real AWS.** The parsers follow AWS's documented response shapes and are tested against a stand-in (`limen-testkit`'s `fake_aws`) that insists on signed, read-only calls, and in CI against the Moto AWS emulator (including the describe-only role below, except its EKS actions). An emulator is not AWS: tracked in #123.
 
 ## How it works
 

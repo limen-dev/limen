@@ -46,7 +46,7 @@ impl SshCertificates for SshCertificatesService {
         &self,
         request: Request<IssueSessionCertificatesRequest>,
     ) -> Result<Response<IssueSessionCertificatesResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let worker = caller.component()?.clone();
         if worker.kind != ComponentKind::Worker {
             return Err(Status::permission_denied(
@@ -70,6 +70,15 @@ impl SshCertificates for SshCertificatesService {
             return Err(Status::permission_denied(
                 "grant is for another worker or protocol",
             ));
+        }
+
+        // A revoked proxy's grants are refused at once, from the database.
+        if db::revoked_components(&self.0.db)
+            .await
+            .map_err(|e| internal("checking revoked components", e))?
+            .contains(&verified.proxy.id)
+        {
+            return Err(Status::permission_denied("the proxy has been revoked"));
         }
 
         // The control plane's own, current view of policy has the last word.

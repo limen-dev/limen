@@ -610,6 +610,49 @@ pub fn host_allowed(host: &str, patterns: &[String]) -> bool {
         })
 }
 
+/// Whether a worker that reached `bootstrap` (the resource's configured
+/// `host:port`) may go on to the host a server there reported, such as a Kafka
+/// broker named in a Metadata response or a MongoDB replica set's primary. The
+/// worker takes the credential with it, so a hostile or compromised server
+/// must not be able to steer it anywhere.
+///
+/// Allowed: the bootstrap host itself; anything in `allowed` (the resource's
+/// `hosts`: exact names, `*.suffix` patterns, or IP literals); and, when
+/// `allowed` is empty, a host in the same place as the bootstrap one: the same
+/// domain below the first label (`b-2.x.kafka.us-east-1.amazonaws.com` for
+/// `b-1.x.kafka.us-east-1.amazonaws.com`), a bare name for a bare name, or an
+/// address in the same /16 (IPv4) or /48 (IPv6).
+#[must_use]
+pub fn may_follow(bootstrap: &str, reported: &str, allowed: &[String]) -> bool {
+    let host_of = |endpoint: &str| -> String {
+        split_host_port(endpoint)
+            .map_or(endpoint, |(host, _)| host)
+            .trim_matches(['[', ']'])
+            .trim_end_matches('.')
+            .to_ascii_lowercase()
+    };
+    let (from, to) = (host_of(bootstrap), host_of(reported));
+    if to.is_empty() || from == to {
+        return !to.is_empty();
+    }
+    if !allowed.is_empty() {
+        return allowed.iter().any(|a| a.eq_ignore_ascii_case(&to)) || host_allowed(&to, allowed);
+    }
+    match (from.parse::<IpAddr>(), to.parse::<IpAddr>()) {
+        (Ok(a), Ok(b)) => match (canonical(a), canonical(b)) {
+            (IpAddr::V4(a), IpAddr::V4(b)) => a.octets()[..2] == b.octets()[..2],
+            (IpAddr::V6(a), IpAddr::V6(b)) => a.segments()[..3] == b.segments()[..3],
+            _ => false,
+        },
+        (Ok(_), Err(_)) | (Err(_), Ok(_)) => false,
+        (Err(_), Err(_)) => match from.split_once('.') {
+            // `kafka-1` and `kafka-2`: bare names stay among bare names.
+            None => !to.contains('.'),
+            Some((_, parent)) => to.ends_with(&format!(".{parent}")),
+        },
+    }
+}
+
 /// `host:port`, with IPv6 literals in brackets.
 fn split_host_port(endpoint: &str) -> Option<(&str, u16)> {
     let (host, port) = if let Some(rest) = endpoint.strip_prefix('[') {
@@ -635,11 +678,15 @@ pub fn in_cidrs(ip: IpAddr, cidrs: &[String]) -> bool {
         .filter_map(|c| parse_cidr(c))
         .any(|(net, prefix)| match (canonical(net), ip) {
             (IpAddr::V4(n), IpAddr::V4(a)) => {
-                let mask = u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0);
+                let mask = u32::MAX
+                    .checked_shl(32_u32.saturating_sub(u32::from(prefix)))
+                    .unwrap_or(0);
                 u32::from(n) & mask == u32::from(a) & mask
             }
             (IpAddr::V6(n), IpAddr::V6(a)) => {
-                let mask = u128::MAX.checked_shl(128 - u32::from(prefix)).unwrap_or(0);
+                let mask = u128::MAX
+                    .checked_shl(128_u32.saturating_sub(u32::from(prefix)))
+                    .unwrap_or(0);
                 u128::from(n) & mask == u128::from(a) & mask
             }
             _ => false,
@@ -651,7 +698,18 @@ fn parse_cidr(cidr: &str) -> Option<(IpAddr, u8)> {
     let addr: IpAddr = addr.parse().ok()?;
     let prefix: u8 = prefix.parse().ok()?;
     let max = if addr.is_ipv4() { 32 } else { 128 };
-    (prefix <= max).then_some((addr, prefix))
+    if prefix > max {
+        return None;
+    }
+    // An IPv4-mapped IPv6 network (`::ffff:10.20.0.0/112`) is an IPv4 network
+    // whose prefix counts the 96 mapped bits; a shorter one covers more than
+    // IPv4 and is refused. (Left as is, `32 - prefix` underflows below.)
+    if let IpAddr::V6(v6) = addr
+        && let Some(v4) = v6.to_ipv4_mapped()
+    {
+        return prefix.checked_sub(96).map(|p| (IpAddr::V4(v4), p));
+    }
+    Some((addr, prefix))
 }
 
 /// An IPv4-mapped IPv6 address as the IPv4 address it carries.

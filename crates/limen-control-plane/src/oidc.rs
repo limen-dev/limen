@@ -189,9 +189,30 @@ pub struct OidcVerifier {
     keys: KeyCache,
     client_id: ClientId,
     username_claim: UsernameClaim,
+    allow_unverified_email: bool,
+}
+
+/// An email is a username only if the IdP says it is verified. A token with
+/// no `email_verified` claim is refused unless the operator opted in.
+fn check_email_verified(verified: Option<bool>, allow_missing: bool) -> Result<(), OidcError> {
+    match verified {
+        Some(true) => Ok(()),
+        None if allow_missing => Ok(()),
+        Some(false) => Err(OidcError::Invalid("email is not verified".into())),
+        None => Err(OidcError::Invalid(
+            "the ID token has no email_verified claim (see --oidc-allow-unverified-email)".into(),
+        )),
+    }
 }
 
 impl OidcVerifier {
+    /// Accept a token without `email_verified` (`--oidc-allow-unverified-email`).
+    #[must_use]
+    pub fn allow_unverified_email(mut self, allow: bool) -> Self {
+        self.allow_unverified_email = allow;
+        self
+    }
+
     pub fn new(
         issuer: &str,
         internal_url: Option<&str>,
@@ -203,6 +224,7 @@ impl OidcVerifier {
             keys: KeyCache::new(issuer, internal_url, http)?,
             client_id: ClientId::new(client_id.to_owned()),
             username_claim,
+            allow_unverified_email: false,
         })
     }
 
@@ -253,9 +275,7 @@ impl OidcVerifier {
         let subject = claims.subject().to_string();
         let username = match self.username_claim {
             UsernameClaim::Email => {
-                if claims.email_verified() == Some(false) {
-                    return Err(OidcError::Invalid("email is not verified".into()));
-                }
+                check_email_verified(claims.email_verified(), self.allow_unverified_email)?;
                 claims.email().map(|e| e.to_string())
             }
             UsernameClaim::PreferredUsername => claims.preferred_username().map(|u| u.to_string()),
@@ -278,6 +298,20 @@ impl OidcVerifier {
 fn constant_time_eq(a: &str, b: &str) -> bool {
     use sha2::{Digest, Sha256};
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
+}
+
+#[cfg(test)]
+mod email_tests {
+    use super::check_email_verified;
+
+    #[test]
+    fn a_missing_email_verified_is_refused_unless_allowed() {
+        assert!(check_email_verified(Some(true), false).is_ok());
+        assert!(check_email_verified(None, false).is_err());
+        assert!(check_email_verified(None, true).is_ok());
+        assert!(check_email_verified(Some(false), false).is_err());
+        assert!(check_email_verified(Some(false), true).is_err());
+    }
 }
 
 #[cfg(test)]

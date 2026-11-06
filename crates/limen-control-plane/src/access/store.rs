@@ -186,7 +186,7 @@ pub async fn insert_approval(
 ) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
         "INSERT INTO access_approvals (request_id, approver, decision, comment)
-         VALUES ($1, $2, $3, $4) ON CONFLICT (request_id, approver) DO NOTHING",
+         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
     )
     .bind(request_id)
     .bind(approver)

@@ -51,11 +51,18 @@ resource "aws_cloudwatch_log_group" "this" {
   tags              = var.tags
 }
 
+# Not `depends_on` on the module: that would defer the AMI lookup above to apply.
+resource "terraform_data" "start_after" {
+  input = var.start_after
+}
+
 module "asg" {
   source  = "terraform-aws-modules/autoscaling/aws"
   version = "~> 9.3"
 
   for_each = local.groups
+
+  depends_on = [terraform_data.start_after]
 
   name                = "${var.name}-${each.key}"
   vpc_zone_identifier = each.value.subnet_ids

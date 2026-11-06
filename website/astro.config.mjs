@@ -75,6 +75,7 @@ export default defineConfig({
             { slug: 'docs/guides/kubernetes' },
             { slug: 'docs/guides/web-apps' },
             { slug: 'docs/guides/tcp' },
+            { slug: 'docs/guides/ai-agents' },
           ],
         },
         {

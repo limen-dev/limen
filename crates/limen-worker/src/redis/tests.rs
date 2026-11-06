@@ -66,6 +66,10 @@ fn fake_server(stream: DuplexStream, seen: Seen) {
                         Some(v) => format!("${}\r\n{v}\r\n", v.len()).into_bytes(),
                         None => b"$-1\r\n".to_vec(),
                     },
+                    // A real server refuses an index past its `databases` setting.
+                    "SELECT" if words[1].parse::<u32>().is_ok_and(|n| n >= 16) => {
+                        b"-ERR DB index is out of range\r\n".to_vec()
+                    }
                     "LIMEN.REFUSED" => b"-ERR unknown command 'LIMEN.REFUSED'\r\n".to_vec(),
                     "SLOW" => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -511,4 +515,58 @@ async fn a_client_that_sends_a_long_pipeline_before_reading_does_not_stall() {
         seen += got;
     }
     drop(write_half);
+}
+
+#[test]
+fn select_reads_the_database_the_way_redis_does() {
+    let sel = |a: &str| rules::selected_database(&[b"SELECT".to_vec(), a.as_bytes().to_vec()]);
+    assert_eq!(sel("0"), Some(0));
+    assert_eq!(sel("12"), Some(12));
+    for bad in ["01", "+1", "-1", "", "1 ", "0x1", "\u{661}"] {
+        assert_eq!(sel(bad), None, "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn select_inside_multi_is_refused() {
+    let mut only_db1 = grant(&[], &[]);
+    only_db1.databases = vec![1];
+    let mut rig = rig(vec![only_db1]);
+    // The worker must never believe database 1 while the server is on 0.
+    let mut batch = cmd(&["SELECT", "1"]);
+    batch.extend(cmd(&["MULTI"]));
+    batch.extend(cmd(&["SELECT", "1"]));
+    batch.extend(cmd(&["DISCARD"]));
+    batch.extend(cmd(&["GET", "k"]));
+    rig.client.write_all(&batch).await.expect("write");
+    let replies = read_replies(&mut rig.client, 5).await;
+    assert_eq!(replies[0], "+OK");
+    assert_eq!(replies[1], "+OK", "MULTI");
+    assert!(replies[2].starts_with("-NOPERM"), "{replies:?}");
+    assert_eq!(replies[3], "+OK", "DISCARD");
+    assert_eq!(replies[4], "$-1");
+    let seen = rig.seen.lock().expect("lock").clone();
+    let selects = seen.iter().filter(|w| w[0] == "SELECT").count();
+    assert_eq!(
+        selects, 1,
+        "only the SELECT outside MULTI reached the server: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_select_the_server_rejects_does_not_move_the_database() {
+    let mut grant99 = grant(&[], &[]);
+    grant99.databases = vec![99];
+    let mut rig = rig(vec![grant99]);
+    let mut batch = cmd(&["SELECT", "99"]);
+    batch.extend(cmd(&["GET", "k"]));
+    rig.client.write_all(&batch).await.expect("write");
+    let replies = read_replies(&mut rig.client, 2).await;
+    assert!(replies[0].starts_with("-ERR DB index"), "{replies:?}");
+    assert!(
+        replies[1].starts_with("-NOPERM"),
+        "the server is still on database 0: {replies:?}"
+    );
+    let seen = rig.seen.lock().expect("lock").clone();
+    assert!(!seen.iter().any(|w| w[0] == "GET"), "{seen:?}");
 }

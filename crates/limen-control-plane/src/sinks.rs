@@ -57,6 +57,9 @@ pub struct S3Sink {
     pub kms_key: Option<String>,
     pub writer: String,
     signer: SignerSlot,
+    /// The internal CA, to check the signature of the manifest the chain resumes
+    /// from. `None` (tests) skips that check.
+    internal_ca: Option<Arc<Vec<u8>>>,
     /// `(next seq, sha256 of the last manifest)`; `None` until loaded from S3.
     chain: Arc<Mutex<Option<(u64, String)>>>,
 }
@@ -77,8 +80,17 @@ impl S3Sink {
             kms_key,
             writer,
             signer,
+            internal_ca: None,
             chain: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Check the signature of the manifest a restart resumes from, against
+    /// this CA.
+    #[must_use]
+    pub fn with_internal_ca(mut self, der: Vec<u8>) -> Self {
+        self.internal_ca = Some(Arc::new(der));
+        self
     }
 
     fn key(&self, rest: &str) -> String {
@@ -94,7 +106,7 @@ impl S3Sink {
     /// commit never forks the chain.
     async fn chain_head(&self) -> Result<(u64, String), ShipError> {
         let prefix = self.key(&format!("manifests/{}/", self.writer));
-        let mut last: Option<String> = None;
+        let mut keys: Vec<String> = Vec::new();
         let mut pages = self
             .client
             .list_objects_v2()
@@ -109,23 +121,63 @@ impl S3Sink {
                     aws_sdk_s3::error::DisplayErrorContext(&e)
                 ))
             })?;
-            for obj in page.contents() {
-                if let Some(k) = obj.key()
-                    && last.as_deref().is_none_or(|l| k > l)
-                {
-                    last = Some(k.to_owned());
+            keys.extend(
+                page.contents()
+                    .iter()
+                    .filter_map(|o| o.key())
+                    .map(str::to_owned),
+            );
+        }
+        keys.sort_unstable_by(|a, b| b.cmp(a));
+        let highest = keys.first().and_then(|k| key_seq(k));
+        // The newest manifest that is consistent with its key and writer. A key
+        // that is not (planted, corrupt, another writer's) is skipped with an
+        // error in the log rather than stopping the writer for good; the
+        // verifier reports the break it leaves. The signature is checked as of
+        // the time the manifest records, so a restart after the signing
+        // certificate's day is over can still resume from its own last manifest.
+        let mut trusted = None;
+        for key in &keys {
+            let body = self.get(key).await?;
+            let checked = consistent_manifest(&body, key, &self.writer)
+                .and_then(|m| self.signature_problem(&body, &m).map_or(Ok(m), Err));
+            match checked {
+                Ok(manifest) => {
+                    trusted = Some((manifest.seq, hex(&Sha256::digest(&body))));
+                    break;
+                }
+                Err(why) => {
+                    tracing::error!(%key, %why, "skipping a manifest that is not this writer's when resuming the audit chain");
                 }
             }
         }
-        let Some(key) = last else {
-            return Ok((0, String::new()));
+        Ok(resume_point(highest, trusted))
+    }
+
+    /// Why the manifest's signature does not hold, if it does not (as of the
+    /// time the manifest records, and by this writer's own certificate).
+    #[must_use]
+    pub fn signature_problem(&self, file: &[u8], manifest: &Manifest) -> Option<String> {
+        let ca = self.internal_ca.as_ref()?;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let signed: SignedManifest = serde_json::from_slice(file).ok()?;
+        let envelope = limen_proto::v1::Signed {
+            payload: signed.manifest.clone().into_bytes(),
+            signature: b64.decode(&signed.signature).unwrap_or_default(),
+            signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
         };
-        let body = self.get(&key).await?;
-        let signed: SignedManifest = serde_json::from_slice(&body)
-            .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-        let manifest: Manifest = serde_json::from_str(&signed.manifest)
-            .map_err(|e| ShipError::Retry(format!("bad manifest {key}: {e}")))?;
-        Ok((manifest.seq + 1, hex(&Sha256::digest(&body))))
+        let at = match time::OffsetDateTime::parse(
+            &manifest.created_at,
+            &time::format_description::well_known::Rfc3339,
+        ) {
+            Ok(at) => at,
+            Err(e) => return Some(format!("unreadable manifest time: {e}")),
+        };
+        let ca = rustls_pki_types::CertificateDer::from(ca.as_slice());
+        match limen_session::envelope::verify_at(&envelope, Purpose::AuditManifest, &ca, at) {
+            Ok((by, _)) => signer_problem(&by.id, &manifest.writer),
+            Err(e) => Some(format!("signature: {e}")),
+        }
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, ShipError> {
@@ -170,14 +222,18 @@ impl S3Sink {
         })
     }
 
-    /// Upload a recording file to `recordings/dt=YYYY-MM-DD/<session>.cast`.
+    /// Upload a recording file to `recordings/dt=YYYY-MM-DD/<session>-<id>.cast`.
+    /// The key is never reused, so a second upload for a session cannot replace the first.
     pub async fn put_recording(
         &self,
         session_id: &str,
         file: &std::path::Path,
     ) -> anyhow::Result<String> {
         let day = time::OffsetDateTime::now_utc().date();
-        let key = self.key(&format!("recordings/dt={day}/{session_id}.cast"));
+        let key = self.key(&format!(
+            "recordings/dt={day}/{session_id}-{}.cast",
+            uuid::Uuid::now_v7().simple()
+        ));
         let body = ByteStream::from_path(file).await?;
         let mut req = self
             .client
@@ -286,11 +342,62 @@ impl S3Sink {
     }
 }
 
+/// `manifests/<writer>/000000000007.json` -> 7.
+fn key_seq(key: &str) -> Option<u64> {
+    key.rsplit('/').next()?.strip_suffix(".json")?.parse().ok()
+}
+
+/// Where the chain continues: after the newest manifest that verified, but
+/// never at a sequence number that already has a key (so nothing is
+/// overwritten). A skipped key beyond it leaves a visible gap for the verifier.
+fn resume_point(highest_key: Option<u64>, trusted: Option<(u64, String)>) -> (u64, String) {
+    let (after_trusted, prev) = trusted.map_or((0, String::new()), |(seq, hash)| (seq + 1, hash));
+    let after_keys = highest_key.map_or(0, |k| k + 1);
+    (after_trusted.max(after_keys), prev)
+}
+
+/// A manifest file that parses and agrees with its key (`<seq>.json`) and its writer.
+fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest, String> {
+    let signed: SignedManifest = serde_json::from_slice(file).map_err(|e| e.to_string())?;
+    let manifest: Manifest = serde_json::from_str(&signed.manifest).map_err(|e| e.to_string())?;
+    if manifest.writer != writer {
+        return Err(format!("manifest names writer {}", manifest.writer));
+    }
+    if key_seq(key) != Some(manifest.seq) {
+        return Err(format!("manifest has seq {}, not its key's", manifest.seq));
+    }
+    Ok(manifest)
+}
+
+/// The signer of a manifest is the control plane that wrote it.
+#[must_use]
+pub fn signer_problem(signer_id: &str, writer: &str) -> Option<String> {
+    (signer_id != writer).then(|| format!("signed by {signer_id}, not by its writer {writer}"))
+}
+
 // ---- Datadog ----------------------------------------------------------------
 
 /// Datadog intake limits (<https://docs.datadoghq.com/api/latest/logs/send-logs>).
 const DD_MAX_ENTRIES: usize = 1000;
 const DD_MAX_PAYLOAD: usize = 5 * 1024 * 1024;
+
+/// A value safe to put in a Datadog tag list: a comma would start another
+/// tag and a colon would change the key, so anything but letters, digits and
+/// `_ - . /` becomes `_`. The component name comes from an event, which a
+/// compromised component writes.
+fn tag_value(value: &str) -> String {
+    value
+        .chars()
+        .take(200)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone)]
 pub struct DatadogSink {
@@ -327,9 +434,11 @@ impl DatadogSink {
             obj.insert(
                 "ddtags".into(),
                 format!(
-                    "env:{},version:{},event_kind:{kind},component:{component}",
-                    self.environment,
-                    limen_core::VERSION
+                    "env:{},version:{},event_kind:{},component:{}",
+                    tag_value(&self.environment),
+                    limen_core::VERSION,
+                    tag_value(&kind),
+                    tag_value(&component),
                 )
                 .into(),
             );
@@ -409,9 +518,85 @@ enum Outcome {
 mod tests {
     use super::*;
 
+    fn manifest_file(writer: &str, seq: u64) -> Vec<u8> {
+        let manifest = Manifest {
+            version: 1,
+            writer: writer.into(),
+            seq,
+            object: "events/x".into(),
+            sha256: String::new(),
+            count: 0,
+            first_event_id: String::new(),
+            last_event_id: String::new(),
+            prev_manifest_sha256: String::new(),
+            created_at: String::new(),
+        };
+        serde_json::to_vec(&SignedManifest {
+            manifest: serde_json::to_string(&manifest).expect("json"),
+            signature: String::new(),
+            signer_cert: String::new(),
+        })
+        .expect("file")
+    }
+
+    #[test]
+    fn only_a_manifest_that_fits_its_key_and_writer_is_resumed_from() {
+        let key = "manifests/cp-a/000000000003.json";
+        assert_eq!(
+            consistent_manifest(&manifest_file("cp-a", 3), key, "cp-a")
+                .expect("fits")
+                .seq,
+            3
+        );
+        assert!(consistent_manifest(&manifest_file("cp-b", 3), key, "cp-a").is_err());
+        assert!(consistent_manifest(&manifest_file("cp-a", 4), key, "cp-a").is_err());
+        assert!(consistent_manifest(b"garbage", key, "cp-a").is_err());
+        assert!(
+            consistent_manifest(&manifest_file("cp-a", 3), "manifests/cp-a/zzz", "cp-a").is_err()
+        );
+    }
+
+    #[test]
+    fn the_chain_resumes_after_the_newest_verified_manifest_and_overwrites_nothing() {
+        assert_eq!(resume_point(None, None), (0, String::new()));
+        assert_eq!(
+            resume_point(Some(4), Some((4, "h".into()))),
+            (5, "h".into())
+        );
+        // A planted key at 999 is skipped; the chain goes on beyond it.
+        assert_eq!(
+            resume_point(Some(999), Some((4, "h".into()))),
+            (1000, "h".into())
+        );
+        assert_eq!(key_seq("manifests/cp-a/000000000007.json"), Some(7));
+        assert_eq!(key_seq("manifests/cp-a/junk"), None);
+    }
+
+    #[test]
+    fn a_signer_must_be_the_writer() {
+        assert_eq!(signer_problem("cp-a", "cp-a"), None);
+        assert!(signer_problem("cp-b", "cp-a").is_some());
+    }
+
     #[test]
     fn gzip_is_deterministic() {
         assert_eq!(gzip(b"same").expect("gz"), gzip(b"same").expect("gz"));
+    }
+
+    #[test]
+    fn a_component_name_cannot_add_datadog_tags() {
+        let sink = DatadogSink {
+            http: reqwest::Client::new(),
+            url: String::new(),
+            api_key: Secret::new("k".into()),
+            hostname: "cp-1".into(),
+            environment: "test".into(),
+        };
+        let raw = br#"{"kind":"ssh.exec","user":"u","event_id":"e1","producer":{"component":"worker,env:prod,team:x","instance_id":"w","seq":1},"data":{}}"#;
+        let entry = sink.log_entry(raw);
+        let tags = entry["ddtags"].as_str().expect("tags");
+        assert_eq!(tags.split(',').count(), 4, "{tags}");
+        assert!(tags.contains("component:worker_env_prod_team_x"), "{tags}");
     }
 
     #[test]

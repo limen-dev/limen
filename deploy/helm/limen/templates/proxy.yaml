@@ -34,7 +34,8 @@ spec:
   replicas: {{ $c.replicas }}
   strategy:
     type: RollingUpdate
-    rollingUpdate: { maxUnavailable: 1, maxSurge: 1 }
+    # A new pod may wait for the control plane (ADR-0045): keep serving pods until it is ready.
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   selector:
     matchLabels: {{ include "limen.selector" $ref | nindent 6 }}
   template:
@@ -92,6 +93,11 @@ spec:
           readinessProbe:
             httpGet: { path: /readyz, port: admin }
             periodSeconds: 3
+          # The admin port is down while the proxy waits for the control plane (ADR-0045): allow 30 min.
+          startupProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+            failureThreshold: 180
           livenessProbe:
             httpGet: { path: /healthz, port: admin }
             periodSeconds: 10

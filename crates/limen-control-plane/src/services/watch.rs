@@ -19,8 +19,8 @@ const MAX_IDS: usize = 1_000;
 #[derive(Debug, Clone)]
 pub struct WatchService(pub AppState);
 
-fn worker(request: &Request<impl Sized>, state: &AppState) -> Result<String, Status> {
-    let caller = caller::resolve(request, &state.cas)?;
+async fn worker(request: &Request<impl Sized>, state: &AppState) -> Result<String, Status> {
+    let caller = caller::resolve_checked(request, state).await?;
     let c = caller.component()?;
     if c.kind != ComponentKind::Worker {
         return Err(Status::permission_denied("only workers use this"));
@@ -34,7 +34,7 @@ impl Watch for WatchService {
         &self,
         request: Request<WatchPollRequest>,
     ) -> Result<Response<WatchPollResponse>, Status> {
-        let worker_id = worker(&request, &self.0)?;
+        let worker_id = worker(&request, &self.0).await?;
         let ids: Vec<Uuid> = request
             .into_inner()
             .session_ids
@@ -54,7 +54,7 @@ impl Watch for WatchService {
         &self,
         request: Request<WatchPublishRequest>,
     ) -> Result<Response<WatchPublishResponse>, Status> {
-        let worker_id = worker(&request, &self.0)?;
+        let worker_id = worker(&request, &self.0).await?;
         let r = request.into_inner();
         let id = Uuid::parse_str(&r.session_id)
             .map_err(|_| Status::invalid_argument("bad session id"))?;

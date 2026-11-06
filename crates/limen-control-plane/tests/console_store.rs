@@ -67,6 +67,83 @@ fn recording(session: Uuid) -> Event {
     )
 }
 
+/// A later event for a session cannot replace the identity, recording link or
+/// recording hash it was first given (pentest #66: a worker forging them).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_keeps_the_first_identity_and_recording_it_was_given() {
+    let Some(db) = fresh_db().await else { return };
+    let id = Uuid::now_v7();
+    store::project_events(&db, &[start(id), end(id), recording(id)])
+        .await
+        .expect("real events");
+    let forged_start = event(
+        EventKind::SessionStart,
+        id,
+        "mallory@example.com",
+        json!({ "kind": "ssh", "resource": "other", "login": "root", "worker_id": "w9", "proxy_id": "p9" }),
+    );
+    let forged_end = event(
+        EventKind::SessionEnd,
+        id,
+        "mallory@example.com",
+        json!({ "recording_sha256": "forged" }),
+    );
+    let forged_recording = event(
+        EventKind::SessionRecording,
+        id,
+        "mallory@example.com",
+        json!({ "recording_uri": "file:///r/forged.cast", "sha256": "forged" }),
+    );
+    store::project_events(&db, &[forged_start, forged_end, forged_recording])
+        .await
+        .expect("forged events");
+    let s = store::session(&db, id).await.expect("query").expect("row");
+    assert_eq!(s.username.as_deref(), Some(DEVELOPER));
+    assert_eq!(s.resource.as_deref(), Some("web-1"));
+    assert_eq!(s.worker_id.as_deref(), Some("w1"));
+    assert_eq!(s.recording_uri.as_deref(), Some("file:///r/1.cast"));
+    assert_eq!(s.recording_sha256.as_deref(), Some("abc"));
+}
+
+/// A worker writes only Kubernetes streams. One that writes first for a session
+/// a proxy opens does not keep it: the proxy's start replaces the forgery, and
+/// the worker's later events are ignored (pentest #66).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workers_forged_session_start_does_not_outlive_the_proxys() {
+    let Some(db) = fresh_db().await else { return };
+    let id = Uuid::now_v7();
+    let from_worker = |kind: EventKind, user: &str, data: serde_json::Value| {
+        let mut e = event(kind, id, user, data);
+        e.producer.component = "worker".into();
+        e
+    };
+    let forged = from_worker(
+        EventKind::SessionStart,
+        "mallory@example.com",
+        json!({ "kind": "kube", "resource": "other", "worker_id": "w9" }),
+    );
+    store::project_events(&db, &[forged])
+        .await
+        .expect("forged first");
+    store::project_events(&db, &[start(id), end(id), recording(id)])
+        .await
+        .expect("real events");
+    let later_end = from_worker(
+        EventKind::SessionEnd,
+        "mallory@example.com",
+        json!({ "kind": "kube", "worker_id": "w9", "reason": "forged", "duration_ms": 1 }),
+    );
+    store::project_events(&db, &[later_end])
+        .await
+        .expect("forged end");
+    let s = store::session(&db, id).await.expect("query").expect("row");
+    assert_eq!(s.username.as_deref(), Some(DEVELOPER));
+    assert_eq!(s.kind.as_deref(), Some("ssh"));
+    assert_eq!(s.resource.as_deref(), Some("web-1"));
+    assert_eq!(s.worker_id.as_deref(), Some("w1"));
+    assert_eq!(s.end_reason.as_deref(), Some("user locked"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn projection_is_idempotent_and_order_independent() {
     let Some(db) = fresh_db().await else { return };

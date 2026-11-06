@@ -23,6 +23,9 @@ use crate::db::sigv4::{self, Credentials, EMPTY_PAYLOAD_SHA256, Target};
 
 /// Most iterations a server may ask for. Kafka defaults to 4096.
 const MAX_ITERATIONS: u32 = 1_000_000;
+/// Fewest iterations accepted: Kafka's own minimum. A hostile server that
+/// picks a small count can crack the client's proof offline.
+const MIN_ITERATIONS: u32 = 4096;
 /// MSK IAM payloads are valid for 15 minutes.
 const IAM_LIFETIME_SECS: u32 = 900;
 
@@ -178,7 +181,7 @@ impl Scram {
         if !nonce.starts_with(ours) || nonce.len() == ours.len() {
             return Err(AuthError::Nonce);
         }
-        if iterations == 0 || iterations > MAX_ITERATIONS {
+        if !(MIN_ITERATIONS..=MAX_ITERATIONS).contains(&iterations) {
             return Err(AuthError::Iterations);
         }
         let rounds = NonZeroU32::new(iterations).ok_or(AuthError::Iterations)?;
@@ -280,8 +283,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && i + 2 < b.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let Some(hex) = b.get(i + 1..i + 3)
+            && hex.iter().all(u8::is_ascii_hexdigit)
+            && let Ok(byte) = u8::from_str_radix(std::str::from_utf8(hex).unwrap_or(""), 16)
         {
             out.push(byte);
             i += 3;
@@ -352,25 +356,30 @@ mod tests {
         let mut c = Scram::new(ScramHash::Sha256, "a=b,c", secret("p"), "n1");
         assert_eq!(c.first(), b"n,,n=a=3Db=2Cc,r=n1");
         // The proof is over the escaped name (`n=a=3Db=2Cc`); Python computes the same value.
-        let fin = c.respond(b"r=n1S,s=c2FsdA==,i=10").expect("response");
+        let fin = c.respond(b"r=n1S,s=c2FsdA==,i=4096").expect("response");
         assert_eq!(
             String::from_utf8(fin).expect("utf8"),
-            "c=biws,r=n1S,p=WqJqm7HDKiYjSexacgF+IEInagQ3IVDvO2IJitcq88A="
+            "c=biws,r=n1S,p=1YGiiiR8hhCMye/xw1gqhjb9f8hi+7VBUzAGyMIpOPg="
         );
     }
 
     #[test]
     fn a_bad_server_is_refused() {
         let mut c = Scram::new(ScramHash::Sha256, "u", secret("p"), "abc");
-        assert_eq!(c.respond(b"r=zzz,s=c2FsdA==,i=10"), Err(AuthError::Nonce));
+        assert_eq!(c.respond(b"r=zzz,s=c2FsdA==,i=4096"), Err(AuthError::Nonce));
         assert_eq!(
-            c.respond(b"r=abc,s=c2FsdA==,i=10"),
+            c.respond(b"r=abc,s=c2FsdA==,i=4096"),
             Err(AuthError::Nonce),
             "must extend"
         );
         assert_eq!(
             c.respond(b"r=abcd,s=c2FsdA==,i=0"),
             Err(AuthError::Iterations)
+        );
+        assert_eq!(
+            c.respond(b"r=abcd,s=c2FsdA==,i=1"),
+            Err(AuthError::Iterations),
+            "a hostile server picking a tiny count"
         );
         assert_eq!(
             c.respond(b"r=abcd,s=c2FsdA==,i=99999999"),

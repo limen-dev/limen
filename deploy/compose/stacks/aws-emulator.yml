@@ -1,0 +1,14 @@
+# Moto AWS emulators for the discovery tests; emulator_tests.rs says how to run them.
+# A test fixture: setup.sh doesn't start it. Recreate `aws` before each run.
+name: limen-aws-emulator
+services:
+  aws:
+    container_name: limen-aws${LIMEN_SUFFIX:-}
+    image: ${MOTO_IMAGE}
+    environment: { INITIAL_NO_AUTH_ACTION_COUNT: "3" }
+    ports: ["127.0.0.1:${LIMEN_PORT_AWS:-15000}:5000"]
+
+  aws-open:
+    container_name: limen-aws-open${LIMEN_SUFFIX:-}
+    image: ${MOTO_IMAGE}
+    ports: ["127.0.0.1:${LIMEN_PORT_AWS_OPEN:-15001}:5000"]

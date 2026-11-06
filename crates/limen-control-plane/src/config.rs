@@ -140,6 +140,17 @@ pub struct Config {
     )]
     pub oidc_username_claim: UsernameClaim,
 
+    /// Accept an ID token that has no `email_verified` claim when the
+    /// username is the email. By default a missing claim is refused (an
+    /// explicit `false` always is). Set it for an IdP that never sends the
+    /// claim and verifies addresses itself.
+    #[arg(
+        long,
+        env = "LIMEN_OIDC_ALLOW_UNVERIFIED_EMAIL",
+        default_value_t = false
+    )]
+    pub oidc_allow_unverified_email: bool,
+
     /// IdP groups whose members get `limen:admin` regardless of policy, so
     /// the first admin can log in and apply policy.
     #[arg(

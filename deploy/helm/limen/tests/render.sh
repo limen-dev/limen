@@ -15,11 +15,29 @@ doc() { awk -v kind="kind: $1" -v name="  name: $2" 'BEGIN{RS="\n---\n"} index($
 base=(-f "$chart/ci-values.yaml")
 
 # 0. No image.tag runs the release the chart was published with; an explicit tag wins.
-app="$(awk -F'"' '/^appVersion:/ {print $2}' "$chart/Chart.yaml")"
+# release-please rewrites appVersion without quotes, so accept both forms.
+app="$(sed -nE 's/^appVersion: *"?([^"[:space:]]+)"?.*/\1/p' "$chart/Chart.yaml")"
+[[ -n "$app" ]] || fail "could not read appVersion from Chart.yaml"
 out="$(render "${base[@]}" --set image.tag=)"
 grep -q "limen-proxy:v${app}\$" <<<"$out" || fail "image.tag unset did not default to v${app}"
 out="$(render "${base[@]}" --set image.tag=custom)"
 grep -q 'limen-proxy:custom$' <<<"$out" || fail "an explicit image.tag was ignored"
+
+# 0b. image.componentTags moves one component and leaves the others on image.tag (staged upgrades,
+# docs/runbooks/upgrading.md); an empty entry falls back to image.tag.
+out="$(render "${base[@]}" --set image.tag=old --set image.componentTags.control-plane=new)"
+grep -q 'limen-control-plane:new$' <<<"$out" || fail "componentTags.control-plane was ignored"
+grep -q 'limen-proxy:old$' <<<"$out" || fail "componentTags.control-plane moved the proxy"
+grep -q 'limen-worker:old$' <<<"$out" || fail "componentTags.control-plane moved the worker"
+out="$(render "${base[@]}" --set image.tag=old --set image.componentTags.worker=)"
+grep -q 'limen-worker:old$' <<<"$out" || fail "an empty componentTags entry did not fall back to image.tag"
+
+# 0c. A proxy can wait for an upgraded control plane (ADR-0045): it never removes a serving pod
+# first, and gets time before the liveness probe starts.
+out="$(render "${base[@]}")"
+proxy="$(doc Deployment proxy-public <<<"$out")"
+grep -q 'maxUnavailable: 0' <<<"$proxy" || fail "proxy rollout may remove a serving pod before its replacement is ready"
+grep -q 'startupProbe:' <<<"$proxy" || fail "proxy has no startupProbe, so liveness would kill a waiting pod"
 
 # 1. A zero value in a group beats a non-zero default.
 out="$(render "${base[@]}" --set workerDefaults.discovery=true --set workers.prod-db.discovery=false)"

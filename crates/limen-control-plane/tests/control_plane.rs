@@ -10,12 +10,13 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::enrollment_client::EnrollmentClient;
+use limen_proto::v1::policy_sync_client::PolicySyncClient;
 use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{
-    ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, ListComponentsRequest,
-    ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource, RenewCertificateRequest,
-    ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
+    ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, GetServerVersionRequest,
+    ListComponentsRequest, ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource,
+    RenewCertificateRequest, ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
 use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
@@ -138,6 +139,13 @@ async fn login_rejects_replay_wrong_nonce_and_bad_tokens() {
             "unverified email",
             Claims {
                 email_verified: Some(false),
+                ..Claims::user("a@example.com", &["admins"])
+            },
+        ),
+        (
+            "no email_verified claim",
+            Claims {
+                email_verified: None,
                 ..Claims::user("a@example.com", &["admins"])
             },
         ),
@@ -576,6 +584,45 @@ async fn only_proxies_may_forward_or_report() {
 }
 
 #[tokio::test]
+async fn components_may_ask_the_control_plane_its_version_and_others_may_not() {
+    let Some(h) = Harness::start().await else {
+        return;
+    };
+    let (_, proxy) = h.enroll_proxy().await;
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
+
+    // The upgrade gate (ADR-0045) polls this call, so it must not share the
+    // unauthenticated limit: ask far more often than 30 times a minute.
+    for _ in 0..50 {
+        let version = PolicySyncClient::new(h.channel(Some(proxy.clone())))
+            .get_server_version(GetServerVersionRequest {})
+            .await
+            .expect("a component may ask")
+            .into_inner()
+            .version;
+        assert_eq!(version, limen_core::VERSION);
+    }
+
+    // Anonymous callers and users (a forwarded user certificate) may not.
+    let err = PolicySyncClient::new(h.channel(None))
+        .get_server_version(GetServerVersionRequest {})
+        .await
+        .expect_err("anonymous");
+    assert!(
+        matches!(err.code(), Code::PermissionDenied | Code::Unauthenticated),
+        "{err}"
+    );
+    let err = PolicySyncClient::new(h.channel(None))
+        .get_server_version(forwarded(GetServerVersionRequest {}, Some(&admin_user)))
+        .await
+        .expect_err("a user");
+    assert!(
+        matches!(err.code(), Code::PermissionDenied | Code::Unauthenticated),
+        "{err}"
+    );
+}
+
+#[tokio::test]
 async fn proxy_cannot_request_unapproved_dns_names() {
     let Some(h) = Harness::start().await else {
         return;
@@ -611,7 +658,7 @@ async fn ingest_accepts_own_events_and_rejects_forgery_and_bad_recordings() {
         serde_json::to_vec(&limen_audit::Event::new(
             EventKind::SessionStart,
             producer,
-            serde_json::json!({"resource": "web-1"}),
+            serde_json::json!({"kind": "ssh", "resource": "web-1", "proxy_id": proxy_id}),
         ))
         .expect("json")
     };

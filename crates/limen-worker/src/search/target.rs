@@ -509,6 +509,7 @@ fn decode_component(s: &str) -> String {
                 let hex = b
                     .get(i + 1..i + 3)
                     .and_then(|h| std::str::from_utf8(h).ok())
+                    .filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))
                     .and_then(|h| u8::from_str_radix(h, 16).ok());
                 if let Some(v) = hex {
                     out.push(v);
@@ -547,6 +548,12 @@ pub fn incoming(body: hyper::body::Incoming) -> ReqBody {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_signed_escape_is_not_decoded() {
+        assert_eq!(decode_component("a%+fb"), "a% fb");
+        assert_eq!(decode_component("a%2Fb"), "a/b");
+    }
+
     use super::*;
 
     #[test]
