@@ -25,7 +25,7 @@ How an agent proves who it is (a platform-issued token, a signed attestation fro
 - Nothing in Phase 4 implements this; it is listed so the bot design isn't narrowed in a way that blocks it.
 
 ## Amendment: spike 0 and desk analysis of the open questions (2026-11-06)
-The status stays Proposed. This records what was built and what reading Limen at `0bf4e9c`-era `main` (ADR-0019, ADR-0025, ADR-0042 as built) suggests for the questions above. **Nothing below was run against a real agent runtime**; each answer is a recommendation for the owner, and spikes 1 to 3 are still to do.
+The status stays Proposed. This records what was built and what reading Limen at `0bc7da6` (ADR-0019, ADR-0025, ADR-0042 as built) suggests for the questions above. **Nothing below was run against a real agent runtime**; each answer is a recommendation for the owner, and spikes 1 to 3 are still to do.
 
 - **Spike 0 is built:** `limen mcp` (#268), a read-only stdio server in the CLI with five tools (`status`, `ls`, `show`, `explain`, `requests`). It runs the CLI with `--json` as the logged-in person, so it grants nothing new and has no agent identity. It has not been tested against a live login. Threat model: TB15. `policy who-can` and `what-can` are left out because they read local policy files or need `limen:admin`.
 - **Where the server lives:** in the CLI first (`limen mcp`). A separate component is justified only by a remote, multi-tenant server that many agents connect to, which has a larger attack surface and no demand yet. The separate `mcp-server-limen` repository was archived for this reason.
