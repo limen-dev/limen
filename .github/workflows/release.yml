@@ -324,6 +324,8 @@ jobs:
           # The tag decides the versions, whatever Chart.yaml says.
           helm package deploy/helm/limen --version "$version" --app-version "$version" --destination dist
           echo "${GH_TOKEN}" | helm registry login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          # helm keeps its login in its own registry config; cosign reads the Docker one.
+          echo "${GH_TOKEN}" | cosign login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           helm push "dist/limen-${version}.tgz" "oci://ghcr.io/${owner}/charts" 2>&1 | tee push.txt
           digest="$(sed -n 's/^Digest: //p' push.txt)"
           [ -n "$digest" ] || { echo "helm push printed no digest" >&2; exit 1; }
