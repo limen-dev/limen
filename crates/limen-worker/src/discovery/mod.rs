@@ -179,3 +179,6 @@ fn to_item(matcher: usize, f: &limen_policy::discovery::Found) -> DiscoveredItem
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod emulator_tests;
