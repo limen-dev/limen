@@ -106,6 +106,11 @@ impl Proxy {
             },
         )
         .await?;
+        // Do not serve while the control plane is older than this proxy (ADR-0045).
+        limen_component::gate::wait_for_control_plane(limen_core::VERSION, || {
+            build_cp_channel(&config, &creds)
+        })
+        .await;
         let tls = Arc::new(RwLock::new(Arc::new(build_server_config(&creds)?)));
         let cp = Arc::new(RwLock::new(build_cp_channel(&config, &creds)?));
         let signer = Arc::new(RwLock::new(Arc::new(build_signer(&creds)?)));

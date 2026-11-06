@@ -135,7 +135,7 @@ module "proxy_lb" {
 
 # ------------------------------------------------------------------- services
 locals {
-  image = { for c in ["control-plane", "proxy", "worker"] : c => "${var.image_registry}/limen-${c}:${var.image_tag}" }
+  image = { for c in ["control-plane", "proxy", "worker"] : c => "${var.image_registry}/limen-${c}:${lookup(var.image_tags, c, var.image_tag)}" }
 
   control_plane_dns = module.control_plane_lb.dns_name
 
@@ -211,6 +211,8 @@ module "ecs" {
 
 module "ec2" {
   source = "../../modules/ec2"
+
+  start_after = [for s in module.ecs.services : s.name]
 
   name        = var.name
   groups      = local.workers

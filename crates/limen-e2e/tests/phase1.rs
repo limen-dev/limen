@@ -170,6 +170,24 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
     )
     .await;
 
+    // The upgrade gate (ADR-0045) starts a component anyway when its question fails, so a wiring
+    // bug would pass every other test. Ask exactly what it asks: a proxy directly, and a worker
+    // through its proxy (the relay and the component check both have to allow it).
+    assert_eq!(
+        limen_component::gate::control_plane_version(d.proxy().cp_channel()).await,
+        Ok(limen_core::VERSION.to_owned()),
+        "a proxy asks the control plane"
+    );
+    assert_eq!(
+        worker.worker.control_plane_version().await,
+        Ok(limen_core::VERSION.to_owned()),
+        "a worker asks the control plane through its proxy"
+    );
+    assert_eq!(
+        limen_component::gate::verdict(limen_core::VERSION, Ok(limen_core::VERSION)),
+        limen_component::gate::Verdict::Go
+    );
+
     // The token can't be used again.
     let reuse = EnrollmentClient::new(d.proxy_channel(None))
         .enroll(EnrollRequest {
