@@ -2848,6 +2848,7 @@ version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
+ "h2",
  "http",
  "http-body-util",
  "hyper",

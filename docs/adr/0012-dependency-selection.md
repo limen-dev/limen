@@ -18,6 +18,7 @@ A dependency is adopted only if all of these hold:
 |---|---|---|---|---|
 | Runtime | tokio | 1.53.3 | 2026-10-13 | Adopt |
 | HTTP | hyper 1.12 / axum 0.8.9 / tower 0.5.3 | | 2026-10 / 2026-04 / 2026-01 | Adopt |
+| HTTP/2 client, test-only | h2 0.4.20 | | 2026-10 | Adopt, test-only (`limen-e2e`). Already a transitive dependency of `hyper`, which never gives a caller frame-level control; a pentest regression test (rapid-reset stream abuse, refs #66) needs to reset a stream mid-flight, which only the lower-level crate exposes. No RustSec advisory; maintained by the hyperium org that ships hyper itself |
 | gRPC | tonic, tonic-prost(-build) 0.14.6, prost 0.14.4 | | 2026-05 / 2026-06 | Adopt. `prost` is also used directly by the control plane for Phase 12 web-session handoff messages. Needs `protoc` at build time (pinned through mise) |
 | TLS | rustls 0.23.46, tokio-rustls 0.26.6 | | 2026-10 / 2026-09 | Adopt. Locked `rustls-webpki` and root-store crates are at patched versions 0.103.16 / 1.0.10 after the 2026-10 RustSec advisories |
 | X.509 | rcgen 0.14.10, x509-parser 0.18.1 | | 2026-08 / 2026-02 | Adopt. Remote-signing spike in Phase 1 (ADR-0007) |
