@@ -20,6 +20,17 @@ variable "image_tag" {
   type        = string
 }
 
+variable "image_tags" {
+  description = "Tag for one component, overriding image_tag, to upgrade the components one at a time (see docs/runbooks/upgrading.md). Keys: control-plane, proxy, worker. Leave empty outside an upgrade."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for k in keys(var.image_tags) : contains(["control-plane", "proxy", "worker"], k)])
+    error_message = "image_tags keys must be control-plane, proxy or worker."
+  }
+}
+
 variable "oidc" {
   description = "Your identity provider's issuer URL and the client id registered for Limen."
   type = object({

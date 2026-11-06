@@ -44,6 +44,7 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | core\_vpc | The VPC created for the database, control planes and proxies. | <pre>object({<br/>    cidr               = optional(string, "10.40.0.0/16")<br/>    azs                = optional(list(string), ["eu-west-1a", "eu-west-1b", "eu-west-1c"])<br/>    private_subnets    = optional(list(string), ["10.40.0.0/20", "10.40.16.0/20", "10.40.32.0/20"])<br/>    public_subnets     = optional(list(string), ["10.40.100.0/24", "10.40.101.0/24", "10.40.102.0/24"])<br/>    single_nat_gateway = optional(bool, true)<br/>  })</pre> | `{}` | no |
 | database | PostgreSQL settings (see modules/foundation). | `any` | `{}` | no |
 | discovery\_sources | Sources the discovery role may read. Used when any worker group sets discovery = true. | `set(string)` | <pre>[<br/>  "ec2",<br/>  "rds",<br/>  "redshift",<br/>  "elasticache",<br/>  "eks"<br/>]</pre> | no |
+| image\_tags | Tag for one component, overriding image\_tag, to upgrade the components one at a time (see docs/runbooks/upgrading.md). Keys: control-plane, proxy, worker. Leave empty outside an upgrade. | `map(string)` | `{}` | no |
 | name | Prefix for every resource. | `string` | `"limen-prod"` | no |
 | region | AWS region for everything in this example. | `string` | `"eu-west-1"` | no |
 
