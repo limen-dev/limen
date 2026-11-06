@@ -5,6 +5,7 @@ One `helm upgrade` or one `terraform apply` upgrades everything in order. Proxie
 **Unverified.** Written from the code, the chart and the Terraform modules; no rollout has been run on a cluster or in AWS. Expect to correct it on the first real upgrade.
 
 ## Before you start
+`OLD` and `NEW` below are image tags with the `v` (for example `v0.1.0-rc.2`); the chart version is `NEW` without it.
 - Read the release notes. Before 1.0 a minor release may break things.
 - **Back up the database** (on Aurora, a cluster snapshot). Migrations only move forward; the backup is the only way back.
 - [Verify the audit chain](audit-verify.md), so a later gap is not one you started with.
@@ -15,10 +16,10 @@ CHART=oci://ghcr.io/limen-dev/charts/limen      # from a checkout: deploy/helm/l
 helm upgrade limen "$CHART" --version "$VERSION" -n limen -f limen-values.yaml -f my-values.yaml \
   --wait --timeout 40m
 ```
-`VERSION` is the release without its `v`. The StatefulSet replaces control plane replicas one at a time; new proxy pods stay unready until the control plane is upgraded, and workers follow. `--timeout` must cover the slowest rollout: replicas times the grace period (three workers at 330 s is about 17 minutes). **Do not add `--atomic`** and do not `helm rollback` once the control plane has migrated; see *Rolling back*.
+`VERSION` is `${NEW#v}`. The StatefulSet replaces control plane replicas one at a time; new proxy pods stay unready until the control plane is upgraded, and workers follow. `--timeout` must cover the slowest rollout: replicas times the grace period (three workers at 330 s is about 17 minutes). **Do not add `--atomic`** and do not `helm rollback` once the control plane has migrated; see *Rolling back*.
 
 ## Terraform (`examples/complete`)
-Set `image_tag` in `my.tfvars` to the new release, then:
+Set `image_tag` in `my.tfvars` to `NEW`, then:
 ```sh
 terraform plan  -var-file=my.tfvars -out=upgrade.plan     # read it: images and task definitions only
 terraform apply upgrade.plan
@@ -30,7 +31,7 @@ for asg in $(terraform output -json worker_groups | jq -r '.[].autoscaling_group
     --query 'InstanceRefreshes[0].[Status,PercentageComplete]' --output text   # until Successful 100
 done
 ```
-A plan that shows more than the new image means the example changed in this release; read the notes. `examples/kubernetes` creates only the dependencies (database, KMS, S3, IAM, tokens); Limen itself is the Helm path.
+The plan should show new images and task definitions, and the worker launch templates. Anything else (a new resource, a changed database or key) means the example changed in this release; read the notes. `examples/kubernetes` creates only the dependencies (database, KMS, S3, IAM, tokens); Limen itself is the Helm path.
 
 ## Check
 All replicas ready; `limen_control_plane_replicas` back at its count; a login and a new session work; no migration or startup errors in the logs. A proxy or worker that is still waiting says so: `waiting for the control plane to be upgraded before starting`. That is normal while the control plane rolls, and a problem only if the control plane never finishes. Workers end the sessions that outlast their drain (`session.end`, `reason: worker_drain`); to end none, wait for `limen_worker_sessions_active` to reach 0 first.
@@ -45,7 +46,7 @@ limen --version && limen doctor
 From a checkout, `scripts/install-cli.sh` builds and installs it. Then re-run the [audit verification](audit-verify.md): the chain must verify across the upgrade.
 
 ## Pausing between components (optional)
-To check each component before the next, pin the others to the old release and move one at a time. Keep the single tag on the old release and add an override, then widen it (`OLD` and `NEW` are image tags with the `v`).
+To check each component before the next, pin the others to the old release and move one at a time. Keep the single tag on the old release and add an override, then widen it .
 ```sh
 # Helm: image.tag stays OLD; override per component (control-plane, proxy, worker)
 helm upgrade limen "$CHART" --version "$VERSION" -n limen -f limen-values.yaml -f my-values.yaml \
