@@ -165,3 +165,10 @@ header.header {
   .right-sidebar-container { width: var(--sl-sidebar-width); }
   [data-has-sidebar][data-has-toc] .main-pane { width: calc(100% - var(--sl-sidebar-width)); --sl-content-margin-inline: auto; }
 }
+
+/* One doc to the next: hold the header and the sidebar still while the page changes.
+   Wide screens only; on a phone the sidebar is a drawer and should not become a layer. */
+@media (min-width: 50rem) {
+  header.header { view-transition-name: docs-header; }
+  .sidebar-pane { view-transition-name: docs-sidebar; }
+}

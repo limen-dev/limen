@@ -39,11 +39,14 @@ export default defineConfig({
         '@fontsource-variable/geist-mono/index.css',
         './src/styles/tokens.css',
         './src/styles/docs.css',
+        './src/styles/transitions.css',
       ],
       head: [
         { tag: 'meta', attrs: { property: 'og:image', content: new URL(`${base}og.png`, site).href } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'script', attrs: { src: `${base}docs-a11y.js`, defer: true } },
+        // Not deferred: it must be listening before the page is first drawn.
+        { tag: 'script', attrs: { src: `${base}page-transitions.js` } },
       ],
       components: { Footer: './src/components/DocsFooter.astro' },
       // Our own 404 page (src/pages/404.astro) replaces Starlight's.
