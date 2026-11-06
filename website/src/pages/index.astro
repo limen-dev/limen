@@ -80,6 +80,14 @@ const groups: Group[] = [
     ],
   },
 ];
+const consoleFeatures = [
+  { t: 'Replay a session', d: 'Watch an SSH recording once the control plane has checked its hash. SQL, Redis and other sessions list what ran.' },
+  { t: 'Approve with context', d: 'Approvers see the reason, the duration, and what the requester did on that resource in the past 30 days.' },
+  { t: 'Reviews and evidence', d: 'Run access reviews and download a signed evidence pack for an auditor.' },
+  { t: 'Lock and end', d: 'Lock a user or end a live session, always with a reason that goes into the audit trail.' },
+  { t: 'Dashboards', d: 'Sessions over time, denials, bot sessions by repository, out-of-hours access and sessions without a recording.' },
+  { t: 'Edit policy safely', d: 'Edit the documents the console owns, after checking the diff, who gains access and the policy tests.' },
+];
 const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l) => l.color.startsWith('#')).map((l) => ({ l, href: i.href }))));
 
 // The ⌘K palette. Plain data, no third-party search.
@@ -189,6 +197,49 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
               <p class="ledger-note">A simplified picture of the idea. The real trail is batched, signed, and chained per writer in S3, and <code>limen audit verify</code> walks it.</p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- CONSOLE -->
+      <section class="section" id="console">
+        <div class="wrap">
+          <div class="eyebrow">The console</div>
+          <h2>Prefer a browser? The console has it.</h2>
+          <p class="sub">The same identity provider and the same policy, in a web console the proxy serves. Look around, replay sessions, approve requests and make the occasional admin change. Your roles decide what you see, and everything you change is audited as you.</p>
+
+          <div class="shotbox reveal">
+            <div class="term-bar">
+              <span class="lights"><i></i><i></i><i></i></span>
+              <div class="tabs" role="tablist" aria-label="Console pages">
+                <button role="tab" aria-selected="true" data-pg="resources" type="button">Resources</button>
+                <button role="tab" aria-selected="false" data-pg="audit" type="button">Audit trail</button>
+                <button role="tab" aria-selected="false" data-pg="policy" type="button">Policy</button>
+              </div>
+            </div>
+            <figure class="shot" data-panel="resources">
+              <img class="dark" src={`${base}console/resources-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it." />
+              <img class="light" src={`${base}console/resources-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Resources page: every resource with its labels, the roles that grant access, and how many workers can serve it." />
+              <figcaption>Everything Limen can reach, with the roles that grant access and the live workers that can serve it. A "none" means no worker can, so sessions would fail.</figcaption>
+            </figure>
+            <figure class="shot" data-panel="audit" hidden>
+              <img class="dark" src={`${base}console/audit-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Audit trail page: filters by kind, user and time, and a list of events." />
+              <img class="light" src={`${base}console/audit-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Audit trail page: filters by kind, user and time, and a list of events." />
+              <figcaption>The last 30 days of sign-ins, denials, locks and policy changes, with search across commands and statements. Every search is recorded too.</figcaption>
+            </figure>
+            <figure class="shot" data-panel="policy" hidden>
+              <img class="dark" src={`${base}console/policy-dark.jpg`} width="1504" height="723" loading="lazy" alt="The console's Policy page: the active version and digest, and every role." />
+              <img class="light" src={`${base}console/policy-light.jpg`} width="1504" height="723" loading="lazy" alt="The console's Policy page: the active version and digest, and every role." />
+              <figcaption>Every policy document with its owner. Check a change before applying it: the diff, who gains or loses access, and the policy tests.</figcaption>
+            </figure>
+            <p class="shot-note">The real console, with sample data.</p>
+          </div>
+
+          <ul class="cfeat">
+            {consoleFeatures.map((f) => (
+              <li class="reveal"><b>{f.t}</b><span>{f.d}</span></li>
+            ))}
+          </ul>
+          <div class="diagram-link reveal"><a href={docs('guides/console/')}>The console guide →</a></div>
         </div>
       </section>
 

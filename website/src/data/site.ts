@@ -21,6 +21,7 @@ export const paletteFor = (base: string) => {
     { t: 'Management API', h: docs('guides/management-api/'), k: 'grpc manage writer profile client' },
     { t: 'Terraform and OpenTofu', h: docs('guides/terraform/'), k: 'provider hcl iac tofu registry' },
     { t: 'Policy reference', h: docs('reference/policy/'), k: 'yaml roles rules labels' },
+    { t: 'The web console', h: docs('guides/console/'), k: 'browser ui sessions replay dashboards audit trail' },
     { t: 'Verify the audit chain', h: docs('runbooks/audit-verify/'), k: 'hash signed prove limen audit verify' },
     { t: 'Architecture and design', h: docs('architecture/design/'), k: 'design adr' },
     { t: 'Threat model', h: docs('architecture/threat-model/'), k: 'security' },

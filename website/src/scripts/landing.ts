@@ -419,6 +419,17 @@ const scenarios: Record<string, Step[]> = {
 }
 
 
+// CONSOLE TABS: one page of the console at a time.
+{
+  const box = $('.shotbox');
+  box?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-pg]');
+    if (!b) return;
+    box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+    box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
+  });
+}
+
 // PROTOCOL FILTER: show all tiles, only fully tested ones, or only those with an unverified cloud path.
 {
   const bar = $('.pfilter');
