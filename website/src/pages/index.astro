@@ -187,6 +187,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                   <button role="tab" aria-selected="true" data-scn="ssh" type="button">SSH</button>
                   <button role="tab" aria-selected="false" data-scn="pg" type="button">Postgres</button>
                   <button role="tab" aria-selected="false" data-scn="k8s" type="button">Kubernetes</button>
+                  <button role="tab" aria-selected="false" data-scn="redis" type="button">Redis</button>
                   <button role="tab" aria-selected="false" data-scn="req" type="button">Ask for access</button>
                 </div>
                 <button class="replay" id="replay" type="button" aria-label="Replay">↻ replay</button>
@@ -194,7 +195,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
               <p class="sr-only">A replayed terminal session. The audit events it produces appear in the list beside it.</p>
               <pre class="term-body" id="term" aria-hidden="true"></pre>
               <noscript><p class="noscript">Turn on JavaScript to replay this session.</p></noscript>
-              <div class="term-foot">Illustrative output. The commands are real; see the <a href={docs('guides/cli/')}>CLI guide</a>.</div>
+              <div class="term-foot">Illustrative output. The commands are real; see the <a href={docs('guides/cli/')}>CLI guide</a>. The same trail covers MySQL, MongoDB, Redis, search, Kafka, RabbitMQ, web apps and TCP: <a href="#protocols">see the integrations</a>.</div>
             </div>
 
             <div class="ledger" aria-label="Audit trail demo">

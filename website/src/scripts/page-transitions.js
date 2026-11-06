@@ -5,6 +5,13 @@
   var inDocs = function (path) { return /\/docs(\/|$)/.test(path); };
   addEventListener('pagereveal', function (e) {
     if (!e.viewTransition) return;
+    // Back and forward: the browser restores the scroll position itself, and a slide would start
+    // from the top of the page and then jump to that position. Leave these to the browser.
+    var traversal = false;
+    try { traversal = navigation.activation.navigationType === 'traverse'; } catch (_) {
+      try { traversal = performance.getEntriesByType('navigation')[0].type === 'back_forward'; } catch (_) { /* unknown */ }
+    }
+    if (traversal) { e.viewTransition.skipTransition(); document.documentElement.dataset.vt = 'traverse'; return; }
     var from = '';
     try {
       var url = new URL(navigation.activation.from.url);

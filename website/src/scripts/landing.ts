@@ -236,6 +236,17 @@ const scenarios: Record<string, Step[]> = {
     { ev: { ty: 'session.end', who: ME, detail: 'exec ended · 18s' } },
     { o: 'Impersonation means the cluster sees you, not a shared admin.', cls: 'dim' },
   ],
+  redis: [
+    { c: 'limen redis connect cache-staging' },
+    { o: '✔ Listening for cache-staging as read. No password needed.', cls: 'ok' },
+    { ev: { ty: 'session.start', who: ME, detail: 'cache-staging as read' } },
+    { c: 'redis-cli -h 127.0.0.1 -p 56950 GET app:config:region' },
+    { ev: { ty: 'redis.command', who: ME, detail: 'GET app:config:region · allowed' } },
+    { c: 'redis-cli -h 127.0.0.1 -p 56950 GET billing:secret' },
+    { o: 'NOPERM Limen: key 1 of 1 is outside the keys this role allows', cls: 'warn' },
+    { ev: { ty: 'redis.command', who: ME, detail: 'GET billing:secret · refused by policy' } },
+    { ev: { ty: 'session.end', who: ME, detail: 'cache-staging · values are never kept' } },
+  ],
   req: [
     { c: 'limen request orders-prod --for 30m --reason "INC-123: orders table is locked" --wait' },
     { o: '⏳ Waiting for sre-leads to decide…', cls: 'dim' },
