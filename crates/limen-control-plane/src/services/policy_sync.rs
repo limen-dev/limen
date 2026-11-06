@@ -1,7 +1,9 @@
 //! Signed policy snapshots for proxies and workers (ADR-0008, ADR-0011).
 
 use limen_proto::v1::policy_sync_server::PolicySync;
-use limen_proto::v1::{GetPolicySnapshotRequest, Signed};
+use limen_proto::v1::{
+    GetPolicySnapshotRequest, GetServerVersionRequest, GetServerVersionResponse, Signed,
+};
 use limen_session::snapshot::Restrictions;
 use time::OffsetDateTime;
 use tonic::{Request, Response, Status};
@@ -72,5 +74,16 @@ impl PolicySync for PolicySyncService {
         )
         .map_err(|e| internal("signing policy snapshot", e))?;
         Ok(Response::new(signed))
+    }
+    async fn get_server_version(
+        &self,
+        request: Request<GetServerVersionRequest>,
+    ) -> Result<Response<GetServerVersionResponse>, Status> {
+        // Components only (proxies directly, workers through a proxy). Not rate limited
+        // like the unauthenticated calls: a waiting fleet polls this.
+        caller::resolve(&request, &self.0.cas)?.component()?;
+        Ok(Response::new(GetServerVersionResponse {
+            version: limen_core::VERSION.to_owned(),
+        }))
     }
 }

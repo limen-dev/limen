@@ -10,12 +10,13 @@ use limen_core::identity::ComponentKind;
 use limen_proto::v1::admin_client::AdminClient;
 use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::enrollment_client::EnrollmentClient;
+use limen_proto::v1::policy_sync_client::PolicySyncClient;
 use limen_proto::v1::registry_client::RegistryClient;
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{
-    ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, ListComponentsRequest,
-    ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource, RenewCertificateRequest,
-    ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
+    ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, GetServerVersionRequest,
+    ListComponentsRequest, ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource,
+    RenewCertificateRequest, ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
 use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
@@ -573,6 +574,45 @@ async fn only_proxies_may_forward_or_report() {
         .await
         .expect_err("no user");
     assert_eq!(err.code(), Code::Unauthenticated);
+}
+
+#[tokio::test]
+async fn components_may_ask_the_control_plane_its_version_and_others_may_not() {
+    let Some(h) = Harness::start().await else {
+        return;
+    };
+    let (_, proxy) = h.enroll_proxy().await;
+    let (_, admin_user) = h.login(ADMIN, &["admins"]).await.expect("admin");
+
+    // The upgrade gate (ADR-0045) polls this call, so it must not share the
+    // unauthenticated limit: ask far more often than 30 times a minute.
+    for _ in 0..50 {
+        let version = PolicySyncClient::new(h.channel(Some(proxy.clone())))
+            .get_server_version(GetServerVersionRequest {})
+            .await
+            .expect("a component may ask")
+            .into_inner()
+            .version;
+        assert_eq!(version, limen_core::VERSION);
+    }
+
+    // Anonymous callers and users (a forwarded user certificate) may not.
+    let err = PolicySyncClient::new(h.channel(None))
+        .get_server_version(GetServerVersionRequest {})
+        .await
+        .expect_err("anonymous");
+    assert!(
+        matches!(err.code(), Code::PermissionDenied | Code::Unauthenticated),
+        "{err}"
+    );
+    let err = PolicySyncClient::new(h.channel(None))
+        .get_server_version(forwarded(GetServerVersionRequest {}, Some(&admin_user)))
+        .await
+        .expect_err("a user");
+    assert!(
+        matches!(err.code(), Code::PermissionDenied | Code::Unauthenticated),
+        "{err}"
+    );
 }
 
 #[tokio::test]
