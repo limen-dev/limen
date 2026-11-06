@@ -49,7 +49,6 @@ tonic-prost-build = "0.14.6"
 tonic-types = "0.14.6"
 hyper = { version = "1.12", features = ["http1", "http2", "server", "client"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "server", "server-auto", "client-legacy", "http1", "http2", "service"] }
-# Already pulled in by hyper; direct so limen-e2e can reset streams itself (ADR-0012).
 h2 = "0.4.20"
 http = "1.5"
 http-body = "1.0"
