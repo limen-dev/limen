@@ -504,3 +504,8 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 @media (prefers-reduced-motion: reduce) {
   body::before, .steps::after { display: none; }
 }
+
+@media (max-width: 560px) {
+  .snip.one { font-size: 0.72rem; }
+  .minichain i { width: 1.7rem; } .minichain i + i { margin-left: 0.8rem; } .minichain i:not(:last-child)::after { width: 0.8rem; }
+}
