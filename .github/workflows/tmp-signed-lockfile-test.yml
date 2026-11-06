@@ -1,0 +1,36 @@
+name: tmp-signed-lockfile-test
+on:
+  push:
+    branches: [test/signed-lockfile-tmp]
+permissions: {}
+jobs:
+  t:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A commit made with git in the runner is unsigned. One made through the GraphQL API
+      # is signed by GitHub, and the repository requires verified signatures.
+      - name: Commit it, if it changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo '# signing test' >> Cargo.lock
+          # The lock file is too big for an argument, so the request goes in as a file.
+          base64 -w0 Cargo.lock > Cargo.lock.b64
+          jq -n --rawfile contents Cargo.lock.b64 \
+            --arg repo "$GITHUB_REPOSITORY" --arg branch "$BRANCH" --arg head "$(git rev-parse HEAD)" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $head,
+                message: {headline: "chore: refresh Cargo.lock for the release"},
+                fileChanges: {additions: [{path: "Cargo.lock", contents: ($contents | rtrimstr("\n"))}]}
+              }}}' > request.json
+          gh api graphql --input request.json
