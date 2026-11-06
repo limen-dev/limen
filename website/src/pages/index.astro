@@ -234,8 +234,8 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             {consolePages.map((pg, i) => (
               <figure class="shot" data-panel={pg.id} hidden={i > 0}>
                 <div class="shot-img">
-                  <img class="dark" src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
-                  <img class="light" src={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading={i > 0 ? 'lazy' : undefined} alt={pg.alt} />
+                  {i === 0 && <noscript><img src={`${base}console/${pg.id}-dark.jpg`} width="2000" height="1027" alt={pg.alt} /></noscript>}
+                  <img class="shot-pic" data-dark={`${base}console/${pg.id}-dark.jpg`} data-light={`${base}console/${pg.id}-light.jpg`} width="2000" height="1027" loading="lazy" decoding="async" alt={pg.alt} />
                 </div>
                 <figcaption>{pg.cap}</figcaption>
               </figure>

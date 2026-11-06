@@ -7,6 +7,7 @@ import '../styles/transitions.css';
 import geistFont from '@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url';
 import geistMonoFont from '@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2?url';
 import { GH, ghPath, docsUrl, paletteFor } from '../data/site';
+import pageTransitions from '../scripts/page-transitions.js?raw';
 
 interface Props {
   title: string;
@@ -24,7 +25,7 @@ const palette = paletteFor(base);
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <script is:inline src={`${base}page-transitions.js`}></script>
+    <script is:inline set:html={pageTransitions}></script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />

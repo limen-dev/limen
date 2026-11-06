@@ -420,9 +420,6 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .shot { margin: 0; }
 .shot[hidden] { display: none; }
 .shot img { display: block; width: 100%; height: auto; }
-.shot .light { display: none; }
-:root[data-theme='light'] .shot .light { display: block; }
-:root[data-theme='light'] .shot .dark { display: none; }
 .shot figcaption { padding: 0.9rem 1.1rem 0.2rem; font-size: 0.92rem; color: var(--lm-text-dim); border-top: 1px solid var(--lm-line); }
 .shot-note { margin: 0; padding: 0.2rem 1.1rem 0.9rem; font-size: 0.78rem; color: var(--lm-muted); font-family: var(--lm-mono); }
 .cfeat { list-style: none; margin: 1.6rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
@@ -554,3 +551,26 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 @keyframes flowv { to { background-position: 100% -200%; } }
 @keyframes sweepv { 0% { background-position: 50% -12%; } 100% { background-position: 50% 112%; } }
 @media (prefers-reduced-motion: reduce) { .nav.open .nav-links { animation: none; } }
+
+/* ---- small phones, touch, and reduced motion (kept last so they win) ---- */
+.snip.one { overflow-x: auto; scrollbar-width: none; }
+.snip.one::-webkit-scrollbar { display: none; }
+@media (max-width: 380px) {
+  .snip.one { font-size: 0.66rem; }
+  .card { padding: 1.25rem; }
+}
+@media (pointer: coarse) {
+  .tabs button, .replay, .copy, .btn.small { min-height: 2.5rem; }
+  .icon-btn, .kbd-btn { min-width: 2.5rem; min-height: 2.5rem; }
+  .more { display: inline-block; padding-block: 0.55rem; }
+  .nav-links a { min-height: 2.75rem; display: flex; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before, .steps::before, .steps::after { animation: none; }
+  .steps::after { display: none; }
+}
+@media (max-width: 340px) {
+  /* the narrowest phones: let the one-line commands wrap rather than hide text behind a scroll */
+  .snip.one { white-space: pre-wrap; word-break: break-word; overflow-x: visible; }
+}
+.shot-pic { color: transparent; font-size: 0; background: var(--lm-surface); }

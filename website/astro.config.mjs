@@ -1,6 +1,7 @@
 import { satteri } from '@astrojs/markdown-satteri';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import { readFileSync } from 'node:fs';
 
 // A project site on GitHub Pages is served under /<repo>/; a custom domain from /.
 // Both come from the environment so moving hosts is a settings change (issues #136, #138).
@@ -45,8 +46,8 @@ export default defineConfig({
         { tag: 'meta', attrs: { property: 'og:image', content: new URL(`${base}og.png`, site).href } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'script', attrs: { src: `${base}docs-a11y.js`, defer: true } },
-        // Not deferred: it must be listening before the page is first drawn.
-        { tag: 'script', attrs: { src: `${base}page-transitions.js` } },
+        // Inline, so it is listening before the page is first drawn and costs no request.
+        { tag: 'script', content: readFileSync(new URL('./src/scripts/page-transitions.js', import.meta.url), 'utf8') },
       ],
       components: { Footer: './src/components/DocsFooter.astro' },
       // Our own 404 page (src/pages/404.astro) replaces Starlight's.
