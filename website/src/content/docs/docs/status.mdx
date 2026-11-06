@@ -39,7 +39,7 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 
 | Capability | Status | Unverified or missing |
 |---|---|---|
-| Signed, hash-chained audit to S3, `limen audit verify` | <span class="chip ok">built</span> | on real S3 |
+| Signed, hash-chained audit to S3, `limen audit verify` (access lent through an assumed AWS role) | <span class="chip ok">built</span> | on real S3 and STS |
 | Datadog logs and monitors, Grafana dashboards | <span class="chip ok">built</span> with a fake intake and Trino | real Datadog, real Athena |
 | Metrics, OpenTelemetry traces, example alerts | <span class="chip ok">built</span> | |
 | Scale-out: several control planes, proxies, workers | <span class="chip ok">built</span> | Kubernetes example on a real cluster |

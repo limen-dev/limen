@@ -11,7 +11,7 @@ pub async fn s3_client(endpoint: Option<&str>, path_style: bool) -> aws_sdk_s3::
 }
 
 /// Read-only access to the audit bucket, as Limen hands it out.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Access {
     pub endpoint: Option<String>,
     pub path_style: bool,
@@ -21,6 +21,20 @@ pub struct Access {
     pub session_token: Option<String>,
     /// Unix seconds; `None` for a key that does not expire.
     pub expires_unix: Option<u64>,
+}
+
+// Credentials never reach a log or a panic message through `{:?}`.
+impl std::fmt::Debug for Access {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Access")
+            .field("endpoint", &self.endpoint)
+            .field("region", &self.region)
+            .field("access_key_id", &"<redacted>")
+            .field("secret_access_key", &"<redacted>")
+            .field("session_token", &"<redacted>")
+            .field("expires_unix", &self.expires_unix)
+            .finish_non_exhaustive()
+    }
 }
 
 /// An S3 client that uses only `access`. It never reads the caller's own AWS

@@ -23,6 +23,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 limen-audit.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

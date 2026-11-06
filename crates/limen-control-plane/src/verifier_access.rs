@@ -43,6 +43,13 @@ pub async fn grant(state: &AppState, username: &str) -> Result<VerifierAccessRes
         .audit_verifier_access_key_id
         .clone()
         .zip(cfg.audit_verifier_secret_access_key.clone());
+    // A fixed key never expires, so one grant would leak read access for good.
+    // It exists for S3-compatible stores without STS, in development only.
+    if role.is_none() && fixed.is_some() && cfg.environment != "dev" {
+        return Err(Status::failed_precondition(
+            "a fixed verifier key is only allowed with --environment dev; use a verifier role",
+        ));
+    }
     if role.is_none() && fixed.is_none() {
         return Err(Status::failed_precondition(
             "verification access is not set up: give the control plane a verifier role (LIMEN_AUDIT_VERIFIER_ROLE_ARN)",

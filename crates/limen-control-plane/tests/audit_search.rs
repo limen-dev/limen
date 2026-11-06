@@ -453,6 +453,7 @@ async fn only_admins_and_auditors_get_verifier_access_and_each_grant_is_audited(
         "--audit-s3-prefix=limen/".to_owned(),
         "--audit-verifier-access-key-id=verifier-key".to_owned(),
         "--audit-verifier-secret-access-key=verifier-secret-value".to_owned(),
+        "--environment=dev".to_owned(),
     ])
     .await
     else {
@@ -505,6 +506,22 @@ async fn verifier_access_needs_a_bucket_and_a_way_to_read_it() {
         .verifier_access(&r2.auditor)
         .await
         .expect_err("no way to read it");
+    assert_eq!(err.code(), Code::FailedPrecondition);
+    // A fixed key outside development is refused: it would never expire.
+    let Some(r3) = rig(&[
+        "--audit-s3-bucket=audit-bucket".to_owned(),
+        "--audit-verifier-access-key-id=k".to_owned(),
+        "--audit-verifier-secret-access-key=s".to_owned(),
+        "--environment=prod".to_owned(),
+    ])
+    .await
+    else {
+        return;
+    };
+    let err = r3
+        .verifier_access(&r3.auditor)
+        .await
+        .expect_err("a fixed key outside dev");
     assert_eq!(err.code(), Code::FailedPrecondition);
     assert!(
         r2.h.audit_events()
