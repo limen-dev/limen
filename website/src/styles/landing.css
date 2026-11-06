@@ -1,5 +1,8 @@
 *, *::before, *::after { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 5rem; }
+/* Smooth scrolling only while an in-page link is followed (see site.ts). On the whole document it also
+   animates the browser's own scroll restoration, so coming back from the docs scrolled down from the top. */
+html { scroll-padding-top: 5rem; }
+html.smooth { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--lm-bg);

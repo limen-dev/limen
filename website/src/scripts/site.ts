@@ -17,6 +17,16 @@ $('#theme')?.addEventListener('click', () => {
   }
 });
 
+/* ---------- smooth scrolling for links within the page, and only those ---------- */
+document.addEventListener('click', (e) => {
+  const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href*="#"]');
+  if (!a || reduce) return;
+  const url = new URL(a.href, location.href);
+  if (url.pathname !== location.pathname || url.origin !== location.origin) return;
+  root.classList.add('smooth');
+  setTimeout(() => root.classList.remove('smooth'), 1500);
+});
+
 /* ---------- the menu on small screens ---------- */
 {
   const nav = $('#nav');
