@@ -75,7 +75,6 @@ jobs:
       - name: Image versions agree with deploy/compose/.env
         run: scripts/check-versions.sh
 
-      # Formatting and clippy as `mise run check` (rustfmt and clippy come from mise.toml).
       - name: Formatting and lints
         run: mise run check
 
