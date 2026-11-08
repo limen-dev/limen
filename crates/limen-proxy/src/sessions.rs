@@ -485,20 +485,9 @@ async fn establish(
             request.principal, request.resource
         )));
     }
-    // Shadow deny rules (ADR-0046): reported, and the session goes on.
+    // Shadow deny rules (ADR-0046): found now, reported once the session
+    // has really opened, and the session goes on either way.
     let shadow = policy.shadow_denies(&access);
-    if !shadow.is_empty() {
-        let asked = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal });
-        crate::shadow::report(
-            &proxy.audit,
-            &shadow,
-            &user.username,
-            session_id,
-            snapshot.version,
-            &asked,
-        )
-        .await;
-    }
     let target = Target {
         resource: &request.resource,
         kind: &kind,
@@ -512,6 +501,18 @@ async fn establish(
     };
     let (session_id, worker, inbound, outbound, slot) =
         open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
+    if !shadow.is_empty() {
+        let asked = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal });
+        crate::shadow::report(
+            &proxy.audit,
+            &shadow,
+            &user.username,
+            Some(session_id),
+            snapshot.version,
+            &asked,
+        )
+        .await;
+    }
     Ok((
         session_id,
         worker,

@@ -192,11 +192,7 @@ impl Policy {
         let mut out = Vec::new();
         for role in self.roles.values() {
             for (_, rule) in role.spec.shadow_deny() {
-                let until = if role.spec.is_shadow() {
-                    role.spec.shadow_until
-                } else {
-                    rule.shadow_until
-                };
+                let until = role.spec.shadow_until_of(rule);
                 if let (Some(name), Some(until)) = (&rule.name, until) {
                     out.push(ShadowRule {
                         role: role.metadata.name.clone(),
@@ -262,6 +258,7 @@ impl Policy {
             for rule in &was.spec.deny {
                 unmatched.entry(content_key(rule)).or_default().push(rule);
             }
+            let mut new_shadow_without_counterpart = false;
             for rule in &role.spec.deny {
                 let candidates = unmatched.entry(content_key(rule)).or_default();
                 let old = if candidates.is_empty() {
@@ -269,7 +266,10 @@ impl Policy {
                 } else {
                     Some(candidates.remove(0))
                 };
-                let Some(old) = old else { continue };
+                let Some(old) = old else {
+                    new_shadow_without_counterpart |= role.spec.deny_is_shadow(rule);
+                    continue;
+                };
                 let name = rule
                     .name
                     .clone()
@@ -282,20 +282,28 @@ impl Policy {
                     out.push(format!(
                         "{label}: enforced before, now reported only (shadow)"
                     ));
-                } else if now_shadow {
-                    let until = |r: &RoleDoc, rule: &Rule| {
-                        if r.spec.is_shadow() {
-                            r.spec.shadow_until
-                        } else {
-                            rule.shadow_until
-                        }
-                    };
-                    if let (Some(then), Some(now)) = (until(was, old), until(role, rule))
-                        && now > then
-                    {
-                        out.push(format!("{label}: shadow_until moves from {then} to {now}"));
-                    }
+                } else if now_shadow
+                    && let (Some(then), Some(now)) = (
+                        was.spec.shadow_until_of(old),
+                        role.spec.shadow_until_of(rule),
+                    )
+                    && now > then
+                {
+                    out.push(format!("{label}: shadow_until moves from {then} to {now}"));
                 }
+            }
+            // An enforced deny rule that disappeared while a shadow one with
+            // other content appeared: an edit and a move to shadow in one
+            // write, which would otherwise pass as a new shadow rule.
+            let edited_away = unmatched
+                .values()
+                .flatten()
+                .any(|old| !was.spec.deny_is_shadow(old));
+            if new_shadow_without_counterpart && edited_away {
+                out.push(format!(
+                    "role {}: an enforced deny rule was changed and a rule is now reported only (shadow)",
+                    role.metadata.name
+                ));
             }
         }
         out.sort();

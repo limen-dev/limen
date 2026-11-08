@@ -146,6 +146,17 @@ impl RoleSpec {
             .filter(move |(_, r)| all || r.mode == RuleMode::Shadow)
     }
 
+    /// The date by which `rule` (a deny rule of this role) must be settled:
+    /// the role's own for a shadow role, otherwise the rule's.
+    #[must_use]
+    pub fn shadow_until_of(&self, rule: &Rule) -> Option<ShadowDate> {
+        if self.is_shadow() {
+            self.shadow_until
+        } else {
+            rule.shadow_until
+        }
+    }
+
     /// Whether a deny rule of this role is reported rather than enforced.
     #[must_use]
     pub fn deny_is_shadow(&self, rule: &Rule) -> bool {

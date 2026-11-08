@@ -21,8 +21,8 @@ pub async fn policy_refresh(state: AppState, mut shutdown: watch::Receiver<bool>
 }
 
 /// How many deny rules are in shadow mode and how soon the first one runs
-/// out (`-1` when none are), so an alert can fire before a date passes
-/// and writes start being refused (ADR-0046).
+/// out (`+Inf` when none are, so `< 7` never fires for nothing), so an alert
+/// can fire before a date passes and writes start being refused (ADR-0046).
 fn publish_shadow_metrics(state: &AppState) {
     let rules = state.policy.base().policy.shadow_rules();
     let today = time::OffsetDateTime::now_utc().date();
@@ -30,10 +30,12 @@ fn publish_shadow_metrics(state: &AppState) {
         .iter()
         .map(|r| (r.until.0 - today).whole_days())
         .min()
-        .map_or(-1, |d| i32::try_from(d).unwrap_or(i32::MAX));
+        .map_or(f64::INFINITY, |d| {
+            f64::from(i32::try_from(d).unwrap_or(i32::MAX))
+        });
     metrics::gauge!("limen_policy_shadow_rules")
         .set(f64::from(i32::try_from(rules.len()).unwrap_or(i32::MAX)));
-    metrics::gauge!("limen_policy_shadow_days_left").set(f64::from(soonest));
+    metrics::gauge!("limen_policy_shadow_days_left").set(soonest);
 }
 
 /// Delete expired rows and idle rate limiter state.

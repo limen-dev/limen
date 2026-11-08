@@ -522,7 +522,11 @@ impl Policy {
     pub fn cert_ttl(&self, roles: &[String], default: Duration, max: Duration) -> Duration {
         roles
             .iter()
-            .filter_map(|r| self.roles.get(r)?.spec.cert_ttl.map(|d| d.0))
+            .filter_map(|r| {
+                let spec = &self.roles.get(r)?.spec;
+                // A shadow role changes nothing, lifetimes included (ADR-0046).
+                spec.cert_ttl.filter(|_| !spec.is_shadow()).map(|d| d.0)
+            })
             .min()
             .unwrap_or(default)
             .min(max)
@@ -534,7 +538,12 @@ impl Policy {
     pub fn max_session_ttl(&self, roles: &[String]) -> Duration {
         roles
             .iter()
-            .filter_map(|r| self.roles.get(r)?.spec.max_session_ttl.map(|d| d.0))
+            .filter_map(|r| {
+                let spec = &self.roles.get(r)?.spec;
+                spec.max_session_ttl
+                    .filter(|_| !spec.is_shadow())
+                    .map(|d| d.0)
+            })
             .min()
             .unwrap_or(DEFAULT_MAX_SESSION_TTL)
     }

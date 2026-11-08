@@ -91,10 +91,12 @@ spec:
 - **Deny rules and whole roles.** `mode: shadow` on a role reports all its `deny` rules and **ignores its `allow` rules**, so a shadow role neither denies nor grants. It needs `shadow_until`, a `name` on every deny rule, at least one deny rule, and can't be requestable or break-glass. An `allow` rule can't be shadowed.
 - **Reported only when the request is allowed.** A request that enforced rules already refuse teaches nothing about a shadow rule. A shadow rule never changes a decision.
 - **It runs out.** The control plane refuses any change to a policy whose `shadow_until` has passed or is more than 90 days away, until the rule is enforced or the date renewed. A shadow rule stays shadow at runtime until a new version says otherwise; nothing flips on a clock.
+- **Emergency changes.** Locking a user, ending a session and revoking a component are not policy writes and still work when a date has passed. Policy changes wait until the rule is enforced or renewed in the same change.
+- **A shadow role changes nothing else.** Its `cert_ttl` and `max_session_ttl` are ignored too.
 - **Loosening needs a second admin.** Moving a deny rule from enforce to shadow, or moving `shadow_until` later, is held for another admin whatever `--widening-approval` says. Going back to enforce, or earlier, applies at once.
 - **Upgrade every component first.** A control plane, proxy or worker from before this feature can't read a role with `name`, `mode` or `shadow_until` (unknown fields are errors), and an older control plane refuses the proxy's `policy.shadow_deny` events along with the rest of its batch. Use shadow rules only after all of them run this version.
 - **Where it is reported.** The proxy reports at the point it allows a session or web request. Checks made only by a worker are not reported yet: Kubernetes groups, and the database a MongoDB command names.
-- **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`-1` when none), `limen policy explain`, and `limen policy test` (`shadow_deny: [role/rule]`).
+- **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`+Inf` when none), `limen policy explain`, and `limen policy test` (`shadow_deny: [role/rule]`; rules with a `web` grant can't be asserted there yet, since a case has no method or path).
 
 ## `role_mapping`
 

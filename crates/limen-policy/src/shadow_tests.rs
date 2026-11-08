@@ -505,3 +505,38 @@ fn trace_agrees_with_enforcement_with_shadow_rules_present() {
         }
     }
 }
+
+#[test]
+fn a_shadow_role_changes_no_lifetimes() {
+    let ghost = GHOST.replace(
+        "  mode: shadow\n",
+        "  mode: shadow\n  cert_ttl: 5m\n  max_session_ttl: 10m\n",
+    );
+    let p = policy(&format!("{BASE_ROLE}---{ghost}")).expect("valid");
+    let roles = vec!["dev".to_owned(), "ghost".to_owned()];
+    let hour = std::time::Duration::from_hours(1);
+    assert_eq!(p.cert_ttl(&roles, hour, hour), hour);
+    assert_eq!(p.max_session_ttl(&roles), DEFAULT_MAX_SESSION_TTL);
+}
+
+#[test]
+fn editing_a_rule_and_shadowing_it_in_one_write_still_counts_as_loosening() {
+    let enforced = BASE_ROLE
+        .replace("      mode: shadow\n", "")
+        .replace("      shadow_until: 2027-01-31\n", "");
+    // Same rule names, but the root rule now selects staging too and is shadow.
+    let edited = BASE_ROLE.replacen(
+        "labels: { env: [prod] } }\n      ssh: { logins: [root] }",
+        "labels: { env: [prod, staging] } }\n      ssh: { logins: [root] }",
+        1,
+    );
+    assert_ne!(edited, BASE_ROLE);
+    let (before, after) = (
+        policy(&enforced).expect("valid"),
+        policy(&edited).expect("valid"),
+    );
+    // The unchanged web rule is matched and reported; the edited one is not
+    // matched, but must not slip through.
+    let lines = before.shadow_loosening(&after);
+    assert!(lines.iter().any(|l| l.contains("was changed")), "{lines:?}");
+}

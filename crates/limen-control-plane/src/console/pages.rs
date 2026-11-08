@@ -1589,7 +1589,7 @@ fn summarize(doc: &Document) -> String {
                 let dates: Vec<_> = r
                     .spec
                     .shadow_deny()
-                    .filter_map(|(_, rule)| rule.shadow_until)
+                    .filter_map(|(_, rule)| r.spec.shadow_until_of(rule))
                     .collect();
                 dates
                     .iter()
