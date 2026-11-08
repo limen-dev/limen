@@ -1062,7 +1062,8 @@ pub(crate) fn impact(outcome: &policy_store::Outcome) -> pb::Impact {
                 text: c.text(),
             })
             .collect(),
-        widens_standing_access: changes.iter().any(policy_changes::gives_standing),
+        widens_standing_access: changes.iter().any(policy_changes::gives_standing)
+            || !outcome.shadow_loosening.is_empty(),
         tests: outcome
             .tests
             .results

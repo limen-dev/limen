@@ -139,7 +139,8 @@ pub fn gives_standing(c: &AccessChange) -> bool {
     c.change == ChangeKind::Gain && c.via == Via::Standing && !matches!(c.subject, Subject::Role(_))
 }
 
-/// The standing access a write gives that nobody had, one line each.
+/// The standing access a write gives that nobody had, one line each, and
+/// the deny rules it moves to shadow mode (ADR-0046).
 #[must_use]
 pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
     outcome
@@ -148,6 +149,12 @@ pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
         .iter()
         .filter(|c| gives_standing(c))
         .map(AccessChange::text)
+        .chain(
+            outcome
+                .shadow_loosening
+                .iter()
+                .map(|l| format!("shadow mode: {l}")),
+        )
         .collect()
 }
 

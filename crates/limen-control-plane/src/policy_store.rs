@@ -271,6 +271,10 @@ pub struct Outcome {
     pub digest: String,
     pub diff: PolicyDiff,
     pub access: AccessDiff,
+    /// Deny rules the write moves to shadow mode, or gives more shadow time
+    /// (ADR-0046). Loosening the access diff can't always show, so it waits
+    /// for a second admin whatever `--widening-approval` says.
+    pub shadow_loosening: Vec<String>,
     pub warnings: Vec<String>,
     pub tests: testing::Report,
     /// Heads of the documents the changes created or updated, as stored (or
@@ -324,6 +328,19 @@ impl From<sqlx::Error> for StoreError {
     }
 }
 
+/// Shadow mode (ADR-0046) on a write: refuse dates that have passed or are
+/// too far ahead, and say what the write loosens. The dates are weighed here,
+/// not when a policy loads, so proxies and workers can always load what is
+/// stored.
+fn check_shadow(current: &Policy, next: &Policy) -> Result<Vec<String>, StoreError> {
+    let problems = next.shadow_date_problems(OffsetDateTime::now_utc().date());
+    if problems.is_empty() {
+        Ok(current.shadow_loosening(next))
+    } else {
+        Err(StoreError::Invalid(problems.join("; ")))
+    }
+}
+
 /// Apply `request`. See the module documentation.
 pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreError> {
     let mut tx = state.db.begin().await?;
@@ -367,6 +384,7 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
 
     let documents = effective(&heads)?;
     let next = Policy::from_documents(documents).map_err(|e| StoreError::Invalid(e.to_string()))?;
+    let shadow_loosening = check_shadow(&current.policy, &next)?;
     let diff = current.policy.diff(&next);
     let access = current.policy.access_diff(&next);
     let tests = next.run_tests();
@@ -386,6 +404,7 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         digest,
         diff,
         access,
+        shadow_loosening,
         warnings,
         tests,
         written: touched
@@ -398,11 +417,16 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         held: false,
         basis: basis(&request.changes, &before),
     };
+    // Loosening by shadow mode always waits for a second admin, unless this
+    // write is that admin's approval (whose hold then stops anything they
+    // did not see).
+    let loosens = !outcome.shadow_loosening.is_empty() && request.approval.is_none();
     outcome.held = !outcome.diff.is_empty()
-        && request
-            .hold
-            .as_ref()
-            .is_some_and(|h| h(&outcome, &before, &heads));
+        && (loosens
+            || request
+                .hold
+                .as_ref()
+                .is_some_and(|h| h(&outcome, &before, &heads)));
     if request.dry_run || outcome.held || (outcome.diff.is_empty() && !heads_changed) {
         return Ok(outcome);
     }
