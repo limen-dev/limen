@@ -136,6 +136,17 @@ FROM {T} WHERE {W} AND kind = 'auth.denied'
 GROUP BY 2, 3, 4, 5, 6 ORDER BY last_seen DESC LIMIT 200""",
     },
     {
+        "title": "Shadow denies by rule",
+        "type": "table",
+        "w": 24, "h": 8,
+        "format": "table",
+        "description": "Requests that were allowed but a shadow deny rule would have refused (ADR-0046). When a rule's count stays at zero, it is safe to enforce.",
+        "sql": """SELECT data.role AS role, data.rule AS rule, data.resource AS resource, count(DISTINCT "user") AS users,
+  count(DISTINCT event_id) AS would_have_denied, max(from_iso8601_timestamp("time")) AS last_seen
+FROM {T} WHERE {W} AND kind = 'policy.shadow_deny'
+GROUP BY 1, 2, 3 ORDER BY would_have_denied DESC LIMIT 200""",
+    },
+    {
         "title": "Top users",
         "type": "barchart",
         "w": 12, "h": 9,
