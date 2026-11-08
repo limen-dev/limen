@@ -36,11 +36,16 @@ outputs = ["node_modules/.package-lock.json"]
 run = "npm ci"
 
 [tasks.website]
-description = "Run the documentation site and homepage in dev mode"
+description = "Run the documentation site and homepage in dev mode (the server detaches: stop it with website-stop)"
 dir = "website"
 depends = ["website-deps"]
 raw = true
 run = "npm run dev"
+
+[tasks.website-stop]
+description = "Stop the documentation dev server that website started"
+dir = "website"
+run = "npx astro dev stop"
 
 [tasks.stack]
 description = "Deploy the local Limen dev stack (deploy/compose/setup.sh); flags after -- go to setup.sh, e.g. -- --yes --stacks ssh"
