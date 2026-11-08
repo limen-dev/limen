@@ -1,6 +1,6 @@
 # ADR-0046: IdP-driven offboarding with a stored refresh token
 
-- Status: Proposed (issue #111; the owner chose the refresh-token option on 2026-11-08)
+- Status: Accepted (issue #111; the owner chose the refresh-token option and the fail-open default on 2026-11-08, and asked for it to be built). *As built* notes are at the end.
 - Date: 2026-11-08
 
 ## Context
@@ -9,10 +9,10 @@ Onboarding is already driven by the IdP: a person added to a group runs `limen l
 Issue #111 proposed a periodic userinfo or introspection check with a service credential. That cannot be built IdP-neutrally here: the CLI is a public client that talks to the IdP itself, and the control plane receives only an ID token (ADR-0006). Userinfo needs the user's access token, and RFC 7662 introspection needs a token to introspect. SCIM stays a non-goal (design.md §1); the owner declined it for this step.
 
 ## Decision
-- **The CLI asks for `offline_access`** and sends the refresh token to the control plane at login, in the same request that presents the ID token and the key-bound nonce. An IdP that issues none (or a user who passes `--no-refresh`) is not an error: that login simply has no check, and the console says so.
-- **The control plane stores it encrypted** (envelope encryption with the existing KMS key, wrapped in `limen_core::secret::Secret`, never logged or audited), one per login ID, deleted when the login ends, is revoked, or expires. It is never returned by any API.
+- **The CLI asks for `offline_access`, when the control plane says so** (`GetAuthConfig` adds the scope only while the check is on, so an IdP that has not enabled refresh tokens is never asked), and sends the refresh token to the control plane at login, in the same request that presents the ID token and the key-bound nonce. An IdP that issues none is not an error: that login simply has no check, and the console says so.
+- **The control plane stores it sealed** (AES-256-GCM under `--idp-token-key`, bound to the login id, never logged or audited), one per login ID, deleted when the login ends, is revoked, or expires. It is never returned by any API. Without the key nothing is stored.
 - **One job checks logins.** A periodic job (default every 5 minutes, jitter, a bounded batch per tick) takes a database lease so only one replica polls (ADR-0020). For each live login it makes a refresh grant:
-  - `invalid_grant` (or `invalid_token`) means the user was deactivated or the session revoked at the IdP. **Lock the user and end their sessions** through the existing lock and kill paths, audited as `idp.offboard` with the IdP's error as the reason.
+  - `invalid_grant` means the user was deactivated or the session revoked at the IdP. **End that login** (the login-revocation path used by `limen logout`; its sessions end with it), audited as `idp.offboard` with the IdP's error as the reason, and check the person's other logins at once.
   - A refreshed ID token whose groups no longer grant a role the login relied on **revokes that login** (`login_revocations`, migration 0013) and ends the sessions that used the role. The user is **not** locked; they can log in again with their remaining access.
   - A rotated refresh token replaces the stored one.
 - **Failure to reach the IdP fails open and alerts** (the owner's choice). The job emits `idp.check_failed` and a metric, and keeps sessions. `--idp-check-failure=closed --idp-check-grace=<duration>` ends logins whose last good check is older than the grace window, for deployments that prefer it.
@@ -35,3 +35,11 @@ A migration adds to `users`: `source` (`idp_login` for people; bots keep their o
 - **Per-IdP directory adapters** (Okta Users API, Microsoft Graph): no change to the login flow, but not IdP-neutral, no Dex equivalent, every adapter unverified.
 - **SCIM 2.0:** seconds-level and real team data, but a new authenticated entry point and a reversed v1 non-goal. Can follow and fill the same `users` columns.
 - **IdP event hooks:** per-IdP integration; same objection.
+
+## As built (2026-11-08)
+- **No lock on `invalid_grant`.** The first draft locked the person. A refusal can also mean an expired refresh token, and a lock needs an admin to undo it. A deactivated person cannot sign in again anyway (the IdP refuses them), so ending the login, and their other logins at once, closes the gap without the risk of locking a valid person. An admin lock stays the immediate tool.
+- **Sealing key, not KMS.** There is no application-level encryption facility yet, so the key is an operator-supplied 32-byte secret (`--idp-token-key`). Wrapping it with KMS is a follow-up.
+- **Claims, not leases.** Replicas claim due logins with `FOR UPDATE SKIP LOCKED` and push the next check out first, so no leader is needed and a crash only delays a check.
+- **An absent `groups` claim counts as no groups**, since IdPs omit it for a person with none. `--idp-ignore-groups` is the switch for an IdP that drops it from refreshed tokens.
+- **No `--no-refresh` flag** on the CLI. Not asking is a one-line change if someone needs it.
+- **Console:** the users page shows source, issuer host, groups, and the last check, and filters by group, role, and check state. There is no SCIM badge, because there is no SCIM source; the `source` column is where one would go.

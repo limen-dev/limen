@@ -129,18 +129,15 @@ async fn discover(settings: &IdpSettings, http: &HttpClient) -> anyhow::Result<M
         .with_context(|| format!("discovering the identity provider at {}", settings.issuer))
 }
 
-/// The configured scopes, plus `offline_access` so the IdP issues a refresh
-/// token, which the control plane uses to notice a deactivated account
-/// (ADR-0046). An IdP that ignores the scope just issues none.
+/// The scopes the control plane advertises. It adds `offline_access` only when
+/// it keeps refresh tokens (ADR-0046), so an IdP that has not enabled refresh
+/// tokens is never asked for one.
 fn scopes(settings: &IdpSettings) -> impl Iterator<Item = Scope> + '_ {
-    let offline = (!settings.scopes.iter().any(|s| s == "offline_access"))
-        .then(|| Scope::new("offline_access".to_owned()));
     settings
         .scopes
         .iter()
         .filter(|s| *s != "openid")
         .map(|s| Scope::new(s.clone()))
-        .chain(offline)
 }
 
 /// What a login returned: the ID token, and the refresh token if the IdP

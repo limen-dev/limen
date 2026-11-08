@@ -29,6 +29,13 @@ const BATCH: i64 = 50;
 /// How often a replica looks for due logins.
 const TICK: Duration = Duration::from_secs(20);
 
+/// Whether refresh tokens are kept and checked: a key is set and the interval
+/// is not zero.
+#[must_use]
+pub fn enabled(config: &crate::config::Config) -> bool {
+    config.idp_token_key.is_some() && !config.idp_check_interval.is_zero()
+}
+
 // ---- sealing ----------------------------------------------------------------
 
 /// `nonce (12) || ciphertext || tag`, with the login id as associated data so

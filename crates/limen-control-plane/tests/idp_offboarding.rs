@@ -269,3 +269,22 @@ fn a_bad_token_key_is_refused() {
     let good = parse("CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=");
     assert!(matches!(good.idp_token_key(), Ok(Some(k)) if k == [9u8; 32]));
 }
+
+async fn scopes(h: &Harness) -> Vec<String> {
+    limen_proto::v1::auth_client::AuthClient::new(h.channel(None))
+        .get_auth_config(limen_proto::v1::GetAuthConfigRequest {})
+        .await
+        .expect("auth config")
+        .into_inner()
+        .scopes
+}
+
+#[tokio::test]
+async fn offline_access_is_asked_for_only_while_the_check_is_on() {
+    let Some(on) = start(&[]).await else { return };
+    assert!(scopes(&on).await.contains(&"offline_access".to_owned()));
+    let Some(off) = Harness::start().await else {
+        return;
+    };
+    assert!(!scopes(&off).await.contains(&"offline_access".to_owned()));
+}

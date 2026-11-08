@@ -55,6 +55,9 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | T: replayed ID token | `exp` and `iat` checked. The nonce is single-use (the control plane stores a nonce hash until the token expires) |
 | S: no key binding in the device flow (RFC 8628 can't carry our nonce) | Replay is still blocked: the control plane records a hash of each device-flow ID token and accepts it once. PKCE stays the default. **Residual risk:** a compromised proxy relaying a device-flow login could swap in its own CSR (see §6) |
 | I: tokens in logs | `Secret<T>` newtypes. The log scanner test |
+| I: the stored IdP refresh token (ADR-0046) is a long-lived credential: a database leak plus the sealing key gives IdP sessions | Sealed with AES-256-GCM under `--idp-token-key`, bound to its login id, never returned by an API, logged, or audited; deleted when the login ends or expires. The key lives outside the database. Off unless the key is set |
+| D: a deactivated person keeps access until their certificate expires | Each login with a refresh token is checked every `--idp-check-interval`; a refusal or a lost role ends the login (`idp.offboard`). Unreachable IdP: fail open with `idp.check_failed`, or `closed` after a grace period |
+| E: a stale refreshed token wrongly ends everyone's login (an IdP that drops `groups`) | Visible at once (`limen_idp_checks_total{outcome="roles_lost"}`); `--idp-ignore-groups` is the switch. Fails towards revoking, not towards keeping access |
 
 ### TB1: Laptop ↔ proxy (public)
 | Threat | Mitigation |
@@ -325,7 +328,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 2. A local process on the user's machine can use an open loopback listener during its lifetime.
 3. A compromised worker sees the plaintext of the sessions it serves, and can act as the `limen_*` DB roles of its resources.
 4. Duplicates in Datadog under failure (at-least-once).
-5. Revocation is TTL-based (no immediate lock in v1. `lock` is an extension point).
+5. Revocation is TTL-based (no immediate lock in v1. `lock` is an extension point). *Amended:* admin locks and logout are immediate (ADR-0017), and with a refresh token a deactivation in the IdP ends the login within `--idp-check-interval` (ADR-0046).
 6. Device-flow logins aren't bound to the CLI's key (no nonce in RFC 8628). PKCE is the default and is bound.
 7. Until IAM join exists (Phase 15), autoscaled proxies and workers enroll with a static, kind-scoped token.
 8. Until Phase 3, recordings sit on the worker's disk, protected only by file permissions and the hash in `session.end`.
@@ -335,6 +338,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-08 | #111 | IdP-driven offboarding (ADR-0046): the CLI sends the IdP's refresh token at login; the control plane stores it sealed and checks logins on a schedule (TB0). New table `idp_logins`, new audit events `idp.offboard` and `idp.check_failed`. Reverses the ADR-0006 default of storing no refresh token, when `--idp-token-key` is set |
 | 2026-11-05 | Pentest | Static code review ([`pentest-plan.md`](pentest-plan.md)): revoked components are refused at grant admission, by peer proxies and by the control plane API (TB2); components send only their own audit event kinds and sessions, and a session keeps its first identity, recording link and hash (TB3, TB6, TB7); connections are capped per source and anonymous API connections are time-limited (TB1); the policy access diff sees a grant's scope, not only its principals (ADR-0042 §4). Still open, so the mitigations above are not fully true for them: a worker's forged `session.start` that is projected first, the unsigned chain-resume manifest, and worker dials to brokers a Kafka or Mongo server names (see the plan) |
 | 2026-11-06 | Pentest | First live run of [`pentest-plan.md`](pentest-plan.md) section 3 on the dev stack and in six demos (databases, Redis, MongoDB, search, RabbitMQ and Kafka, the management API). No bypass found. Recorded: two residual risks added above (database role privileges are the control for `COPY ... PROGRAM` and similar; the `sftp` subsystem is allowed). Most section 3 rows are not run: the plan lists them. |
 | 2026-10-29 | 14 (stage 2) | Built: console editing through `policy_store` (`/console/policy/documents`, read-only for documents owned elsewhere) and the **Policy changes** pages (`/console/changes`), deciding with the API's functions |

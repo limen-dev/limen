@@ -64,7 +64,14 @@ impl Auth for AuthService {
         Ok(Response::new(GetAuthConfigResponse {
             issuer_url: c.oidc_issuer.clone(),
             client_id: c.oidc_client_id.clone(),
-            scopes: c.oidc_scopes.clone(),
+            // Ask the IdP for a refresh token only when we keep one (ADR-0046).
+            scopes: {
+                let mut scopes = c.oidc_scopes.clone();
+                if crate::idp_check::enabled(c) && !scopes.iter().any(|s| s == "offline_access") {
+                    scopes.push("offline_access".to_owned());
+                }
+                scopes
+            },
             server_version: limen_core::VERSION.to_owned(),
             bot_audience: c.bot_audience.clone(),
         }))
