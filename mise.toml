@@ -30,9 +30,9 @@ node = "24.22.1"
 
 [tasks.website-deps]
 description = "Install website/ dependencies with npm ci, again only when package-lock.json changes"
+sources = ["website/package-lock.json"]
+outputs = ["website/node_modules/.package-lock.json"]
 dir = "website"
-sources = ["package-lock.json"]
-outputs = ["node_modules/.package-lock.json"]
 run = "npm ci"
 
 [tasks.website]
