@@ -1,6 +1,6 @@
 # ADR-0046: Shadow mode for policy rules
 
-- Status: Proposed (issue #116, epic #117). Granularity (deny rules and roles), audit failure (allow, count the loss) and widening (needs a second admin) were decided by the owner on 2026-11-08; everything else is a default for review.
+- Status: Accepted (issue #116, epic #117; the owner approved it on 2026-11-08). Granularity (deny rules and roles), audit failure (allow, count the loss) and widening (needs a second admin) were decided by the owner on 2026-11-08; everything else is a default for review.
 - Date: 2026-11-08
 
 ## Context
