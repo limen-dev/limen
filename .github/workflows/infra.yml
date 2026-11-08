@@ -89,10 +89,5 @@ jobs:
           helm-docs --chart-search-root deploy/helm --sort-values-order file
           git diff --exit-code -- deploy/helm
 
-      - name: Generated dashboards are up to date
-        run: |
-          python3 deploy/grafana/generate.py
-          git diff --exit-code -- deploy/grafana
-
-      - name: Dev users file and what is generated from it agree
-        run: python3 deploy/compose/scripts/gen-dev-users.py --check
+      - name: Generated dashboards and dev users are up to date
+        run: mise run gen-check
