@@ -20,6 +20,22 @@ pub async fn policy_refresh(state: AppState, mut shutdown: watch::Receiver<bool>
     }
 }
 
+/// How many deny rules are in shadow mode and how soon the first one runs
+/// out (`-1` when none are), so an alert can fire before a date passes
+/// and writes start being refused (ADR-0046).
+fn publish_shadow_metrics(state: &AppState) {
+    let rules = state.policy.base().policy.shadow_rules();
+    let today = time::OffsetDateTime::now_utc().date();
+    let soonest = rules
+        .iter()
+        .map(|r| (r.until.0 - today).whole_days())
+        .min()
+        .map_or(-1, |d| i32::try_from(d).unwrap_or(i32::MAX));
+    metrics::gauge!("limen_policy_shadow_rules")
+        .set(f64::from(i32::try_from(rules.len()).unwrap_or(i32::MAX)));
+    metrics::gauge!("limen_policy_shadow_days_left").set(f64::from(soonest));
+}
+
 /// Delete expired rows and idle rate limiter state.
 pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let mut tick = tokio::time::interval(Duration::from_secs(60));
@@ -29,6 +45,7 @@ pub async fn cleanup(state: AppState, mut shutdown: watch::Receiver<bool>) {
             _ = shutdown.changed() => return,
         }
         state.limits.shrink();
+        publish_shadow_metrics(&state);
         // Events and recording text age out of the search window (ADR-0026).
         let days = i32::try_from(state.config.search_retention.as_secs() / 86_400)
             .unwrap_or(i32::MAX)

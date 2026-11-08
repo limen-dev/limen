@@ -1574,11 +1574,30 @@ pub async fn revoke(
 
 fn summarize(doc: &Document) -> String {
     match doc {
-        Document::Role(r) => format!(
-            "{} allow, {} deny rules",
-            r.spec.allow.len(),
-            r.spec.deny.len()
-        ),
+        Document::Role(r) => {
+            let rules = format!(
+                "{} allow, {} deny rules",
+                r.spec.allow.len(),
+                r.spec.deny.len()
+            );
+            // Shadow mode (ADR-0046): reported, not enforced, and until when.
+            let shadow = if r.spec.is_shadow() {
+                r.spec
+                    .shadow_until
+                    .map(|until| format!(" · shadow until {until}, grants nothing"))
+            } else {
+                let dates: Vec<_> = r
+                    .spec
+                    .shadow_deny()
+                    .filter_map(|(_, rule)| rule.shadow_until)
+                    .collect();
+                dates
+                    .iter()
+                    .min()
+                    .map(|first| format!(" · {} in shadow until {first}", dates.len()))
+            };
+            format!("{rules}{}", shadow.unwrap_or_default())
+        }
         Document::RoleMapping(m) => format!("{} group mappings", m.spec.len()),
         Document::Bot(b) => format!(
             "{} · roles {}",
