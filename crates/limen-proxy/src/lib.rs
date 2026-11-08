@@ -7,6 +7,7 @@ mod kube;
 mod peer;
 pub mod relay;
 mod sessions;
+mod shadow;
 mod source;
 pub mod tunnels;
 mod web;

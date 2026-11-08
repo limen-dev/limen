@@ -316,6 +316,27 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
     }
 
     let session_id = Uuid::now_v7();
+    // Shadow deny rules with a `web` grant (ADR-0046): reported, and the
+    // request goes on. Rules that deny the whole resource are reported when
+    // the worker stream is opened.
+    let shadow = snapshot.policy.shadow_denies_web(
+        &effective.roles,
+        &route.resource,
+        req.method().as_str(),
+        uri.path(),
+    );
+    if !shadow.is_empty() {
+        let asked = json!({ "action": "web", "resource": route.resource, "method": req.method().as_str(), "path": uri.path() });
+        crate::shadow::report(
+            &proxy.audit,
+            &shadow,
+            &identity.username,
+            Some(session_id),
+            snapshot.version,
+            &asked,
+        )
+        .await;
+    }
     let started = Instant::now();
     let client_addr = peer
         .as_ref()
