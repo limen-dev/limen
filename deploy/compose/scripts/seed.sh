@@ -30,7 +30,18 @@ seed_search() {
 }
 
 seed_messaging() {
-  wait_for "rabbitmq" "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping
+  # Wait for the broker, but stop at once (with its log) if it dies: a crashed
+  # container would otherwise just run out the two-minute timeout.
+  local up=false
+  for _ in $(seq 1 240); do
+    if "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping >/dev/null 2>&1; then up=true; break; fi
+    if [ -n "$("${compose[@]}" ps -q --status exited rabbitmq-target 2>/dev/null)" ]; then
+      "${compose[@]}" logs --tail 20 rabbitmq-target >&2 || true
+      fail "rabbitmq exited at start (its log is above)"
+    fi
+    sleep 0.5
+  done
+  $up || fail "timed out waiting for rabbitmq"
   already_done kafka "kafka-1-messaging-${LIMEN_ENV}" "kafka-2-messaging-${LIMEN_ENV}" "kafka-3-messaging-${LIMEN_ENV}" && return 0
   "$here/config/targets/messaging/provision.sh" "kafka-1-messaging-${LIMEN_ENV}" >/dev/null || fail "Kafka provisioning failed"
   mark_done kafka "kafka-1-messaging-${LIMEN_ENV}" "kafka-2-messaging-${LIMEN_ENV}" "kafka-3-messaging-${LIMEN_ENV}"
