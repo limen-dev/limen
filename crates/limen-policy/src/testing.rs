@@ -36,6 +36,11 @@ pub struct TestCase {
     /// With `expect: allow`: the role the decision must go through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via_role: Option<String>,
+    /// With `expect: allow`: shadow deny rules (`role/rule-name`) that must
+    /// match the request and be reported, so CI can prove a shadow rule would
+    /// fire before it is enforced (ADR-0046).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_deny: Vec<String>,
 }
 
 /// The identity a case speaks for, written by what policy sees, never by user
@@ -187,6 +192,26 @@ pub(crate) fn validate_test(doc: &PolicyTestDoc) -> Result<(), PolicyError> {
                 format!("case {}: via_role goes with expect: allow", i + 1),
             ));
         }
+        if !case.shadow_deny.is_empty() && case.expect != Expect::Allow {
+            return Err(invalid(
+                "policy_test",
+                name,
+                format!(
+                    "case {}: shadow_deny goes with expect: allow, since only an allowed request is reported",
+                    i + 1
+                ),
+            ));
+        }
+        if let Some(bad) = case.shadow_deny.iter().find(|r| {
+            r.split_once('/')
+                .is_none_or(|(role, rule)| role.is_empty() || rule.is_empty())
+        }) {
+            return Err(invalid(
+                "policy_test",
+                name,
+                format!("case {}: shadow_deny {bad:?} must be role/rule-name", i + 1),
+            ));
+        }
     }
     Ok(())
 }
@@ -320,23 +345,43 @@ impl Policy {
         let (held, eligible) = self.roles_of(&case.who)?;
         touched_roles.extend(held.iter().cloned());
         touched_roles.extend(eligible.iter().cloned());
-        let decision = self.evaluate_eligible(
-            &AccessRequest {
-                roles: &held,
-                resource: &case.resource,
-                principal,
-            },
-            &eligible,
-        );
+        let request = AccessRequest {
+            roles: &held,
+            resource: &case.resource,
+            principal,
+        };
+        let decision = self.evaluate_eligible(&request, &eligible);
         Ok(match decision {
             Decision::Allow { matched_roles } => {
-                let problem = case
+                let mut problems = Vec::new();
+                if let Some(via) = case
                     .via_role
                     .as_ref()
-                    .filter(|via| !matched_roles.contains(via))
-                    .map(|via| format!("allowed through {}, not {via}", matched_roles.join(", ")))
-                    .unwrap_or_default();
-                ("allow".to_owned(), problem)
+                    .filter(|v| !matched_roles.contains(v))
+                {
+                    problems.push(format!(
+                        "allowed through {}, not {via}",
+                        matched_roles.join(", ")
+                    ));
+                }
+                if !case.shadow_deny.is_empty() {
+                    let reported: BTreeSet<String> = self
+                        .shadow_denies(&request)
+                        .into_iter()
+                        .map(|m| format!("{}/{}", m.role, m.rule))
+                        .collect();
+                    for want in case.shadow_deny.iter().filter(|w| !reported.contains(*w)) {
+                        problems.push(format!(
+                            "shadow rule {want} did not match (reported: {})",
+                            if reported.is_empty() {
+                                "none".to_owned()
+                            } else {
+                                reported.iter().cloned().collect::<Vec<_>>().join(", ")
+                            }
+                        ));
+                    }
+                }
+                ("allow".to_owned(), problems.join("; "))
             }
             Decision::RequiresApproval { .. } => ("request".to_owned(), String::new()),
             Decision::Deny { .. } => ("deny".to_owned(), String::new()),

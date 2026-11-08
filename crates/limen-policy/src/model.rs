@@ -7,6 +7,7 @@ use limen_core::resource::ResourceKind;
 use serde::{Deserialize, Serialize};
 
 use crate::duration::DurationStr;
+use crate::shadow::{RuleMode, ShadowDate};
 
 /// One YAML document. The `kind` field selects the variant.
 // Documents are parsed rarely and held in maps, so variant size doesn't matter.
@@ -93,6 +94,14 @@ pub struct RoleSpec {
     pub allow: Vec<Rule>,
     #[serde(default)]
     pub deny: Vec<Rule>,
+    /// `shadow` reports what this role's `deny` rules would refuse and
+    /// ignores its `allow` rules, so the role can neither deny nor grant
+    /// (ADR-0046). Needs `shadow_until`, and a `name` on every deny rule.
+    #[serde(default, skip_serializing_if = "RuleMode::is_enforce")]
+    pub mode: RuleMode,
+    /// The day by which a shadow role must be enforced or renewed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_until: Option<ShadowDate>,
     /// Makes the role *requestable*: people in `request.who` can ask for it
     /// for a limited time (ADR-0025).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +114,43 @@ pub struct RoleSpec {
     /// watch them (ADR-0030). Watching is audited whether or not this is set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub notify_observed: bool,
+}
+
+impl RoleSpec {
+    /// A shadow role reports its deny rules and grants nothing (ADR-0046).
+    #[must_use]
+    pub fn is_shadow(&self) -> bool {
+        self.mode == RuleMode::Shadow
+    }
+
+    /// The allow rules that grant access: none for a shadow role.
+    pub fn enforced_allow(&self) -> impl Iterator<Item = &Rule> {
+        let rules: &[Rule] = if self.is_shadow() { &[] } else { &self.allow };
+        rules.iter()
+    }
+
+    /// The deny rules that refuse access: none for a shadow role, and not
+    /// the rules marked `mode: shadow`.
+    pub fn enforced_deny(&self) -> impl Iterator<Item = &Rule> {
+        let rules: &[Rule] = if self.is_shadow() { &[] } else { &self.deny };
+        rules.iter().filter(|r| r.mode == RuleMode::Enforce)
+    }
+
+    /// The deny rules that only report, with their position in `deny`: all
+    /// of a shadow role's, otherwise those marked `mode: shadow`.
+    pub fn shadow_deny(&self) -> impl Iterator<Item = (usize, &Rule)> {
+        let all = self.is_shadow();
+        self.deny
+            .iter()
+            .enumerate()
+            .filter(move |(_, r)| all || r.mode == RuleMode::Shadow)
+    }
+
+    /// Whether a deny rule of this role is reported rather than enforced.
+    #[must_use]
+    pub fn deny_is_shadow(&self, rule: &Rule) -> bool {
+        self.is_shadow() || rule.mode == RuleMode::Shadow
+    }
 }
 
 /// Who may ask for a role, who may approve, and the limits (ADR-0025).
@@ -170,6 +216,17 @@ impl RequestSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
+    /// Names a `deny` rule. Required with `mode: shadow` (and on every deny
+    /// rule of a shadow role): audit events and tests refer to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `shadow` (deny rules only) reports a match instead of enforcing it
+    /// (ADR-0046). Needs `name` and `shadow_until`.
+    #[serde(default, skip_serializing_if = "RuleMode::is_enforce")]
+    pub mode: RuleMode,
+    /// The day by which a shadow rule must be enforced or renewed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_until: Option<ShadowDate>,
     pub resources: Selector,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshGrant>,

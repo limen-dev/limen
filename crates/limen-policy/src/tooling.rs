@@ -390,11 +390,17 @@ impl Policy {
         for (side, rules) in [
             (
                 "allow",
-                roles.iter().flat_map(|r| &r.spec.allow).collect::<Vec<_>>(),
+                roles
+                    .iter()
+                    .flat_map(|r| r.spec.enforced_allow())
+                    .collect::<Vec<_>>(),
             ),
             (
                 "deny",
-                roles.iter().flat_map(|r| &r.spec.deny).collect::<Vec<_>>(),
+                roles
+                    .iter()
+                    .flat_map(|r| r.spec.enforced_deny())
+                    .collect::<Vec<_>>(),
             ),
         ] {
             for rule in rules {
@@ -404,7 +410,10 @@ impl Policy {
                 let before = tokens.len();
                 let mut value = serde_json::to_value(rule).unwrap_or_default();
                 if let Some(object) = value.as_object_mut() {
-                    object.remove("resources");
+                    // Naming a rule or timing a shadow does not change what it reaches.
+                    for field in ["resources", "name", "mode", "shadow_until"] {
+                        object.remove(field);
+                    }
                 }
                 flatten_tokens(side, "", &value, &mut tokens);
                 if tokens.len() == before && side == "deny" {
