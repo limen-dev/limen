@@ -27,3 +27,21 @@ kubeconform = "0.8.0"
 buf = "1.74.0"
 # Documentation site and homepage (website/)
 node = "24.22.1"
+
+[tasks.website]
+description = "Run the documentation site and homepage in dev mode (installs website/ dependencies first if missing)"
+dir = "website"
+raw = true
+run = """
+test -d node_modules || npm ci
+npm run dev
+"""
+
+[tasks.stack]
+description = "Deploy the local Limen dev stack (deploy/compose/setup.sh); flags after -- go to setup.sh, e.g. -- --yes --stacks ssh"
+raw = true
+run = "deploy/compose/setup.sh"
+
+[tasks.install-cli]
+description = "Build the limen CLI from this checkout and install it to ~/.local/bin (set PREFIX to change)"
+run = "scripts/install-cli.sh"
