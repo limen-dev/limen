@@ -345,3 +345,45 @@ async fn a_group_gained_and_lost_after_login_does_not_end_the_login() {
     assert!(alive(&h, &proxy, &cert).await);
     assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
 }
+
+const TWO_ROLES: &str = "kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n---\nkind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [postgres] }\n      db: { roles: [limen_read] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [dev] }\n  - { idp_group: sre, roles: [ops] }\n";
+
+/// Onboarding is the IdP's: nobody is created in Limen, and the roles a person
+/// gets follow the groups the IdP puts in their ID token.
+#[tokio::test]
+async fn a_person_inherits_the_roles_of_their_idp_groups_without_any_setup() {
+    let Some(h) = start(&[]).await else { return };
+    h.set_policy(&[("m.yaml", TWO_ROLES)]);
+    let users_before: i64 = sqlx::query_scalar("SELECT count(*) FROM users")
+        .fetch_one(&h.state.db)
+        .await
+        .expect("count");
+    assert_eq!(users_before, 0, "nobody exists in Limen beforehand");
+
+    // First sign-in: the group gives the predefined role.
+    let (resp, _) = h
+        .login("new.hire@example.com", &["developers"])
+        .await
+        .expect("login");
+    assert_eq!(resp.roles, ["dev"]);
+
+    // Added to another group in the IdP: picked up at the next sign-in.
+    let (resp, _) = h
+        .login("new.hire@example.com", &["developers", "sre"])
+        .await
+        .expect("login");
+    assert_eq!(resp.roles, ["dev", "ops"]);
+
+    // A group no mapping names gives nothing; with no mapped group at all, no
+    // sign-in (nothing to inherit).
+    let (resp, _) = h
+        .login("new.hire@example.com", &["developers", "book-club"])
+        .await
+        .expect("login");
+    assert_eq!(resp.roles, ["dev"]);
+    let err = h
+        .login("outsider@example.com", &["book-club"])
+        .await
+        .expect_err("no mapped group");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+}

@@ -2,11 +2,15 @@
 
 The IdP is the only source of truth for who may use Limen (ADR-0046). Limen has no user lifecycle of its own and needs no offboarding checklist.
 
-*Everything here is tested against a stand-in IdP that issues refresh tokens. It is not verified against Okta, Entra or another real IdP (#64).*
+*Tested against Dex v2.46.0 (on PostgreSQL storage) and a stand-in IdP. Not verified against Okta, Entra or another hosted IdP (#64).*
 
 ## Onboarding
 
-Add a person to an IdP group that a `role_mapping` document maps to a role. They run `limen login`. Nothing is created in Limen first.
+Add a person to an IdP group that a `role_mapping` document maps to a role. They run `limen login`. Nothing is created in Limen first, and they inherit exactly the roles their groups map to:
+
+- A group you add them to later is picked up at their **next** sign-in (roles are fixed at sign-in).
+- A group no mapping names gives nothing. A person with no mapped group at all cannot sign in, unless a request or approval policy lets them *ask* for access (ADR-0025).
+- To give everyone a baseline, map a group that everyone is in (most IdPs have one, such as `Everyone` in Okta).
 
 ## Offboarding
 
@@ -46,6 +50,10 @@ Without the key, no refresh token is stored and nothing is checked.
 The IdP must allow `offline_access` and issue refresh tokens to the CLI's client (Okta: enable the Refresh Token grant on the native app) and put the groups claim in refreshed ID tokens. **An IdP that omits the claim for a person with no groups looks the same as a person with no groups**, so a refreshed token without `groups` counts as no groups. If your IdP drops the claim from refreshed tokens, every login would end at its first check; set `--idp-ignore-groups` and rely on deactivation only.
 
 If your IdP expires refresh tokens early (idle or absolute lifetimes), an expired token reads as a refusal (`invalid_grant`) and ends the login. Set the refresh token lifetime at least as long as `--max-cert-ttl`.
+
+## Dex
+
+Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refresh grant **never returns** when Dex keeps its state in memory or SQLite (the token update holds the storage lock while the connector reads storage). That also freezes the rest of that Dex. Use PostgreSQL (or another networked) storage, as production Dex deployments do. The development stack's Dex is in memory, so the dev stack leaves `--idp-token-key` unset and does not check logins. The check's HTTP calls time out after 10 seconds, so a stuck IdP shows up as `idp.check_failed`, not as a stuck control plane.
 
 ## What to watch
 
