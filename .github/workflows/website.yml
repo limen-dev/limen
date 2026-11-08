@@ -54,15 +54,10 @@ jobs:
         with:
           install_args: node
 
-      - name: Install the dependencies
-        working-directory: website
-        run: npm ci
-
-      # Publishes the docs, builds the site, then fails on a broken link or anchor,
-      # a third-party request, or a claim ADR-0031 forbids.
-      - name: Build and check the site
-        working-directory: website
-        run: npm run build
+      # Installs the dependencies, publishes the docs, builds the site, then fails on a
+      # broken link or anchor, a third-party request, or a claim ADR-0031 forbids.
+      - name: Build and check the site (mise run website-build)
+        run: mise run website-build
 
       # Only main publishes, and only while PUBLISH_SITE is on.
       - name: Upload the site

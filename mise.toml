@@ -70,7 +70,7 @@ run = [
 
 [tasks.test]
 description = "Run the workspace tests. Integration tests need the stack's postgres, kms and s3 services (see CONTRIBUTING.md)"
-run = "cargo test --workspace --locked"
+run = "cargo test --workspace --all-features --locked"
 
 [tasks.gen]
 description = "Regenerate the generated files: CLI reference, Grafana dashboards and alerts, dev users. CI fails when they are stale"
@@ -78,6 +78,14 @@ run = [
   "scripts/gen-cli-reference.sh",
   "python3 deploy/grafana/generate.py",
   "python3 deploy/compose/scripts/gen-dev-users.py",
+]
+
+[tasks.gen-check]
+description = "Fail when the generated Grafana files or dev users are stale (what CI runs; generates first, then compares)"
+run = [
+  "python3 deploy/grafana/generate.py",
+  "git diff --exit-code -- deploy/grafana",
+  "python3 deploy/compose/scripts/gen-dev-users.py --check",
 ]
 
 [tasks.website-build]
