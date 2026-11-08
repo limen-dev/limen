@@ -5,24 +5,43 @@
 <div class="page-head">
   <div>
     <h1>Users</h1>
-    <p class="sub">People who have signed in with the CLI or the console. Locked users can't sign in or open sessions, and their open sessions end.</p>
+    <p class="sub">People who have signed in with the CLI or the console, with where they came from and whether the IdP still vouches for them. Groups are as of their last sign-in. Locked users can't sign in or open sessions, and their open sessions end.</p>
   </div>
   <form method="get" action="/console/users" class="search" role="search">
     <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
-    <input type="search" name="q" value="{{ query }}" placeholder="Search name or role" aria-label="Search" maxlength="200" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
+    <input type="search" name="q" value="{{ query }}" placeholder="Search name, group or role" aria-label="Search" maxlength="200" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
   </form>
 </div>
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
+<form method="get" action="/console/users" class="filters" data-autosubmit>
+  <input type="hidden" name="q" value="{{ query }}">
+  <label><span>Group</span><select name="group"><option value="">Any</option>{% for g in groups %}<option value="{{ g }}"{% if filter.group == g.as_str() %} selected{% endif %}>{{ g }}</option>{% endfor %}</select></label>
+  <label><span>Role</span><select name="role"><option value="">Any</option>{% for r in roles %}<option value="{{ r }}"{% if filter.role == r.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
+  <label><span>IdP check</span><select name="status">
+    <option value="">Any</option>
+    <option value="ok"{% if filter.status == "ok" %} selected{% endif %}>Checked</option>
+    <option value="unchecked"{% if filter.status == "unchecked" %} selected{% endif %}>Not checked</option>
+    <option value="check_failed"{% if filter.status == "check_failed" %} selected{% endif %}>IdP not reachable</option>
+    <option value="offboarded"{% if filter.status == "offboarded" %} selected{% endif %}>Ended by the IdP</option>
+    <option value="locked"{% if filter.status == "locked" %} selected{% endif %}>Locked</option>
+  </select></label>
+  <noscript><button type="submit" class="secondary">Filter</button></noscript>
+  {% if !filter.is_empty() %}<a href="{{ clear_href }}">Clear filters</a>{% endif %}
+  <span class="hint">{{ users.len() }} of {{ total }}</span>
+</form>
 {% if users.is_empty() %}
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>{% if query.is_empty() %}Nobody has signed in yet.{% else %}No user matches “{{ query }}”. <a href="/console/users">Clear search</a>{% endif %}</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>{% if total == 0 %}Nobody has signed in yet.{% else %}No user matches. <a href="/console/users">Clear search and filters</a>{% endif %}</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>User</th><th>Roles</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>Status</th></tr></thead>
+  <thead><tr><th>User</th><th>Source</th><th>Groups</th><th>Roles</th><th>IdP check</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>Status</th></tr></thead>
   <tbody>
   {% for u in users %}
     <tr>
       <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a></div></td>
+      <td class="nowrap">{{ u.source }}{% if !u.issuer.is_empty() %}<div class="cell-sub">{{ u.issuer }}</div>{% endif %}</td>
+      <td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td>
       <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td>
+      <td>{% if u.idp_tone.is_empty() %}<span class="cell-sub">{{ u.idp }}</span>{% else %}<span class="pill {{ u.idp_tone }}">{{ u.idp }}</span>{% endif %}</td>
       <td class="nowrap">{{ u.last_login }}</td>
       <td class="num">{{ u.logins }}</td>
       <td>{% if u.locked %}<span class="pill bad">locked</span> <span class="cell-sub">{{ u.lock_reason }}</span>{% else %}<span class="pill ok">active</span>{% endif %}</td>

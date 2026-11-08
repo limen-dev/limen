@@ -568,6 +568,17 @@ async fn console_end_to_end() {
     let home = admin_user.get("/console/users").await;
     assert_eq!(home.status, 200);
     assert!(home.body.contains(DEVELOPER));
+    // Where people came from, and the filters (ADR-0046).
+    assert!(home.body.contains("IdP sign-in"), "{}", home.body);
+    assert!(home.body.contains("not checked"));
+    let unchecked = admin_user.get("/console/users?status=unchecked").await;
+    assert!(unchecked.body.contains(DEVELOPER));
+    let nobody = admin_user
+        .get("/console/users?group=no-such-group&status=ok")
+        .await;
+    assert_eq!(nobody.status, 200);
+    assert!(!nobody.body.contains(DEVELOPER));
+    assert!(nobody.body.contains("Clear search and filters"));
     let csrf = Browser::csrf(&home);
     let page = admin_user
         .post(

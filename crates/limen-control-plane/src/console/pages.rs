@@ -1040,10 +1040,27 @@ pub async fn kill_session(
 
 // ---- users -----------------------------------------------------------------------------
 
+/// The users page's query string: the search box and the filters.
+#[derive(Deserialize)]
+pub struct UsersQuery {
+    done: Option<String>,
+    q: Option<String>,
+    group: Option<String>,
+    role: Option<String>,
+    status: Option<String>,
+}
+
+/// A filter value from the query string: bounded, and only what the menus offer
+/// is acted on (an unknown status simply matches nobody).
+fn filter_value(v: Option<&String>) -> String {
+    v.map(|s| s.trim().chars().take(200).collect())
+        .unwrap_or_default()
+}
+
 pub async fn users(
     State(state): State<AppState>,
     auth: Auth,
-    Query(q): Query<DoneQuery>,
+    Query(q): Query<UsersQuery>,
 ) -> Response {
     if let Err(r) = auth.admin() {
         return r;
@@ -1066,6 +1083,28 @@ pub async fn users(
         Err(e) => return db_error("listing bots", &e),
     };
     let query = search_text(q.q.as_ref());
+    let filter = views::UserFilter {
+        group: filter_value(q.group.as_ref()),
+        role: filter_value(q.role.as_ref()),
+        status: filter_value(q.status.as_ref()),
+    };
+    let total = users.len();
+    let clear_href = if query.is_empty() {
+        "/console/users".to_owned()
+    } else {
+        format!(
+            "/console/users?{}",
+            url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("q", &query)
+                .finish()
+        )
+    };
+    let mut groups: Vec<String> = users.iter().flat_map(|u| u.groups.clone()).collect();
+    let mut roles: Vec<String> = users.iter().flat_map(|u| u.roles.clone()).collect();
+    for list in [&mut groups, &mut roles] {
+        list.sort();
+        list.dedup();
+    }
     let wanted = |u: &UserView| {
         let chips: Vec<&str> = u
             .role_list
@@ -1075,19 +1114,31 @@ pub async fn users(
             .collect();
         search_matches(&query, &[u.name.as_str(), &chips.join(" ")])
     };
+    // Someone who never signed in has no groups, roles or IdP check to filter on.
     let orphan_locks = locks
         .iter()
         .filter(|l| !known.contains(&l.username))
         .map(|l| lock_only_view(&l.username, l))
         .filter(&wanted)
+        .filter(|_| filter.is_empty() || filter.status == "locked")
         .collect();
     html(
         UsersPage {
             chrome: chrome(&state, &auth, "users"),
             notice: notice(q.done.as_deref()),
-            users: users.iter().map(UserView::from).filter(&wanted).collect(),
+            users: users
+                .iter()
+                .filter(|u| filter.admits(u, u.lock_reason.is_some()))
+                .map(UserView::from)
+                .filter(&wanted)
+                .collect(),
             query,
             orphan_locks,
+            clear_href,
+            filter,
+            groups,
+            roles,
+            total,
         }
         .render(),
     )
@@ -1114,6 +1165,10 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         is_bot: limen_core::identity::is_bot(name),
         ci: Vec::new(),
         run_url: None,
+        source: "never signed in".into(),
+        issuer: String::new(),
+        idp: "—".into(),
+        idp_tone: "",
     }
 }
 

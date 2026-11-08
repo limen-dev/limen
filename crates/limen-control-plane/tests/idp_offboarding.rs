@@ -146,8 +146,8 @@ async fn a_still_valid_person_keeps_their_login_across_checks() {
     // Several checks pass; the rotated token keeps working.
     tokio::time::sleep(Duration::from_secs(5)).await;
     assert!(alive(&h, &proxy, &cert).await);
-    assert!(events(&h, EventKind::IdpOffboard).await.is_empty());
-    assert!(events(&h, EventKind::IdpCheckFailed).await.is_empty());
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    assert_eq!(events(&h, EventKind::IdpCheckFailed).await.len(), 0);
 }
 
 #[tokio::test]
@@ -244,26 +244,28 @@ async fn the_refresh_token_is_stored_sealed() {
     );
 }
 
-#[tokio::test]
-async fn a_bad_token_key_is_refused_at_startup() {
-    let Some(base) = limen_testkit::database_url() else {
-        return;
+#[derive(clap::Parser)]
+struct Wrapper {
+    #[command(flatten)]
+    c: limen_control_plane::Config,
+}
+
+#[test]
+fn a_bad_token_key_is_refused() {
+    use clap::Parser as _;
+    let parse = |key: &str| {
+        Wrapper::try_parse_from([
+            "t",
+            "--database-url=postgres://x",
+            "--oidc-issuer=http://i",
+            "--oidc-client-id=c",
+            &format!("--idp-token-key={key}"),
+        ])
+        .expect("parse")
+        .c
     };
-    let _ = base;
-    use clap::Parser;
-    #[derive(clap::Parser)]
-    struct W {
-        #[command(flatten)]
-        c: limen_control_plane::Config,
-    }
-    let c = W::try_parse_from([
-        "t",
-        "--database-url=postgres://x",
-        "--oidc-issuer=http://i",
-        "--oidc-client-id=c",
-        "--idp-token-key=c2hvcnQ=",
-    ])
-    .expect("parse")
-    .c;
-    assert!(c.idp_token_key().is_err());
+    assert!(parse("c2hvcnQ=").idp_token_key().is_err(), "too short");
+    assert!(parse("not base64!").idp_token_key().is_err());
+    let good = parse("CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=");
+    assert!(matches!(good.idp_token_key(), Ok(Some(k)) if k == [9u8; 32]));
 }

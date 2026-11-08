@@ -12,6 +12,8 @@
 <div class="card facts-card"><table class="facts">
   <tr><th>Roles</th><td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td></tr>
   <tr><th>IdP groups</th><td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td></tr>
+  <tr><th>Source</th><td>{{ u.source }}{% if !u.issuer.is_empty() %} · {{ u.issuer }}{% endif %}</td></tr>
+  <tr><th>IdP check</th><td>{{ u.idp }}</td></tr>
   <tr><th>First sign-in</th><td>{{ u.first_login }}</td></tr>
   <tr><th>Last sign-in</th><td>{{ u.last_login }}</td></tr>
   <tr><th>Sign-ins</th><td>{{ u.logins }}</td></tr>
