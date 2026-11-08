@@ -28,14 +28,19 @@ buf = "1.74.0"
 # Documentation site and homepage (website/)
 node = "24.22.1"
 
-[tasks.website]
-description = "Run the documentation site and homepage in dev mode (installs website/ dependencies first if missing)"
+[tasks.website-deps]
+description = "Install website/ dependencies with npm ci, again only when package-lock.json changes"
 dir = "website"
+sources = ["package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm ci"
+
+[tasks.website]
+description = "Run the documentation site and homepage in dev mode"
+dir = "website"
+depends = ["website-deps"]
 raw = true
-run = """
-test -d node_modules || npm ci
-npm run dev
-"""
+run = "npm run dev"
 
 [tasks.stack]
 description = "Deploy the local Limen dev stack (deploy/compose/setup.sh); flags after -- go to setup.sh, e.g. -- --yes --stacks ssh"
@@ -78,8 +83,6 @@ run = [
 [tasks.website-build]
 description = "Build the website and run its link and site checks (the whole check before pushing a site or docs change)"
 dir = "website"
+depends = ["website-deps"]
 raw = true
-run = """
-test -d node_modules || npm ci
-npm run build
-"""
+run = "npm run build"
