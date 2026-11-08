@@ -36,8 +36,9 @@ fn component_name(kind: ComponentKind) -> &'static str {
 fn may_send(kind: ComponentKind, event: EventKind) -> bool {
     use EventKind::{
         AuthDenied, DbBootstrap, DbQuery, DbQueryEnd, KafkaRequest, KafkaSummary, KubeRequest,
-        MongoCommand, MongoCommandEnd, MqOperation, MqSummary, RedisCommand, SearchRequest,
-        SearchResponse, SessionEnd, SessionStart, SshExec, WebRequest, WebResponse, WebSocket,
+        MongoCommand, MongoCommandEnd, MqOperation, MqSummary, PolicyShadowDeny, RedisCommand,
+        SearchRequest, SearchResponse, SessionEnd, SessionStart, SshExec, WebRequest, WebResponse,
+        WebSocket,
     };
     match kind {
         ComponentKind::ControlPlane => true,
@@ -61,9 +62,18 @@ fn may_send(kind: ComponentKind, event: EventKind) -> bool {
                 | SessionStart
                 | SshExec
         ),
+        // `PolicyShadowDeny` (ADR-0046) is the proxy's report of a deny rule
+        // that only reports; it changes no decision, so forging one only
+        // adds noise to a log the control plane's own events outrank.
         ComponentKind::Proxy => matches!(
             event,
-            AuthDenied | SessionEnd | SessionStart | WebRequest | WebResponse | WebSocket
+            AuthDenied
+                | PolicyShadowDeny
+                | SessionEnd
+                | SessionStart
+                | WebRequest
+                | WebResponse
+                | WebSocket
         ),
     }
 }
@@ -293,6 +303,12 @@ mod tests {
         assert!(may_send(ComponentKind::Worker, EventKind::SessionEnd));
         assert!(!may_send(ComponentKind::Worker, EventKind::WebRequest));
         assert!(may_send(ComponentKind::Proxy, EventKind::WebRequest));
+        // The proxy reports shadow denies (ADR-0046); a worker has no business with them.
+        assert!(may_send(ComponentKind::Proxy, EventKind::PolicyShadowDeny));
+        assert!(!may_send(
+            ComponentKind::Worker,
+            EventKind::PolicyShadowDeny
+        ));
         assert!(!may_send(ComponentKind::Proxy, EventKind::DbQuery));
     }
 

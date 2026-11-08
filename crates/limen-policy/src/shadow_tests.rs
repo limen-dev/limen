@@ -315,3 +315,94 @@ fn a_policy_test_can_require_that_a_shadow_rule_fires() {
     assert!(policy(&case("deny", "dev/no-root-in-prod")).is_err());
     assert!(policy(&case("allow", "no-slash")).is_err());
 }
+
+fn day(y: i32, m: u8, d: u8) -> time::Date {
+    time::Date::from_calendar_date(y, time::Month::try_from(m).expect("month"), d).expect("date")
+}
+
+#[test]
+fn dates_are_checked_against_a_day_you_name() {
+    let p = policy(BASE_ROLE).expect("valid: a past date still loads");
+    // Within range.
+    assert_eq!(
+        p.shadow_date_problems(day(2026, 11, 8)),
+        Vec::<String>::new()
+    );
+    // The last day still counts.
+    assert_eq!(
+        p.shadow_date_problems(day(2027, 1, 31)),
+        Vec::<String>::new()
+    );
+    // Passed: both rules are named.
+    let passed = p.shadow_date_problems(day(2027, 2, 1));
+    assert_eq!(passed.len(), 2, "{passed:?}");
+    assert!(passed[0].contains("has passed"), "{passed:?}");
+    // More than 90 days ahead.
+    let far = p.shadow_date_problems(day(2026, 10, 1));
+    assert_eq!(far.len(), 2, "{far:?}");
+    assert!(far[0].contains("days away"), "{far:?}");
+    assert_eq!(p.shadow_rules().len(), 2);
+}
+
+#[test]
+fn loosening_is_enforce_to_shadow_or_a_later_date() {
+    let enforced = BASE_ROLE
+        .replace("      mode: shadow\n", "")
+        .replace("      shadow_until: 2027-01-31\n", "");
+    let (enforced, shadow) = (
+        policy(&enforced).expect("valid"),
+        policy(BASE_ROLE).expect("valid"),
+    );
+    // Enforce to shadow, even though the rules were unnamed-in-effect before.
+    let lines = enforced.shadow_loosening(&shadow);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("now reported only"), "{lines:?}");
+    // The other way, and no change, are not loosening.
+    assert_eq!(shadow.shadow_loosening(&enforced), Vec::<String>::new());
+    assert_eq!(shadow.shadow_loosening(&shadow), Vec::<String>::new());
+    // A later date is.
+    let later = policy(&BASE_ROLE.replace("2027-01-31", "2027-02-28")).expect("valid");
+    let lines = shadow.shadow_loosening(&later);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains("moves from 2027-01-31 to 2027-02-28"),
+        "{lines:?}"
+    );
+    // An earlier date is not.
+    assert_eq!(later.shadow_loosening(&shadow), Vec::<String>::new());
+    // A brand-new shadow rule, and a brand-new role, are not.
+    let none = policy("kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [x] }\n").expect("valid");
+    assert_eq!(none.shadow_loosening(&shadow), Vec::<String>::new());
+    let empty = policy("kind: role\nversion: v1\nmetadata: { name: other }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [x] }\n").expect("valid");
+    assert_eq!(empty.shadow_loosening(&shadow), Vec::<String>::new());
+}
+
+#[test]
+fn moving_a_whole_role_to_shadow_is_loosening_too() {
+    let enforced = "kind: role\nversion: v1\nmetadata: { name: lock }\nspec:\n  deny:\n    - name: no-prod\n      resources: { kind: [ssh], labels: { env: [prod] } }\n";
+    let shadow = "kind: role\nversion: v1\nmetadata: { name: lock }\nspec:\n  mode: shadow\n  shadow_until: 2027-01-31\n  deny:\n    - name: no-prod\n      resources: { kind: [ssh], labels: { env: [prod] } }\n";
+    let (a, b) = (
+        policy(enforced).expect("valid"),
+        policy(shadow).expect("valid"),
+    );
+    assert_eq!(a.shadow_loosening(&b).len(), 1);
+    assert_eq!(b.shadow_loosening(&a), Vec::<String>::new());
+}
+
+#[test]
+fn explain_says_a_shadow_rule_matched_but_did_not_apply() {
+    let p = policy(BASE_ROLE).expect("valid");
+    let roles = held();
+    let trace = p.trace(&request(&roles, "web-prod", "root"), &[]);
+    assert!(trace.decision.is_allowed(), "{:?}", trace.decision);
+    let text = trace.render().join("\n");
+    assert!(
+        text.contains("deny rule 1 denies") && text.contains("shadow: reported, not enforced"),
+        "{text}"
+    );
+    let admin_view = p.explain_resource(&roles, &[], "web-prod").join("\n");
+    assert!(
+        admin_view.contains("shadow: reported, not enforced"),
+        "{admin_view}"
+    );
+}

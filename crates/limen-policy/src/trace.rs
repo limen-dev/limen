@@ -436,6 +436,14 @@ impl Trace {
                     n.text
                 ));
             }
+            for n in &r.shadow_denied_by {
+                lines.push(format!(
+                    "  role {} ({how}): deny rule {} {}",
+                    r.role,
+                    n.rule + 1,
+                    n.text
+                ));
+            }
             for n in &r.allowed_by {
                 lines.push(format!(
                     "  role {} ({how}): allow rule {} {}",
