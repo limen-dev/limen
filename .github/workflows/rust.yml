@@ -75,9 +75,14 @@ jobs:
       - name: Image versions agree with deploy/compose/.env
         run: scripts/check-versions.sh
 
-      # Formatting and clippy as `mise run check` (rustfmt and clippy come from mise.toml).
-      - name: Formatting and lints (mise run check)
-        run: mise run check
+      - name: Add rustfmt and clippy
+        run: rustup component add rustfmt clippy
+
+      - name: Formatting (cargo fmt)
+        run: cargo fmt --all --check
+
+      - name: Lints (cargo clippy)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   # The management API is a compatibility promise (ADR-0042): buf lints it and
   # refuses breaking changes against the base. Before 1.0, a break the owner
