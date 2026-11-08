@@ -12,6 +12,7 @@ password="${3:-password}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 ca="${LIMEN_DEV_CA:-$here/.state/internal-ca.pem}"
 base="${LIMEN_CONSOLE_URL:-https://localhost:3443}"
+dex="${LIMEN_DEX_URL:-http://localhost:${LIMEN_PORT_DEX:-5556}}"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -23,9 +24,9 @@ dex_url="$(curl -s --cacert "$ca" -c "$jar" -b "$jar" -o /dev/null -w '%{redirec
 curl -sf -c "$work/dex" -b "$work/dex" -L -o "$work/form.html" "$dex_url"
 action="$(grep -o 'action="[^"]*"' "$work/form.html" | head -1 | sed 's/^action="//; s/"$//; s/&amp;/\&/g')"
 back="$(curl -s -c "$work/dex" -b "$work/dex" -o /dev/null -w '%{redirect_url}' \
-  --data-urlencode "login=$email" --data-urlencode "password=$password" "http://localhost:5556$action")"
+  --data-urlencode "login=$email" --data-urlencode "password=$password" "$dex$action")"
 # Dex may bounce through an approval step; follow its redirects until we leave it.
-while [[ "$back" == http://localhost:5556/* ]]; do
+while [[ "$back" == "$dex"/* ]]; do
   back="$(curl -s -c "$work/dex" -b "$work/dex" -o /dev/null -w '%{redirect_url}' "$back")"
 done
 # Back at the console's callback, with the code.
