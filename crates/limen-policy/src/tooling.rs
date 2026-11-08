@@ -657,6 +657,8 @@ impl Policy {
         }
         for name in held {
             match self.roles.get(name) {
+                // A shadow role (ADR-0046) grants nothing and is not for users to see.
+                Some(role) if role.spec.is_shadow() => {}
                 Some(role) => {
                     lines.push(format!("Your role `{name}` allows:"));
                     for line in summarize_role(role) {

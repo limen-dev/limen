@@ -484,9 +484,9 @@ fn deny_text(reason: &DenyReason) -> &'static str {
 /// who holds (or may request) the role.
 #[must_use]
 pub fn summarize_role(role: &RoleDoc) -> Vec<String> {
+    // A shadow role grants nothing, so it has nothing to say (ADR-0046).
     role.spec
-        .allow
-        .iter()
+        .enforced_allow()
         .map(|rule| {
             let sel = &rule.resources;
             let mut parts = vec![kinds(sel)];

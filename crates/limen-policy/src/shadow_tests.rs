@@ -406,3 +406,102 @@ fn explain_says_a_shadow_rule_matched_but_did_not_apply() {
         "{admin_view}"
     );
 }
+
+const GHOST: &str = r"
+kind: role
+version: v1
+metadata: { name: ghost }
+spec:
+  mode: shadow
+  shadow_until: 2027-01-31
+  allow:
+    - resources: { kind: [ssh] }
+      ssh: { logins: [ubuntu, root] }
+  deny:
+    - name: no-prod
+      resources: { kind: [ssh], labels: { env: [prod] } }
+";
+
+/// A person asking why they can't reach something is never told about shadow
+/// rules, and a shadow role they hold is not listed as granting anything.
+#[test]
+fn a_users_explain_never_mentions_shadow_rules() {
+    let both = format!("{BASE_ROLE}---{GHOST}");
+    let p = policy(&both).expect("valid");
+    for roles in [vec!["dev"], vec!["ghost"], vec!["dev", "ghost"], vec![]] {
+        let roles: Vec<String> = roles.into_iter().map(str::to_owned).collect();
+        for resource in ["web-prod", "web-staging", "wiki", "nope"] {
+            for principal in [Some(Principal::SshLogin("root".into())), None] {
+                let text = p
+                    .explain_for_user(&roles, &[], resource, principal.as_ref())
+                    .join("\n");
+                for word in ["shadow", "no-root-in-prod", "no-prod", "no-delete"] {
+                    assert!(!text.contains(word), "{roles:?} {resource}: {text}");
+                }
+                assert!(
+                    !text.contains("Your role `ghost` allows"),
+                    "a shadow role grants nothing: {text}"
+                );
+            }
+        }
+    }
+    // An admin's trace does show them.
+    let held = vec!["dev".to_owned(), "ghost".to_owned()];
+    let text = p
+        .trace(&request(&held, "web-prod", "root"), &[])
+        .render()
+        .join("\n");
+    assert!(text.contains("shadow"), "{text}");
+}
+
+/// ADR-0028's one-engine rule with shadow rules and a shadow role present:
+/// the trace and enforcement agree on every request.
+#[test]
+fn trace_agrees_with_enforcement_with_shadow_rules_present() {
+    let p = policy(&format!("{BASE_ROLE}---{GHOST}")).expect("valid");
+    let all = ["dev", "ghost", "unknown"];
+    let resources = ["web-prod", "web-staging", "wiki", "nope"];
+    let principals = [
+        Principal::SshLogin("ubuntu".into()),
+        Principal::SshLogin("root".into()),
+        Principal::WebAccess,
+    ];
+    let mut seed = 0xfeed_u64;
+    let mut next = |n: usize| {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        usize::try_from(seed >> 33).expect("fits") % n
+    };
+    for _ in 0..5_000 {
+        let held: Vec<String> = all
+            .iter()
+            .filter(|_| next(2) == 0)
+            .map(|r| (*r).to_owned())
+            .collect();
+        let eligible: Vec<String> = all
+            .iter()
+            .filter(|_| next(3) == 0)
+            .map(|r| (*r).to_owned())
+            .collect();
+        let req = AccessRequest {
+            roles: &held,
+            resource: resources[next(resources.len())],
+            principal: principals[next(principals.len())].clone(),
+        };
+        assert_eq!(
+            p.trace(&req, &[]).decision,
+            p.evaluate(&req),
+            "{held:?} {req:?}"
+        );
+        assert_eq!(
+            p.trace(&req, &eligible).decision,
+            p.evaluate_eligible(&req, &eligible),
+            "{held:?} {eligible:?} {req:?}"
+        );
+        // A shadow role never opens anything by itself.
+        if held.iter().all(|r| r != "dev") {
+            assert!(!p.evaluate(&req).is_allowed(), "{held:?} {req:?}");
+        }
+    }
+}
