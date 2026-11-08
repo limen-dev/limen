@@ -95,7 +95,30 @@ async fn a_deactivated_person_loses_their_login() {
             .as_str()
             .is_some_and(|r| r.contains("invalid_grant"))
     );
-    assert_eq!(status(&h).await, "offboarded");
+    eventually("the status to show it", || async {
+        status(&h).await == "offboarded"
+    })
+    .await;
+    // Deactivated means locked too, so what a login does not cover ends as well.
+    assert!(
+        limen_control_plane::db::is_locked(&h.state.db, ADMIN)
+            .await
+            .expect("lock check")
+    );
+    let lock = limen_control_plane::db::active_lock(&h.state.db, ADMIN)
+        .await
+        .expect("lock")
+        .expect("locked");
+    assert_eq!(lock.locked_by, "system:idp-check");
+
+    // The IdP vouching for them again lifts that lock by itself, audited.
+    h.login(ADMIN, &["admins"]).await.expect("signs in again");
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, ADMIN)
+            .await
+            .expect("lock check")
+    );
+    assert_eq!(events(&h, EventKind::UserUnlock).await.len(), 1);
     let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM idp_logins")
         .fetch_one(&h.state.db)
         .await
@@ -287,4 +310,38 @@ async fn offline_access_is_asked_for_only_while_the_check_is_on() {
         return;
     };
     assert!(!scopes(&off).await.contains(&"offline_access".to_owned()));
+}
+
+#[tokio::test]
+async fn an_admins_lock_is_never_lifted_by_signing_in() {
+    let Some(h) = start(&[]).await else { return };
+    h.login(ADMIN, &["admins"]).await.expect("login");
+    assert!(
+        limen_control_plane::db::lock_user(&h.state.db, ADMIN, "stolen laptop", "root@example.com")
+            .await
+            .expect("lock")
+    );
+    let err = h.login(ADMIN, &["admins"]).await.expect_err("still locked");
+    assert_eq!(err.code(), tonic::Code::PermissionDenied);
+}
+
+const MAPPING: &str = "kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [dev] }\n  - { idp_group: extra, roles: [dev] }\n";
+
+#[tokio::test]
+async fn a_group_gained_and_lost_after_login_does_not_end_the_login() {
+    let Some(h) = start(&[]).await else { return };
+    h.set_policy(&[("m.yaml", MAPPING)]);
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["developers"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["developers"], &refresh)
+        .await
+        .expect("login");
+    // Gains `extra` (same role), the login keeps working; then loses it again.
+    h.idp.set_groups(ADMIN, &["developers", "extra"]);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    h.idp.set_groups(ADMIN, &["developers"]);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(alive(&h, &proxy, &cert).await);
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
 }

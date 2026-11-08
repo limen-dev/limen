@@ -37,7 +37,9 @@ A migration adds to `users`: `source` (`idp_login` for people; bots keep their o
 - **IdP event hooks:** per-IdP integration; same objection.
 
 ## As built (2026-11-08)
-- **No lock on `invalid_grant`.** The first draft locked the person. A refusal can also mean an expired refresh token, and a lock needs an admin to undo it. A deactivated person cannot sign in again anyway (the IdP refuses them), so ending the login, and their other logins at once, closes the gap without the risk of locking a valid person. An admin lock stays the immediate tool.
+- **Deactivation ends the login, locks, and lifts the lock itself.** `invalid_grant` ends that login, checks the person's other logins at once, and places a lock as `system:idp-check`, so console and web sessions and logins without a refresh token end too. A refusal can also mean an expired refresh token, so the lock is lifted (audited `user.unlock`) when the person next signs in, because that sign-in is the IdP vouching for them. A lock by anyone else is never lifted that way. (An earlier as-built draft did not lock; it left console sessions and unchecked logins running.)
+- **The login keeps its issue-time groups.** Checks compare the groups the login was issued with against the groups now, so a role gained and lost again after login does not end it.
+- **Claims last longer than the interval.** A claim covers a whole batch of slow calls, so another replica cannot redeem a rotating token that is still being used.
 - **Sealing key, not KMS.** There is no application-level encryption facility yet, so the key is an operator-supplied 32-byte secret (`--idp-token-key`). Wrapping it with KMS is a follow-up.
 - **Claims, not leases.** Replicas claim due logins with `FOR UPDATE SKIP LOCKED` and push the next check out first, so no leader is needed and a crash only delays a check.
 - **An absent `groups` claim counts as no groups**, since IdPs omit it for a person with none. `--idp-ignore-groups` is the switch for an IdP that drops it from refreshed tokens.

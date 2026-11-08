@@ -828,6 +828,26 @@ pub async fn active_locks(db: &Db) -> Result<Vec<LockRow>, sqlx::Error> {
         .collect()
 }
 
+/// The active lock on `username`, if any.
+pub async fn active_lock(db: &Db, username: &str) -> Result<Option<LockRow>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT username, reason, locked_by, locked_at FROM user_locks
+         WHERE lower(username) = lower($1) AND released_at IS NULL",
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await?;
+    row.map(|r| {
+        Ok(LockRow {
+            username: r.try_get("username")?,
+            reason: r.try_get("reason")?,
+            locked_by: r.try_get("locked_by")?,
+            locked_at: r.try_get("locked_at")?,
+        })
+    })
+    .transpose()
+}
+
 pub async fn is_locked(db: &Db, username: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM user_locks WHERE lower(username) = lower($1) AND released_at IS NULL)",

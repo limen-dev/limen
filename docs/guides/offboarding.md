@@ -14,7 +14,7 @@ Deactivate the person, or remove them from the group that grants a role. Within 
 
 | In the IdP | What Limen does | Audit event |
 |---|---|---|
-| The person is deactivated, or their IdP session is revoked | Ends their logins: certificates stop working at the next API call and their sessions end. They cannot sign in again, because the IdP refuses them. | `idp.offboard` with `deactivated: true` and the IdP's reason |
+| The person is deactivated, or their IdP session is revoked | Ends that login, **locks the person** (as `system:idp-check`), so console and web sessions and logins without a refresh token end too, and checks their other logins at once. The lock lifts itself, audited as `user.unlock`, when the IdP vouches for them at their next sign-in. An admin's lock is never lifted that way. | `idp.offboard` with `deactivated: true` and the IdP's reason, then `user.lock` |
 | A group that gave them a role is removed | Ends that login only. The person is **not** locked; they can sign in again with the access they still have. | `idp.offboard` with `deactivated: false` and the roles lost |
 | The IdP cannot be reached | Keeps sessions and raises `idp.check_failed` once per person per outage (see the failure rule below). | `idp.check_failed` |
 
@@ -54,6 +54,8 @@ If your IdP expires refresh tokens early (idle or absolute lifetimes), an expire
 - Several control plane replicas share the work: each claims logins that are due, so none is checked twice.
 
 ## Limits
+
+- **A refresh token is a credential that outlives the sign-in.** Anyone who can read the login request on the way to the control plane (a compromised proxy) or the database and the sealing key can redeem it at the IdP, and, through the device flow, which has no key binding, get Limen certificates until the token expires. Keep refresh token lifetimes short, and see the threat model (TB0, residual risk 11).
 
 - Reaction time is the check interval, not instant. For instant, lock the user.
 - Roles are still fixed at login; a *new* group applies at the next sign-in.

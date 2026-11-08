@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use limen_audit::{Context, EventKind};
+use limen_core::secret::Secret;
 use serde_json::json;
 use sqlx::Row;
 use time::OffsetDateTime;
@@ -26,6 +27,12 @@ use crate::state::AppState;
 
 /// Logins claimed per tick, so one slow IdP cannot hold a whole fleet's checks.
 const BATCH: i64 = 50;
+/// The most one IdP call may take (the HTTP client's timeout).
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// The name on the lock a deactivation places. A lock by this name is lifted
+/// when the IdP vouches for the person again at their next sign-in; any other
+/// lock (an admin's) is never touched.
+pub const LOCK_ACTOR: &str = "system:idp-check";
 /// How often a replica looks for due logins.
 const TICK: Duration = Duration::from_secs(20);
 
@@ -60,7 +67,7 @@ pub fn seal(key: &[u8; 32], login_id: &str, token: &str) -> Result<Vec<u8>, Stri
 /// The inverse of [`seal`]. `None` for a wrong key, a different login id, or
 /// damaged bytes.
 #[must_use]
-pub fn open(key: &[u8; 32], login_id: &str, sealed: &[u8]) -> Option<String> {
+pub fn open(key: &[u8; 32], login_id: &str, sealed: &[u8]) -> Option<Secret<String>> {
     if sealed.len() < NONCE_LEN + AES_256_GCM.tag_len() {
         return None;
     }
@@ -74,7 +81,7 @@ pub fn open(key: &[u8; 32], login_id: &str, sealed: &[u8]) -> Option<String> {
             &mut buf,
         )
         .ok()?;
-    String::from_utf8(plain.to_vec()).ok()
+    String::from_utf8(plain.to_vec()).ok().map(Secret::new)
 }
 
 // ---- storage ----------------------------------------------------------------
@@ -147,6 +154,10 @@ pub async fn note_user(
 /// Claim the logins due for a check, pushing their next check out first, so
 /// replicas never take the same login and a crash mid-check only delays it.
 async fn claim_due(db: &Db, interval: Duration) -> Result<Vec<Tracked>, sqlx::Error> {
+    // Long enough that a whole batch of slow calls finishes before another
+    // replica can claim the same rows: two redemptions of one rotating token
+    // would make the second look like a refusal.
+    let claim_for = interval.max(CALL_TIMEOUT * u32::try_from(BATCH).unwrap_or(50) + CALL_TIMEOUT);
     sqlx::query(
         "UPDATE idp_logins SET next_check_at = now() + make_interval(secs => $2)
          WHERE login_id IN (
@@ -155,7 +166,7 @@ async fn claim_due(db: &Db, interval: Duration) -> Result<Vec<Tracked>, sqlx::Er
          RETURNING login_id, username, refresh_token, groups, expires_at, last_ok_at",
     )
     .bind(BATCH)
-    .bind(jittered_secs(interval))
+    .bind(jittered_secs(claim_for))
     .fetch_all(db)
     .await?
     .iter()
@@ -189,16 +200,19 @@ async fn mark_ok(
     db: &Db,
     t: &Tracked,
     rotated: Option<&[u8]>,
-    groups: Option<&[String]>,
+    next: Duration,
 ) -> Result<(), sqlx::Error> {
+    // The groups stay those the login was issued with: a role gained since
+    // and lost again was never this login's.
     sqlx::query(
         "UPDATE idp_logins SET last_ok_at = now(),
-                refresh_token = COALESCE($2, refresh_token), groups = COALESCE($3, groups)
+                refresh_token = COALESCE($2, refresh_token),
+                next_check_at = now() + make_interval(secs => $3)
          WHERE login_id = $1",
     )
     .bind(&t.login_id)
     .bind(rotated)
-    .bind(groups)
+    .bind(jittered_secs(next))
     .execute(db)
     .await?;
     set_status(db, &t.username, "ok").await
@@ -237,8 +251,8 @@ async fn already_failing(db: &Db, username: &str) -> bool {
 pub enum Answer {
     /// The IdP still vouches. The ID token and rotated refresh token, if sent.
     Valid {
-        id_token: Option<String>,
-        refresh_token: Option<String>,
+        id_token: Option<Secret<String>>,
+        refresh_token: Option<Secret<String>>,
     },
     /// The IdP refused the token (`invalid_grant`): the person is deactivated
     /// or the IdP session was revoked or expired.
@@ -252,11 +266,12 @@ pub enum Answer {
 pub fn interpret(status: u16, body: &[u8]) -> Answer {
     let json: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
     let text = |k: &str| json.get(k).and_then(|v| v.as_str()).map(str::to_owned);
+    let secret = |k: &str| text(k).map(Secret::new);
     if status == 200 {
         return if text("id_token").is_some() || text("access_token").is_some() {
             Answer::Valid {
-                id_token: text("id_token"),
-                refresh_token: text("refresh_token"),
+                id_token: secret("id_token"),
+                refresh_token: secret("refresh_token"),
             }
         } else {
             Answer::Unreachable("the token endpoint answered without a token".into())
@@ -265,7 +280,15 @@ pub fn interpret(status: u16, body: &[u8]) -> Answer {
     match text("error").as_deref() {
         Some("invalid_grant") => Answer::Refused(text("error_description").map_or_else(
             || "invalid_grant".to_owned(),
-            |d| format!("invalid_grant: {}", d.chars().take(200).collect::<String>()),
+            |d| {
+                format!(
+                    "invalid_grant: {}",
+                    d.chars()
+                        .filter(|c| !c.is_control())
+                        .take(200)
+                        .collect::<String>()
+                )
+            },
         )),
         Some(other) => Answer::Unreachable(format!("token endpoint error: {other}")),
         None => Answer::Unreachable(format!("token endpoint answered {status}")),
@@ -406,6 +429,27 @@ async fn end_login(state: &AppState, t: &Tracked, reason: &str, deactivated: boo
     }
     let _ = forget(&state.db, &t.login_id).await;
     if deactivated {
+        // Lock them, so what a login does not cover (console and web sessions,
+        // logins that sent no refresh token) ends too. The lock lifts itself
+        // when the IdP vouches for them at their next sign-in.
+        let lock_reason: String = format!("deactivated in the identity provider: {reason}")
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(400)
+            .collect();
+        if let Err(e) = crate::services::ops::lock_user(
+            state,
+            crate::services::ops::Actor {
+                username: LOCK_ACTOR,
+                via: "idp",
+            },
+            &t.username,
+            &lock_reason,
+        )
+        .await
+        {
+            tracing::error!(error = %e, user = %t.username, "locking a deactivated person failed");
+        }
         // Their other logins will be refused too: ask now, not in minutes.
         let _ = sqlx::query(
             "UPDATE idp_logins SET next_check_at = now() WHERE lower(username) = lower($1)",
@@ -451,6 +495,14 @@ async fn check_failed(state: &AppState, t: &Tracked, why: &str) {
             )
             .await;
     }
+    // Ask again at the usual interval, not the longer claim.
+    let _ = sqlx::query(
+        "UPDATE idp_logins SET next_check_at = now() + make_interval(secs => $2) WHERE login_id = $1",
+    )
+    .bind(&t.login_id)
+    .bind(jittered_secs(state.config.idp_check_interval))
+    .execute(&state.db)
+    .await;
     let _ = set_status(&state.db, &t.username, "check_failed").await;
 }
 
@@ -462,7 +514,7 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
         let _ = forget(&state.db, &t.login_id).await;
         return;
     };
-    match idp.refresh(state, &token).await {
+    match idp.refresh(state, token.expose()).await {
         Answer::Refused(why) => {
             metrics::counter!("limen_idp_checks_total", "outcome" => "refused").increment(1);
             end_login(
@@ -478,9 +530,8 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
             id_token,
             refresh_token,
         } => {
-            let mut new_groups = None;
             if let Some(raw) = id_token {
-                match state.oidc.verify(raw.clone(), None).await {
+                match state.oidc.verify(raw.expose().clone(), None).await {
                     Ok(id) => {
                         if !id.username.eq_ignore_ascii_case(&t.username) {
                             end_login(
@@ -507,7 +558,6 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                                 .await;
                                 return;
                             }
-                            new_groups = Some(id.groups);
                         }
                     }
                     Err(e) => {
@@ -516,9 +566,15 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                     }
                 }
             }
-            let rotated = refresh_token.and_then(|r| seal(key, &t.login_id, &r).ok());
+            let rotated = refresh_token.and_then(|r| seal(key, &t.login_id, r.expose()).ok());
             metrics::counter!("limen_idp_checks_total", "outcome" => "ok").increment(1);
-            if let Err(e) = mark_ok(&state.db, &t, rotated.as_deref(), new_groups.as_deref()).await
+            if let Err(e) = mark_ok(
+                &state.db,
+                &t,
+                rotated.as_deref(),
+                state.config.idp_check_interval,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "recording a successful check");
             }
@@ -571,7 +627,9 @@ mod tests {
             "the token is not stored in the clear"
         );
         assert_eq!(
-            open(&KEY, "login-1", &sealed).as_deref(),
+            open(&KEY, "login-1", &sealed)
+                .map(Secret::into_inner)
+                .as_deref(),
             Some("refresh-secret")
         );
         assert_eq!(open(&KEY, "login-2", &sealed), None, "bound to its login");

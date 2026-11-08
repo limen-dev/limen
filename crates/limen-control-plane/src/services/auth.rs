@@ -166,17 +166,43 @@ impl Auth for AuthService {
     }
 }
 
-/// Remember the person, where they came from, and (ADR-0046) keep the IdP's
-/// refresh token, sealed, so the login can be checked against the IdP. Best
-/// effort: a login without a token is simply not checked, and the console says so.
-async fn record_user(
+/// Refuse a locked person. A lock placed because the IdP deactivated them
+/// lifts itself when the IdP vouches for them again (they just signed in); an
+/// admin's lock never does (ADR-0046).
+async fn refuse_if_locked(
     state: &AppState,
-    identity: &crate::oidc::VerifiedIdentity,
-    roles: &[String],
-    login_id: Uuid,
-    refresh_token: &str,
-    not_after: time::OffsetDateTime,
-) {
+    addr: Option<IpAddr>,
+    username: &str,
+) -> Result<(), Status> {
+    let Some(lock) = crate::db::active_lock(&state.db, username)
+        .await
+        .map_err(|e| internal("checking locks", e))?
+    else {
+        return Ok(());
+    };
+    if lock.locked_by != crate::idp_check::LOCK_ACTOR {
+        return Err(deny(
+            state.audit.clone(),
+            addr,
+            Some(username.to_owned()),
+            "user locked",
+        )
+        .await);
+    }
+    crate::services::ops::unlock_user(
+        state,
+        crate::services::ops::Actor {
+            username: crate::idp_check::LOCK_ACTOR,
+            via: "idp",
+        },
+        username,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Remember the person (ADR-0017).
+async fn record_user(state: &AppState, identity: &crate::oidc::VerifiedIdentity, roles: &[String]) {
     if let Err(e) = crate::console::store::upsert_user(
         &state.db,
         &identity.username,
@@ -188,6 +214,20 @@ async fn record_user(
     {
         tracing::warn!(error = %e, "recording the user");
     }
+}
+
+/// After the login is audited: keep the IdP's refresh token, sealed, so the
+/// login can be checked against the IdP (ADR-0046), and note where the person
+/// came from. Best effort: a login without a token is simply not checked, and
+/// the console says so. Done only once the login cannot be refused any more,
+/// so a refused login leaves no credential behind.
+async fn keep_refresh_token(
+    state: &AppState,
+    identity: &crate::oidc::VerifiedIdentity,
+    login_id: Uuid,
+    refresh_token: &str,
+    not_after: time::OffsetDateTime,
+) {
     let tracked = track_refresh_token(state, identity, login_id, refresh_token, not_after).await;
     if let Err(e) = crate::idp_check::note_user(
         &state.db,
@@ -326,18 +366,7 @@ async fn login(
         .await);
     }
 
-    if crate::db::is_locked(&state.db, &identity.username)
-        .await
-        .map_err(|e| internal("checking locks", e))?
-    {
-        return Err(deny(
-            state.audit.clone(),
-            addr,
-            Some(identity.username),
-            "user locked",
-        )
-        .await);
-    }
+    refuse_if_locked(&state, addr, &identity.username).await?;
 
     let loaded = state.policy.current();
     let roles: Vec<String> = loaded
@@ -385,15 +414,7 @@ async fn login(
             other => internal("issuing user certificate", other),
         })?;
 
-    record_user(
-        &state,
-        &identity,
-        &roles,
-        login_id,
-        &req.refresh_token,
-        issued.not_after,
-    )
-    .await;
+    record_user(&state, &identity, &roles).await;
     // Fail closed: no audit event, no credentials.
     let data = json!({
         "login_id": login_id,
@@ -420,6 +441,14 @@ async fn login(
             tracing::error!(error = %e, "audit unavailable; refusing login");
             Status::unavailable("audit unavailable")
         })?;
+    keep_refresh_token(
+        &state,
+        &identity,
+        login_id,
+        &req.refresh_token,
+        issued.not_after,
+    )
+    .await;
     metrics::counter!("limen_logins_total", "outcome" => "success").increment(1);
     tracing::info!(user = %identity.username, ?roles, ttl_secs = ttl.as_secs(), "login");
 
