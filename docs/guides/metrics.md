@@ -23,7 +23,12 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_ca_sign_errors_total` | counter | `kind` | control plane |
 | `limen_api_request_seconds` | histogram | `service` | control plane |
 | `limen_control_plane_replicas` | gauge | | control plane |
+| `limen_policy_shadow_rules`, `limen_policy_shadow_days_left` | gauge | | control plane |
+| `limen_policy_shadow_denies_total` | counter | `role`, `rule` | proxy |
+| `limen_policy_shadow_events_dropped_total` | counter | | proxy |
 | `limen_recordings_pending` | gauge | | worker |
+
+`limen_policy_shadow_days_left` is the days until the first shadow rule runs out, or `-1` with none; alert before it reaches 0, because after that policy changes are refused until the rule is enforced or renewed (ADR-0046). `limen_policy_shadow_events_dropped_total` counts shadow denies whose audit event could not be written; the request is never refused for it.
 
 Protocol-specific counters (`limen_mongo_*`, `limen_search_*`, `limen_broker_*`, `limen_kube_requests_total`) are described in the guide for each protocol.
 

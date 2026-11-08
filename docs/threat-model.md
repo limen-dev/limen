@@ -230,6 +230,8 @@ Out of scope for v1: a compromised AWS account root or KMS itself; a compromised
 | E: an owner certifies their own access (ADR-0029) | Self-review is refused and routed to the admin pool; an admin cannot decide an item about themselves; overdue items escalate |
 | T: evidence edited after export | The manifest of section hashes is signed by the control plane; the export is an audit event carrying the manifest hash; `limen audit verify --evidence` checks both offline; spreadsheet cells that would run as formulas are defused |
 | I/E: silent surveillance of a live session (ADR-0030) | Every watch is audited and fails closed; the session page lists watchers; `notify_observed` tells the user; watching is a separate power from reading the record (`--auditors-may-watch`); you cannot watch yourself; output only |
+| E: shadow mode used to switch a deny off quietly (ADR-0046) | Moving a deny to shadow, or later `shadow_until`, is held for a second admin whatever `--widening-approval` says; shadow needs a name and a date at most 90 days ahead; past that date the control plane refuses every change until the rule is enforced or renewed; `limen_policy_shadow_days_left` warns before. *Residual:* until the second admin looks, they approve what the held change lists |
+| D/I: a shadow report refuses a request, or hides one | A report cannot change a decision (a test with the sink broken); a lost report is counted in `limen_policy_shadow_events_dropped_total` and the request's own audit event still follows the failure mode |
 | D: a watcher slows the user's session | Bounded rings and buffers that drop; nothing is sent unless watched; five watchers per session; the stream re-checks authorization every few seconds |
 
 ### TB6: Audit sinks and dashboards

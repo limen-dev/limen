@@ -30,6 +30,8 @@ spec:
       via_role: sre-prod-readonly
 ```
 
+To prove a [shadow rule](../policy.md#shadow-mode) would fire before you enforce it, add `shadow_deny: [role/rule-name]` to an `expect: allow` case. The case fails if the request is not allowed, or if a listed rule does not match. `explain` and `who-can` treat shadow rules as not enforced, so `policy diff` shows the access that is really open: moving a deny to shadow appears as access gained.
+
 `who` is `groups`, a `bot`, or `roles` held directly, never a user name, so a case does not depend on who is in the user table. A case against a resource that does not exist **fails** (a "must deny" on a typo would otherwise pass). `policy_test` documents are validated like the rest and ignored at runtime.
 
 ```sh
