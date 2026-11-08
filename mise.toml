@@ -45,3 +45,41 @@ run = "deploy/compose/setup.sh"
 [tasks.install-cli]
 description = "Build the limen CLI from this checkout and install it to ~/.local/bin (set PREFIX to change)"
 run = "scripts/install-cli.sh"
+
+[tasks.stack-down]
+description = "Take down the local dev stack and delete its volumes (setup.sh down -v: data and dev CA state are lost)"
+raw = true
+run = "deploy/compose/setup.sh down"
+
+[tasks.stack-status]
+description = "Show which containers of the local dev stack are running (setup.sh status)"
+raw = true
+run = "deploy/compose/setup.sh status"
+
+[tasks.check]
+description = "Format check and clippy with warnings as errors, the checks every change needs"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+]
+
+[tasks.test]
+description = "Run the workspace tests. Integration tests need the stack's postgres, kms and s3 services (see CONTRIBUTING.md)"
+run = "cargo test --workspace --locked"
+
+[tasks.gen]
+description = "Regenerate the generated files: CLI reference, Grafana dashboards and alerts, dev users. CI fails when they are stale"
+run = [
+  "scripts/gen-cli-reference.sh",
+  "python3 deploy/grafana/generate.py",
+  "python3 deploy/compose/scripts/gen-dev-users.py",
+]
+
+[tasks.website-build]
+description = "Build the website and run its link and site checks (the whole check before pushing a site or docs change)"
+dir = "website"
+raw = true
+run = """
+test -d node_modules || npm ci
+npm run build
+"""
