@@ -56,7 +56,8 @@ fn event_view(e: &store::EventRow) -> EventView {
         icon,
         kclass,
         tone: match e.kind.as_str() {
-            "auth.denied" | "user.lock" | "session.kill" | "component.revoke" => "bad",
+            "auth.denied" | "user.lock" | "session.kill" | "component.revoke" | "idp.offboard"
+            | "idp.check_failed" => "bad",
             "auth.login" | "user.unlock" | "worker.enroll" => "ok",
             _ => "",
         },

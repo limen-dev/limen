@@ -133,6 +133,16 @@ struct Browser {
     user: Option<(String, Vec<String>)>,
     client: Option<(String, String)>,
     codes: std::collections::HashMap<String, PendingCode>,
+    /// Refresh tokens handed out (ADR-0046), by token.
+    refresh: std::collections::HashMap<String, RefreshSession>,
+    /// The token endpoint answers 503, as an IdP that is down.
+    down: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RefreshSession {
+    email: String,
+    groups: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +262,56 @@ impl MockIdp {
             email.to_owned(),
             groups.iter().map(|g| (*g).to_owned()).collect(),
         ));
+    }
+
+    /// Hand out a refresh token for `email`, as an IdP does with
+    /// `offline_access` (ADR-0046).
+    ///
+    /// # Panics
+    /// If the internal lock is poisoned. Tests only.
+    #[must_use]
+    pub fn issue_refresh_token(&self, email: &str, groups: &[&str]) -> String {
+        let token = format!("refresh-{}", uuid::Uuid::now_v7());
+        self.browser.lock().expect("lock").refresh.insert(
+            token.clone(),
+            RefreshSession {
+                email: email.to_owned(),
+                groups: groups.iter().map(|g| (*g).to_owned()).collect(),
+            },
+        );
+        token
+    }
+
+    /// Deactivate `email`: every refresh token of theirs now answers `invalid_grant`.
+    ///
+    /// # Panics
+    /// If the internal lock is poisoned. Tests only.
+    pub fn deactivate(&self, email: &str) {
+        self.browser
+            .lock()
+            .expect("lock")
+            .refresh
+            .retain(|_, s| s.email != email);
+    }
+
+    /// Change the groups `email` is in, as the next refreshed ID token shows.
+    ///
+    /// # Panics
+    /// If the internal lock is poisoned. Tests only.
+    pub fn set_groups(&self, email: &str, groups: &[&str]) {
+        for s in self.browser.lock().expect("lock").refresh.values_mut() {
+            if s.email == email {
+                s.groups = groups.iter().map(|g| (*g).to_owned()).collect();
+            }
+        }
+    }
+
+    /// Make the token endpoint answer 503 (or recover).
+    ///
+    /// # Panics
+    /// If the internal lock is poisoned. Tests only.
+    pub fn set_down(&self, down: bool) {
+        self.browser.lock().expect("lock").down = down;
     }
 
     /// Mint a signed ID token.
@@ -388,11 +448,60 @@ async fn browser_auth(State(idp): State<MockIdp>, Query(q): Query<AuthQuery>) ->
 #[derive(Deserialize)]
 struct TokenForm {
     grant_type: String,
+    #[serde(default)]
     code: String,
+    #[serde(default)]
     redirect_uri: String,
     client_id: String,
+    #[serde(default)]
     client_secret: String,
+    #[serde(default)]
     code_verifier: String,
+    #[serde(default)]
+    refresh_token: String,
+}
+
+/// The refresh-token grant of a public client (the CLI's client has no secret).
+fn refresh_grant(
+    idp: &MockIdp,
+    f: &TokenForm,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, &'static str)> {
+    use axum::http::StatusCode;
+    let session = {
+        let mut browser = idp.browser.lock().expect("lock");
+        if browser.down {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{\"error\":\"temporarily_unavailable\"}",
+            ));
+        }
+        browser
+            .refresh
+            .remove(&f.refresh_token)
+            .ok_or((StatusCode::BAD_REQUEST, "{\"error\":\"invalid_grant\"}"))?
+    };
+    // Rotation: the old token is spent, a new one is issued.
+    let rotated = format!("refresh-{}", uuid::Uuid::now_v7());
+    idp.browser
+        .lock()
+        .expect("lock")
+        .refresh
+        .insert(rotated.clone(), session.clone());
+    let mut claims = Claims::user(
+        &session.email,
+        &session
+            .groups
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    claims.audience = Some(f.client_id.clone());
+    Ok(Json(serde_json::json!({
+        "id_token": idp.id_token(&claims),
+        "access_token": "unused",
+        "refresh_token": rotated,
+        "token_type": "Bearer",
+    })))
 }
 
 /// The token endpoint: checks the client secret, the redirect URI, and PKCE.
@@ -401,6 +510,9 @@ async fn browser_token(
     Form(f): Form<TokenForm>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, &'static str)> {
     use axum::http::StatusCode;
+    if f.grant_type == "refresh_token" {
+        return refresh_grant(&idp, &f);
+    }
     let pending = {
         let mut browser = idp.browser.lock().expect("lock");
         let secret_ok = browser

@@ -13,6 +13,7 @@ pub mod discovery;
 pub mod evidence;
 pub mod handoff_client;
 pub mod http_client;
+pub mod idp_check;
 pub mod jobs;
 pub mod live;
 pub mod oidc;
@@ -43,6 +44,7 @@ use state::{AppState, Limits, PolicyStore};
 /// load the policy, and open the audit sink.
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     config.check_cert_ttls().map_err(anyhow::Error::msg)?;
+    config.idp_token_key().map_err(anyhow::Error::msg)?;
     let db = db::connect_with(
         config.database_url.expose(),
         config.database_max_connections,
@@ -238,6 +240,7 @@ pub async fn run(
     tokio::spawn(jobs::access_expiry(state.clone(), stop.clone()));
     tokio::spawn(jobs::discovery_sweep(state.clone(), stop.clone()));
     tokio::spawn(jobs::reviews_tick(state.clone(), stop.clone()));
+    tokio::spawn(idp_check::job(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),
