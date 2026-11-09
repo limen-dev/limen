@@ -474,17 +474,20 @@ async fn establish(
     // The certificate's roles, plus roles an approved access request gave on
     // this resource, less any an access review took away (ADR-0025, ADR-0029).
     let effective = snapshot.roles_for(&user.username, &user.roles, &request.resource, now);
-    let decision = policy.evaluate(&AccessRequest {
+    let access = AccessRequest {
         roles: &effective.roles,
         resource: &request.resource,
         principal,
-    });
-    if !decision.is_allowed() {
+    };
+    if !policy.evaluate(&access).is_allowed() {
         return Err(denied(format!(
             "access denied to {}@{}",
             request.principal, request.resource
         )));
     }
+    // Shadow deny rules (ADR-0046): found now, reported once the session
+    // has really opened, and the session goes on either way.
+    let shadow = policy.shadow_denies(&access);
     let target = Target {
         resource: &request.resource,
         kind: &kind,
@@ -498,6 +501,18 @@ async fn establish(
     };
     let (session_id, worker, inbound, outbound, slot) =
         open_session(proxy, policy, user, &user_cert_der, &target, now).await?;
+    if !shadow.is_empty() {
+        let asked = json!({ "action": protocol.action(), "resource": request.resource, protocol.principal_field(): request.principal });
+        crate::shadow::report(
+            &proxy.audit,
+            &shadow,
+            &user.username,
+            Some(session_id),
+            snapshot.version,
+            &asked,
+        )
+        .await;
+    }
     Ok((
         session_id,
         worker,

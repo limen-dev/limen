@@ -68,7 +68,8 @@ pub fn notice(done: &str) -> Option<String> {
 
 /// One write by a person in the console, with the guardrails every channel
 /// has: tests with `--policy-tests=required`, and a second admin with
-/// `--widening-approval=all`.
+/// `--widening-approval=all` or when a deny rule moves to shadow mode
+/// (ADR-0046), which always waits.
 async fn write(state: &AppState, auth: &Auth, changes: Vec<Change>) -> Result<Done, String> {
     // The same per-person limit as the API's writes.
     if !state.limits.allow_policy_write(&auth.username, false) {

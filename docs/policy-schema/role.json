@@ -352,6 +352,10 @@
             }
           ]
         },
+        "mode": {
+          "$ref": "#/$defs/RuleMode",
+          "description": "`shadow` (deny rules only) reports a match instead of enforcing it\n(ADR-0046). Needs `name` and `shadow_until`."
+        },
         "mongo": {
           "anyOf": [
             {
@@ -370,6 +374,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "name": {
+          "description": "Names a `deny` rule. Required with `mode: shadow` (and on every deny\nrule of a shadow role): audit events and tests refer to it.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "redis": {
@@ -394,6 +405,17 @@
               "type": "null"
             }
           ]
+        },
+        "shadow_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShadowDate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The day by which a shadow rule must be enforced or renewed."
         },
         "ssh": {
           "anyOf": [
@@ -430,6 +452,22 @@
         "resources"
       ],
       "type": "object"
+    },
+    "RuleMode": {
+      "description": "Whether a deny rule or role is enforced or only reported.",
+      "oneOf": [
+        {
+          "enum": [
+            "enforce"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "shadow",
+          "description": "A matching deny is reported as `policy.shadow_deny` and the request\ngoes on as if the rule did not exist.",
+          "type": "string"
+        }
+      ]
     },
     "SearchClass": {
       "description": "What a search request does (ADR-0036). `Admin` is also what the worker\ncalls any API it doesn't recognise, so new APIs start closed.",
@@ -505,6 +543,11 @@
         "kind"
       ],
       "type": "object"
+    },
+    "ShadowDate": {
+      "description": "A calendar day, `YYYY-MM-DD`.",
+      "pattern": "^\\s*[0-9]{4}-[0-9]{2}-[0-9]{2}\\s*$",
+      "type": "string"
     },
     "SshGrant": {
       "additionalProperties": false,
@@ -587,6 +630,10 @@
         }
       ]
     },
+    "mode": {
+      "$ref": "#/$defs/RuleMode",
+      "description": "`shadow` reports what this role's `deny` rules would refuse and\nignores its `allow` rules, so the role can neither deny nor grant\n(ADR-0046). Needs `shadow_until`, and a `name` on every deny rule."
+    },
     "notify_observed": {
       "description": "Tell people on sessions this role grants that an administrator may\nwatch them (ADR-0030). Watching is audited whether or not this is set.",
       "type": "boolean"
@@ -601,6 +648,17 @@
         }
       ],
       "description": "Makes the role *requestable*: people in `request.who` can ask for it\nfor a limited time (ADR-0025)."
+    },
+    "shadow_until": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ShadowDate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The day by which a shadow role must be enforced or renewed."
     }
   },
   "title": "role spec",

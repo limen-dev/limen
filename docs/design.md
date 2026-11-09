@@ -271,6 +271,7 @@ spec:
 
 ### 7.2 Evaluation
 - **Deny by default.** An explicit `deny` match wins. Otherwise the request is allowed only if at least one `allow` rule matches the resource kind, **every** label selector key matches (values within a key are ORed), and the requested principal (login, DB role, kube group) appears in that rule. With wildcards, only the explicit `"*"` form is accepted.
+- **Shadow mode (ADR-0046).** A `deny` rule or role marked `mode: shadow` is reported (`policy.shadow_deny`) when it would have refused a request that was allowed, and never enforced. A shadow role's `allow` rules grant nothing.
 - `Decision` has a reserved `RequiresApproval` variant. Every enforcement point treats it as a deny. This is where JIT and approvals plug in later.
 
 ### 7.3 Distribution
@@ -290,6 +291,8 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - no new sessions
   - in-flight sessions block on emission. Backpressure pauses the client stream, and if that lasts longer than `audit.block_timeout` (default 30 s), the session ends with reason `audit_unavailable`
   - logins are refused
+
+  One narrow exception (ADR-0046): a `policy.shadow_deny` event that cannot be written never refuses the request, since a shadow rule is documented as unable to deny; it is counted in `limen_policy_shadow_events_dropped_total`. The request's own audit event still follows the failure mode, so with the spool full under `fail_closed` the session is refused anyway.
 
   `degrade` keeps going, drops nothing it can still spool, and raises `limen_audit_degraded=1` plus an error log every 10 s. Either way, nothing is dropped silently.
 - **Session recordings** are written by the worker to `<data-dir>/recordings/<session>.cast.part`, renamed when the session ends, and uploaded to the control plane (`AuditIngest.UploadRecording`), which stores them at `recordings/dt=YYYY-MM-DD/<session_id>.cast` and emits `session.recording` with the final URI and SHA-256. `session.end` carries `recording:<session_id>` and the hash. Until the control plane acks, the worker keeps the file and retries.

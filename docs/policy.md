@@ -17,6 +17,8 @@ Access is **denied by default**. A request names a resource and the principal to
 1. If any of the user's roles has a `deny` rule that matches the resource (and the principal, if the rule names principals), the request is denied.
 2. Otherwise it's allowed if some `allow` rule matches the resource **and** lists the principal.
 
+A `deny` rule or a whole role can be put in [shadow mode](#shadow-mode) first, to see what it would refuse.
+
 A selector matches when:
 - the resource kind is listed,
 - **every** label key matches (any of the listed values; `"*"` means "present with any value", and `"*": ["*"]` matches every resource),
@@ -65,6 +67,36 @@ spec:
 `db.roles` names the database roles people may use. **They must start with `limen_`** (followed by lowercase letters, digits, or underscores): the prefix is reserved for roles Limen creates and manages, and policy validation rejects any other. `db.databases` lists the databases (`"*"` for any).
 
 For Redis, MongoDB, search, RabbitMQ, and Kafka, the `users` and `roles` fields select upstream identities; they do not require a Limen prefix. Use concise names such as `read`, `write`, `consumer`, or `admin`.
+
+## Shadow mode
+
+Tightening production access is risky: you don't know what a new `deny` breaks until it is live. Put it in **shadow mode** first (ADR-0046). A shadow rule is evaluated against real requests but never enforced: when it would have refused a request that was allowed, Limen audits `policy.shadow_deny` and lets the request through. When that log stays quiet, remove `mode: shadow` and the rule is enforced.
+
+```yaml
+kind: role
+version: v1
+metadata: { name: dev }
+spec:
+  allow:
+    - resources: { kind: [ssh], labels: { env: [prod] } }
+      ssh: { logins: [ubuntu, root] }
+  deny:
+    - name: no-root-in-prod          # required with mode: shadow
+      mode: shadow
+      shadow_until: 2027-01-31       # required, at most 90 days ahead
+      resources: { kind: [ssh], labels: { env: [prod] } }
+      ssh: { logins: [root] }
+```
+
+- **Deny rules and whole roles.** `mode: shadow` on a role reports all its `deny` rules and **ignores its `allow` rules**, so a shadow role neither denies nor grants. It needs `shadow_until`, a `name` on every deny rule, at least one deny rule, and can't be requestable or break-glass. An `allow` rule can't be shadowed.
+- **Reported only when the request is allowed.** A request that enforced rules already refuse teaches nothing about a shadow rule. A shadow rule never changes a decision.
+- **It runs out.** The control plane refuses any change to a policy whose `shadow_until` has passed or is more than 90 days away, until the rule is enforced or the date renewed. A shadow rule stays shadow at runtime until a new version says otherwise; nothing flips on a clock.
+- **Emergency changes.** Locking a user, ending a session and revoking a component are not policy writes and still work when a date has passed. Policy changes wait until the rule is enforced or renewed in the same change.
+- **A shadow role changes nothing else.** Its `cert_ttl` and `max_session_ttl` are ignored too.
+- **Loosening needs a second admin.** Moving a deny rule from enforce to shadow, or moving `shadow_until` later, is held for another admin whatever `--widening-approval` says. Going back to enforce, or earlier, applies at once.
+- **Upgrade every component first.** A control plane, proxy or worker from before this feature can't read a role with `name`, `mode` or `shadow_until` (unknown fields are errors), and an older control plane refuses the proxy's `policy.shadow_deny` events along with the rest of its batch. Use shadow rules only after all of them run this version.
+- **Where it is reported.** The proxy reports at the point it allows a session or web request. Checks made only by a worker are not reported yet: Kubernetes groups, and the database a MongoDB command names.
+- **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`+Inf` when none), `limen policy explain`, and `limen policy test` (`shadow_deny: [role/rule]`; rules with a `web` grant can't be asserted there yet, since a case has no method or path).
 
 ## `role_mapping`
 
@@ -189,6 +221,7 @@ spec:
       principal: { login: root }          # login | db_role (+database) | mongo_role (+database) | kube_group | redis_user | search_role | mq_user | kafka_user | web | tcp
       expect: deny                        # allow | request | deny
       via_role: sre                       # optional, with expect: allow
+      shadow_deny: [dev/no-root-in-prod]  # optional, with expect: allow: these shadow rules must match (ADR-0046)
 ```
 
 ## `bot`

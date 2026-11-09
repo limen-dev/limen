@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod duration;
 pub mod model;
 pub mod schema;
+pub mod shadow;
 pub mod testing;
 pub mod tooling;
 pub mod trace;
@@ -28,6 +29,7 @@ pub use model::{
 };
 use model::{ResourceDoc, RoleDoc, Rule, Selector};
 pub use model::{SearchAudit, SearchClass, SearchGrant, SearchTarget};
+use shadow::RuleMode;
 
 /// Default lifetime of login credentials when no role sets `cert_ttl`.
 /// The control plane's `--default-cert-ttl` overrides it per deployment.
@@ -520,7 +522,11 @@ impl Policy {
     pub fn cert_ttl(&self, roles: &[String], default: Duration, max: Duration) -> Duration {
         roles
             .iter()
-            .filter_map(|r| self.roles.get(r)?.spec.cert_ttl.map(|d| d.0))
+            .filter_map(|r| {
+                let spec = &self.roles.get(r)?.spec;
+                // A shadow role changes nothing, lifetimes included (ADR-0046).
+                spec.cert_ttl.filter(|_| !spec.is_shadow()).map(|d| d.0)
+            })
             .min()
             .unwrap_or(default)
             .min(max)
@@ -532,7 +538,12 @@ impl Policy {
     pub fn max_session_ttl(&self, roles: &[String]) -> Duration {
         roles
             .iter()
-            .filter_map(|r| self.roles.get(r)?.spec.max_session_ttl.map(|d| d.0))
+            .filter_map(|r| {
+                let spec = &self.roles.get(r)?.spec;
+                spec.max_session_ttl
+                    .filter(|_| !spec.is_shadow())
+                    .map(|d| d.0)
+            })
             .min()
             .unwrap_or(DEFAULT_MAX_SESSION_TTL)
     }
@@ -630,12 +641,10 @@ impl Policy {
         }
         let roles: Vec<&RoleDoc> = req.roles.iter().filter_map(|r| self.roles.get(r)).collect();
 
-        let denied = roles.iter().flat_map(|r| &r.spec.deny).any(|rule| {
-            selector_matches(&rule.resources, resource)
-                && (rule_has_no_principals(rule)
-                    || (!matches!(req.principal, Principal::WebAccess)
-                        && rule_grants(rule, &req.principal)))
-        });
+        let denied = roles
+            .iter()
+            .flat_map(|r| r.spec.enforced_deny())
+            .any(|rule| deny_rule_matches(rule, resource, &req.principal));
         if denied {
             return Decision::Deny {
                 reason: DenyReason::ExplicitDeny,
@@ -645,7 +654,7 @@ impl Policy {
         let matched_roles: Vec<String> = roles
             .iter()
             .filter(|r| {
-                r.spec.allow.iter().any(|rule| {
+                r.spec.enforced_allow().any(|rule| {
                     selector_matches(&rule.resources, resource) && rule_grants(rule, &req.principal)
                 })
             })
@@ -858,6 +867,20 @@ impl Policy {
         let mut out = Vec::new();
         for role in self.roles.values() {
             let name = &role.metadata.name;
+            if role.spec.is_shadow()
+                && let Some(until) = role.spec.shadow_until
+            {
+                out.push(format!(
+                    "role {name}: in shadow mode until {until}; its deny rules are reported, not enforced, and it grants nothing"
+                ));
+            }
+            for (_, rule) in role.spec.shadow_deny().filter(|_| !role.spec.is_shadow()) {
+                if let (Some(rule_name), Some(until)) = (&rule.name, rule.shadow_until) {
+                    out.push(format!(
+                        "role {name}: deny rule {rule_name:?} is in shadow mode until {until}; it is reported, not enforced"
+                    ));
+                }
+            }
             if let Some(request) = &role.spec.request {
                 if let Some(g) = request.who.iter().find(|g| request.approvers.contains(g)) {
                     out.push(format!(
@@ -975,25 +998,21 @@ impl Policy {
             return false;
         }
         let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
-        let matches_request = |grant: &WebGrant| {
-            (grant.methods.is_empty() || grant.methods.iter().any(|m| m == method))
-                && (grant.path_prefixes.is_empty()
-                    || grant
-                        .path_prefixes
-                        .iter()
-                        .any(|prefix| web_path_matches(prefix, path)))
-        };
-        let denied = roles.iter().flat_map(|r| &r.spec.deny).any(|rule| {
-            selector_matches(&rule.resources, resource)
-                && (rule_has_no_principals(rule) || rule.web.as_ref().is_some_and(matches_request))
-        });
+        let matches_request = |grant: &WebGrant| web_grant_matches(grant, method, path);
+        let denied = roles
+            .iter()
+            .flat_map(|r| r.spec.enforced_deny())
+            .any(|rule| web_deny_rule_matches(rule, resource, &matches_request));
         if denied {
             return false;
         }
-        roles.iter().flat_map(|r| &r.spec.allow).any(|rule| {
-            selector_matches(&rule.resources, resource)
-                && rule.web.as_ref().is_some_and(matches_request)
-        })
+        roles
+            .iter()
+            .flat_map(|r| r.spec.enforced_allow())
+            .any(|rule| {
+                selector_matches(&rule.resources, resource)
+                    && rule.web.as_ref().is_some_and(matches_request)
+            })
     }
 
     /// The Redis grants that let `roles` act as `user` on `resource`. A session
@@ -1007,7 +1026,7 @@ impl Policy {
         roles
             .iter()
             .filter_map(|r| self.roles.get(r))
-            .flat_map(|r| &r.spec.allow)
+            .flat_map(|r| r.spec.enforced_allow())
             .filter(|rule| selector_matches(&rule.resources, resource))
             .filter_map(|rule| rule.redis.as_ref())
             .filter(|g| g.users.iter().any(|u| u == user))
@@ -1048,7 +1067,7 @@ impl Policy {
         roles
             .iter()
             .filter_map(|r| self.roles.get(r))
-            .flat_map(|r| &r.spec.allow)
+            .flat_map(|r| r.spec.enforced_allow())
             .filter(|rule| selector_matches(&rule.resources, resource))
             .filter_map(|rule| rule.mongo.as_ref())
             .filter(|g| g.roles.iter().any(|r| r == role))
@@ -1073,7 +1092,7 @@ impl Policy {
         roles
             .iter()
             .filter_map(|r| self.roles.get(r))
-            .flat_map(|r| &r.spec.allow)
+            .flat_map(|r| r.spec.enforced_allow())
             .filter(|rule| selector_matches(&rule.resources, resource))
             .filter_map(|rule| rule.search.as_ref())
             .filter(|g| g.roles.iter().any(|r| r == engine_role))
@@ -1091,7 +1110,7 @@ impl Policy {
         roles
             .iter()
             .filter_map(|r| self.roles.get(r))
-            .flat_map(|r| &r.spec.allow)
+            .flat_map(|r| r.spec.enforced_allow())
             .filter(move |rule| resource.is_some_and(|res| selector_matches(&rule.resources, res)))
     }
 
@@ -1140,12 +1159,12 @@ impl Policy {
 /// a deny rule names (or all of them, for a deny rule that names none).
 fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<String> {
     let mut principals = BTreeSet::new();
-    for rule in roles.iter().flat_map(|r| &r.spec.allow) {
+    for rule in roles.iter().flat_map(|r| r.spec.enforced_allow()) {
         if selector_matches(&rule.resources, resource) {
             principals.extend(rule_principals(rule, resource_kind(resource)));
         }
     }
-    for rule in roles.iter().flat_map(|r| &r.spec.deny) {
+    for rule in roles.iter().flat_map(|r| r.spec.enforced_deny()) {
         if selector_matches(&rule.resources, resource) {
             if rule_has_no_principals(rule) {
                 principals.clear();
@@ -1157,6 +1176,40 @@ fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<St
         }
     }
     principals
+}
+
+/// Whether a deny rule refuses `principal` on `resource`. Enforcement, the
+/// trace and the shadow query all call this one function (ADR-0028, ADR-0046).
+pub(crate) fn deny_rule_matches(
+    rule: &Rule,
+    resource: &ResourceDoc,
+    principal: &Principal,
+) -> bool {
+    selector_matches(&rule.resources, resource)
+        && (rule_has_no_principals(rule)
+            || (!matches!(principal, Principal::WebAccess) && rule_grants(rule, principal)))
+}
+
+/// Whether a web grant covers one request. Path prefixes match path
+/// segments, not arbitrary string fragments.
+pub(crate) fn web_grant_matches(grant: &WebGrant, method: &str, path: &str) -> bool {
+    (grant.methods.is_empty() || grant.methods.iter().any(|m| m == method))
+        && (grant.path_prefixes.is_empty()
+            || grant
+                .path_prefixes
+                .iter()
+                .any(|prefix| web_path_matches(prefix, path)))
+}
+
+/// Whether a deny rule refuses one web request after the resource-level
+/// check: the rule names no principals, or its `web` grant covers the request.
+pub(crate) fn web_deny_rule_matches(
+    rule: &Rule,
+    resource: &ResourceDoc,
+    matches_request: &impl Fn(&WebGrant) -> bool,
+) -> bool {
+    selector_matches(&rule.resources, resource)
+        && (rule_has_no_principals(rule) || rule.web.as_ref().is_some_and(matches_request))
 }
 
 /// The resource's single kind. Validation guarantees there is exactly one.
@@ -1325,6 +1378,84 @@ fn validate_name(kind: &'static str, doc: &str, name: &str) -> Result<(), Policy
     }
 }
 
+/// The shape of shadow mode (ADR-0046). Dates are not compared with a clock
+/// here: proxies and workers load policy through this code, and a rule that
+/// ran out must not stop them loading it. The control plane checks the date
+/// range when a change is applied.
+fn validate_shadow(role: &RoleDoc) -> Result<(), PolicyError> {
+    let name = &role.metadata.name;
+    let bad = |message: String| Err(invalid("role", name, message));
+    for (i, rule) in role.spec.allow.iter().enumerate() {
+        if rule.mode != RuleMode::Enforce || rule.shadow_until.is_some() || rule.name.is_some() {
+            return bad(format!(
+                "allow rule {}: name, mode, and shadow_until belong on deny rules; an allow rule can't be shadowed",
+                i + 1
+            ));
+        }
+    }
+    let mut names = BTreeSet::new();
+    for (i, rule) in role.spec.deny.iter().enumerate() {
+        let at = i + 1;
+        if let Some(rule_name) = &rule.name {
+            validate_name("role", name, rule_name)?;
+            if !names.insert(rule_name.as_str()) {
+                return bad(format!(
+                    "deny rule {at}: the name {rule_name:?} is used twice"
+                ));
+            }
+        }
+        match rule.mode {
+            RuleMode::Enforce => {
+                if rule.shadow_until.is_some() {
+                    return bad(format!("deny rule {at}: shadow_until needs mode: shadow"));
+                }
+            }
+            RuleMode::Shadow => {
+                if role.spec.is_shadow() {
+                    return bad(format!(
+                        "deny rule {at}: the role is already in shadow mode, so its rules carry no mode"
+                    ));
+                }
+                if rule.name.is_none() {
+                    return bad(format!("deny rule {at}: a shadow rule needs a name"));
+                }
+                if rule.shadow_until.is_none() {
+                    return bad(format!("deny rule {at}: a shadow rule needs shadow_until"));
+                }
+            }
+        }
+        if role.spec.is_shadow() {
+            if rule.shadow_until.is_some() {
+                return bad(format!(
+                    "deny rule {at}: the role's shadow_until covers its rules"
+                ));
+            }
+            if rule.name.is_none() {
+                return bad(format!(
+                    "deny rule {at}: every deny rule of a shadow role needs a name"
+                ));
+            }
+        }
+    }
+    if role.spec.is_shadow() {
+        if role.spec.shadow_until.is_none() {
+            return bad("a shadow role needs shadow_until".to_owned());
+        }
+        if role.spec.deny.is_empty() {
+            return bad(
+                "a shadow role needs deny rules to report; its allow rules grant nothing"
+                    .to_owned(),
+            );
+        }
+        if role.spec.request.is_some() || role.spec.break_glass {
+            return bad("a shadow role can't be requestable or break-glass".to_owned());
+        }
+    } else if role.spec.shadow_until.is_some() {
+        return bad("shadow_until needs mode: shadow".to_owned());
+    }
+    Ok(())
+}
+
 fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
     let name = &role.metadata.name;
     validate_name("role", name, name)?;
@@ -1335,6 +1466,7 @@ fn validate_role(role: &RoleDoc) -> Result<(), PolicyError> {
             "role must have at least one allow or deny rule",
         ));
     }
+    validate_shadow(role)?;
     for rule in role.spec.allow.iter().chain(&role.spec.deny) {
         validate_selector(name, &rule.resources)?;
         if let Some(web) = &rule.web {
@@ -1980,6 +2112,8 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     Ok(())
 }
 
+#[cfg(test)]
+mod shadow_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

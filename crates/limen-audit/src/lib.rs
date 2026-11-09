@@ -92,6 +92,11 @@ pub enum EventKind {
     WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// A request was allowed that a shadow deny rule would have refused
+    /// (ADR-0046). `data.role`, `rule`, `resource`, and the principal; the
+    /// request itself went ahead.
+    #[serde(rename = "policy.shadow_deny")]
+    PolicyShadowDeny,
     /// A bot writer's write was refused by its grant or the escalation rules
     /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
     /// detection signal.

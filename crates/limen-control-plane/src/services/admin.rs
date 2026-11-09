@@ -112,7 +112,8 @@ impl Admin for AdminService {
         if outcome.held && req.dry_run {
             warnings.push(policy_changes::WOULD_BE_HELD.to_owned());
         }
-        // Held for a second admin (`--widening-approval=all`).
+        // Held for a second admin: `--widening-approval=all`, or a deny rule
+        // moved to shadow mode (ADR-0046), which always waits.
         let pending_change_id = if outcome.held && !req.dry_run {
             let new = policy_changes::New {
                 author: admin.username.clone(),
