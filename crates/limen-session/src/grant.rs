@@ -307,6 +307,166 @@ mod tests {
         assert!(verify_at(&signed, Purpose::AuditManifest, ca, before).is_err());
     }
 
+    /// The reason a grant was refused, so each case below proves which check
+    /// fired rather than that something failed.
+    fn refusal(result: Result<VerifiedGrant, SessionError>) -> String {
+        match result {
+            Err(SessionError::Grant(reason)) => reason,
+            Err(other) => panic!("expected a grant refusal, got {other:?}"),
+            Ok(v) => panic!("expected a grant refusal, got a verified grant for {v:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_future_grants_short_nonces_and_other_identities() {
+        let f = fixture().await;
+        let proxy = component(&f.internal, ComponentKind::Proxy, "p1").await;
+        let (cert, login) = user_cert(&f.user_ca).await;
+        let now = OffsetDateTime::now_utc();
+        let check = |g: &SessionGrant| {
+            verify_grant(
+                &sign(&proxy, g).expect("sign"),
+                f.internal.cert_der(),
+                f.user_ca.cert_der(),
+                now,
+            )
+        };
+
+        // Issued beyond the allowed clock skew, with an otherwise fine window.
+        let mut future = grant(cert.clone(), login.clone(), "p1");
+        future.issued_at_unix = now.unix_timestamp() + CLOCK_SKEW_SECS + 60;
+        future.establish_by_unix = future.issued_at_unix + 60;
+        assert_eq!(refusal(check(&future)), "issued in the future");
+
+        // A deadline before the issue time is not a window at all.
+        let mut backwards = grant(cert.clone(), login.clone(), "p1");
+        backwards.issued_at_unix = now.unix_timestamp() + 30;
+        backwards.establish_by_unix = now.unix_timestamp() + 10;
+        assert_eq!(
+            refusal(check(&backwards)),
+            "establish window longer than allowed"
+        );
+
+        // A nonce too short to be unguessable is refused, at both empty and 15 bytes.
+        for len in [0, 15] {
+            let mut short = grant(cert.clone(), login.clone(), "p1");
+            short.nonce = vec![7; len];
+            assert_eq!(
+                refusal(check(&short)),
+                "nonce must be 16..=64 bytes",
+                "{len}-byte nonce"
+            );
+        }
+        let mut long = grant(cert.clone(), login.clone(), "p1");
+        long.nonce = vec![7; 65];
+        assert_eq!(refusal(check(&long)), "nonce must be 16..=64 bytes");
+        // Both ends of the range are allowed.
+        for len in [16, 64] {
+            let mut edge = grant(cert.clone(), login.clone(), "p1");
+            edge.nonce = vec![7; len];
+            assert!(check(&edge).is_ok(), "{len}-byte nonce must be accepted");
+        }
+
+        // The grant names someone other than the certificate it carries.
+        let mut other_user = grant(cert.clone(), login.clone(), "p1");
+        other_user.username = "admin".into();
+        assert_eq!(
+            refusal(check(&other_user)),
+            "identity doesn't match the user certificate"
+        );
+        // Or the same person under another (say, ended) login.
+        let mut other_login = grant(cert.clone(), login.clone(), "p1");
+        other_login.login_id = uuid::Uuid::now_v7().to_string();
+        assert_eq!(
+            refusal(check(&other_login)),
+            "identity doesn't match the user certificate"
+        );
+        // Dropping a role is as much a mismatch as adding one.
+        let mut fewer_roles = grant(cert, login.clone(), "p1");
+        fewer_roles.roles = vec![];
+        assert_eq!(
+            refusal(check(&fewer_roles)),
+            "identity doesn't match the user certificate"
+        );
+
+        // A user certificate from a CA the verifier doesn't trust for users,
+        // even one issued with matching identity fields.
+        let rogue = CertificateAuthority::create_self_signed(
+            CaPurpose::UserX509,
+            Arc::new(FileSigner::generate().expect("k")),
+        )
+        .await
+        .expect("ca");
+        let (rogue_cert, rogue_login) = user_cert(&rogue).await;
+        let reason = refusal(check(&grant(rogue_cert, rogue_login, "p1")));
+        assert!(
+            reason.starts_with("user certificate:"),
+            "unexpected reason: {reason}"
+        );
+        // Garbage in place of a certificate is refused the same way.
+        let garbage = grant(vec![0x30, 0x03, 1, 2, 3], login, "p1");
+        let reason = refusal(check(&garbage));
+        assert!(
+            reason.starts_with("user certificate:"),
+            "unexpected reason: {reason}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_payload_that_is_not_a_grant_is_malformed() {
+        let f = fixture().await;
+        let proxy = component(&f.internal, ComponentKind::Proxy, "p1").await;
+        // Correctly signed for the grant purpose, but not a SessionGrant.
+        let signed = proxy
+            .sign(Purpose::SessionGrant, vec![0xff; 8])
+            .expect("sign");
+        assert!(matches!(
+            verify_grant(
+                &signed,
+                f.internal.cert_der(),
+                f.user_ca.cert_der(),
+                OffsetDateTime::now_utc(),
+            ),
+            Err(SessionError::Malformed(_))
+        ));
+    }
+
+    /// When the cache is full of nonces that are still valid it refuses new
+    /// grants instead of evicting one that could then be replayed.
+    #[test]
+    fn a_full_nonce_cache_fails_closed() {
+        let cache = NonceCache::default();
+        for i in 0..MAX_NONCES {
+            assert!(cache.check_and_insert(&(i as u64).to_be_bytes(), i64::MAX));
+        }
+        assert!(
+            !cache.check_and_insert(b"a-fresh-nonce-0000", i64::MAX),
+            "a full cache must refuse rather than forget live nonces"
+        );
+        // Every nonce it holds is still refused as a replay.
+        assert!(!cache.check_and_insert(&0u64.to_be_bytes(), i64::MAX));
+        assert!(!cache.check_and_insert(&((MAX_NONCES - 1) as u64).to_be_bytes(), i64::MAX));
+    }
+
+    /// A full cache makes room by dropping only nonces whose grants have expired.
+    #[test]
+    fn a_full_nonce_cache_drops_only_expired_nonces() {
+        let cache = NonceCache::default();
+        let past = OffsetDateTime::now_utc().unix_timestamp() - 3600;
+        // Half expired, half live.
+        for i in 0..MAX_NONCES {
+            let expires = if i % 2 == 0 { past } else { i64::MAX };
+            assert!(cache.check_and_insert(&(i as u64).to_be_bytes(), expires));
+        }
+        assert!(
+            cache.check_and_insert(b"a-fresh-nonce-0000", i64::MAX),
+            "expired nonces make room"
+        );
+        // A live nonce survived the cleanup and is still a replay.
+        assert!(!cache.check_and_insert(&1u64.to_be_bytes(), i64::MAX));
+        assert!(!cache.check_and_insert(b"a-fresh-nonce-0000", i64::MAX));
+    }
+
     #[test]
     fn nonce_cache_rejects_replays() {
         let cache = NonceCache::default();
