@@ -711,6 +711,10 @@ fn a_worker_follows_only_hosts_near_the_one_it_was_given() {
         ("kafka-1:9092", "kafka-2.evil.net", false),
         ("kafka.default.svc:9092", "broker-0.kafka.default.svc", true),
         ("kafka.default.svc:9092", "broker-0.kafka.other.svc", false),
+        // Below a top-level domain is not "nearby".
+        ("example.com:9092", "evil.com", false),
+        ("example.com:9092", "b-2.example.com", true),
+        ("kafka.corp:27017", "attacker.corp", false),
         // Addresses stay in their /16.
         ("10.1.2.3:9092", "10.1.9.9", true),
         ("10.1.2.3:9092", "10.2.0.1", false),
