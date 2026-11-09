@@ -178,19 +178,41 @@ pub fn router(state: AppState) -> Router {
 
 /// Only proxies may reach the console, and only on behalf of a browser.
 async fn proxy_only(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
-    let verified = req
+    let proxy = req
         .extensions()
         .get::<PeerInfo>()
         .and_then(PeerInfo::leaf)
         .and_then(|leaf| verify_component(leaf, state.cas.internal.cert_der(), false).ok())
-        .is_some_and(|id| id.kind == ComponentKind::Proxy)
-        && req.headers().contains_key(relay::FORWARDED);
-    if !verified {
+        .filter(|id| id.kind == ComponentKind::Proxy)
+        .filter(|_| req.headers().contains_key(relay::FORWARDED));
+    let Some(proxy) = proxy else {
         return (
             StatusCode::FORBIDDEN,
             "the console is served through the proxy",
         )
             .into_response();
+    };
+    // A revoked proxy's certificate stays valid until it expires; refuse it
+    // here as the API does (`caller::resolve_checked`), and fail closed when
+    // the revoked set can't be read.
+    match state
+        .revoked
+        .is_revoked(&proxy.id, || crate::db::revoked_components(&state.db))
+        .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            tracing::warn!(component = %proxy.id, "console request refused: the proxy was revoked");
+            return (StatusCode::FORBIDDEN, "this component was revoked").into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "checking revoked components");
+            return views::error_page(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Console unavailable",
+                "The database can't be reached right now. Try again shortly.",
+            );
+        }
     }
     let addr = req
         .headers()

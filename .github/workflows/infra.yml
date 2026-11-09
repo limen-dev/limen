@@ -13,6 +13,13 @@ on:
       - "deploy/grafana/**"
       - "deploy/compose/config/dev-users.toml"
       - "deploy/compose/scripts/gen-dev-users.py"
+      # gen-dev-users.py reads the mappings and writes these blocks; lib.sh is the policy-selection test's subject.
+      - "examples/policy/**"
+      - "deploy/compose/config/dex/config.yaml"
+      - "deploy/compose/README.md"
+      - "deploy/compose/scripts/dev-users.sh"
+      - "deploy/compose/scripts/lib.sh"
+      - "deploy/compose/scripts/test-policy-selection.sh"
       - "crates/**"
       - ".github/workflows/infra.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.
@@ -89,10 +96,8 @@ jobs:
           helm-docs --chart-search-root deploy/helm --sort-values-order file
           git diff --exit-code -- deploy/helm
 
-      - name: Generated dashboards are up to date
-        run: |
-          python3 deploy/grafana/generate.py
-          git diff --exit-code -- deploy/grafana
+      - name: Generated dashboards and dev users are up to date
+        run: mise run gen-check
 
-      - name: Dev users file and what is generated from it agree
-        run: python3 deploy/compose/scripts/gen-dev-users.py --check
+      - name: Compose stacks pick the right policy directories
+        run: bash deploy/compose/scripts/test-policy-selection.sh

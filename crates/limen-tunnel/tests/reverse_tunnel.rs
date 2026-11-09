@@ -229,3 +229,119 @@ async fn proxy_rejects_worker_from_another_ca() {
         client_side.is_ok()
     );
 }
+
+/// Run one TLS handshake between `server` and `client` and return the
+/// server's result: on success, how many client certificates it saw.
+async fn handshake(
+    server: rustls::ServerConfig,
+    client: rustls::ClientConfig,
+) -> std::io::Result<usize> {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let acceptor = TlsAcceptor::from(Arc::new(server));
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.expect("accept");
+        let tls = acceptor.accept(tcp).await?;
+        Ok::<_, std::io::Error>(tls.get_ref().1.peer_certificates().map_or(0, <[_]>::len))
+    });
+    let connector = TlsConnector::from(Arc::new(client));
+    let tcp = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let _client_side = connector
+        .connect("localhost".try_into().expect("name"), tcp)
+        .await;
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .expect("server handshake finished")
+        .expect("join")
+}
+
+/// mTLS is required: a client that trusts the proxy but presents no
+/// certificate at all is refused at the handshake, while `Optional`, the
+/// mode handlers must authorize explicitly, lets the same client in.
+#[tokio::test]
+async fn required_client_auth_refuses_a_client_without_a_certificate() {
+    let ca = CertificateAuthority::create_self_signed(
+        CaPurpose::Internal,
+        Arc::new(FileSigner::generate().expect("key")),
+    )
+    .await
+    .expect("ca");
+    let roots = vec![ca.cert_der().clone()];
+    let proxy_id = identity(&ca, ComponentKind::Proxy, "proxy-1", &["localhost"]).await;
+    let worker_id = identity(&ca, ComponentKind::Worker, "worker-1", &[]).await;
+    let anonymous = || client_config(&roots, None, &[alpn::TUNNEL]).expect("client config");
+    let server = |auth| {
+        server_config(proxy_id.clone(), &roots, auth, &[alpn::TUNNEL]).expect("server config")
+    };
+
+    let refused = handshake(server(ClientAuth::Required), anonymous()).await;
+    assert!(
+        refused.is_err(),
+        "a required-auth server must refuse a client without a certificate, saw {refused:?}"
+    );
+
+    // The same server takes a client that does present one, so the refusal
+    // above is about the missing certificate and nothing else.
+    let with_cert = client_config(&roots, Some(worker_id), &[alpn::TUNNEL]).expect("cfg");
+    assert_eq!(
+        handshake(server(ClientAuth::Required), with_cert)
+            .await
+            .expect("handshake with a client certificate"),
+        1
+    );
+
+    // Optional lets the anonymous client in, with no peer certificate.
+    assert_eq!(
+        handshake(server(ClientAuth::Optional), anonymous())
+            .await
+            .expect("optional auth accepts an anonymous client"),
+        0
+    );
+}
+
+/// Every config is TLS 1.3 only (ADR-0012): a client that offers only
+/// TLS 1.2 gets no connection, even with a valid certificate.
+#[tokio::test]
+async fn servers_refuse_tls_1_2() {
+    let ca = CertificateAuthority::create_self_signed(
+        CaPurpose::Internal,
+        Arc::new(FileSigner::generate().expect("key")),
+    )
+    .await
+    .expect("ca");
+    let roots = vec![ca.cert_der().clone()];
+    let proxy_id = identity(&ca, ComponentKind::Proxy, "proxy-1", &["localhost"]).await;
+    let worker_id = identity(&ca, ComponentKind::Worker, "worker-1", &[]).await;
+    let server =
+        server_config(proxy_id, &roots, ClientAuth::Required, &[alpn::TUNNEL]).expect("cfg");
+
+    let mut store = rustls::RootCertStore::empty();
+    store.add(ca.cert_der().clone()).expect("root");
+    let mut old = rustls::ClientConfig::builder_with_provider(limen_tunnel::tls::provider())
+        .with_protocol_versions(&[&rustls::version::TLS12])
+        .expect("tls 1.2 client")
+        .with_root_certificates(store)
+        .with_client_auth_cert(worker_id.certs, worker_id.key)
+        .expect("client cert");
+    old.alpn_protocols = vec![alpn::TUNNEL.to_vec()];
+
+    assert!(
+        handshake(server, old).await.is_err(),
+        "a TLS 1.2 handshake must fail"
+    );
+}
+
+#[test]
+fn pem_without_a_certificate_is_an_error() {
+    use limen_tunnel::tls::certs_from_pem;
+    assert!(certs_from_pem("").is_err(), "empty input");
+    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+    assert!(
+        certs_from_pem(&key.serialize_pem()).is_err(),
+        "a key is not a certificate"
+    );
+    assert!(
+        Identity::from_pem("", &key.serialize_pem()).is_err(),
+        "an identity needs a certificate"
+    );
+}

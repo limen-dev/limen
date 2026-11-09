@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate everything that lists the dev users from dev-users.toml.
 
-    python3 deploy/compose/gen-dev-users.py          # rewrite the generated parts
-    python3 deploy/compose/gen-dev-users.py --check  # fail if they are stale (CI)
+    python3 deploy/compose/scripts/gen-dev-users.py          # rewrite the generated parts
+    python3 deploy/compose/scripts/gen-dev-users.py --check  # fail if they are stale (CI)
 """
 import pathlib
 import re

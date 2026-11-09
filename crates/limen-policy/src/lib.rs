@@ -1195,13 +1195,10 @@ pub(crate) fn deny_rule_matches(
 pub(crate) fn web_grant_matches(grant: &WebGrant, method: &str, path: &str) -> bool {
     (grant.methods.is_empty() || grant.methods.iter().any(|m| m == method))
         && (grant.path_prefixes.is_empty()
-            || grant.path_prefixes.iter().any(|prefix| {
-                path == prefix
-                    || prefix == "/"
-                    || path
-                        .strip_prefix(prefix)
-                        .is_some_and(|suffix| suffix.starts_with('/'))
-            }))
+            || grant
+                .path_prefixes
+                .iter()
+                .any(|prefix| web_path_matches(prefix, path)))
 }
 
 /// Whether a deny rule refuses one web request after the resource-level
@@ -1767,6 +1764,20 @@ fn validate_web_grant(role_name: &str, web: &WebGrant) -> Result<(), PolicyError
         ));
     }
     Ok(())
+}
+
+/// Whether `path` is `prefix` or below it, segment by segment: `/admin`
+/// covers `/admin` and `/admin/users`, not `/administrator`. A trailing slash
+/// names the same directory (`/admin/` covers what `/admin` does); without
+/// this, a deny on `/admin/` would match only `/admin/` itself and let
+/// `/admin/users` through.
+fn web_path_matches(prefix: &str, path: &str) -> bool {
+    let prefix = prefix.trim_end_matches('/');
+    prefix.is_empty()
+        || path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn valid_web_path(path: &str) -> bool {

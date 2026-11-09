@@ -21,6 +21,8 @@ const MAX_CONTROL_FRAME: usize = 256 * 1024;
 /// Inflated size of one header block. Real ones are a few hundred bytes; the
 /// cap stops a compression bomb.
 const MAX_HEADER_BLOCK: usize = 256 * 1024;
+/// Headers in one block; a real `SYN_STREAM` carries a handful.
+const MAX_HEADERS: usize = 256;
 const VERSION: u16 = 3;
 
 const SYN_STREAM: u16 = 1;
@@ -186,8 +188,16 @@ fn parse_headers(block: &[u8]) -> Result<Vec<(String, String)>, Error> {
     }
     let mut buf = block;
     let count = number(&mut buf)?;
+    // Refuse rather than truncate: the API server reads every header, so
+    // reading only the first few would let a client hide `streamtype: stdout`
+    // after junk ones and keep the output off the recording.
+    if count > MAX_HEADERS {
+        return Err(Error::SpdyHeaders(format!(
+            "{count} headers, at most {MAX_HEADERS}"
+        )));
+    }
     let mut headers = Vec::new();
-    for _ in 0..count.min(256) {
+    for _ in 0..count {
         let name_len = number(&mut buf)?;
         let name = String::from_utf8_lossy(take(&mut buf, name_len)?).into_owned();
         let value_len = number(&mut buf)?;
@@ -270,6 +280,25 @@ pub mod build {
 mod tests {
     use super::build::{Compressor, data, ping};
     use super::*;
+
+    /// A header past the limit is refused, not dropped: dropped headers could
+    /// hide the `streamtype` the API server reads.
+    #[test]
+    fn refuses_more_headers_than_it_reads() {
+        let names: Vec<String> = (0..=MAX_HEADERS).map(|i| format!("x{i}")).collect();
+        let mut headers: Vec<(&str, &str)> = names.iter().map(|n| (n.as_str(), "v")).collect();
+        let mut z = Compressor::default();
+        let mut decoder = Decoder::new(Sender::Client);
+        assert!(
+            decoder
+                .push(&z.syn_stream(1, &headers[..MAX_HEADERS]))
+                .is_ok()
+        );
+        headers[MAX_HEADERS] = ("streamtype", "stdout");
+        let mut z = Compressor::default();
+        let mut decoder = Decoder::new(Sender::Client);
+        assert!(decoder.push(&z.syn_stream(1, &headers)).is_err());
+    }
 
     #[test]
     fn inflates_client_headers_across_blocks_with_one_context() {

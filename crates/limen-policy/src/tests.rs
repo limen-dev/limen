@@ -504,6 +504,46 @@ spec:
     assert!(!policy.web_request_allowed(&roles, "app", "GET", "/admin/secret"));
 }
 
+/// A prefix written with a trailing slash names the same directory: a deny on
+/// `/admin/` must cover everything below it, not only `/admin/` itself.
+#[test]
+fn web_path_prefixes_with_a_trailing_slash_cover_the_directory() {
+    let role = r#"
+kind: role
+version: v1
+metadata: { name: reader }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: { path_prefixes: ["/api/", "/admin/"] }
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: { path_prefixes: ["/admin/"] }
+---
+kind: resource
+version: v1
+metadata: { name: app }
+spec:
+  web: { address: "app:443", host: "app.apps.example.com", tls_ca_file: "/etc/ssl/ca.pem" }
+"#;
+    let policy = Policy::parse_yaml([("web.yaml", role)]).expect("valid web policy");
+    let roles = vec!["reader".to_owned()];
+    for denied in ["/admin", "/admin/", "/admin/users", "/admin/secret/x"] {
+        assert!(
+            !policy.web_request_allowed(&roles, "app", "GET", denied),
+            "{denied}"
+        );
+    }
+    for allowed in ["/api", "/api/", "/api/x"] {
+        assert!(
+            policy.web_request_allowed(&roles, "app", "GET", allowed),
+            "{allowed}"
+        );
+    }
+    assert!(!policy.web_request_allowed(&roles, "app", "GET", "/apix"));
+    assert!(!policy.web_request_allowed(&roles, "app", "GET", "/"));
+}
+
 #[test]
 fn web_hosts_are_unique_across_resources() {
     let resources = r#"
@@ -725,6 +765,7 @@ mod bots {
         let issuer = "https://token.actions.githubusercontent.com";
         let good = claims(&[
             ("repository", "acme/infra"),
+            ("repository_id", "123456789"),
             ("ref", "refs/heads/main"),
             ("environment", "staging"),
             ("actor", "someone"),
@@ -746,6 +787,7 @@ mod bots {
         for wrong in [
             claims(&[
                 ("repository", "acme/infra"),
+                ("repository_id", "123456789"),
                 ("ref", "refs/heads/feature"),
                 ("environment", "staging"),
             ]),
@@ -754,7 +796,18 @@ mod bots {
                 ("ref", "refs/heads/main"),
                 ("environment", "staging"),
             ]),
-            claims(&[("repository", "acme/infra"), ("ref", "refs/heads/main")]),
+            claims(&[
+                ("repository", "acme/infra"),
+                ("repository_id", "123456789"),
+                ("ref", "refs/heads/main"),
+            ]),
+            // Same name, different repository: it was deleted and created again.
+            claims(&[
+                ("repository", "acme/infra"),
+                ("repository_id", "999"),
+                ("ref", "refs/heads/main"),
+                ("environment", "staging"),
+            ]),
             claims(&[]),
         ] {
             assert!(
