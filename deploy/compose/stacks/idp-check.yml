@@ -1,0 +1,30 @@
+# Offboarding checks for the dev stack (profile `idp-check`, ADR-0047, #111).
+#
+# The control plane keeps each login's refresh token, sealed, and refreshes it
+# every few seconds (setup.sh sets LIMEN_IDP_TOKEN_KEY and LIMEN_IDP_CHECK_INTERVAL
+# in stack.env). The stack's Dex keeps its state in memory, and with Dex v2.46.0 a
+# refresh grant against memory storage never returns. So this stack moves the
+# same Dex, with the same dev users, onto PostgreSQL. Development only.
+services:
+  dex-db:
+    container_name: limen-dex-db${LIMEN_SUFFIX:-}
+    profiles: ["idp-check"]
+    image: ${POSTGRES_IMAGE}
+    environment: { POSTGRES_USER: dex, POSTGRES_PASSWORD: dex-dev-only, POSTGRES_DB: dex }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dex -d dex"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The base command, with the storage block swapped for PostgreSQL (the two
+  # extra sed expressions). Everything else in config/dex/config.yaml is used as is.
+  dex:
+    depends_on:
+      dex-db: { condition: service_healthy }
+    command:
+      - >-
+        sed -e 's#localhost:5556#localhost:${LIMEN_PORT_DEX:-5556}#' -e 's#localhost:3443#localhost:${LIMEN_PORT_PROXY:-3443}#'
+        -e 's#^storage:#storage: {type: postgres, config: {host: dex-db, port: 5432, database: dex, user: dex, password: dex-dev-only, ssl: {mode: disable}}}#'
+        -e '/^  type: memory$/d'
+        /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml

@@ -86,7 +86,7 @@ deploy/compose/
   docker-compose.yml        Limen: postgres, dex, s3, kms, control plane, proxy, worker
   stacks/                   one compose file per stack, layered on Limen with -f
     scale.yml                 3 control planes, 3 proxies, 3 workers (replaces docker-compose.yml)
-    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  tracing.yml  bots.yml  kube.yml  tcp.yml  web.yml
+    ssh.yml  db.yml  redis.yml  mongo.yml  search.yml  messaging.yml  observability.yml  tracing.yml  bots.yml  kube.yml  tcp.yml  web.yml  idp-check.yml
   config/                   what the services mount: dex, s3, trino, grafana, targets/, dev-users.toml
   scripts/                  lib.sh (builds the compose command), seed.sh (per-target setup), dev-login.sh, console-login.sh,
                             dev-users.sh and gen-dev-users.py (generated user lists), test-policy-selection.sh
@@ -113,6 +113,7 @@ Limen is one stack, and everything it connects to or reports to is another: a co
 | `web` | `stacks/web.yml` + the single/scale worker opt-in overlay | `web-target-dev` (HTTP fixture for browser SSO, request policy, audit) |
 | `observability` | `stacks/observability.yml` | `datadog-fake-dev` (receives the audit events), `trino-dev` + `trino-init-dev` (SQL over the S3 batches, as Athena does), `grafana-dev` (http://localhost:3000) |
 | `tracing` | `stacks/tracing.yml` | `jaeger-dev` (http://localhost:16686, memory storage); components export via `LIMEN_OTLP_ENDPOINT` |
+| `idp-check` | `stacks/idp-check.yml` | `dex-db` (the stack's Dex moves to PostgreSQL; with Dex v2.46.0 a refresh grant hangs on memory storage); the control plane gets `LIMEN_IDP_TOKEN_KEY` and `LIMEN_IDP_CHECK_INTERVAL=15s`, so logins are checked against Dex (`docs/guides/offboarding.md`) |
 | `bots` | `stacks/bots.yml` | `ci-issuer-fake-dev`; the control plane trusts its plain-http issuer |
 
 `stacks/aws-emulator.yml` is a test fixture (Moto AWS emulators for the discovery tests), not a stack: `setup.sh` doesn't start it.

@@ -53,7 +53,25 @@ If your IdP expires refresh tokens early (idle or absolute lifetimes), an expire
 
 ## Dex
 
-Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refresh grant **never returns** when Dex keeps its state in memory or SQLite (the token update holds the storage lock while the connector reads storage). That also freezes the rest of that Dex. Use PostgreSQL (or another networked) storage, as production Dex deployments do. The development stack's Dex is in memory, so the dev stack leaves `--idp-token-key` unset and does not check logins. The check's HTTP calls time out after 10 seconds, so a stuck IdP shows up as `idp.check_failed`, not as a stuck control plane.
+Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refresh grant **never returns** when Dex keeps its state in memory or SQLite (the token update holds the storage lock while the connector reads storage). That also freezes the rest of that Dex. Use PostgreSQL (or another networked) storage, as production Dex deployments do. The development stack's Dex is in memory, so by default the dev stack leaves `--idp-token-key` unset and does not check logins; the opt-in `idp-check` stack turns it on (below). The check's HTTP calls time out after 10 seconds, so a stuck IdP shows up as `idp.check_failed`, not as a stuck control plane.
+
+### Try it on the dev stack
+
+```bash
+deploy/compose/setup.sh --stacks idp-check      # adds to any other stacks you pick
+mise run install-cli                            # the CLI must send the refresh token
+limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # developer@example.com / password
+```
+
+The `idp-check` stack moves the stack's Dex, with the same users, onto PostgreSQL (`dex-db`) and sets `LIMEN_IDP_TOKEN_KEY` (a development-only key) and `LIMEN_IDP_CHECK_INTERVAL=15s` on the control plane. Open `https://localhost:3443/console/users`: after one interval the person's *last check* is fresh. Then:
+
+- **Offboard.** Delete the person's refresh token in Dex, which is what a revoked session looks like to the IdP:
+  `docker exec limen-dex-db psql -U dex -d dex -c "delete from refresh_token where claims_email='developer@example.com'"`.
+  At the next check, Dex answers `invalid_grant`, the login ends, and the person is locked as `system:idp-check` (`idp.offboard` in the audit trail). Signing in again lifts the lock.
+- **Remove the user from Dex's config instead and the check does not offboard.** Dex answers a refresh for a user it no longer has with `500 invalid_request` ("user not found" in its log), not `invalid_grant`, so Limen reads it as the IdP being unreachable: it fails open and raises `idp.check_failed`. Treating every 500 as a deactivation would lock everyone out in a Dex outage, so Limen does not. Okta and the other hosted IdPs answer `invalid_grant` for a deactivated user (unverified until #64).
+- **Onboard.** Change a user's `groups` in `deploy/compose/config/dev-users.toml`, run `python3 deploy/compose/scripts/gen-dev-users.py`, and restart Dex (`docker compose restart dex`). The new group applies at that person's next sign-in. A refreshed token from this Dex carries the same `groups`.
+
+Run `docker exec limen-dex-db psql -U dex -d dex -c 'select id, claims_email from refresh_token'` to see the tokens Dex holds.
 
 ## What to watch
 

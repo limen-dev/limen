@@ -21,6 +21,7 @@
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
 # tcp      a raw TCP echo target for `limen tcp`                 stacks/tcp.yml
+# idp-check  Dex on PostgreSQL and a 15s IdP login check           stacks/idp-check.yml
 # web      an HTTP app target for browser SSO                    stacks/web.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
