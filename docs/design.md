@@ -284,7 +284,7 @@ spec:
 emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) ─► CP spool ─┬─► S3 batches (JSONL.gz, hash-chained, signed)
  (proxy, worker, CP)                                                                └─► Datadog logs intake
 ```
-- **Envelope v1** (`limen-audit::Event`): `schema_version`, `event_id` (UUIDv7, the idempotency key), `kind`, `time`, `producer{component, instance_id, seq}`, `user`, `session_id`, and `data` (fields specific to the kind, with their own JSON Schema in `docs/audit-schema/`). A gap in `seq` for a producer is detectable, and gaps are surfaced on a dashboard.
+- **Envelope v1** (`limen-audit::Event`): `schema_version`, `event_id` (UUIDv7, the idempotency key), `kind`, `time`, `producer{component, instance_id, seq}`, `user`, `session_id`, and `data` (fields specific to the kind; a standalone JSON Schema is not published yet, see ADR-0009). A gap in `seq` for a producer is detectable, and gaps are surfaced on a dashboard.
 - **Spool.** An append-only, segmented log on local disk, with length+CRC32 framing (`crc32fast`; the `crc32c` crate is unmaintained), group-commit fsync (default every 50 ms or 256 events), and a durable consumer offset. **At-least-once.** A sender advances only after the downstream ack. Duplicates are removed by `event_id` in Athena views. Datadog may see rare duplicates.
 - **Full spool or unavailable sink.** `audit.failure_mode: fail_closed` (the default) means:
   - no new sessions

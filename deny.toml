@@ -15,6 +15,13 @@ ignore = [
     # Limen only verifies IdP RS256 signatures with public keys and never holds
     # an RSA private key. No fixed version exists. See ADR-0012.
     { id = "RUSTSEC-2023-0071", reason = "public-key verification only; no RSA private keys" },
+    # libsqlite3-sys (via sqlx-sqlite, an optional driver of sqlx): bundled C
+    # SQLite CVE. Limen uses sqlx with PostgreSQL only; the SQLite driver is
+    # never compiled (`cargo tree -i libsqlite3-sys` is empty), but it is in
+    # Cargo.lock, which cargo-audit scans. sqlx-sqlite 0.9.0 requires
+    # libsqlite3-sys <0.38 and the fix is 0.39, so no bump is possible until
+    # sqlx releases. See ADR-0012.
+    { id = "RUSTSEC-2026-0459", reason = "SQLite driver is never compiled; sqlx-sqlite pins <0.38" },
 ]
 
 [licenses]

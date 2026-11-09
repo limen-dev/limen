@@ -131,7 +131,7 @@ impl StreamDecoder {
             }
             Transport::Spdy { client, .. } => {
                 let frames = client.push(bytes)?;
-                self.spdy_client_frames(frames, &mut events);
+                self.spdy_client_frames(frames, &mut events)?;
             }
             Transport::SpdyTunnel {
                 ws_client, client, ..
@@ -142,7 +142,7 @@ impl StreamDecoder {
                         frames.extend(client.push(&payload)?);
                     }
                 }
-                self.spdy_client_frames(frames, &mut events);
+                self.spdy_client_frames(frames, &mut events)?;
             }
         }
         Ok(events)
@@ -200,7 +200,11 @@ impl StreamDecoder {
         Ok(events)
     }
 
-    fn spdy_client_frames(&mut self, frames: Vec<Frame>, events: &mut Vec<Event>) {
+    fn spdy_client_frames(
+        &mut self,
+        frames: Vec<Frame>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), Error> {
         for frame in frames {
             match frame {
                 Frame::SynStream { stream_id, headers } => {
@@ -227,11 +231,11 @@ impl StreamDecoder {
                     // oldest rather than fail a healthy forward.
                     if self.spdy_streams.len() >= 1024 {
                         if !self.port_forward {
-                            // An exec has a handful of streams. Past the cap,
-                            // new ones are noise: keep the real ones (opened
-                            // first) rather than let a flood push stdout out
-                            // of the table and off the recording.
-                            continue;
+                            // An exec has a handful of streams, and the client
+                            // picks their order: ignoring streams past the cap
+                            // would let 1024 junk streams opened first keep the
+                            // real stdout off the recording. Fail closed.
+                            return Err(Error::Spdy("too many streams for an exec"));
                         }
                         if let Some(oldest) = self.spdy_streams.keys().next().copied() {
                             self.spdy_streams.remove(&oldest);
@@ -256,6 +260,7 @@ impl StreamDecoder {
                 Frame::Other => {}
             }
         }
+        Ok(())
     }
 
     fn spdy_server_frames(&self, frames: Vec<Frame>, events: &mut Vec<Event>) {
@@ -393,8 +398,7 @@ mod tests {
         assert_eq!(ports.into_iter().collect::<Vec<_>>(), [8080]);
     }
 
-    /// The recording must see what the API server sees: a flood of extra
-    /// streams must not push stdout out of the table, and a NUL-separated
+    /// The recording must see what the API server sees: a NUL-separated
     /// `streamtype` is read as its first value.
     #[test]
     fn spdy_exec_output_stays_recorded_when_the_client_tries_to_hide_it() {
@@ -403,9 +407,6 @@ mod tests {
         let mut open = Vec::new();
         open.extend(z.syn_stream(1, &[("streamtype", "error")]));
         open.extend(z.syn_stream(5, &[("streamtype", "stdout\0stdin")]));
-        for id in 0..1100u32 {
-            open.extend(z.syn_stream(1001 + 2 * id, &[("streamtype", "stdin")]));
-        }
         d.client(&open).expect("client");
         assert_eq!(
             d.server(&data(5, false, b"secret output")).expect("server"),
@@ -416,6 +417,28 @@ mod tests {
                 .expect("server"),
             [Event::Exit(0)]
         );
+    }
+
+    /// A flood of streams can't keep stdout out of the table, whichever order
+    /// the client opens them in: an exec past the cap ends instead.
+    #[test]
+    fn spdy_exec_refuses_a_flood_of_streams() {
+        for real_first in [true, false] {
+            let mut d = StreamDecoder::new(StreamKind::ExecSpdy);
+            let mut z = Compressor::default();
+            let mut open = Vec::new();
+            if real_first {
+                open.extend(z.syn_stream(1, &[("streamtype", "error")]));
+                open.extend(z.syn_stream(5, &[("streamtype", "stdout")]));
+            }
+            for id in 0..1100u32 {
+                open.extend(z.syn_stream(1001 + 2 * id, &[("streamtype", "junk")]));
+            }
+            if !real_first {
+                open.extend(z.syn_stream(5, &[("streamtype", "stdout")]));
+            }
+            assert!(d.client(&open).is_err(), "real streams first: {real_first}");
+        }
     }
 
     #[test]

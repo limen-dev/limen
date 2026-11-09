@@ -37,7 +37,7 @@ LIMEN_TEST_AWS_ENDPOINT=http://localhost:15000 LIMEN_TEST_AWS_OPEN_ENDPOINT=http
   cargo test -p limen-worker --lib discovery::emulator
 ```
 
-The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. To put the CLI on your PATH, run `scripts/install-cli.sh` (installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade).
+The local dev stack needs a Docker-compatible runtime. OrbStack is recommended on macOS. Three `mise` tasks cover the common jobs: `mise run stack` deploys the local dev stack (`deploy/compose/setup.sh`; put its flags after `--`), `mise run website` runs the documentation site in dev mode, and `mise run install-cli` puts the CLI on your PATH (`scripts/install-cli.sh`, installs `limen` to `~/.local/bin`; re-run it after pulling to upgrade).
 
 
 ## Commits

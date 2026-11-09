@@ -7,6 +7,7 @@
 //!
 //! ```text
 //! curl 'http://localhost:8130/github?repository=acme/infra&ref=refs/heads/main&environment=staging'
+//! # repository_id defaults to 123456789, the id examples/policy/stacks/bots pins
 //! curl -X POST http://localhost:8130/mint -d '{"subject":"x","claims":{"project_path":"acme/r"}}'
 //! ```
 
@@ -24,6 +25,8 @@ struct GithubQuery {
     #[serde(rename = "ref")]
     git_ref: String,
     environment: Option<String>,
+    /// GitHub's numeric repository id. Defaults to the one the example bots pin.
+    repository_id: Option<String>,
     run_id: Option<String>,
     actor: Option<String>,
     audience: Option<String>,
@@ -55,6 +58,10 @@ async fn main() -> std::io::Result<()> {
         get(move |Query(q): Query<GithubQuery>| async move {
             let mut token =
                 WorkloadToken::github(&q.repository, &q.git_ref, q.environment.as_deref());
+            token.claims.insert(
+                "repository_id".into(),
+                q.repository_id.unwrap_or_else(|| "123456789".into()).into(),
+            );
             if let Some(run) = q.run_id {
                 token.claims.insert("run_id".into(), run.into());
             }

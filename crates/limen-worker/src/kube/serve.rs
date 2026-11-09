@@ -641,7 +641,8 @@ fn forward_headers(
                 HeaderValue::from_str(upgrade).unwrap_or(HeaderValue::from_static("websocket"))
             }),
         );
-        // Only the binary channel protocols: the base64 variants are text
+        // Only the binary channel protocols: the base64 variants
+        // (`base64.channel.k8s.io`, `v4.base64.channel.k8s.io`) are text
         // frames the recorder does not read.
         if let Some(offered) = client
             .get(SEC_WEBSOCKET_PROTOCOL)
@@ -650,7 +651,7 @@ fn forward_headers(
             let kept: Vec<&str> = offered
                 .split(',')
                 .map(str::trim)
-                .filter(|p| !p.starts_with("base64."))
+                .filter(|p| !is_base64_protocol(p))
                 .collect();
             if kept.is_empty() {
                 return Err("no binary channel protocol offered".into());
@@ -667,9 +668,17 @@ fn forward_headers(
 /// `channel.k8s.io`, `v4.channel.k8s.io`, `v2.portforward.k8s.io`: the binary
 /// protocols whose messages start with a channel byte.
 fn is_channel_protocol(protocol: &str) -> bool {
-    protocol == "channel.k8s.io"
-        || (protocol.starts_with('v')
-            && (protocol.ends_with(".channel.k8s.io") || protocol.ends_with(".portforward.k8s.io")))
+    !is_base64_protocol(protocol)
+        && (protocol == "channel.k8s.io"
+            || (protocol.starts_with('v')
+                && (protocol.ends_with(".channel.k8s.io")
+                    || protocol.ends_with(".portforward.k8s.io"))))
+}
+
+/// A base64 variant of a channel protocol, versioned or not: its frames are
+/// text, which the recorder doesn't read.
+fn is_base64_protocol(protocol: &str) -> bool {
+    protocol.starts_with("base64.") || protocol.contains(".base64.")
 }
 
 /// The values of query parameter `name`. Keys are decoded as well as values:
@@ -744,7 +753,9 @@ mod tests {
         assert_eq!(percent_decode("a%2Fb"), "a/b");
     }
 
-    use super::{is_canonical, is_channel_protocol, percent_decode, query_values};
+    use super::{
+        is_base64_protocol, is_canonical, is_channel_protocol, percent_decode, query_values,
+    };
 
     #[test]
     fn the_client_cannot_choose_the_forwarding_headers() {
@@ -815,10 +826,22 @@ mod tests {
         for bad in [
             "",
             "base64.channel.k8s.io",
+            "v4.base64.channel.k8s.io",
             "SPDY/3.1+portforward.k8s.io",
             "graphql-ws",
         ] {
             assert!(!is_channel_protocol(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn base64_channel_protocols_are_not_forwarded() {
+        // kubelet answers either with text frames the recorder can't read.
+        for b in ["base64.channel.k8s.io", "v4.base64.channel.k8s.io"] {
+            assert!(is_base64_protocol(b), "{b}");
+        }
+        for ok in ["channel.k8s.io", "v4.channel.k8s.io", "v5.channel.k8s.io"] {
+            assert!(!is_base64_protocol(ok), "{ok}");
         }
     }
 

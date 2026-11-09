@@ -167,3 +167,53 @@ async fn a_revoked_proxys_grants_are_refused() {
     }
     panic!("the worker never refused the revoked proxy's grants (last error: {last})");
 }
+
+/// The console is served only to proxies, and a revoked proxy is no longer
+/// one: its certificate still verifies, so the control plane must check the
+/// revocation itself, as it does on the API.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_proxy_no_longer_serves_the_console() {
+    let Some(d) = Deployment::start_with_console().await else {
+        return;
+    };
+    let ca = std::fs::read(d.ca_file()).expect("ca");
+    let http = reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_pem(&ca).expect("cert"))
+        .resolve("localhost", d.proxy_addr)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("client");
+    let signin = format!("https://localhost:{}/console/signin", d.proxy_addr.port());
+    let status = || async {
+        http.get(&signin)
+            .send()
+            .await
+            .expect("request")
+            .status()
+            .as_u16()
+    };
+    assert_eq!(
+        status().await,
+        200,
+        "the sign-in page before the revocation"
+    );
+
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
+    let revoked = admin
+        .revoke_component(RevokeComponentRequest {
+            component_id: d.proxy().id(),
+            reason: "console regression".into(),
+        })
+        .await
+        .expect("revoke the proxy")
+        .into_inner();
+    assert!(revoked.revoked);
+
+    eventually(
+        Duration::from_secs(15),
+        "the control plane refuses the console relayed by the revoked proxy",
+        || async { status().await == 403 },
+    )
+    .await;
+}
