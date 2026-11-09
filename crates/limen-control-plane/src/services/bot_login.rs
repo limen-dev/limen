@@ -63,15 +63,23 @@ fn ci_facts(
         ],
         JoinMethod::Oidc => &[],
     };
-    // A rule can name many claims; the certificate carries a fixed few.
-    let from_rule = rule_claims.iter().take(limen_ca::MAX_CI_FACTS - 4);
-    let mut facts: BTreeMap<String, String> = wanted
-        .iter()
-        .chain(from_rule)
-        .filter(|k| !RESERVED.contains(*k))
-        .filter_map(|k| claims.get(*k).map(|v| ((*k).to_owned(), clip(v))))
-        .filter(|(_, v)| !v.is_empty())
-        .collect();
+    // The certificate carries a fixed few facts, and three of them are set
+    // below. The claims the matched rule relied on come first, so the reason a
+    // run was let in always survives; the provider's usual claims fill what is
+    // left. Taking them all could go past what the CA signs and refuse the login.
+    let budget = limen_ca::MAX_CI_FACTS - 3;
+    let mut facts: BTreeMap<String, String> = BTreeMap::new();
+    for k in rule_claims.iter().chain(wanted) {
+        if facts.len() >= budget {
+            break;
+        }
+        if RESERVED.contains(k) || facts.contains_key(*k) {
+            continue;
+        }
+        if let Some(v) = claims.get(*k).map(|v| clip(v)).filter(|v| !v.is_empty()) {
+            facts.insert((*k).to_owned(), v);
+        }
+    }
     // Set last, so nothing above can have replaced them.
     facts.insert("provider".into(), method.as_str().to_owned());
     for key in ["iss", "sub"] {
@@ -444,5 +452,75 @@ mod tests {
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let facts = ci_facts(JoinMethod::Oidc, &many, &names);
         assert!(facts.len() <= limen_ca::MAX_CI_FACTS, "{}", facts.len());
+    }
+
+    #[test]
+    fn a_rule_naming_provider_ids_still_fits_a_certificate() {
+        // A GitHub job with an environment carries every claim the provider
+        // records; a rule that also pins the repository and owner ids (as the
+        // bots guide recommends) must not push the facts past what the CA signs.
+        let mut pairs: Vec<(&str, &str)> = [
+            "repository",
+            "repository_owner",
+            "workflow",
+            "job_workflow_ref",
+            "run_id",
+            "run_attempt",
+            "sha",
+            "ref",
+            "ref_type",
+            "event_name",
+            "actor",
+            "environment",
+            "runner_environment",
+        ]
+        .iter()
+        .map(|k| (*k, "v"))
+        .collect();
+        pairs.extend([
+            ("iss", "https://token.actions.githubusercontent.com"),
+            ("sub", "repo:acme/infra:environment:prod"),
+            ("repository_id", "123456789"),
+            ("repository_owner_id", "42"),
+        ]);
+        let token = claims(&pairs);
+        let rule = ["repository", "repository_id", "repository_owner_id"];
+        let facts = ci_facts(JoinMethod::GithubActions, &token, &rule);
+        assert!(facts.len() <= limen_ca::MAX_CI_FACTS, "{}", facts.len());
+        // What the rule matched on, and what Limen sets itself, always survive.
+        for key in ["repository", "repository_id", "repository_owner_id"] {
+            assert!(facts.contains_key(key), "{key} kept");
+        }
+        assert_eq!(facts["provider"], "github_actions");
+        assert!(facts.contains_key("iss") && facts.contains_key("sub"));
+
+        // GitLab, pinning the project and namespace ids.
+        let mut pairs: Vec<(&str, &str)> = [
+            "project_path",
+            "namespace_path",
+            "pipeline_id",
+            "pipeline_source",
+            "job_id",
+            "sha",
+            "ref",
+            "ref_type",
+            "ref_protected",
+            "user_login",
+            "environment",
+            "environment_protected",
+        ]
+        .iter()
+        .map(|k| (*k, "v"))
+        .collect();
+        pairs.extend([
+            ("iss", "https://gitlab.com"),
+            ("sub", "project_path:acme/infra:ref_type:branch:ref:main"),
+            ("project_id", "4242"),
+            ("namespace_id", "7"),
+        ]);
+        let token = claims(&pairs);
+        let facts = ci_facts(JoinMethod::Gitlab, &token, &["project_id", "namespace_id"]);
+        assert!(facts.len() <= limen_ca::MAX_CI_FACTS, "{}", facts.len());
+        assert!(facts.contains_key("project_id") && facts.contains_key("namespace_id"));
     }
 }
