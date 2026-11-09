@@ -515,7 +515,9 @@ pub async fn redeem(
     use crate::caller;
     use limen_proto::v1::RedeemWebHandoffResponse;
 
-    let caller = caller::resolve(&request, &state.cas)?;
+    // Checked: a revoked proxy must not keep redeeming handoffs (and minting
+    // web-app sessions) for as long as its certificate is still valid.
+    let caller = caller::resolve_checked(&request, state).await?;
     caller.direct_proxy()?;
     let request = request.into_inner();
     if request.token.len() > 128

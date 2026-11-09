@@ -621,7 +621,8 @@ pub fn host_allowed(host: &str, patterns: &[String]) -> bool {
 /// `allowed` is empty, a host in the same place as the bootstrap one: the same
 /// domain below the first label (`b-2.x.kafka.us-east-1.amazonaws.com` for
 /// `b-1.x.kafka.us-east-1.amazonaws.com`), a bare name for a bare name, or an
-/// address in the same /16 (IPv4) or /48 (IPv6).
+/// address in the same /16 (IPv4) or /48 (IPv6). A bootstrap name of two
+/// labels (`kafka.corp`) has no such domain: only `allowed` lets it follow.
 #[must_use]
 pub fn may_follow(bootstrap: &str, reported: &str, allowed: &[String]) -> bool {
     let host_of = |endpoint: &str| -> String {
@@ -645,10 +646,15 @@ pub fn may_follow(bootstrap: &str, reported: &str, allowed: &[String]) -> bool {
             _ => false,
         },
         (Ok(_), Err(_)) | (Err(_), Ok(_)) => false,
+        // Below the bootstrap name itself: the same operator's domain.
+        (Err(_), Err(_)) if to.ends_with(&format!(".{from}")) => true,
         (Err(_), Err(_)) => match from.split_once('.') {
             // `kafka-1` and `kafka-2`: bare names stay among bare names.
             None => !to.contains('.'),
-            Some((_, parent)) => to.ends_with(&format!(".{parent}")),
+            // The parent must still be a domain, not a top-level one: from
+            // `example.com`, "nearby" would otherwise be every `.com` host,
+            // and the credential would go wherever the server pointed.
+            Some((_, parent)) => parent.contains('.') && to.ends_with(&format!(".{parent}")),
         },
     }
 }
