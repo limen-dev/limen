@@ -21,6 +21,12 @@ variable "kms_key_arn" {
   default     = null
 }
 
+variable "audit_kms_key_arn" {
+  description = "The audit bucket's KMS key (the audit module's kms_key_arn output). Optional: when set, applying fails if kms_key_arn is the same key, because that key also protects recordings."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Tags for every resource."
   type        = map(string)

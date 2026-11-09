@@ -182,17 +182,22 @@ pub struct Pipeline {
 }
 
 /// Whether the OCSF consumer is the one holding spool segments back (no other
-/// consumer is further behind) while the spool holds more than `max_lag`
+/// consumer is as far behind or further) while the spool holds more than `max_lag`
 /// bytes. Then, and only then, a failing OCSF send skips its batch: a
 /// projection must not be able to fill the spool and make audit fail closed
 /// (ADR-0047).
 fn ocsf_may_skip(spool: &Spool, names: &[String], max_lag: u64) -> bool {
     let mine = spool.pending(OCSF);
+    // Only the sinks that hold a record durably matter for who is slowest, but
+    // the console store is read the same way: any consumer at least as far
+    // behind as OCSF means skipping would not free the spool.
     spool.used_bytes() > max_lag
         && names
             .iter()
             .filter(|n| n.as_str() != OCSF)
-            .all(|n| spool.pending(n) <= mine)
+            // Strictly: a tie would mean skipping frees nothing, since the other
+            // sink holds the same segments.
+            .all(|n| spool.pending(n) < mine)
 }
 
 /// Why S3 shipping is paused while the replica is fenced.
@@ -306,7 +311,9 @@ impl Pipeline {
             _ => None,
         };
         let ocsf = Box::pin(open_ocsf(config)).await;
-        if consumers.len() == 1 {
+        // The console store and the OCSF projection are not an audit trail: the
+        // OCSF sink may skip a batch (ADR-0047), so something durable must hold it.
+        if !consumers.iter().any(|c| matches!(*c, JSONL | S3 | DATADOG)) {
             anyhow::bail!(
                 "no audit sink is configured: set --audit-file, an S3 bucket, or Datadog"
             );
@@ -460,7 +467,7 @@ impl Pipeline {
         if let Some(sink) = self.ocsf.clone() {
             let consumer = ConsumerConfig {
                 name: OCSF.into(),
-                batch_max: 10_000,
+                batch_max: 1000,
                 linger: self.config.audit_ocsf_s3_flush,
             };
             let spool = self.spool.clone();
@@ -614,7 +621,7 @@ mod status_tests {
 mod tests {
     use super::*;
 
-    async fn spool(dir: &std::path::Path, names: &[&str], records: usize) -> Spool {
+    async fn spool_with(dir: &std::path::Path, names: &[&str], records: usize) -> Spool {
         let mut c = SpoolConfig::new(dir, names);
         c.fsync_interval = Duration::from_millis(2);
         c.segment_bytes = 256;
@@ -635,19 +642,27 @@ mod tests {
     async fn ocsf_skips_only_when_it_is_the_slowest_and_the_spool_is_over_the_bound() {
         let dir = tempfile::tempdir().expect("dir");
         let all = [CONSOLE, S3, OCSF];
-        let spool = spool(dir.path(), &all, 20).await;
+        let spool = spool_with(dir.path(), &all, 20).await;
         let names = names(&all);
-        // Everyone is equally behind and the spool is big: skipping may help.
+        // Everyone is equally behind: skipping would free nothing (S3 holds the
+        // same segments), so it must not skip.
         assert!(spool.used_bytes() > 1000);
-        assert!(ocsf_may_skip(&spool, &names, 1000));
+        assert!(!ocsf_may_skip(&spool, &names, 1000));
+        // The others catch up a little; OCSF alone is furthest behind.
+        spool.commit(CONSOLE, 20).expect("commit");
+        spool.commit(S3, 10).expect("commit");
+        assert!(ocsf_may_skip(&spool, &names, 500));
         // Under the bound, never skip.
         assert!(!ocsf_may_skip(&spool, &names, u64::MAX));
+        // S3 is as far behind as OCSF again: a tie is not "slowest".
+        let dir2 = tempfile::tempdir().expect("dir");
+        let spool2 = spool_with(dir2.path(), &all, 20).await;
+        spool2.commit(CONSOLE, 20).expect("commit");
+        spool2.commit(S3, 5).expect("commit");
+        spool2.commit(OCSF, 5).expect("commit");
+        assert!(!ocsf_may_skip(&spool2, &names, 1));
         // S3 is further behind than OCSF: OCSF is not what holds the spool.
-        spool.commit(CONSOLE, 20).expect("commit");
-        spool.commit(OCSF, 10).expect("commit");
-        assert!(!ocsf_may_skip(&spool, &names, 500));
-        // S3 catches up past OCSF: now OCSF is the slowest.
-        spool.commit(S3, 20).expect("commit");
-        assert!(ocsf_may_skip(&spool, &names, 500));
+        spool2.commit(OCSF, 15).expect("commit");
+        assert!(!ocsf_may_skip(&spool2, &names, 1));
     }
 }

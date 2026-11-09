@@ -40,12 +40,14 @@ Unverified: validated with `terraform validate`, never applied to AWS.
 | [aws_iam_policy_document.bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.reader](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.writer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | name | Prefix for every resource name, e.g. "limen-prod". | `string` | n/a | yes |
+| audit\_kms\_key\_arn | The audit bucket's KMS key (the audit module's kms\_key\_arn output). Optional: when set, applying fails if kms\_key\_arn is the same key, because that key also protects recordings. | `string` | `null` | no |
 | bucket\_name | OCSF bucket name. Defaults to "<name>-ocsf-<account id>". | `string` | `null` | no |
 | kms\_key\_arn | Existing KMS key for the bucket. It must not be the audit key, which also protects recordings. A new key is created when null. | `string` | `null` | no |
 | retention\_days | Days to keep OCSF objects. The audit bucket is the record; this copy is for the SIEM. 0 keeps them forever. | `number` | `90` | no |

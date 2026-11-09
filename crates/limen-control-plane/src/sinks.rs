@@ -399,21 +399,16 @@ impl OcsfSink {
     }
 
     /// Project a batch into `(day, hour) -> NDJSON`. Unreadable lines are kept
-    /// as Base Events under the current hour; nothing is dropped.
+    /// as Base Events under `unknown/00` (fixed, so a retry rewrites the same
+    /// bytes); nothing is dropped.
     fn partitions(batch: &[(u64, Vec<u8>)]) -> BTreeMap<(String, String), Vec<u8>> {
-        let now = time::OffsetDateTime::now_utc();
-        let fallback = format!(
-            "{:04}-{:02}-{:02}/{:02}",
-            now.year(),
-            u8::from(now.month()),
-            now.day(),
-            now.hour()
-        );
         let mut out: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
         for (_, raw) in batch {
             let (record, day_hour) = limen_audit::ocsf::raw_to_ocsf(raw, limen_core::VERSION);
-            let day_hour = day_hour.unwrap_or_else(|| fallback.clone());
-            let (day, hour) = day_hour.split_once('/').unwrap_or(("unknown", "00"));
+            let (day, hour) = day_hour
+                .as_deref()
+                .and_then(|dh| dh.split_once('/'))
+                .unwrap_or(("unknown", "00"));
             let body = out.entry((day.to_owned(), hour.to_owned())).or_default();
             // `Value` always serializes.
             if serde_json::to_writer(&mut *body, &record).is_ok() {
@@ -660,14 +655,18 @@ mod tests {
         };
         assert_eq!(lines("2026-11-09", "10").len(), 2);
         assert_eq!(lines("2026-11-09", "11").len(), 1);
-        // The unreadable line is somewhere, as a Base Event; 4 records in all.
+        // The unreadable line is under unknown/00, as a Base Event; 4 records in all.
+        assert_eq!(lines("unknown", "00").len(), 1);
         let total: usize = parts.keys().map(|(d, h)| lines(d, h).len()).sum();
         assert_eq!(total, 4);
         let all = parts
             .values()
             .map(|b| String::from_utf8_lossy(b).into_owned())
             .collect::<String>();
-        assert!(all.contains("not json at all"));
+        assert!(
+            !all.contains("not json at all"),
+            "unparseable text is not copied"
+        );
         assert!(!all.contains("hunter2"), "a secret reached the projection");
         assert!(all.contains("orders"));
     }

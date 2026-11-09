@@ -30,16 +30,29 @@ const MAX_DEPTH: usize = 32;
 /// Words that mark a field as a secret. Native events never hold one
 /// (design §8); this is a second lock, so a mistake upstream does not leave
 /// the building through a SIEM feed.
-const SECRET_WORDS: [&str; 9] = [
+const SECRET_WORDS: [&str; 22] = [
     "password",
     "passwd",
+    "passphrase",
+    "pwd",
     "secret",
     "private_key",
     "api_key",
     "apikey",
+    "access_key",
+    "session_key",
+    "signing_key",
+    "psk",
     "authorization",
+    "bearer",
+    "jwt",
     "cookie",
     "credential",
+    "connection_string",
+    "dsn",
+    "otp",
+    "mfa_code",
+    "x_auth",
 ];
 
 const REDACTED: &str = "[redacted]";
@@ -219,8 +232,10 @@ fn sql_activity(statement_type: Option<&str>) -> Activity {
         .as_deref()
         .map(str::trim)
     {
-        Some("select" | "show" | "explain" | "with" | "describe") => act(4, "Query"),
-        Some("insert" | "copy" | "replace") => act(5, "Write"),
+        // `with` can wrap a DELETE and `explain analyze` runs its statement;
+        // `copy` can export. They stay Other so a rule on Query is not dodged.
+        Some("select" | "show" | "describe") => act(4, "Query"),
+        Some("insert" | "replace") => act(5, "Write"),
         Some("update" | "merge") => act(2, "Update"),
         Some("delete" | "truncate" | "drop") => act(7, "Delete"),
         Some("create") => act(6, "Create"),
@@ -323,8 +338,9 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
 
 /// `key` names a secret.
 fn is_secret_key(key: &str) -> bool {
-    let k = key.to_ascii_lowercase();
-    if SECRET_WORDS.iter().any(|w| k.contains(w)) {
+    // `Api-Key`, `api.key` and `API_KEY` are the same name.
+    let k = key.to_ascii_lowercase().replace(['-', '.', ' '], "_");
+    if k == "pass" || SECRET_WORDS.iter().any(|w| k.contains(w)) {
         return true;
     }
     // "token" alone is a secret; an id or digest of one is not.
@@ -333,6 +349,16 @@ fn is_secret_key(key: &str) -> bool {
             || k.ends_with("_sha256")
             || k.ends_with("_hash")
             || k == "token_id")
+}
+
+/// Fields a SIEM reader has no need for. The recording's location names the
+/// audit bucket, which the export is meant to keep out of the reader's sight.
+fn drop_fields(kind: EventKind, data: &mut Value) {
+    if kind == EventKind::SessionRecording
+        && let Value::Object(map) = data
+    {
+        map.remove("recording_uri");
+    }
 }
 
 /// A copy of `value` with secret-named fields replaced and a depth bound.
@@ -418,6 +444,8 @@ pub fn to_ocsf(event: &Event, product_version: &str) -> Value {
     };
     let type_uid = u64::from(class.uid) * 100 + u64::from(activity.id);
     let user = event.user.as_deref().unwrap_or("-");
+    let mut data = scrub(&event.data, 0);
+    drop_fields(event.kind, &mut data);
     let mut out = json!({
         "class_uid": class.uid,
         "class_name": class.name,
@@ -446,7 +474,7 @@ pub fn to_ocsf(event: &Event, product_version: &str) -> Value {
                     "seq": event.producer.seq,
                 },
                 "session_id": event.session_id.map(|s| s.to_string()),
-                "data": scrub(&event.data, 0),
+                "data": data,
             }
         },
     });
@@ -485,7 +513,12 @@ pub fn to_ocsf(event: &Event, product_version: &str) -> Value {
 
 /// Project one spooled line. A line that is not a readable native event (a
 /// bug upstream, or an event kind from a newer producer) still becomes a Base
-/// Event with the raw text kept, so this sink never drops one.
+/// Event, so this sink never drops one. What is kept of it goes through the same
+/// secret scrub as every other record: a JSON line keeps its scrubbed content
+/// (unless that is over 32 KiB, then only `kind`, `event_id` and `producer`); a
+/// line that is not JSON keeps only its length. The record has a fixed time (0)
+/// and the partition `unknown/00`, so projecting the same line again gives the
+/// same bytes and the same object key.
 #[must_use]
 pub fn raw_to_ocsf(raw: &[u8], product_version: &str) -> (Value, Option<String>) {
     match serde_json::from_slice::<Event>(raw) {
@@ -494,10 +527,29 @@ pub fn raw_to_ocsf(raw: &[u8], product_version: &str) -> (Value, Option<String>)
             (to_ocsf(&event, product_version), Some(day_hour))
         }
         Err(e) => {
-            let lossy = String::from_utf8_lossy(raw);
-            let mut end = lossy.len().min(MAX_RAW);
-            while !lossy.is_char_boundary(end) {
-                end -= 1;
+            let kept = match serde_json::from_slice::<Value>(raw) {
+                Ok(value) => {
+                    let scrubbed = scrub(&value, 0);
+                    let size = serde_json::to_vec(&scrubbed).map_or(usize::MAX, |v| v.len());
+                    if size <= MAX_RAW {
+                        json!({ "raw": scrubbed })
+                    } else {
+                        let pick = |k: &str| scrubbed.get(k).cloned().unwrap_or(Value::Null);
+                        json!({
+                            "raw_summary": {
+                                "kind": pick("kind"),
+                                "event_id": pick("event_id"),
+                                "producer": pick("producer"),
+                            },
+                            "raw_bytes": raw.len(),
+                        })
+                    }
+                }
+                Err(_) => json!({ "raw_bytes": raw.len(), "raw_is_json": false }),
+            };
+            let mut limen = json!({ "error": e.to_string() });
+            if let (Value::Object(dst), Value::Object(src)) = (&mut limen, kept) {
+                dst.extend(src);
             }
             let record = json!({
                 "class_uid": BASE.uid,
@@ -508,7 +560,7 @@ pub fn raw_to_ocsf(raw: &[u8], product_version: &str) -> (Value, Option<String>)
                 "activity_name": "unreadable audit event",
                 "type_uid": u64::from(OTHER.id),
                 "type_name": "Base Event: unreadable audit event",
-                "time": time::OffsetDateTime::now_utc().unix_timestamp() * 1000,
+                "time": 0,
                 "severity_id": MEDIUM,
                 "severity": severity_name(MEDIUM),
                 "message": "unreadable audit event",
@@ -516,11 +568,7 @@ pub fn raw_to_ocsf(raw: &[u8], product_version: &str) -> (Value, Option<String>)
                     "version": OCSF_VERSION,
                     "product": product(product_version, None),
                 },
-                "unmapped": { "limen": {
-                    "error": e.to_string(),
-                    "raw": &lossy[..end],
-                    "truncated": end < lossy.len(),
-                } },
+                "unmapped": { "limen": limen },
             });
             (record, None)
         }
@@ -806,23 +854,105 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_lines_become_base_events_with_the_raw_text() {
-        let (v, hour) = raw_to_ocsf(br#"{"kind":"from.the.future","event_id":"x"}"#, "1");
+    fn unreadable_lines_become_scrubbed_deterministic_base_events() {
+        // A kind from a newer producer: kept, with secrets scrubbed.
+        let line = br#"{"kind":"from.the.future","event_id":"x","data":{"password":"hunter2","resource":"r"}}"#;
+        let (v, hour) = raw_to_ocsf(line, "1");
         assert!(hour.is_none());
         assert_eq!(v["class_uid"], 0);
         assert_eq!(v["activity_id"], 99);
-        assert!(
-            v["unmapped"]["limen"]["raw"]
-                .as_str()
-                .unwrap()
-                .contains("from.the.future")
+        assert_eq!(v["time"], 0);
+        let text = serde_json::to_string(&v).unwrap();
+        assert!(text.contains("from.the.future"));
+        assert!(text.contains(r#""resource":"r""#));
+        assert!(!text.contains("hunter2"), "{text}");
+        // The same line gives the same bytes: a retry writes the same object.
+        assert_eq!(v, raw_to_ocsf(line, "1").0);
+        // Not JSON, or not UTF-8: only the length is kept.
+        for raw in [
+            &b"not json at all password=hunter2"[..],
+            &[0xff, 0xfe, 0x00][..],
+        ] {
+            let (v, _) = raw_to_ocsf(raw, "1");
+            let text = serde_json::to_string(&v).unwrap();
+            assert!(!text.contains("hunter2"));
+            assert_eq!(v["unmapped"]["limen"]["raw_bytes"], raw.len());
+        }
+        // Over the cap: only the identifying fields.
+        let big = format!(
+            r#"{{"kind":"k","event_id":"e","producer":{{"seq":3}},"data":"{}"}}"#,
+            "a".repeat(MAX_RAW * 2)
         );
-        // Not UTF-8, and very long: still one valid record.
-        let mut raw = vec![0xff, 0xfe];
-        raw.extend(std::iter::repeat_n(b'a', MAX_RAW * 2));
-        let (v, _) = raw_to_ocsf(&raw, "1");
-        assert_eq!(v["unmapped"]["limen"]["truncated"], true);
-        assert!(v["unmapped"]["limen"]["raw"].as_str().unwrap().len() <= MAX_RAW);
+        let (v, _) = raw_to_ocsf(big.as_bytes(), "1");
+        let text = serde_json::to_string(&v).unwrap();
+        assert!(text.len() < MAX_RAW, "{}", text.len());
+        assert_eq!(v["unmapped"]["limen"]["raw_summary"]["event_id"], "e");
+    }
+
+    #[test]
+    fn secret_key_names_match_however_they_are_spelled() {
+        for key in [
+            "Api-Key",
+            "x-api-key",
+            "api.key",
+            "PRIVATE-KEY",
+            "passphrase",
+            "pwd",
+            "pass",
+            "Bearer",
+            "jwt",
+            "access_key_id_secret",
+            "session-key",
+            "dsn",
+            "connection_string",
+            "otp",
+            "mfa_code",
+            "client_secret",
+            "refresh_token",
+            "X-Auth-Token",
+        ] {
+            assert!(is_secret_key(key), "{key} should be redacted");
+        }
+        for key in [
+            "resource",
+            "token_id",
+            "token_sha256",
+            "passes",
+            "client_addr",
+            "path",
+        ] {
+            assert!(!is_secret_key(key), "{key} should be kept");
+        }
+    }
+
+    #[test]
+    fn sql_statements_that_can_change_data_never_look_like_queries() {
+        let act = |t: &str| {
+            to_ocsf(
+                &event(EventKind::DbQuery, json!({"statement_type": t})),
+                "1",
+            )["activity_id"]
+                .as_u64()
+        };
+        assert_eq!(act("select"), Some(4));
+        for risky in ["with", "explain", "copy", "do", "call"] {
+            assert_eq!(act(risky), Some(99), "{risky}");
+        }
+        assert_eq!(act("delete"), Some(7));
+    }
+
+    #[test]
+    fn a_recordings_location_is_not_shown_to_siem_readers() {
+        let v = to_ocsf(
+            &event(
+                EventKind::SessionRecording,
+                json!({"recording_uri": "s3://audit-bucket/recordings/x.cast", "sha256": "ab", "bytes": 5}),
+            ),
+            "1",
+        );
+        let text = serde_json::to_string(&v).unwrap();
+        assert!(!text.contains("audit-bucket"), "{text}");
+        assert!(text.contains(r#""sha256":"ab""#));
     }
 
     /// The mapping table of the guide, built from `classify` itself.

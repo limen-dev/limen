@@ -602,14 +602,30 @@ impl Config {
         if bucket.trim().is_empty() {
             return Err("--audit-ocsf-s3-bucket is empty".into());
         }
-        if self.audit_s3_bucket.as_deref() == Some(bucket.as_str()) {
+        // Names are compared the way S3 reads them (no padding, no case). A
+        // different spelling of the same bucket (an access point, another
+        // account's alias) can't be seen from here: the IAM separation in the
+        // `ocsf` Terraform module is the control, this is a guard against
+        // mistakes.
+        let same_bucket = self
+            .audit_s3_bucket
+            .as_deref()
+            .is_some_and(|a| a.trim().eq_ignore_ascii_case(bucket.trim()));
+        if same_bucket && self.audit_ocsf_s3_endpoint.is_none() {
             return Err(
                 "--audit-ocsf-s3-bucket must not be the audit bucket: whoever reads the SIEM feed would be able to read recordings"
                     .into(),
             );
         }
+        // A key id, `alias/name` and a full ARN can name one key. Compare the
+        // last path segment, which catches an alias or key id written two ways;
+        // an alias and the key id it points to can't be told apart offline.
+        let kms_name = |k: &str| k.trim().rsplit('/').next().unwrap_or_default().to_owned();
         if let Some(key) = &self.audit_ocsf_s3_kms_key
-            && self.audit_s3_kms_key.as_deref() == Some(key.as_str())
+            && self
+                .audit_s3_kms_key
+                .as_deref()
+                .is_some_and(|a| kms_name(a) == kms_name(key))
         {
             return Err(
                 "--audit-ocsf-s3-kms-key must not be the audit KMS key: it also protects recordings"
@@ -795,6 +811,17 @@ mod tests {
             .expect_err("same bucket");
         assert!(same.contains("must not be the audit bucket"), "{same}");
         assert!(ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=siem"]).is_ok());
+        // A different spelling of the same name is the same bucket.
+        assert!(ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=AUDIT "]).is_err());
+        // The same name on another endpoint is a different store.
+        assert!(
+            ok(&[
+                "--audit-s3-bucket=audit",
+                "--audit-ocsf-s3-bucket=audit",
+                "--audit-ocsf-s3-endpoint=https://other.example"
+            ])
+            .is_ok()
+        );
         // And so does its key.
         let key = ok(&[
             "--audit-s3-kms-key=k1",
@@ -811,6 +838,21 @@ mod tests {
             ])
             .is_ok()
         );
+        // An alias and its ARN, or a key id and its ARN, are the same key.
+        for (audit, ocsf) in [
+            (
+                "alias/limen",
+                "arn:aws:kms:eu-west-1:111122223333:alias/limen",
+            ),
+            ("arn:aws:kms:eu-west-1:111122223333:key/abc-123", "abc-123"),
+        ] {
+            let both = ok(&[
+                &format!("--audit-s3-kms-key={audit}"),
+                "--audit-ocsf-s3-bucket=siem",
+                &format!("--audit-ocsf-s3-kms-key={ocsf}"),
+            ]);
+            assert!(both.is_err(), "{audit} vs {ocsf}");
+        }
         // Prefix shape.
         assert!(ok(&["--audit-ocsf-s3-bucket=siem", "--audit-ocsf-s3-prefix=ocsf"]).is_err());
         assert!(

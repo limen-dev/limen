@@ -7,6 +7,7 @@
 # with `terraform validate`; the local stand-in is SeaweedFS.
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 locals {
   bucket  = coalesce(var.bucket_name, "${var.name}-ocsf-${data.aws_caller_identity.current.account_id}")
@@ -30,6 +31,13 @@ resource "aws_kms_alias" "ocsf" {
 resource "aws_s3_bucket" "ocsf" {
   bucket = local.bucket
   tags   = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.audit_kms_key_arn == null || var.audit_kms_key_arn != local.kms_arn
+      error_message = "kms_key_arn is the audit key. It also protects session recordings: the SIEM reader would be able to decrypt them. Use a key of its own (leave kms_key_arn null)."
+    }
+  }
 }
 
 resource "aws_s3_bucket_ownership_controls" "ocsf" {
@@ -115,6 +123,24 @@ data "aws_iam_policy_document" "bucket" {
       values   = ["aws:kms"]
     }
   }
+
+  # Only this bucket's key: a writer with kms:GenerateDataKey on another key
+  # (such as the audit key) cannot write an object that key would decrypt.
+  statement {
+    sid       = "DenyOtherKey"
+    effect    = "Deny"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.ocsf.arn}/*"]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "StringNotEqualsIfExists"
+      variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
+      values   = [local.kms_arn]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "ocsf" {
@@ -156,5 +182,10 @@ data "aws_iam_policy_document" "reader" {
     sid       = "Decrypt"
     actions   = ["kms:Decrypt"]
     resources = [local.kms_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${data.aws_region.current.region}.amazonaws.com"]
+    }
   }
 }

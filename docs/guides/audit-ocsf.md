@@ -17,9 +17,9 @@ The export writes gzipped NDJSON (one OCSF event per line) to an S3 bucket of it
 | `--audit-ocsf-s3-flush` (`LIMEN_AUDIT_OCSF_S3_FLUSH`, default `60s`) | Close a batch after this long. |
 | `--audit-ocsf-max-lag-bytes` (`LIMEN_AUDIT_OCSF_MAX_LAG_BYTES`, default 256 MiB) | See [when the SIEM is down](#when-the-siem-is-down). Must be below `--audit-spool-max-bytes`. |
 
-The control plane refuses to start if the OCSF bucket or key equals the audit one, or if the lag bound is not below the spool size. The reason is access: the audit bucket and its key also protect **session recordings**. The SIEM's collector gets the OCSF bucket and key and nothing of the audit bucket (`reader_policy_json` in the module does that).
+The control plane refuses to start if the OCSF bucket or key looks like the audit one (same name, ignoring case and padding; a key id, alias or ARN written two ways), if the lag bound is not below the spool size, or if no native sink (`--audit-file`, an audit S3 bucket, or Datadog) is configured, because the OCSF sink can skip batches and something durable must hold them. The name check is a guard against mistakes; it cannot see an alias that points to the same key or an access point on the same bucket, so the IAM separation in the Terraform module is what keeps the SIEM out of the audit bucket. The reason is access: the audit bucket and its key also protect **session recordings**. The SIEM's collector gets the OCSF bucket and key and nothing of the audit bucket (`reader_policy_json` in the module does that).
 
-Objects are named `<prefix>dt=YYYY-MM-DD/hour=HH/<control plane id>-<content hash>.jsonl.gz`, partitioned by the event's UTC hour. A retry writes the same key with the same bytes. Delivery is at-least-once, like every sink, so a SIEM may see a record twice: `metadata.uid` is the same.
+Objects are named `<prefix>dt=YYYY-MM-DD/hour=HH/<control plane id>-<content hash>.jsonl.gz`, partitioned by the event's UTC hour (lines the export cannot read go under `dt=unknown/hour=00`). A retry writes the same key with the same bytes, including for unreadable lines. Delivery is at-least-once, like every sink, so a SIEM may see a record twice: `metadata.uid` is the same.
 
 ## What a record carries
 
@@ -32,9 +32,9 @@ Every record has the OCSF base attributes (`class_uid`, `category_uid`, `activit
 
 The chain position (the manifest sequence number of the S3 batch) is **not** in the record: the OCSF export reads the spool independently of the S3 sink and does not know it when it ships.
 
-**Secrets.** Native events hold none. As a second lock, any field in `data` whose name contains `password`, `secret`, `private_key`, `api_key`, `authorization`, `cookie`, `credential`, or `token` (other than ids and digests of one) is replaced by `[redacted]` in the export, at any depth. Statement text follows the same redaction rules as the native trail ([databases](databases.md)).
+**Secrets.** Native events hold none in named fields. As a second lock, any field in `data` whose name says it is a secret (`password`, `passphrase`, `secret`, `api key`, `access key`, `private key`, `authorization`, `bearer`, `jwt`, `cookie`, `credential`, `dsn`, `otp`, `token`, and similar, however they are spelled: `Api-Key`, `api.key`) is replaced by `[redacted]`, at any depth. Ids and digests of a token (`token_id`, `…_sha256`) are kept. **Values are not scanned.** Free text that a user typed, such as an SSH command, a SQL statement, a search query or a web path, goes to the SIEM exactly as it is in the native trail, with the same redaction rules ([databases](databases.md)): a password typed into a command line is visible to whoever reads the SIEM. Treat the SIEM's access as you treat the audit bucket's for that data. The location of a recording (`recording_uri` of `session.recording`) is removed, so the feed does not name the audit bucket.
 
-An event the export cannot read (a line that is not valid native JSON, or a kind from a newer producer) is not dropped: it becomes a Base Event with the raw text (cut at 32 KiB) under `unmapped.limen.raw`.
+An event the export cannot read (a kind from a newer producer, say) is not dropped: it becomes a Base Event. If the line is JSON, its content goes through the same secret scrub and is kept under `unmapped.limen.raw` (over 32 KiB, only its `kind`, `event_id` and `producer`); if it is not JSON, only its length is kept. Its `time` is 0.
 
 ## Mapping
 
@@ -42,7 +42,7 @@ Generated from the code (`crates/limen-audit/src/ocsf.rs`), and a test fails if 
 
 - HTTP Activity (`search.*`, `web.*`): the method (Get 3, Post 6, Put 7, Delete 2, Patch 9, Head 4, Options 5, Connect 1, Trace 8, else Other 99), and `status_id` from the response status.
 - API Activity for `kube.request`: the Kubernetes verb (create → Create 1; get, list, watch → Read 2; update, patch → Update 3; delete, deletecollection → Delete 4; else Other 99).
-- Datastore Activity for `db.query`: the statement class (select, show, explain → Query 4; insert, copy → Write 5; update, merge → Update 2; delete, truncate, drop → Delete 7; create → Create 6; else Other 99).
+- Datastore Activity for `db.query`: the statement class (select, show, describe → Query 4; insert, replace → Write 5; update, merge → Update 2; delete, truncate, drop → Delete 7; create → Create 6; else Other 99). `with`, `explain` and `copy` stay Other on purpose: a `WITH … DELETE`, an `EXPLAIN ANALYZE` of a write and a `COPY … TO` would otherwise look like reads.
 
 An *Other* activity carries a readable `activity_name` (for example `access approve`).
 
@@ -111,7 +111,7 @@ An *Other* activity carries a readable `activity_name` (for example `access appr
 
 The control plane keeps every audit event in a disk spool until all sinks have taken it. A SIEM bucket that stays unreachable would hold the spool back until it is full, and a full spool refuses logins and sessions (`audit.failure_mode: fail_closed`). A projection must not be able to do that.
 
-So: while the OCSF sink is failing **and** it is the slowest sink **and** the spool holds more than `--audit-ocsf-max-lag-bytes`, it skips its batch instead of retrying it. Nothing else is affected, and the events are still in the S3 trail. Each skip is counted in `limen_audit_ocsf_skipped_total` and logged as an error; alert on any increase, because a SIEM missing events silently is its own risk. Below the bound, or while another sink is further behind, the sink retries and keeps its events, and delivers them when the bucket is back.
+So: while the OCSF sink is failing **and** it is strictly the slowest sink (every other sink has fewer records pending, so skipping frees segments) **and** the spool holds more than `--audit-ocsf-max-lag-bytes`, it skips its batch instead of retrying it. A skip leaves no marker in the SIEM; a gap shows only as missing `metadata.uid`s or a jump in a producer's `seq`. It also applies to a permanent fault (a denied key, a missing bucket): the export then does nothing once the spool is past the bound, which is why the skip counter needs an alert. Nothing else is affected, and the events are still in the S3 trail. Each skip is counted in `limen_audit_ocsf_skipped_total` and logged as an error; alert on any increase, because a SIEM missing events silently is its own risk. Below the bound, or while another sink is further behind, the sink retries and keeps its events, and delivers them when the bucket is back.
 
 Metrics: `limen_audit_ocsf_events_total` (records written), `limen_audit_ocsf_skipped_total` (records skipped), and the usual `limen_audit_spool_pending{consumer="ocsf"}`, `limen_audit_shipped_total` and `limen_audit_ship_errors_total`. The console's Integrations page lists the export next to the other sinks.
 
@@ -120,6 +120,8 @@ Metrics: `limen_audit_ocsf_events_total` (records written), `limen_audit_ocsf_sk
 - **Amazon Security Lake.** It takes Parquet, one class per source, and OCSF 1.3 or earlier for custom sources. This export is NDJSON at 1.9.0. A Security Lake path would be a later change (ADR-0047, Open for review).
 - **An HTTPS push** to a SIEM's collector endpoint.
 - **The manifest sequence number** in each record.
+- **A gap marker** in the SIEM for skipped batches.
+- **Dropping free-text fields** (`command`, `statement`, bodies) from the OCSF copy.
 - **A Limen extension** for the fields that sit in `unmapped`.
 
 ## What was tried
