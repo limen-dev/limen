@@ -765,6 +765,7 @@ mod bots {
         let issuer = "https://token.actions.githubusercontent.com";
         let good = claims(&[
             ("repository", "acme/infra"),
+            ("repository_id", "123456789"),
             ("ref", "refs/heads/main"),
             ("environment", "staging"),
             ("actor", "someone"),
@@ -786,6 +787,7 @@ mod bots {
         for wrong in [
             claims(&[
                 ("repository", "acme/infra"),
+                ("repository_id", "123456789"),
                 ("ref", "refs/heads/feature"),
                 ("environment", "staging"),
             ]),
@@ -794,7 +796,18 @@ mod bots {
                 ("ref", "refs/heads/main"),
                 ("environment", "staging"),
             ]),
-            claims(&[("repository", "acme/infra"), ("ref", "refs/heads/main")]),
+            claims(&[
+                ("repository", "acme/infra"),
+                ("repository_id", "123456789"),
+                ("ref", "refs/heads/main"),
+            ]),
+            // Same name, different repository: it was deleted and created again.
+            claims(&[
+                ("repository", "acme/infra"),
+                ("repository_id", "999"),
+                ("ref", "refs/heads/main"),
+                ("environment", "staging"),
+            ]),
             claims(&[]),
         ] {
             assert!(

@@ -23,6 +23,7 @@ spec:
     method: github_actions
     match:
       repository: acme/infra
+      repository_id: "123456789"
       ref: refs/heads/main
       environment: staging
   roles: [deployer]
@@ -38,6 +39,7 @@ spec:
     method: gitlab
     match:
       project_path: acme/reports
+      project_id: "4242"
       ref: main
       ref_protected: "true"
   roles: [deployer]
