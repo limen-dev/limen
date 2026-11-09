@@ -652,12 +652,14 @@ impl Config {
             .as_deref()
             .is_some_and(|a| a.trim().eq_ignore_ascii_case(bucket.trim()));
         // The same name on another endpoint is another store; on the same one it is not.
+        let norm = |e: &str| e.trim().trim_end_matches('/').to_ascii_lowercase();
         let other_endpoint = self.audit_ocsf_s3_endpoint.as_deref().is_some_and(|e| {
-            Some(e.trim().trim_end_matches('/'))
-                != self
-                    .audit_s3_endpoint
-                    .as_deref()
-                    .map(|a| a.trim().trim_end_matches('/'))
+            let e = norm(e);
+            match self.audit_s3_endpoint.as_deref() {
+                Some(a) => e != norm(a),
+                // The audit bucket is on AWS (no endpoint): an AWS endpoint is the same store.
+                None => !e.contains("amazonaws.com"),
+            }
         });
         if same_bucket && !other_endpoint {
             return Err(
@@ -885,6 +887,15 @@ mod tests {
                 "--audit-ocsf-s3-endpoint=https://other.example"
             ])
             .is_ok()
+        );
+        // On AWS (no audit endpoint), spelling out an AWS endpoint is the same store.
+        assert!(
+            ok(&[
+                "--audit-s3-bucket=audit",
+                "--audit-ocsf-s3-bucket=audit",
+                "--audit-ocsf-s3-endpoint=https://s3.eu-west-1.amazonaws.com"
+            ])
+            .is_err()
         );
         // Spelling out the audit endpoint again does not make it another store.
         for same in ["http://s3:8333", "http://s3:8333/"] {
