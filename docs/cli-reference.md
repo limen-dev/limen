@@ -480,7 +480,7 @@ Options:
 
 ### `limen mcp`
 
-Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents (ADR-0032, spike 0).
+Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
 
 Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
 
