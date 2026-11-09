@@ -560,6 +560,19 @@ pub struct UserView {
     pub idp_tone: &'static str,
 }
 
+impl UserView {
+    /// Who disabled the person: the IdP check, or an admin. Empty when enabled.
+    pub fn disabled_by(&self) -> &'static str {
+        if !self.locked {
+            ""
+        } else if self.locked_by == crate::idp_check::LOCK_ACTOR {
+            "the IdP"
+        } else {
+            "an admin"
+        }
+    }
+}
+
 /// How the IdP check stands, in words and as a tone (ADR-0047).
 pub fn idp_check_text(
     status: &str,
@@ -877,18 +890,40 @@ pub struct UserFilter {
     pub role: String,
     /// `ok`, `unchecked`, `check_failed`, `offboarded` or `locked`.
     pub status: String,
+    /// `enabled`, `disabled`, `disabled_idp` or `disabled_admin`. A disabled
+    /// person is a locked one; the lock's author says who disabled them.
+    pub state: String,
 }
 
 impl UserFilter {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.group.is_empty() && self.role.is_empty() && self.status.is_empty()
+        self.group.is_empty()
+            && self.role.is_empty()
+            && self.status.is_empty()
+            && self.state.is_empty()
+    }
+
+    /// Whether the state filter admits a person: `locked_by` is the author of
+    /// their lock, if they are locked.
+    #[must_use]
+    pub fn admits_state(&self, locked_by: Option<&str>) -> bool {
+        let idp = locked_by == Some(crate::idp_check::LOCK_ACTOR);
+        match self.state.as_str() {
+            "" => true,
+            "enabled" => locked_by.is_none(),
+            "disabled" => locked_by.is_some(),
+            "disabled_idp" => idp,
+            "disabled_admin" => locked_by.is_some() && !idp,
+            _ => false,
+        }
     }
 
     /// Whether a person passes every filter that is set.
     #[must_use]
     pub fn admits(&self, u: &UserRow, locked: bool) -> bool {
-        (self.group.is_empty() || u.groups.contains(&self.group))
+        self.admits_state(locked.then(|| u.locked_by.as_deref().unwrap_or("")))
+            && (self.group.is_empty() || u.groups.contains(&self.group))
             && (self.role.is_empty() || u.roles.contains(&self.role))
             && match self.status.as_str() {
                 "" => true,
@@ -1417,6 +1452,7 @@ mod user_filter_tests {
             group: g.into(),
             role: r.into(),
             status: s.into(),
+            ..UserFilter::default()
         };
         assert!(f("platform", "", "").admits(&u, false));
         assert!(!f("other", "", "").admits(&u, false));
@@ -1424,6 +1460,23 @@ mod user_filter_tests {
         assert!(!f("platform", "admin", "ok").admits(&u, false));
         assert!(!f("", "", "check_failed").admits(&u, false));
         assert!(f("", "", "locked").admits(&u, true));
+        let state = |s: &str, by: Option<&str>| {
+            let mut u = person(&[], &[], "ok");
+            u.lock_reason = by.map(|_| "why".to_owned());
+            u.locked_by = by.map(str::to_owned);
+            UserFilter {
+                state: s.into(),
+                ..UserFilter::default()
+            }
+            .admits(&u, by.is_some())
+        };
+        let idp = Some("system:idp-check");
+        let admin = Some("admin@example.com");
+        assert!(state("enabled", None) && !state("enabled", idp) && !state("enabled", admin));
+        assert!(!state("disabled", None) && state("disabled", idp) && state("disabled", admin));
+        assert!(state("disabled_idp", idp) && !state("disabled_idp", admin));
+        assert!(state("disabled_admin", admin) && !state("disabled_admin", idp));
+        assert!(!state("disabled_admin", None) && !state("nonsense", None));
         assert!(!f("", "", "locked").admits(&u, false));
         assert!(
             !f("", "", "nonsense").admits(&u, false),

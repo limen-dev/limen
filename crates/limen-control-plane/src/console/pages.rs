@@ -1048,6 +1048,7 @@ pub struct UsersQuery {
     group: Option<String>,
     role: Option<String>,
     status: Option<String>,
+    state: Option<String>,
 }
 
 /// A filter value from the query string: bounded, and only what the menus offer
@@ -1087,6 +1088,7 @@ pub async fn users(
         group: filter_value(q.group.as_ref()),
         role: filter_value(q.role.as_ref()),
         status: filter_value(q.status.as_ref()),
+        state: filter_value(q.state.as_ref()),
     };
     let total = users.len();
     let clear_href = if query.is_empty() {
@@ -1120,7 +1122,13 @@ pub async fn users(
         .filter(|l| !known.contains(&l.username))
         .map(|l| lock_only_view(&l.username, l))
         .filter(&wanted)
-        .filter(|_| filter.is_empty() || filter.status == "locked")
+        // Never signed in: no groups, roles or IdP check, but disabled all the same.
+        .filter(|_| {
+            filter.group.is_empty()
+                && filter.role.is_empty()
+                && (filter.status.is_empty() || filter.status == "locked")
+        })
+        .filter(|u| filter.admits_state(Some(u.locked_by.as_str())))
         .collect();
     html(
         UsersPage {

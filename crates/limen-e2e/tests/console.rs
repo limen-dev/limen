@@ -635,7 +635,37 @@ async fn console_end_to_end() {
     let user_page = admin_user
         .get(&format!("/console/users/{DEVELOPER_ENC}"))
         .await;
-    assert!(user_page.body.contains("locked") && user_page.body.contains("stolen laptop"));
+    assert!(user_page.body.contains("disabled") && user_page.body.contains("stolen laptop"));
+    // The state filter: an admin's lock is "disabled by an admin", not by the IdP.
+    let disabled = admin_user.get("/console/users?state=disabled").await;
+    assert!(
+        disabled.body.contains(DEVELOPER) && disabled.body.contains("by an admin"),
+        "{}",
+        disabled.body
+    );
+    assert!(
+        admin_user
+            .get("/console/users?state=disabled_admin")
+            .await
+            .body
+            .contains(DEVELOPER)
+    );
+    assert!(
+        !admin_user
+            .get("/console/users?state=disabled_idp")
+            .await
+            .body
+            .contains(DEVELOPER),
+        "an admin's lock is not the IdP's"
+    );
+    assert!(
+        !admin_user
+            .get("/console/users?state=enabled")
+            .await
+            .body
+            .contains(DEVELOPER),
+        "a disabled person is not listed as enabled"
+    );
     let page = dev_user
         .get_once(&format!("{}/console/", dev_user.base))
         .await;

@@ -67,7 +67,7 @@ The `idp-check` stack moves the stack's Dex, with the same users, onto PostgreSQ
 
 - **Offboard.** Delete the person's refresh token in Dex, which is what a revoked session looks like to the IdP:
   `docker exec limen-dex-db psql -U dex -d dex -c "delete from refresh_token where claims_email='developer@example.com'"`.
-  At the next check, Dex answers `invalid_grant`, the login ends, and the person is locked as `system:idp-check` (`idp.offboard` in the audit trail). Signing in again lifts the lock.
+  At the next check, Dex answers `invalid_grant`, the login ends, and the person is **disabled** (a lock held by `system:idp-check`; the Users page's *State* filter has "Disabled by the IdP") (`idp.offboard` in the audit trail). Signing in again lifts the lock.
 - **Remove the user from Dex's config instead and the check does not offboard.** Dex answers a refresh for a user it no longer has with `500 invalid_request` ("user not found" in its log), not `invalid_grant`, so Limen reads it as the IdP being unreachable: it fails open and raises `idp.check_failed`. Treating every 500 as a deactivation would lock everyone out in a Dex outage, so Limen does not. Okta and the other hosted IdPs answer `invalid_grant` for a deactivated user (unverified until #64).
 - **Onboard.** Change a user's `groups` in `deploy/compose/config/dev-users.toml`, run `python3 deploy/compose/scripts/gen-dev-users.py`, and restart Dex (`docker compose restart dex`). The new group applies at that person's next sign-in. A refreshed token from this Dex carries the same `groups`.
 
