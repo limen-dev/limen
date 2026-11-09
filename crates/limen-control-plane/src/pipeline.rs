@@ -13,11 +13,13 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
 use crate::config::Config;
-use crate::sinks::{DatadogSink, S3Sink, SignerSlot};
+use crate::sinks::{DatadogSink, OcsfSink, S3Sink, SignerSlot};
 
 pub const JSONL: &str = "jsonl";
 pub const S3: &str = "s3";
 pub const DATADOG: &str = "datadog";
+/// The OCSF projection for SIEMs (ADR-0047).
+pub const OCSF: &str = "ocsf";
 /// Fills the `sessions` table the web console reads.
 pub const CONSOLE: &str = "console";
 
@@ -164,6 +166,7 @@ pub struct Pipeline {
     pub recordings: RecordingStore,
     s3: Option<S3Sink>,
     datadog: Option<DatadogSink>,
+    ocsf: Option<Arc<OcsfSink>>,
     config: Arc<Config>,
     names: Arc<[String]>,
     /// Consumers stop shipping once empty when this flips.
@@ -176,6 +179,20 @@ pub struct Pipeline {
     fenced: Arc<std::sync::atomic::AtomicBool>,
     /// One entry per consumer in `names`.
     status: Arc<BTreeMap<String, Arc<SinkStatus>>>,
+}
+
+/// Whether the OCSF consumer is the one holding spool segments back (no other
+/// consumer is further behind) while the spool holds more than `max_lag`
+/// bytes. Then, and only then, a failing OCSF send skips its batch: a
+/// projection must not be able to fill the spool and make audit fail closed
+/// (ADR-0047).
+fn ocsf_may_skip(spool: &Spool, names: &[String], max_lag: u64) -> bool {
+    let mine = spool.pending(OCSF);
+    spool.used_bytes() > max_lag
+        && names
+            .iter()
+            .filter(|n| n.as_str() != OCSF)
+            .all(|n| spool.pending(n) <= mine)
 }
 
 /// Why S3 shipping is paused while the replica is fenced.
@@ -201,7 +218,36 @@ pub fn consumer_names(config: &Config) -> Vec<&'static str> {
     if config.datadog_logs_url.is_some() && config.datadog_api_key.is_some() {
         consumers.push(DATADOG);
     }
+    if config.audit_ocsf_s3_bucket.is_some() {
+        consumers.push(OCSF);
+    }
     consumers
+}
+
+/// The OCSF sink, if a bucket is configured (ADR-0047). Kept out of
+/// [`Pipeline::open`] so that function's future stays small.
+async fn open_ocsf(config: &Config) -> Option<Arc<OcsfSink>> {
+    let bucket = config.audit_ocsf_s3_bucket.as_ref()?;
+    let endpoint = config
+        .audit_ocsf_s3_endpoint
+        .as_deref()
+        .or(config.audit_s3_endpoint.as_deref());
+    let client = crate::sinks::s3_client(endpoint, config.audit_s3_path_style).await;
+    if config.audit_s3_create_bucket && client.head_bucket().bucket(bucket).send().await.is_err() {
+        match client.create_bucket().bucket(bucket).send().await {
+            Ok(_) => tracing::info!(%bucket, "created the OCSF bucket"),
+            Err(e) => {
+                tracing::warn!(%bucket, error = %aws_sdk_s3::error::DisplayErrorContext(&e), "couldn't create the OCSF bucket; will retry when shipping");
+            }
+        }
+    }
+    Some(Arc::new(OcsfSink {
+        client,
+        bucket: bucket.clone(),
+        prefix: config.audit_ocsf_s3_prefix.clone(),
+        kms_key: config.audit_ocsf_s3_kms_key.clone(),
+        writer: config.id.clone(),
+    }))
 }
 
 impl Pipeline {
@@ -259,6 +305,7 @@ impl Pipeline {
             (Some(_), None) => anyhow::bail!("--datadog-logs-url needs DD_API_KEY"),
             _ => None,
         };
+        let ocsf = Box::pin(open_ocsf(config)).await;
         if consumers.len() == 1 {
             anyhow::bail!(
                 "no audit sink is configured: set --audit-file, an S3 bucket, or Datadog"
@@ -282,6 +329,7 @@ impl Pipeline {
             recordings,
             s3,
             datadog,
+            ocsf,
             config: Arc::clone(config),
             names: consumers.iter().map(|c| (*c).to_owned()).collect(),
             stop: Arc::new(watch::channel(false).0),
@@ -407,6 +455,30 @@ impl Pipeline {
             self.spawn_consumer(consumer, move |batch| {
                 let sink = sink.clone();
                 async move { sink.ship(batch).await }
+            });
+        }
+        if let Some(sink) = self.ocsf.clone() {
+            let consumer = ConsumerConfig {
+                name: OCSF.into(),
+                batch_max: 10_000,
+                linger: self.config.audit_ocsf_s3_flush,
+            };
+            let spool = self.spool.clone();
+            let names = Arc::clone(&self.names);
+            let max_lag = self.config.audit_ocsf_max_lag_bytes;
+            self.spawn_consumer(consumer, move |batch| {
+                let (sink, spool, names) = (sink.clone(), spool.clone(), Arc::clone(&names));
+                async move {
+                    let count = batch.len() as u64;
+                    match sink.ship(batch).await {
+                        Err(ShipError::Retry(why)) if ocsf_may_skip(&spool, &names, max_lag) => {
+                            metrics::counter!("limen_audit_ocsf_skipped_total").increment(count);
+                            tracing::error!(%why, skipped = count, "the OCSF sink is failing and holding the audit spool back; skipping this batch (it is still in the audit trail)");
+                            Ok(())
+                        }
+                        other => other,
+                    }
+                }
             });
         }
     }
@@ -535,5 +607,47 @@ mod status_tests {
         );
         // A success does not clear the count: it is failures since the process started.
         assert_eq!(status.errors.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn spool(dir: &std::path::Path, names: &[&str], records: usize) -> Spool {
+        let mut c = SpoolConfig::new(dir, names);
+        c.fsync_interval = Duration::from_millis(2);
+        c.segment_bytes = 256;
+        let spool = Spool::open(c).expect("open");
+        spool.start();
+        for i in 0..records {
+            spool.append(&[b'x'; 100]).await.expect("append");
+            let _ = i;
+        }
+        spool
+    }
+
+    fn names(all: &[&str]) -> Vec<String> {
+        all.iter().map(|n| (*n).to_owned()).collect()
+    }
+
+    #[tokio::test]
+    async fn ocsf_skips_only_when_it_is_the_slowest_and_the_spool_is_over_the_bound() {
+        let dir = tempfile::tempdir().expect("dir");
+        let all = [CONSOLE, S3, OCSF];
+        let spool = spool(dir.path(), &all, 20).await;
+        let names = names(&all);
+        // Everyone is equally behind and the spool is big: skipping may help.
+        assert!(spool.used_bytes() > 1000);
+        assert!(ocsf_may_skip(&spool, &names, 1000));
+        // Under the bound, never skip.
+        assert!(!ocsf_may_skip(&spool, &names, u64::MAX));
+        // S3 is further behind than OCSF: OCSF is not what holds the spool.
+        spool.commit(CONSOLE, 20).expect("commit");
+        spool.commit(OCSF, 10).expect("commit");
+        assert!(!ocsf_may_skip(&spool, &names, 500));
+        // S3 catches up past OCSF: now OCSF is the slowest.
+        spool.commit(S3, 20).expect("commit");
+        assert!(ocsf_may_skip(&spool, &names, 500));
     }
 }

@@ -304,6 +304,7 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - each batch has a manifest at `manifests/<writer>/<seq>.json`, signed by the control plane's certificate key (`Purpose::AuditManifest`) and chained by the previous manifest's SHA-256. The chain head is recovered from S3 on restart. `limen audit verify` (shipped in the control plane image) checks signatures, numbering, chain, and batch hashes. The planned `limen admin audit verify` is not built yet.
 
   Parquet is deferred. JSONL with the Glue JSON SerDe and partition projection is enough at the target scale.
+- **OCSF export (ADR-0047, [guide](guides/audit-ocsf.md)):** an optional spool consumer, `ocsf`, writes each event as an OCSF 1.9.0 record (gzipped NDJSON) to a bucket and KMS key of its own, so a SIEM reader never reaches the audit bucket's recordings. The mapping is an exhaustive `match` on `EventKind`; every record carries the native `event_id` as `metadata.uid` and the producer position. It is a projection: the S3 chain stays the source of truth. If it fails while it is the slowest sink and the spool is over `--audit-ocsf-max-lag-bytes`, it skips and counts rather than hold the spool back until audit fails closed.
 - **Datadog:**
   - audit events go to the Logs HTTP intake (`service:limen`, `source:limen`, tags `env`, `version`, `event_kind`, `component`)
   - service metrics go over DogStatsD to the agent sidecar
@@ -353,7 +354,7 @@ crates/
   limen-proto/           # tonic/prost generated code
   limen-policy/          # YAML model (roles, group→role mappings, resources), validation, evaluator, signed snapshots
   limen-ca/              # Signer trait (file, KMS), X.509 + SSH cert issuance
-  limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog)
+  limen-audit/           # event schema, spool, sinks (stub, control-plane ingest, S3, Datadog), the OCSF mapping
   limen-session/         # signed session grants and policy snapshots, shared by control plane, proxies and workers
   limen-verify/          # checks the S3 audit chain and evidence packs without the control plane; behind `limen audit verify`
   limen-component/       # shared runtime for proxies and workers: identity, enrollment, certificate renewal
@@ -405,6 +406,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
   - Phase 10: Amazon OpenSearch Service (SigV4 acceptance, fine-grained access control), OpenSearch Serverless, Elastic Cloud API keys, TLS with the Amazon bundle.
   - Phase 11: Amazon MQ, MSK (the `AWS_MSK_IAM` payload, the AWS bundle), MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
   - Phase 13: discovery runs in CI against the Moto AWS emulator (`discovery/emulator_tests.rs`): signed EC2, RDS/Aurora, Redshift and ElastiCache calls, `AssumeRole`, tag filtering, and the describe-only role being enough for those scans. That is emulator-tested, not verified. Moto is lenient about input and has no real engines, and EKS signing and permissions aren't covered (Moto refuses even botocore's signed EKS requests). Still open on real AWS: the describe response shapes, `GetConsoleOutput` host keys, `AssumeRole` across accounts, ElastiCache and Redshift tags, the Slack and webhook notifiers against real endpoints, and the audit-search history link to Athena. Not built: automatic approval from context, a signed Slack approval button, a PDF evidence pack, ElastiCache cluster mode in discovery, watching protocols other than SSH.
+  - OCSF export (ADR-0047): tested against SeaweedFS only. No SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema.
   - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - **Deferred to Phase 15:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
 - **Deferred and not yet scheduled in §13:**

@@ -201,6 +201,20 @@ fn sinks(config: &Config, snapshots: &[(String, SinkSnapshot)], fenced: bool) ->
                         format!("Environment tag {}", config.environment),
                     ],
                 ),
+                crate::pipeline::OCSF => (
+                    "OCSF export (SIEM)",
+                    ("warehouse", "k-s3"),
+                    format!(
+                        "s3://{}/{}",
+                        config.audit_ocsf_s3_bucket.as_deref().unwrap_or_default(),
+                        config.audit_ocsf_s3_prefix
+                    ),
+                    vec![
+                        format!("OCSF {}", limen_audit::ocsf::OCSF_VERSION),
+                        format!("Flushed every {:?}", config.audit_ocsf_s3_flush),
+                        "A projection: the audit trail stays the source of truth".into(),
+                    ],
+                ),
                 _ => (
                     "Audit sink",
                     ("scroll-text", "k-other"),

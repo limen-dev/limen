@@ -61,7 +61,7 @@ add('deploy/compose/README.md', 'reference/compose-stack', 'Local stack (Compose
 // module's and example's README (inputs and outputs from terraform-docs).
 add('deploy/helm/limen/README.md', 'reference/deploy/helm-chart', 'Helm chart');
 add('deploy/terraform/modules/README.md', 'reference/deploy/terraform-modules', 'Terraform modules');
-for (const m of ['foundation', 'ecs', 'ec2', 'discovery', 'audit', 'datadog']) {
+for (const m of ['foundation', 'ecs', 'ec2', 'discovery', 'audit', 'ocsf', 'datadog']) {
   add(`deploy/terraform/modules/${m}/README.md`, `reference/deploy/terraform-${m}`, `Module: ${m}`);
 }
 for (const e of ['complete', 'kubernetes']) {

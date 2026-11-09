@@ -239,7 +239,7 @@ Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestone
 - [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API (Terraform)](docs/guides/management-api.md) · [resource discovery](docs/guides/discovery.md)
 
 **Audit and operate**
-- [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [watching a live session](docs/guides/watching-sessions.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)
+- [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [OCSF export for SIEMs](docs/guides/audit-ocsf.md) · [watching a live session](docs/guides/watching-sessions.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)
 
 **How it is built**
 - [The three programs](docs/components.md) · [design](docs/design.md) · [diagrams](docs/diagrams/README.md) · [decision records (ADRs)](docs/adr/README.md) · [threat model](docs/threat-model.md) · [penetration test plan](docs/pentest-plan.md)

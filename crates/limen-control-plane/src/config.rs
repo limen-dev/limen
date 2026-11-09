@@ -269,6 +269,40 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
     pub audit_s3_flush: Duration,
 
+    /// Write an OCSF projection of the audit trail (ADR-0047) to this bucket
+    /// for SIEMs. It must not be the audit bucket: a SIEM reader gets this
+    /// bucket and nothing of the audit bucket, which holds recordings. Uses
+    /// the audit bucket's path-style setting.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_BUCKET")]
+    pub audit_ocsf_s3_bucket: Option<String>,
+
+    /// S3 endpoint for the OCSF bucket, if it differs from `--audit-s3-endpoint`
+    /// (another account or region, or an S3-compatible store in development).
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_ENDPOINT")]
+    pub audit_ocsf_s3_endpoint: Option<String>,
+
+    /// Key prefix in the OCSF bucket. Empty, or ending in `/`.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_PREFIX", default_value = "")]
+    pub audit_ocsf_s3_prefix: String,
+
+    /// Encrypt OCSF objects with this KMS key. Must differ from
+    /// `--audit-s3-kms-key`: the audit key protects recordings.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_KMS_KEY")]
+    pub audit_ocsf_s3_kms_key: Option<String>,
+
+    /// Close an OCSF batch after this long, even if it isn't full.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
+    pub audit_ocsf_s3_flush: Duration,
+
+    /// If the OCSF sink fails while the spool holds more than this many bytes
+    /// and the OCSF sink is the slowest consumer, it skips the batch (counted
+    /// in `limen_audit_ocsf_skipped_total`) instead of holding the spool
+    /// until it is full and audit fails closed. The events stay in the S3
+    /// trail. Must be below `--audit-spool-max-bytes`.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_MAX_LAG_BYTES", default_value_t = 256 * 1024 * 1024,
+          value_parser = clap::value_parser!(u64).range(1..))]
+    pub audit_ocsf_max_lag_bytes: u64,
+
     /// Datadog Logs intake URL, for example
     /// `https://http-intake.logs.datadoghq.eu/api/v2/logs`. Enables the Datadog sink.
     #[arg(long, env = "LIMEN_DATADOG_LOGS_URL")]
@@ -553,6 +587,50 @@ impl Config {
         Ok(())
     }
 
+    /// Refuses OCSF settings that would weaken the audit bucket's protection
+    /// or could never take effect (ADR-0047).
+    pub fn check_ocsf(&self) -> Result<(), String> {
+        let Some(bucket) = &self.audit_ocsf_s3_bucket else {
+            if self.audit_ocsf_s3_kms_key.is_some()
+                || self.audit_ocsf_s3_endpoint.is_some()
+                || !self.audit_ocsf_s3_prefix.is_empty()
+            {
+                return Err("the other --audit-ocsf-s3-* flags need --audit-ocsf-s3-bucket".into());
+            }
+            return Ok(());
+        };
+        if bucket.trim().is_empty() {
+            return Err("--audit-ocsf-s3-bucket is empty".into());
+        }
+        if self.audit_s3_bucket.as_deref() == Some(bucket.as_str()) {
+            return Err(
+                "--audit-ocsf-s3-bucket must not be the audit bucket: whoever reads the SIEM feed would be able to read recordings"
+                    .into(),
+            );
+        }
+        if let Some(key) = &self.audit_ocsf_s3_kms_key
+            && self.audit_s3_kms_key.as_deref() == Some(key.as_str())
+        {
+            return Err(
+                "--audit-ocsf-s3-kms-key must not be the audit KMS key: it also protects recordings"
+                    .into(),
+            );
+        }
+        let prefix = &self.audit_ocsf_s3_prefix;
+        if prefix.starts_with('/') || (!prefix.is_empty() && !prefix.ends_with('/')) {
+            return Err(
+                "--audit-ocsf-s3-prefix must be empty, or end in `/` and not start with one".into(),
+            );
+        }
+        if self.audit_ocsf_max_lag_bytes >= self.audit_spool_max_bytes {
+            return Err(format!(
+                "--audit-ocsf-max-lag-bytes ({}) must be below --audit-spool-max-bytes ({}), or the OCSF sink could still fill the spool",
+                self.audit_ocsf_max_lag_bytes, self.audit_spool_max_bytes
+            ));
+        }
+        Ok(())
+    }
+
     /// The notifiers these flags configure. Refuses a URL that is not
     /// `https` (or loopback `http`).
     pub fn notify_config(&self) -> Result<crate::access::notify::NotifyConfig, String> {
@@ -702,6 +780,63 @@ mod tests {
         let over = parse_with(&["--default-cert-ttl=2h", "--max-cert-ttl=1h"]).expect("parses");
         let err = over.check_cert_ttls().expect_err("above the max");
         assert!(err.contains("--default-cert-ttl"), "{err}");
+    }
+
+    #[test]
+    fn ocsf_settings_cannot_share_the_audit_bucket_or_key_or_outgrow_the_spool() {
+        let ok = |extra: &[&str]| parse_with(extra).expect("parses").check_ocsf();
+        // Off by default, and nothing else may be set without the bucket.
+        assert!(ok(&[]).is_ok());
+        assert!(ok(&["--audit-ocsf-s3-kms-key=k"]).is_err());
+        assert!(ok(&["--audit-ocsf-s3-prefix=x/"]).is_err());
+        assert!(ok(&["--audit-ocsf-s3-bucket=siem"]).is_ok());
+        // The audit bucket holds recordings.
+        let same = ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=audit"])
+            .expect_err("same bucket");
+        assert!(same.contains("must not be the audit bucket"), "{same}");
+        assert!(ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=siem"]).is_ok());
+        // And so does its key.
+        let key = ok(&[
+            "--audit-s3-kms-key=k1",
+            "--audit-ocsf-s3-bucket=siem",
+            "--audit-ocsf-s3-kms-key=k1",
+        ])
+        .expect_err("same key");
+        assert!(key.contains("KMS key"), "{key}");
+        assert!(
+            ok(&[
+                "--audit-s3-kms-key=k1",
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-kms-key=k2"
+            ])
+            .is_ok()
+        );
+        // Prefix shape.
+        assert!(ok(&["--audit-ocsf-s3-bucket=siem", "--audit-ocsf-s3-prefix=ocsf"]).is_err());
+        assert!(
+            ok(&[
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-prefix=/ocsf/"
+            ])
+            .is_err()
+        );
+        assert!(
+            ok(&[
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-prefix=ocsf/"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["--audit-ocsf-s3-bucket= "]).is_err());
+        // The lag bound must be reachable before the spool is full.
+        let lag = ok(&[
+            "--audit-ocsf-s3-bucket=siem",
+            "--audit-spool-max-bytes=1000",
+            "--audit-ocsf-max-lag-bytes=1000",
+        ])
+        .expect_err("not below the spool size");
+        assert!(lag.contains("must be below"), "{lag}");
+        assert!(parse_with(&["--audit-ocsf-max-lag-bytes=0"]).is_err());
     }
 
     #[test]
