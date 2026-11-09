@@ -799,6 +799,18 @@ mod tests {
     }
 
     #[test]
+    fn the_groups_claim_defaults_to_groups_and_cannot_be_empty() {
+        assert_eq!(
+            &*parse_with(&[]).expect("defaults").oidc_groups_claim,
+            "groups"
+        );
+        let c = parse_with(&["--oidc-groups-claim=cognito:groups"]).expect("cognito");
+        assert_eq!(&*c.oidc_groups_claim, "cognito:groups");
+        assert!(parse_with(&["--oidc-groups-claim="]).is_err());
+        assert!(parse_with(&["--oidc-groups-claim= groups"]).is_err());
+    }
+
+    #[test]
     fn default_cert_ttl_is_an_hour_and_at_most_the_max() {
         let ok = parse_with(&[]).expect("defaults");
         assert_eq!(ok.default_cert_ttl, Duration::from_hours(1));

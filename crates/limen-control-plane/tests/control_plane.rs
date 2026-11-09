@@ -54,6 +54,36 @@ fn sources() -> Vec<PolicySource> {
 }
 
 #[tokio::test]
+async fn a_configured_groups_claim_gives_roles_through_login() {
+    let Some(h) = Harness::start_with(&["--oidc-groups-claim=cognito:groups".into()]).await else {
+        return;
+    };
+    let login = |plain: bool, seed: u8| {
+        let h = &h;
+        async move {
+            let key = new_key();
+            let salt = vec![seed; 32];
+            let nonce = limen_control_plane::services::auth::expected_nonce(
+                &rcgen::PublicKeyData::subject_public_key_info(&key),
+                &salt,
+            );
+            let claims = Claims::user(ADMIN, &["admins"]).with_nonce(&nonce);
+            let token = if plain {
+                h.idp.id_token(&claims)
+            } else {
+                h.idp.id_token_with_groups_claim(&claims, "cognito:groups")
+            };
+            h.login_raw(token, csr(&key), salt, LoginFlow::Pkce).await
+        }
+    };
+    let resp = login(false, 5).await.expect("login");
+    assert_eq!(resp.roles, ["limen:admin"]);
+    // The same groups under the plain `groups` name are not read here.
+    let plain = login(true, 6).await.expect_err("no groups were read");
+    assert!(plain.message().contains("no roles are mapped"), "{plain}");
+}
+
+#[tokio::test]
 async fn pkce_login_issues_verified_short_lived_cert() {
     let Some(h) = Harness::start().await else {
         return;
