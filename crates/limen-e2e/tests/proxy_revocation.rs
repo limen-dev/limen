@@ -192,7 +192,11 @@ async fn a_revoked_proxy_no_longer_serves_the_console() {
             .status()
             .as_u16()
     };
-    assert_eq!(status().await, 200, "the sign-in page before the revocation");
+    assert_eq!(
+        status().await,
+        200,
+        "the sign-in page before the revocation"
+    );
 
     let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
     let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));

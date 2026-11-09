@@ -83,6 +83,7 @@ A dependency is adopted only if all of these hold:
 | Advisory | Crate (path) | Why it's accepted |
 |---|---|---|
 | RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
+| RUSTSEC-2026-0459 (C SQLite CVE) | `libsqlite3-sys` (via `sqlx-sqlite`, an optional driver of `sqlx`) | Limen uses `sqlx` with PostgreSQL only. The SQLite driver is never compiled (`cargo tree -i libsqlite3-sys` prints nothing), but `sqlx` lists it as an optional dependency, so it is in `Cargo.lock`, which `cargo audit` scans. `sqlx-sqlite` 0.9.0 requires `libsqlite3-sys` below 0.38 and the fix is 0.39, so no bump is possible until `sqlx` releases one. Re-evaluate on the next `sqlx` release. |
 
 ## Terraform registry modules (2026-10-25)
 
