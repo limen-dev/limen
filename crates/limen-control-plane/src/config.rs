@@ -651,7 +651,15 @@ impl Config {
             .audit_s3_bucket
             .as_deref()
             .is_some_and(|a| a.trim().eq_ignore_ascii_case(bucket.trim()));
-        if same_bucket && self.audit_ocsf_s3_endpoint.is_none() {
+        // The same name on another endpoint is another store; on the same one it is not.
+        let other_endpoint = self.audit_ocsf_s3_endpoint.as_deref().is_some_and(|e| {
+            Some(e.trim().trim_end_matches('/'))
+                != self
+                    .audit_s3_endpoint
+                    .as_deref()
+                    .map(|a| a.trim().trim_end_matches('/'))
+        });
+        if same_bucket && !other_endpoint {
             return Err(
                 "--audit-ocsf-s3-bucket must not be the audit bucket: whoever reads the SIEM feed would be able to read recordings"
                     .into(),
@@ -878,6 +886,19 @@ mod tests {
             ])
             .is_ok()
         );
+        // Spelling out the audit endpoint again does not make it another store.
+        for same in ["http://s3:8333", "http://s3:8333/"] {
+            assert!(
+                ok(&[
+                    "--audit-s3-bucket=audit",
+                    "--audit-s3-endpoint=http://s3:8333",
+                    "--audit-ocsf-s3-bucket=audit",
+                    &format!("--audit-ocsf-s3-endpoint={same}"),
+                ])
+                .is_err(),
+                "{same}"
+            );
+        }
         // And so does its key.
         let key = ok(&[
             "--audit-s3-kms-key=k1",

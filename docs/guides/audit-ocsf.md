@@ -11,7 +11,7 @@ The export writes gzipped NDJSON (one OCSF event per line) to an S3 bucket of it
 | Flag (environment) | Meaning |
 |---|---|
 | `--audit-ocsf-s3-bucket` (`LIMEN_AUDIT_OCSF_S3_BUCKET`) | The OCSF bucket. Turns the export on. **Must not be the audit bucket.** |
-| `--audit-ocsf-s3-kms-key` (`LIMEN_AUDIT_OCSF_S3_KMS_KEY`) | SSE-KMS key for the objects. **Must not be the audit KMS key.** |
+| `--audit-ocsf-s3-kms-key` (`LIMEN_AUDIT_OCSF_S3_KMS_KEY`) | SSE-KMS key for the objects. **Must not be the audit KMS key.** With the `ocsf` Terraform module this flag is **required and must be the module's `kms_key_arn` output, the full ARN**: the module's bucket policy denies any write that names no key or another one (an alias or a bare key id does not match). |
 | `--audit-ocsf-s3-prefix` (`LIMEN_AUDIT_OCSF_S3_PREFIX`) | Key prefix: empty, or ending in `/`. |
 | `--audit-ocsf-s3-endpoint` (`LIMEN_AUDIT_OCSF_S3_ENDPOINT`) | Endpoint if it differs from `--audit-s3-endpoint` (another account or region, S3-compatible store). Path-style addressing follows `--audit-s3-path-style`. |
 | `--audit-ocsf-s3-flush` (`LIMEN_AUDIT_OCSF_S3_FLUSH`, default `60s`) | Close a batch after this long. |

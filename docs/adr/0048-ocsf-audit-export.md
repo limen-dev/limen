@@ -38,7 +38,7 @@ Limen ships audit events to S3 (hash-chained, signed) and Datadog, always in its
 - **Schema drift:** the version is pinned and written into every record.
 
 ## Consequences
-- A new consumer, config flags, metrics, and an OCSF bucket, KMS key, writer policy and reader role in `deploy/terraform/modules/audit`. No change to the native format, chain or verifier.
+- A new consumer, config flags, metrics, and an OCSF bucket, KMS key, writer policy and reader role in the new `deploy/terraform/modules/ocsf`. No change to the native format, chain or verifier.
 - A mapping table to edit whenever an event kind is added, enforced by the compiler.
 - No dependency added in v1.
 

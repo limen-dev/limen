@@ -554,7 +554,10 @@ pub fn raw_to_ocsf(raw: &[u8], product_version: &str) -> (Value, Option<String>)
                 }
                 Err(_) => json!({ "raw_bytes": raw.len(), "raw_is_json": false }),
             };
-            let mut limen = json!({ "error": e.to_string() });
+            // Not `e.to_string()`: serde's message can quote the offending value.
+            let mut limen = json!({
+                "error": format!("{:?} at line {} column {}", e.classify(), e.line(), e.column()),
+            });
             if let (Value::Object(dst), Value::Object(src)) = (&mut limen, kept) {
                 dst.extend(src);
             }
@@ -868,6 +871,10 @@ mod tests {
         let line = br#"{"kind":"from.the.future","event_id":"x","data":{"password":"hunter2","resource":"r"}}"#;
         let (v, hour) = raw_to_ocsf(line, "1");
         assert!(hour.is_none());
+        // A value in a wrongly typed field must not come back through the error text.
+        let typed = br#"{"schema_version":"hunter2-as-a-string","event_id":"x"}"#;
+        let error = raw_to_ocsf(typed, "1").0["unmapped"]["limen"]["error"].to_string();
+        assert!(!error.contains("hunter2"), "{error}");
         assert_eq!(v["class_uid"], 0);
         assert_eq!(v["activity_id"], 99);
         assert_eq!(v["time"], 0);
