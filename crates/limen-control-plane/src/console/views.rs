@@ -1165,10 +1165,16 @@ pub struct PolicyPage {
     pub query: String,
     pub pasted: String,
     pub result: Option<DryRun>,
-    pub simulation: Option<Simulation>,
     pub draft: String,
     pub error: Option<String>,
     pub notice: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "simulator.html")]
+pub struct SimulatorPage {
+    pub chrome: Chrome,
+    pub simulation: Option<Simulation>,
 }
 
 pub struct RoleAccess {

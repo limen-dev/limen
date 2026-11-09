@@ -50,7 +50,7 @@ limen policy what-can --group developers --group on-call
 limen policy what-can --bot deploy-staging
 ```
 
-Each lists the role, how (`standing`, `by request`, `break-glass`), the principals, the groups and bots that hold it, and who approves. In the console, a resource page has **Who can reach it**, and **Policy → Access simulator** answers `what-can`.
+Each lists the role, how (`standing`, `by request`, `break-glass`), the principals, the groups and bots that hold it, and who approves. In the console, a resource page has **Who can reach it**, and **Access simulator** (Administration) answers `what-can`.
 
 ## What a change does
 

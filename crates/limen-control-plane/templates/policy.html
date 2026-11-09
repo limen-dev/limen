@@ -97,31 +97,4 @@
   {% endif %}
 {% endif %}
 {% endif %}
-
-<h2>Access simulator</h2>
-<p class="hint">Pick groups (or a bot) and see what they can reach and could ask for, using the same decision code as enforcement.</p>
-<div class="card">
-<form method="post" action="/console/policy/simulate" class="stack wide">
-  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-  <div class="row">
-    <label><span>IdP groups (comma-separated)</span> <input type="text" name="groups" placeholder="developers, sre" class="w-360" maxlength="500"></label>
-    <label><span>or a bot</span> <input type="text" name="bot" placeholder="deploy-staging" maxlength="128"></label>
-    <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg>Show what they can reach</button>
-  </div>
-</form>
-</div>
-{% if let Some(sim) = simulation %}
-{% if let Some(e) = sim.error %}<pre class="error">{{ e }}</pre>{% else %}
-<h3>{{ sim.who }} can reach</h3>
-{% if sim.standing.is_empty() %}<div class="card empty"><div>Nothing, with standing access.</div></div>{% else %}
-<div class="table-wrap"><table><thead><tr><th>Resource</th><th>Kind</th><th>As</th></tr></thead><tbody>
-{% for (n, k, p) in sim.standing %}<tr><td><a href="/console/resources/{{ n }}">{{ n }}</a></td><td>{{ k }}</td><td>{{ p }}</td></tr>{% endfor %}
-</tbody></table></div>{% endif %}
-{% if !sim.requestable.is_empty() %}
-<h3>and could ask for</h3>
-<div class="table-wrap"><table><thead><tr><th>Resource</th><th>Kind</th><th>Through</th></tr></thead><tbody>
-{% for (n, k, r) in sim.requestable %}<tr><td><a href="/console/resources/{{ n }}">{{ n }}</a></td><td>{{ k }}</td><td>{{ r }}</td></tr>{% endfor %}
-</tbody></table></div>{% endif %}
-{% endif %}
-{% endif %}
 {% endblock %}

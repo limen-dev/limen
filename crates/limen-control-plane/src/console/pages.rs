@@ -21,9 +21,9 @@ use super::views::{
     self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, DryRun, EventView, HitView,
     Home, KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup,
     PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView,
-    SessionPage, SessionView, SessionsPage, Simulation, StatementView, Stats, TokenPage, UserPage,
-    UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page, list_text,
-    path_segment, time_text,
+    SessionPage, SessionView, SessionsPage, Simulation, SimulatorPage, StatementView, Stats,
+    TokenPage, UserPage, UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers,
+    error_page, list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -1738,7 +1738,6 @@ async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
 struct PolicyExtras {
     pasted: String,
     result: Option<DryRun>,
-    simulation: Option<Simulation>,
     query: String,
     /// A new document being written, kept when the write was refused.
     draft: String,
@@ -1774,7 +1773,6 @@ async fn policy_page(state: &AppState, auth: &Auth, extras: PolicyExtras) -> Res
             query,
             pasted: extras.pasted,
             result: extras.result,
-            simulation: extras.simulation,
             draft: extras.draft,
             error: extras.error,
             notice: extras.notice,
@@ -1927,7 +1925,21 @@ pub struct SimulateForm {
     bot: String,
 }
 
-/// `POST /console/policy/simulate`: what groups or a bot can reach and could ask for.
+/// `GET /console/simulator`: the form.
+pub async fn simulator(State(state): State<AppState>, auth: Auth) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    html(
+        SimulatorPage {
+            chrome: chrome(&state, &auth, "simulator"),
+            simulation: None,
+        }
+        .render(),
+    )
+}
+
+/// `POST /console/simulator`: what groups or a bot can reach and could ask for.
 pub async fn simulate(
     State(state): State<AppState>,
     auth: Auth,
@@ -1993,15 +2005,13 @@ pub async fn simulate(
             },
         }
     };
-    policy_page(
-        &state,
-        &auth,
-        PolicyExtras {
+    html(
+        SimulatorPage {
+            chrome: chrome(&state, &auth, "simulator"),
             simulation: Some(sim),
-            ..PolicyExtras::default()
-        },
+        }
+        .render(),
     )
-    .await
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {

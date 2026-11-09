@@ -1124,12 +1124,19 @@ async fn the_console_pages_for_the_workflows() {
 
     // ---- policy: simulator and the effective-access diff -------------------
     let page = admin.get("/console/policy").await;
-    assert!(page.body.contains("Access simulator"));
+    assert!(
+        !page.body.contains("Access simulator")
+            || page.body.contains("href=\"/console/simulator\""),
+        "the simulator has its own page, not a section of the policy page"
+    );
+    let sim_page = admin.get("/console/simulator").await;
+    assert_eq!(sim_page.status, 200, "{}", sim_page.body);
+    assert!(sim_page.body.contains("Access simulator"));
     let sim = admin
         .post(
-            "/console/policy/simulate",
+            "/console/simulator",
             &[
-                ("csrf", &csrf_of(&page)),
+                ("csrf", &csrf_of(&sim_page)),
                 ("groups", "developers"),
                 ("bot", ""),
             ],
