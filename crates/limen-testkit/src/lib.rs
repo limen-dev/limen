@@ -31,6 +31,14 @@ pub fn s3_endpoint() -> Option<String> {
     env_or_skip("LIMEN_TEST_S3_ENDPOINT")
 }
 
+/// Base URL of the Dex used for refresh-token tests, from
+/// `LIMEN_TEST_DEX_REFRESH_URL` (`http://localhost:5558` with
+/// `deploy/compose/stacks/dex-refresh.yml`).
+#[must_use]
+pub fn dex_refresh_url() -> Option<String> {
+    env_or_skip("LIMEN_TEST_DEX_REFRESH_URL")
+}
+
 fn env_or_skip(name: &str) -> Option<String> {
     let value = std::env::var(name).ok();
     if value.is_none() {

@@ -1,6 +1,6 @@
 # Terraform module: ocsf
 
-The bucket and KMS key for the OCSF export of the audit trail (ADR-0047, [guide](../../../../docs/guides/audit-ocsf.md)), and the IAM policies for the control plane (write) and a SIEM collector (read). It is separate from the [audit](../audit/README.md) module on purpose: the audit bucket and its key also hold session recordings, and a SIEM reader must not be able to reach them.
+The bucket and KMS key for the OCSF export of the audit trail (ADR-0048, [guide](../../../../docs/guides/audit-ocsf.md)), and the IAM policies for the control plane (write) and a SIEM collector (read). It is separate from the [audit](../audit/README.md) module on purpose: the audit bucket and its key also hold session recordings, and a SIEM reader must not be able to reach them.
 
 ```hcl
 module "ocsf" {

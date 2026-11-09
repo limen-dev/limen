@@ -1,4 +1,4 @@
-# ADR-0047: OCSF audit export for SIEMs
+# ADR-0048: OCSF audit export for SIEMs
 
 - Status: Proposed (issue #112, `needs: design`). Built in PR #294 at the owner's request with the defaults below; the owner has not yet approved the decisions listed under Open for review, and the status stays Proposed until they do.
 - Date: 2026-11-09
@@ -17,9 +17,9 @@ Limen ships audit events to S3 (hash-chained, signed) and Datadog, always in its
   - `db.*`, `mongo.*` and `redis.*` are Datastore Activity (6005), with the activity from the statement class for `db.query`
   - `search.*` and `web.*` are HTTP Activity (4002), with the activity from the method
   - `kube.*`, `mq.*`, `kafka.*`, `audit.*`, `evidence.export` and `session.recording` are API Activity (6003)
-  - policy changes, enrollment, revocation, locks and resource discovery are Entity Management (3004)
+  - policy changes, enrollment, revocation, locks, IdP offboarding (`idp.offboard`, Suspend) and resource discovery are Entity Management (3004)
   - `access.grant` and `access.break_glass` are Authorize Session (3003, Assign Roles), the one activity that class defines for them; the other `access.*` and `review.*` kinds are Entity Management with *Other* and a readable `activity_name`
-  - `policy.shadow_deny`, `policy.write_denied` and `session.watch.*` are Base Event (class 0): an evaluation, a refusal and a watch are not changes to an entity or a network event, so the whole event stays in `unmapped`
+  - `policy.shadow_deny`, `policy.write_denied`, `idp.check_failed` and `session.watch.*` are Base Event (class 0): an evaluation, a refusal, a failed check and a watch are not changes to an entity or a network event, so the whole event stays in `unmapped`
 
   A kind that fits no class well emits a Base Event. Nothing is dropped. Moving a kind to a more specific class later is a visible change to the generated table.
 - **Severity.** `severity_id` is Informational by default, Low for refusals (`auth.denied`, `policy.write_denied`), Medium for `policy.shadow_deny`, High for `access.break_glass`. Defaults for review.

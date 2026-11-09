@@ -127,6 +127,16 @@ pub enum EventKind {
     UserLock,
     #[serde(rename = "user.unlock")]
     UserUnlock,
+    /// The identity provider no longer vouches for a person (ADR-0047).
+    /// `data.action` is `lock` (deactivated: locked, sessions ended) or
+    /// `revoke_login` (a group that granted a role was removed: that login ended).
+    #[serde(rename = "idp.offboard")]
+    IdpOffboard,
+    /// A check of the identity provider could not be completed (unreachable,
+    /// or an answer that could not be read). Sessions are kept unless the
+    /// deployment fails closed (ADR-0047).
+    #[serde(rename = "idp.check_failed")]
+    IdpCheckFailed,
     /// An admin ended a session. `session_id` says which.
     #[serde(rename = "session.kill")]
     SessionKill,

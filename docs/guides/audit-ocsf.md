@@ -1,6 +1,6 @@
 # OCSF audit export for SIEMs
 
-Limen can write its audit trail in [OCSF](https://schema.ocsf.io) (the Open Cybersecurity Schema Framework) so Splunk, Microsoft Sentinel, Google Chronicle and similar tools can read it without a custom parser. Design and decisions: [ADR-0047](../adr/0047-ocsf-audit-export.md).
+Limen can write its audit trail in [OCSF](https://schema.ocsf.io) (the Open Cybersecurity Schema Framework) so Splunk, Microsoft Sentinel, Google Chronicle and similar tools can read it without a custom parser. Design and decisions: [ADR-0048](../adr/0048-ocsf-audit-export.md).
 
 **It is a copy, not the record.** The native events, the S3 batches and the signed hash chain ([ADR-0009](../adr/0009-audit-pipeline.md)) stay the source of truth, and `limen audit verify` checks only those. The OCSF files are a projection for people who search in a SIEM. Anyone who needs to *prove* what happened uses the native trail.
 
@@ -82,6 +82,8 @@ An *Other* activity carries a readable `activity_name` (for example `access appr
 | `session.recording` | API Activity (6003) | Create (1) | Informational |
 | `user.lock` | Entity Management (3004) | Suspend (12) | Low |
 | `user.unlock` | Entity Management (3004) | Resume (13) | Informational |
+| `idp.offboard` | Entity Management (3004) | Suspend (12) | Low |
+| `idp.check_failed` | Base Event (0) | idp check failed (99) | Medium |
 | `session.kill` | Network Activity (4001) | Close (2) | Low |
 | `component.revoke` | Entity Management (3004) | Unenroll (7) | Low |
 | `access.request` | Entity Management (3004) | access request (99) | Informational |
@@ -117,7 +119,7 @@ Metrics: `limen_audit_ocsf_events_total` (records written), `limen_audit_ocsf_sk
 
 ## What is not built
 
-- **Amazon Security Lake.** It takes Parquet, one class per source, and OCSF 1.3 or earlier for custom sources. This export is NDJSON at 1.9.0. A Security Lake path would be a later change (ADR-0047, Open for review).
+- **Amazon Security Lake.** It takes Parquet, one class per source, and OCSF 1.3 or earlier for custom sources. This export is NDJSON at 1.9.0. A Security Lake path would be a later change (ADR-0048, Open for review).
 - **An HTTPS push** to a SIEM's collector endpoint.
 - **The manifest sequence number** in each record.
 - **A gap marker** in the SIEM for skipped batches.

@@ -1,4 +1,4 @@
-# The OCSF export bucket (ADR-0047): a projection of the audit trail for
+# The OCSF export bucket (ADR-0048): a projection of the audit trail for
 # SIEMs, in a bucket and under a KMS key of its own. Whoever reads the SIEM feed
 # gets this bucket and nothing of the audit bucket, which holds session
 # recordings.

@@ -1,4 +1,4 @@
-//! ADR-0047: the OCSF projection reaches its own bucket with every event, and
+//! ADR-0048: the OCSF projection reaches its own bucket with every event, and
 //! a broken OCSF sink cannot hold the audit spool back.
 //!
 //! Needs `LIMEN_TEST_DATABASE_URL` and `LIMEN_TEST_S3_ENDPOINT` (the dev stack,

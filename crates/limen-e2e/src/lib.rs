@@ -494,6 +494,7 @@ impl Deployment {
                 csr_der: csr,
                 nonce_salt: salt,
                 flow: LoginFlow::Pkce.into(),
+                refresh_token: String::new(),
             })
             .await?
             .into_inner();

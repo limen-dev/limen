@@ -60,7 +60,11 @@ LIMEN_BOOTSTRAP_ADMIN_GROUPS=<an okta group of your admins>   # so the first adm
 
 `LIMEN_OIDC_USERNAME_CLAIM` is `email` by default: the ID token must carry the user's email, which the `email` scope gives. The token must also say the address is verified (`email_verified: true`); a token without that claim is refused. If your IdP never sends it and verifies addresses itself, set `LIMEN_OIDC_ALLOW_UNVERIFIED_EMAIL=true` (a claim that says `false` is always refused). The [deploy guide](deploy.md) shows where these go on ECS, EC2 and Kubernetes.
 
-## 6. Check it
+## 6. Refresh tokens, for offboarding
+
+To end a person's sessions when you deactivate them in Okta (or remove them from a group), turn on the **Refresh Token** grant for the CLI's native app, keep the refresh token lifetime at least as long as `LIMEN_MAX_CERT_TTL`, and set `LIMEN_IDP_TOKEN_KEY` on the control plane. With the key set, the control plane makes the CLI ask for `offline_access`. See [Onboarding and offboarding](offboarding.md).
+
+## 7. Check it
 
 ```sh
 limen login            # or: limen login --device
@@ -72,4 +76,4 @@ If `limen status` shows no roles, the token had no groups claim or no `role_mapp
 
 ## What we have not checked
 
-Everything on the Okta side, on a real tenant: the loopback redirect, the device grant, the groups claim and scope behavior, token lifetime, and a multi-factor sign-in. OneLogin is not covered here (#64).
+Everything on the Okta side, on a real tenant: the loopback redirect, refresh token issuance and `invalid_grant` for a deactivated user, the device grant, the groups claim and scope behavior, token lifetime, and a multi-factor sign-in. OneLogin is not covered here (#64).

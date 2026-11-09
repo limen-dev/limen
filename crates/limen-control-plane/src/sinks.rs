@@ -1,5 +1,5 @@
 //! Audit sinks that leave the host: S3, Datadog (ADR-0009) and the OCSF
-//! projection (ADR-0047).
+//! projection (ADR-0048).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -372,7 +372,7 @@ fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest,
 
 // ---- OCSF -------------------------------------------------------------------
 
-/// The OCSF projection (ADR-0047): gzipped NDJSON in a bucket of its own, one
+/// The OCSF projection (ADR-0048): gzipped NDJSON in a bucket of its own, one
 /// object per `(date, hour)` of the events in a batch. It is a projection of
 /// the native trail and never part of the hash chain.
 #[derive(Debug, Clone)]

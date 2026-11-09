@@ -86,6 +86,7 @@ export default defineConfig({
           label: 'Identity and access',
           items: [
             { slug: 'docs/guides/okta' },
+            { slug: 'docs/guides/offboarding' },
             { slug: 'docs/guides/bots' },
             { slug: 'docs/guides/management-api' },
             { slug: 'docs/guides/terraform' },

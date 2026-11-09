@@ -1,0 +1,23 @@
+# Dex with refresh tokens, for the offboarding tests; dex_offboarding.rs says how to run them.
+# A test fixture: setup.sh doesn't start it. Recreate it before each run.
+name: limen-dex-refresh
+services:
+  dex-refresh-db:
+    container_name: limen-dex-refresh-db${LIMEN_SUFFIX:-}
+    image: ${POSTGRES_IMAGE}
+    environment: { POSTGRES_USER: dex, POSTGRES_PASSWORD: dex-dev-only, POSTGRES_DB: dex }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dex -d dex"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  dex-refresh:
+    depends_on:
+      dex-refresh-db: { condition: service_healthy }
+    container_name: limen-dex-refresh${LIMEN_SUFFIX:-}
+    image: ${DEX_IMAGE}
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./config/dex-refresh/config.yaml:/etc/dex/config.yaml:ro
+    ports: ["127.0.0.1:${LIMEN_PORT_DEX_REFRESH:-5558}:5556"]

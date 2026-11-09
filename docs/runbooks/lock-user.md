@@ -27,7 +27,7 @@ Keep a second admin: a locked admin can't unlock themselves, so keep at least tw
 If the control plane is down you can't lock or unlock. Proxies and workers keep enforcing the last snapshot they have, including existing locks.
 
 ## Audit
-`user.lock`, `user.unlock`, and `session.kill` events record who did it, whom it applied to, and why. If audit is unavailable the command reports it: the lock is applied but wasn't recorded, so retry the audit path (see [spool full](audit-spool-full.md)).
+When the IdP deactivates a person, Limen ends their logins by itself within a few minutes ([offboarding](../guides/offboarding.md)); a lock is the immediate version. `user.lock`, `user.unlock`, `session.kill`, and `idp.offboard` events record who did it, whom it applied to, and why. If audit is unavailable the command reports it: the lock is applied but wasn't recorded, so retry the audit path (see [spool full](audit-spool-full.md)).
 
 ## Limits
 - Sessions of every protocol end within about ten seconds of a lock: the proxy checks the lock every second against the policy snapshot it refreshes every 10 s, then tells the worker to close. A statement the database is already running may finish there.
