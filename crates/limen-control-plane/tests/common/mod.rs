@@ -218,6 +218,16 @@ impl Harness {
         email: &str,
         groups: &[&str],
     ) -> Result<(limen_proto::v1::LoginResponse, CertificateDer<'static>), tonic::Status> {
+        self.login_with_refresh(email, groups, "").await
+    }
+
+    /// Like [`Harness::login`], handing over the IdP's refresh token (ADR-0047).
+    pub async fn login_with_refresh(
+        &self,
+        email: &str,
+        groups: &[&str],
+        refresh_token: &str,
+    ) -> Result<(limen_proto::v1::LoginResponse, CertificateDer<'static>), tonic::Status> {
         let key = new_key();
         let salt = [7u8; 32];
         let nonce = limen_control_plane::services::auth::expected_nonce(
@@ -228,11 +238,12 @@ impl Harness {
             .idp
             .id_token(&limen_testkit::idp::Claims::user(email, groups).with_nonce(&nonce));
         let resp = self
-            .login_raw(
+            .login_raw_with_refresh(
                 token,
                 csr(&key),
                 salt.to_vec(),
                 limen_proto::v1::LoginFlow::Pkce,
+                refresh_token,
             )
             .await?;
         let der = limen_tunnel::tls::certs_from_pem(&resp.cert_pem)
@@ -307,6 +318,18 @@ impl Harness {
         nonce_salt: Vec<u8>,
         flow: limen_proto::v1::LoginFlow,
     ) -> Result<limen_proto::v1::LoginResponse, tonic::Status> {
+        self.login_raw_with_refresh(id_token, csr_der, nonce_salt, flow, "")
+            .await
+    }
+
+    pub async fn login_raw_with_refresh(
+        &self,
+        id_token: String,
+        csr_der: Vec<u8>,
+        nonce_salt: Vec<u8>,
+        flow: limen_proto::v1::LoginFlow,
+        refresh_token: &str,
+    ) -> Result<limen_proto::v1::LoginResponse, tonic::Status> {
         let mut client = limen_proto::v1::auth_client::AuthClient::new(self.channel(None));
         client
             .login(limen_proto::v1::LoginRequest {
@@ -314,6 +337,7 @@ impl Harness {
                 csr_der,
                 nonce_salt,
                 flow: flow.into(),
+                refresh_token: refresh_token.to_owned(),
             })
             .await
             .map(tonic::Response::into_inner)

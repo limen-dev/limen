@@ -1,0 +1,42 @@
+# Dex for the offboarding tests (crates/limen-control-plane/tests/dex_offboarding.rs).
+# A test fixture: setup.sh doesn't start it. Development only.
+#
+# It stores its state in PostgreSQL, not in memory like the dev stack's Dex:
+# with Dex v2.46.0 a refresh grant against memory (or SQLite) storage never
+# returns, because the token update holds the storage lock while the
+# connector reads storage. Real deployments use a database. The mockCallback
+# connector stands in for an upstream IdP.
+issuer: http://localhost:5558/dex
+
+storage:
+  type: postgres
+  config:
+    host: dex-refresh-db
+    port: 5432
+    database: dex
+    user: dex
+    password: dex-dev-only
+    ssl:
+      mode: disable
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  responseTypes: [code]
+
+expiry:
+  idTokens: 10m
+
+staticClients:
+  # Public client, as the CLI's is (PKCE, loopback redirect).
+  - id: limen-cli
+    name: Limen CLI
+    public: true
+
+connectors:
+  # One signed-in person: kilgore@kilgore.trout, in the group "authors".
+  - type: mockCallback
+    id: mock
+    name: Mock

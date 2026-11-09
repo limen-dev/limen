@@ -26,6 +26,11 @@ LIMEN_TEST_S3_ENDPOINT=http://localhost:8333 \
 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
 LIMEN_TEST_KMS_ENDPOINT=http://localhost:8099 cargo test --workspace --all-features
 
+# Offboarding runs against a Dex with refresh tokens (its own PostgreSQL):
+docker compose --project-directory deploy/compose -f deploy/compose/stacks/dex-refresh.yml up -d --force-recreate
+LIMEN_TEST_DEX_REFRESH_URL=http://localhost:5558 LIMEN_TEST_DATABASE_URL=postgres://limen:limen-dev-only@localhost:5432/limen \
+  cargo test -p limen-control-plane --test dex_offboarding
+
 # Discovery runs against two Moto AWS emulators; recreate them for every run:
 docker compose --project-directory deploy/compose -f deploy/compose/stacks/aws-emulator.yml up -d --force-recreate
 LIMEN_TEST_AWS_ENDPOINT=http://localhost:15000 LIMEN_TEST_AWS_OPEN_ENDPOINT=http://localhost:15001 \

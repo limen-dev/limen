@@ -124,6 +124,10 @@ message LoginRequest {
   // nonce = base64url(SHA-256(CSR SubjectPublicKeyInfo DER || nonce_salt)).
   bytes nonce_salt = 3;
   LoginFlow flow = 4;
+  // The IdP's refresh token, when it issued one (ADR-0047). The control plane
+  // stores it encrypted and uses it to learn that the person was deactivated
+  // or lost a group. Optional: without it that login is not checked.
+  string refresh_token = 5;
 }
 
 message BotLoginRequest {

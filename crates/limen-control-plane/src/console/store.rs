@@ -76,6 +76,13 @@ pub struct UserRow {
     pub actor_type: String,
     /// The CI run of a bot's latest login.
     pub last_ci: Option<serde_json::Value>,
+    /// Where the account came from: `idp_login` or `bot` (ADR-0047).
+    pub source: String,
+    /// The IdP the person signed in with.
+    pub issuer: Option<String>,
+    /// `unchecked`, `ok`, `check_failed` or `offboarded` (ADR-0047).
+    pub idp_status: String,
+    pub idp_checked_at: Option<OffsetDateTime>,
 }
 
 fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
@@ -91,13 +98,18 @@ fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
         locked_at: r.try_get("locked_at")?,
         actor_type: r.try_get("actor_type")?,
         last_ci: r.try_get("last_ci")?,
+        source: r.try_get("source")?,
+        issuer: r.try_get("issuer")?,
+        idp_status: r.try_get("idp_status")?,
+        idp_checked_at: r.try_get("idp_checked_at")?,
     })
 }
 
 macro_rules! user_select {
     () => {
         "SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
-        l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci
+        l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci,
+        u.source, u.issuer, u.idp_status, u.idp_checked_at
      FROM users u LEFT JOIN user_locks l ON lower(l.username) = lower(u.username) AND l.released_at IS NULL"
     };
 }

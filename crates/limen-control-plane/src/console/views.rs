@@ -550,6 +550,42 @@ pub struct UserView {
     pub is_bot: bool,
     pub ci: Vec<Fact>,
     pub run_url: Option<String>,
+    /// Where the account came from, in words ("IdP sign-in", "CI bot").
+    pub source: String,
+    /// The IdP's host, for a tooltip.
+    pub issuer: String,
+    /// What the IdP check last found, in words.
+    pub idp: String,
+    /// `ok`, `warn`, `bad` or empty: the pill's tone.
+    pub idp_tone: &'static str,
+}
+
+/// How the IdP check stands, in words and as a tone (ADR-0047).
+pub fn idp_check_text(
+    status: &str,
+    checked: Option<OffsetDateTime>,
+    is_bot: bool,
+) -> (String, &'static str) {
+    if is_bot {
+        return ("not applicable".into(), "");
+    }
+    match status {
+        "ok" => (format!("checked {}", time_text(checked)), "ok"),
+        "check_failed" => (
+            format!("IdP not reachable since {}", time_text(checked)),
+            "warn",
+        ),
+        "offboarded" => (format!("ended by the IdP {}", time_text(checked)), "bad"),
+        _ => ("not checked: no refresh token".into(), ""),
+    }
+}
+
+/// The host of an issuer URL, for display.
+fn issuer_host(issuer: Option<&str>) -> String {
+    issuer
+        .and_then(|i| url::Url::parse(i).ok())
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 impl From<&UserRow> for UserView {
@@ -575,6 +611,14 @@ impl From<&UserRow> for UserView {
             is_bot: u.actor_type == "bot",
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
+            source: if u.source == "bot" {
+                "CI bot".to_owned()
+            } else {
+                "IdP sign-in".to_owned()
+            },
+            issuer: issuer_host(u.issuer.as_deref()),
+            idp: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").0,
+            idp_tone: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").1,
         }
     }
 }
@@ -817,6 +861,41 @@ pub struct UsersPage {
     pub users: Vec<UserView>,
     pub query: String,
     pub orphan_locks: Vec<UserView>,
+    pub filter: UserFilter,
+    /// The page without its filters, keeping the search text.
+    pub clear_href: String,
+    /// Every group and role among the people listed, for the filter menus.
+    pub groups: Vec<String>,
+    pub roles: Vec<String>,
+    pub total: usize,
+}
+
+/// The users page's filters, from the query string (`?group=&role=&status=`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UserFilter {
+    pub group: String,
+    pub role: String,
+    /// `ok`, `unchecked`, `check_failed`, `offboarded` or `locked`.
+    pub status: String,
+}
+
+impl UserFilter {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.group.is_empty() && self.role.is_empty() && self.status.is_empty()
+    }
+
+    /// Whether a person passes every filter that is set.
+    #[must_use]
+    pub fn admits(&self, u: &UserRow, locked: bool) -> bool {
+        (self.group.is_empty() || u.groups.contains(&self.group))
+            && (self.role.is_empty() || u.roles.contains(&self.role))
+            && match self.status.as_str() {
+                "" => true,
+                "locked" => locked,
+                s => u.idp_status == s,
+            }
+    }
 }
 
 #[derive(Template)]
@@ -1297,5 +1376,66 @@ mod category_tests {
             assert_eq!(category_of(kind).map(|c| c.label), Some(label), "{kind}");
         }
         assert!(category_of("nothing.here").is_none());
+    }
+}
+
+#[cfg(test)]
+mod user_filter_tests {
+    use super::*;
+
+    fn person(groups: &[&str], roles: &[&str], status: &str) -> UserRow {
+        UserRow {
+            username: "a@example.com".into(),
+            roles: roles.iter().map(|s| (*s).to_owned()).collect(),
+            groups: groups.iter().map(|s| (*s).to_owned()).collect(),
+            first_login_at: OffsetDateTime::UNIX_EPOCH,
+            last_login_at: OffsetDateTime::UNIX_EPOCH,
+            login_count: 1,
+            lock_reason: None,
+            locked_by: None,
+            locked_at: None,
+            actor_type: "user".into(),
+            last_ci: None,
+            source: "idp_login".into(),
+            issuer: None,
+            idp_status: status.into(),
+            idp_checked_at: None,
+        }
+    }
+
+    #[test]
+    fn filters_combine_and_an_empty_filter_admits_everyone() {
+        let u = person(&["platform"], &["dev"], "ok");
+        assert!(UserFilter::default().admits(&u, false));
+        let f = |g: &str, r: &str, s: &str| UserFilter {
+            group: g.into(),
+            role: r.into(),
+            status: s.into(),
+        };
+        assert!(f("platform", "", "").admits(&u, false));
+        assert!(!f("other", "", "").admits(&u, false));
+        assert!(f("platform", "dev", "ok").admits(&u, false));
+        assert!(!f("platform", "admin", "ok").admits(&u, false));
+        assert!(!f("", "", "check_failed").admits(&u, false));
+        assert!(f("", "", "locked").admits(&u, true));
+        assert!(!f("", "", "locked").admits(&u, false));
+        assert!(
+            !f("", "", "nonsense").admits(&u, false),
+            "unknown matches nobody"
+        );
+    }
+
+    #[test]
+    fn the_check_is_described_honestly() {
+        assert_eq!(idp_check_text("unchecked", None, false).1, "");
+        assert!(
+            idp_check_text("unchecked", None, false)
+                .0
+                .contains("no refresh token")
+        );
+        assert_eq!(idp_check_text("check_failed", None, false).1, "warn");
+        assert_eq!(idp_check_text("offboarded", None, false).1, "bad");
+        assert_eq!(idp_check_text("ok", None, false).1, "ok");
+        assert_eq!(idp_check_text("ok", None, true).0, "not applicable");
     }
 }

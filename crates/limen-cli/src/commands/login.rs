@@ -42,7 +42,7 @@ pub async fn run(
         .to_vec();
     let salt: [u8; 32] = rand::random();
 
-    let (id_token, flow) = if device {
+    let (tokens, flow) = if device {
         (oidc::device_login(&idp).await?, LoginFlow::Device)
     } else {
         let nonce = limen_core::login::nonce(&key.subject_public_key_info(), &salt);
@@ -54,10 +54,11 @@ pub async fn run(
 
     let resp = auth
         .login(LoginRequest {
-            id_token,
+            id_token: tokens.id_token,
             csr_der,
             nonce_salt: salt.to_vec(),
             flow: flow.into(),
+            refresh_token: tokens.refresh_token.unwrap_or_default(),
         })
         .await
         .map_err(|s| api::status_error(&s))?

@@ -178,6 +178,7 @@ jobs:
       LIMEN_TEST_AWS_ENDPOINT: http://localhost:15000
       LIMEN_TEST_AWS_OPEN_ENDPOINT: http://localhost:15001
       LIMEN_TEST_S3_ENDPOINT: http://localhost:8333
+      LIMEN_TEST_DEX_REFRESH_URL: http://localhost:5558
       LIMEN_TEST_OTLP_ENDPOINT: http://localhost:4318
       # The test identity in deploy/compose/config/s3/s3.json.
       AWS_ACCESS_KEY_ID: test
@@ -196,6 +197,17 @@ jobs:
           docker run -d --name s3 -p 8333:8333
           -v "$GITHUB_WORKSPACE/deploy/compose/config/s3/s3.json:/etc/seaweedfs/s3.json:ro"
           "$SEAWEEDFS_IMAGE" server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -master.volumeSizeLimitMB=512
+
+      # Dex with refresh tokens, for the offboarding tests (dex_offboarding.rs).
+      - name: Start Dex (refresh tokens)
+        run: |
+          docker compose --project-directory deploy/compose -f deploy/compose/stacks/dex-refresh.yml up -d
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:5558/dex/.well-known/openid-configuration >/dev/null && exit 0
+            sleep 1
+          done
+          docker compose --project-directory deploy/compose -f deploy/compose/stacks/dex-refresh.yml logs
+          exit 1
 
       # Exports the LIMEN_TEST_*_TARGET, _CA_FILE and _CLIENT_PEM variables for the test step.
       - name: Start the database targets (PostgreSQL, MySQL, MongoDB)

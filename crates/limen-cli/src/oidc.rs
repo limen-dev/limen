@@ -129,12 +129,22 @@ async fn discover(settings: &IdpSettings, http: &HttpClient) -> anyhow::Result<M
         .with_context(|| format!("discovering the identity provider at {}", settings.issuer))
 }
 
+/// The scopes the control plane advertises. It adds `offline_access` only when
+/// it keeps refresh tokens (ADR-0047), so an IdP that has not enabled refresh
+/// tokens is never asked for one.
 fn scopes(settings: &IdpSettings) -> impl Iterator<Item = Scope> + '_ {
     settings
         .scopes
         .iter()
         .filter(|s| *s != "openid")
         .map(|s| Scope::new(s.clone()))
+}
+
+/// What a login returned: the ID token, and the refresh token if the IdP
+/// issued one.
+pub struct Tokens {
+    pub id_token: String,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,12 +167,12 @@ fn callback_error_message(error: &str, description: &str) -> String {
 }
 
 /// Authorization code flow with PKCE. Opens the browser unless `open_browser`
-/// is false, waits for the redirect to a loopback port, and returns the raw ID token.
+/// is false, waits for the redirect to a loopback port, and returns the tokens.
 pub async fn pkce_login(
     settings: &IdpSettings,
     nonce: String,
     open_browser: bool,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Tokens> {
     let http = HttpClient::new()?;
     let metadata = discover(settings, &http).await?;
 
@@ -247,16 +257,18 @@ pub async fn pkce_login(
         .request_async(&http)
         .await
         .context("exchanging the authorization code")?;
-    let _ = token.access_token();
-    Ok(token
-        .extra_fields()
-        .id_token()
-        .context("the identity provider returned no ID token")?
-        .to_string())
+    Ok(Tokens {
+        id_token: token
+            .extra_fields()
+            .id_token()
+            .context("the identity provider returned no ID token")?
+            .to_string(),
+        refresh_token: token.refresh_token().map(|r| r.secret().clone()),
+    })
 }
 
 /// Device authorization grant, for machines without a browser.
-pub async fn device_login(settings: &IdpSettings) -> anyhow::Result<String> {
+pub async fn device_login(settings: &IdpSettings) -> anyhow::Result<Tokens> {
     let http = HttpClient::new()?;
     let metadata = discover(settings, &http).await?;
     let device_url = metadata
@@ -291,11 +303,14 @@ pub async fn device_login(settings: &IdpSettings) -> anyhow::Result<String> {
         .request_async(&http, tokio::time::sleep, Some(LOGIN_TIMEOUT))
         .await
         .context("waiting for device authorization")?;
-    Ok(token
-        .extra_fields()
-        .id_token()
-        .context("the identity provider returned no ID token")?
-        .to_string())
+    Ok(Tokens {
+        id_token: token
+            .extra_fields()
+            .id_token()
+            .context("the identity provider returned no ID token")?
+            .to_string(),
+        refresh_token: token.refresh_token().map(|r| r.secret().clone()),
+    })
 }
 
 /// The logo mark, inlined so the page needs no further requests.

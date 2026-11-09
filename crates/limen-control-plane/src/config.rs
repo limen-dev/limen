@@ -184,6 +184,39 @@ pub struct Config {
     #[arg(long, env = "LIMEN_DEFAULT_CERT_TTL", value_parser = parse_duration, default_value = "1h")]
     pub default_cert_ttl: Duration,
 
+    /// Key that seals the IdP refresh tokens kept for offboarding checks
+    /// (ADR-0047): 32 random bytes, base64. Without it the control plane
+    /// stores no refresh token and does not check logins against the IdP.
+    #[arg(long, env = "LIMEN_IDP_TOKEN_KEY", value_parser = parse_secret)]
+    pub idp_token_key: Option<Secret<String>>,
+
+    /// How often a login is checked against the IdP (ADR-0047). `0s` turns
+    /// the check off.
+    #[arg(long, env = "LIMEN_IDP_CHECK_INTERVAL", value_parser = parse_duration, default_value = "5m")]
+    pub idp_check_interval: Duration,
+
+    /// Do not end logins when a refreshed ID token no longer grants a role.
+    /// For an IdP that leaves groups out of refreshed tokens. IdPs also omit
+    /// the claim for a person with no groups, so by default an absent claim
+    /// counts as no groups (ADR-0047).
+    #[arg(long, env = "LIMEN_IDP_IGNORE_GROUPS")]
+    pub idp_ignore_groups: bool,
+
+    /// What to do when the IdP cannot be asked: `open` keeps sessions and
+    /// alerts, `closed` ends logins not confirmed within `--idp-check-grace`.
+    #[arg(
+        long,
+        env = "LIMEN_IDP_CHECK_FAILURE",
+        value_enum,
+        default_value = "open"
+    )]
+    pub idp_check_failure: IdpCheckFailure,
+
+    /// With `--idp-check-failure closed`: how long a login may go without a
+    /// successful check before it ends.
+    #[arg(long, env = "LIMEN_IDP_CHECK_GRACE", value_parser = parse_duration, default_value = "1h")]
+    pub idp_check_grace: Duration,
+
     /// Upper bound on user credential lifetime, whatever roles say.
     #[arg(long, env = "LIMEN_MAX_CERT_TTL", value_parser = parse_duration, default_value = "12h")]
     pub max_cert_ttl: Duration,
@@ -431,6 +464,13 @@ pub enum WideningApproval {
     All,
 }
 
+/// The rule when the IdP cannot be reached (ADR-0047).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum IdpCheckFailure {
+    Open,
+    Closed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum CaBackend {
     File,
@@ -551,6 +591,22 @@ impl Config {
             ));
         }
         Ok(())
+    }
+
+    /// The key for sealed refresh tokens, if configured. Refuses one that is
+    /// not 32 bytes of base64, and a check interval without a key.
+    pub fn idp_token_key(&self) -> Result<Option<[u8; 32]>, String> {
+        use base64::Engine as _;
+        let Some(key) = &self.idp_token_key else {
+            return Ok(None);
+        };
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(key.expose().trim())
+            .map_err(|_| "--idp-token-key must be base64".to_owned())?;
+        let key: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| "--idp-token-key must be 32 bytes (44 base64 characters)".to_owned())?;
+        Ok(Some(key))
     }
 
     /// The notifiers these flags configure. Refuses a URL that is not
