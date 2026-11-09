@@ -133,7 +133,7 @@ struct Browser {
     user: Option<(String, Vec<String>)>,
     client: Option<(String, String)>,
     codes: std::collections::HashMap<String, PendingCode>,
-    /// Refresh tokens handed out (ADR-0046), by token.
+    /// Refresh tokens handed out (ADR-0047), by token.
     refresh: std::collections::HashMap<String, RefreshSession>,
     /// The token endpoint answers 503, as an IdP that is down.
     down: bool,
@@ -265,7 +265,7 @@ impl MockIdp {
     }
 
     /// Hand out a refresh token for `email`, as an IdP does with
-    /// `offline_access` (ADR-0046).
+    /// `offline_access` (ADR-0047).
     ///
     /// # Panics
     /// If the internal lock is poisoned. Tests only.

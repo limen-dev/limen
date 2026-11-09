@@ -1,6 +1,6 @@
 # Onboarding and offboarding from your IdP
 
-The IdP is the only source of truth for who may use Limen (ADR-0046). Limen has no user lifecycle of its own and needs no offboarding checklist.
+The IdP is the only source of truth for who may use Limen (ADR-0047). Limen has no user lifecycle of its own and needs no offboarding checklist.
 
 *Tested against Dex v2.46.0 (on PostgreSQL storage) and a stand-in IdP. Not verified against Okta, Entra or another hosted IdP (#64).*
 
@@ -68,4 +68,4 @@ Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refre
 - Reaction time is the check interval, not instant. For instant, lock the user.
 - Roles are still fixed at login; a *new* group applies at the next sign-in.
 - Bots and agents are not checked (they hold no refresh token).
-- SCIM and IdP event hooks are not built (ADR-0046, alternatives).
+- SCIM and IdP event hooks are not built (ADR-0047, alternatives).

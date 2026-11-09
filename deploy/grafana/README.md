@@ -23,6 +23,7 @@ The **Resource type** selector at the top picks which types the per-type panels 
 - Resource types in use (sessions, people, resources, last connection)
 - Who accessed what (user, resource, login, last access)
 - Failed and denied attempts, with the reason
+- Shadow denies by rule: what each shadow deny rule would have refused (ADR-0046)
 - Top users
 - Privileged commands (root logins, `sudo`, `su`, `chown`, and similar)
 - Ingestion lag per producer

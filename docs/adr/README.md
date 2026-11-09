@@ -50,6 +50,7 @@ Each ADR's status line gives its approval date.
 | [0043](0043-public-proxy-certificate.md) | A publicly trusted certificate for the proxy's public listener: operator-supplied, chosen per connection by ALPN, reloaded without a restart; the CLI trusts the system roots when no CA is pinned | Proposed |
 | [0044](0044-aws-iam-join.md) | Joining with an AWS IAM identity (components and bots): a signed `GetCallerIdentity` the control plane rebuilds and forwards itself, with a per-attempt challenge and fixed hosts | Proposed |
 | [0045](0045-upgrade-gate.md) | Proxies and workers wait for an upgraded control plane, so one rollout orders itself | Accepted |
-| [0046](0046-idp-driven-offboarding.md) | IdP-driven offboarding: a stored, encrypted refresh token checked by one leased job; deactivation locks and kills, group loss revokes the login; fail open with an alert | Accepted |
+| [0046](0046-policy-shadow-mode.md) | Shadow mode for policy rules: deny rules and roles evaluated and reported but not enforced, with a mandatory expiry that enforces | Accepted |
+| [0047](0047-idp-driven-offboarding.md) | IdP-driven offboarding: a stored, encrypted refresh token checked by one leased job; deactivation locks and kills, group loss revokes the login; fail open with an alert | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

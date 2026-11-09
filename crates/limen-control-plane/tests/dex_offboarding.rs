@@ -1,4 +1,4 @@
-//! Offboarding (ADR-0046) against a real Dex, not the mock IdP: the refresh
+//! Offboarding (ADR-0047) against a real Dex, not the mock IdP: the refresh
 //! grant, token rotation, `invalid_grant`, and groups in tokens as Dex sends
 //! them. Set `LIMEN_TEST_DEX_REFRESH_URL` and `LIMEN_TEST_DATABASE_URL`:
 //!

@@ -37,6 +37,13 @@
         "resource": {
           "type": "string"
         },
+        "shadow_deny": {
+          "description": "With `expect: allow`: shadow deny rules (`role/rule-name`) that must\nmatch the request and be reported, so CI can prove a shadow rule would\nfire before it is enforced (ADR-0046).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "via_role": {
           "description": "With `expect: allow`: the role the decision must go through.",
           "type": [

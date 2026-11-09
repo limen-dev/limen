@@ -560,7 +560,7 @@ pub struct UserView {
     pub idp_tone: &'static str,
 }
 
-/// How the IdP check stands, in words and as a tone (ADR-0046).
+/// How the IdP check stands, in words and as a tone (ADR-0047).
 pub fn idp_check_text(
     status: &str,
     checked: Option<OffsetDateTime>,

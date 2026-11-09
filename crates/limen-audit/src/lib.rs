@@ -92,6 +92,11 @@ pub enum EventKind {
     WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// A request was allowed that a shadow deny rule would have refused
+    /// (ADR-0046). `data.role`, `rule`, `resource`, and the principal; the
+    /// request itself went ahead.
+    #[serde(rename = "policy.shadow_deny")]
+    PolicyShadowDeny,
     /// A bot writer's write was refused by its grant or the escalation rules
     /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
     /// detection signal.
@@ -121,14 +126,14 @@ pub enum EventKind {
     UserLock,
     #[serde(rename = "user.unlock")]
     UserUnlock,
-    /// The identity provider no longer vouches for a person (ADR-0046).
+    /// The identity provider no longer vouches for a person (ADR-0047).
     /// `data.action` is `lock` (deactivated: locked, sessions ended) or
     /// `revoke_login` (a group that granted a role was removed: that login ended).
     #[serde(rename = "idp.offboard")]
     IdpOffboard,
     /// A check of the identity provider could not be completed (unreachable,
     /// or an answer that could not be read). Sessions are kept unless the
-    /// deployment fails closed (ADR-0046).
+    /// deployment fails closed (ADR-0047).
     #[serde(rename = "idp.check_failed")]
     IdpCheckFailed,
     /// An admin ended a session. `session_id` says which.

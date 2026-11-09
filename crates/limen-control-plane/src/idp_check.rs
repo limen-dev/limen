@@ -1,4 +1,4 @@
-//! IdP-driven offboarding (ADR-0046).
+//! IdP-driven offboarding (ADR-0047).
 //!
 //! A login that handed over a refresh token is checked against the IdP every
 //! few minutes. The IdP refusing the token ends that login (its person was

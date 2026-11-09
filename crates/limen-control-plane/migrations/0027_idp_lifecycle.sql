@@ -1,4 +1,4 @@
--- IdP-driven offboarding (ADR-0046) and where a user came from.
+-- IdP-driven offboarding (ADR-0047) and where a user came from.
 
 -- Where the person came from and what the IdP last said about them. Bots keep
 -- their own rows (`actor_type = 'bot'`) and are always `source = 'bot'`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# IdP-driven onboarding and offboarding (ADR-0046, #111) against a real Dex.
+# IdP-driven onboarding and offboarding (ADR-0047, #111) against a real Dex.
 #
 # Needs: Docker, and the dev database from deploy/compose
 # (`docker compose -f deploy/compose/docker-compose.yml up -d postgres`).

@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS audit.limen.events_raw (
     roles array(varchar), groups array(varchar),
     version bigint, digest varchar, source_ref varchar, component_id varchar,
     actor_type varchar, method varchar, bot varchar,
+    -- Shadow denies (ADR-0046): the role and the named deny rule that matched.
+    role varchar, rule varchar,
     ci row(
       provider varchar,
       repository varchar,

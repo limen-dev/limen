@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{ResourceDoc, RoleDoc, Rule, Selector};
 use crate::{
-    AccessRequest, Decision, DenyReason, Policy, Principal, labels_match, principal_fits_kind,
-    resource_kind, rule_grants, rule_has_no_principals, rule_principals, selector_matches,
+    AccessRequest, Decision, DenyReason, Policy, Principal, deny_rule_matches, labels_match,
+    principal_fits_kind, resource_kind, rule_grants, rule_has_no_principals, rule_principals,
+    selector_matches,
 };
 
 /// What a resource looked like to the decision. Admin-only: showing it to a
@@ -49,6 +50,9 @@ pub struct RoleTrace {
     pub allowed_by: Vec<RuleNote>,
     /// Allow rules that didn't apply, and why.
     pub misses: Vec<RuleNote>,
+    /// Shadow deny rules that match: reported, not applied (ADR-0046).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_denied_by: Vec<RuleNote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -175,6 +179,7 @@ impl Policy {
                 denied_by: Vec::new(),
                 allowed_by: Vec::new(),
                 misses: Vec::new(),
+                shadow_denied_by: Vec::new(),
             };
         };
         let mut out = RoleTrace {
@@ -184,24 +189,37 @@ impl Policy {
             denied_by: Vec::new(),
             allowed_by: Vec::new(),
             misses: Vec::new(),
+            shadow_denied_by: Vec::new(),
         };
+        // Rules are numbered in the whole list, so a note points at the right
+        // one even when some are shadow.
         for (i, rule) in role.spec.deny.iter().enumerate() {
-            if selector_matches(&rule.resources, resource)
-                && (rule_has_no_principals(rule)
-                    || (!matches!(principal, Principal::WebAccess) && rule_grants(rule, principal)))
-            {
-                out.denied_by.push(RuleNote {
+            if deny_rule_matches(rule, resource, principal) {
+                let note = RuleNote {
                     rule: i,
                     text: if rule_has_no_principals(rule) {
                         "denies the resource entirely".to_owned()
                     } else {
                         format!("denies {}", describe_principal(principal))
                     },
-                });
+                };
+                if role.spec.deny_is_shadow(rule) {
+                    out.shadow_denied_by.push(RuleNote {
+                        text: format!("{} (shadow: reported, not enforced)", note.text),
+                        ..note
+                    });
+                } else {
+                    out.denied_by.push(note);
+                }
             }
         }
         for (i, rule) in role.spec.allow.iter().enumerate() {
-            if selector_matches(&rule.resources, resource) && rule_grants(rule, principal) {
+            if role.spec.is_shadow() {
+                out.misses.push(RuleNote {
+                    rule: i,
+                    text: "the role is in shadow mode, so it grants nothing".to_owned(),
+                });
+            } else if selector_matches(&rule.resources, resource) && rule_grants(rule, principal) {
                 out.allowed_by.push(RuleNote {
                     rule: i,
                     text: format!("allows {}", describe_principal(principal)),
@@ -273,11 +291,21 @@ impl Policy {
                     } else {
                         format!("denies {}", rule_principals(rule, kind).join(", "))
                     };
-                    lines.push(format!("  role {name} ({how}): deny rule {} {what}", i + 1));
+                    let shadow = if role.spec.deny_is_shadow(rule) {
+                        " (shadow: reported, not enforced)"
+                    } else {
+                        ""
+                    };
+                    lines.push(format!(
+                        "  role {name} ({how}): deny rule {} {what}{shadow}",
+                        i + 1
+                    ));
                 }
             }
             for (i, rule) in role.spec.allow.iter().enumerate() {
-                let text = if selector_matches(&rule.resources, res) {
+                let text = if role.spec.is_shadow() {
+                    "grants nothing, the role is in shadow mode".to_owned()
+                } else if selector_matches(&rule.resources, res) {
                     format!("allows {}", rule_principals(rule, kind).join(", "))
                 } else {
                     miss_reason(rule, res, None)
@@ -408,6 +436,14 @@ impl Trace {
                     n.text
                 ));
             }
+            for n in &r.shadow_denied_by {
+                lines.push(format!(
+                    "  role {} ({how}): deny rule {} {}",
+                    r.role,
+                    n.rule + 1,
+                    n.text
+                ));
+            }
             for n in &r.allowed_by {
                 lines.push(format!(
                     "  role {} ({how}): allow rule {} {}",
@@ -448,9 +484,9 @@ fn deny_text(reason: &DenyReason) -> &'static str {
 /// who holds (or may request) the role.
 #[must_use]
 pub fn summarize_role(role: &RoleDoc) -> Vec<String> {
+    // A shadow role grants nothing, so it has nothing to say (ADR-0046).
     role.spec
-        .allow
-        .iter()
+        .enforced_allow()
         .map(|rule| {
             let sel = &rule.resources;
             let mut parts = vec![kinds(sel)];

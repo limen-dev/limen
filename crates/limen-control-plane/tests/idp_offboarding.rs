@@ -1,4 +1,4 @@
-//! IdP-driven offboarding (ADR-0046) against a real PostgreSQL and a mock IdP
+//! IdP-driven offboarding (ADR-0047) against a real PostgreSQL and a mock IdP
 //! that issues refresh tokens. Set `LIMEN_TEST_DATABASE_URL` to run them.
 //! Everything here is *unverified against a real IdP* (Okta: #64).
 

@@ -130,7 +130,7 @@ async fn discover(settings: &IdpSettings, http: &HttpClient) -> anyhow::Result<M
 }
 
 /// The scopes the control plane advertises. It adds `offline_access` only when
-/// it keeps refresh tokens (ADR-0046), so an IdP that has not enabled refresh
+/// it keeps refresh tokens (ADR-0047), so an IdP that has not enabled refresh
 /// tokens is never asked for one.
 fn scopes(settings: &IdpSettings) -> impl Iterator<Item = Scope> + '_ {
     settings

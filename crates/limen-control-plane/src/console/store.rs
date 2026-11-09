@@ -76,11 +76,11 @@ pub struct UserRow {
     pub actor_type: String,
     /// The CI run of a bot's latest login.
     pub last_ci: Option<serde_json::Value>,
-    /// Where the account came from: `idp_login` or `bot` (ADR-0046).
+    /// Where the account came from: `idp_login` or `bot` (ADR-0047).
     pub source: String,
     /// The IdP the person signed in with.
     pub issuer: Option<String>,
-    /// `unchecked`, `ok`, `check_failed` or `offboarded` (ADR-0046).
+    /// `unchecked`, `ok`, `check_failed` or `offboarded` (ADR-0047).
     pub idp_status: String,
     pub idp_checked_at: Option<OffsetDateTime>,
 }

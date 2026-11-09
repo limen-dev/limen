@@ -185,12 +185,12 @@ pub struct Config {
     pub default_cert_ttl: Duration,
 
     /// Key that seals the IdP refresh tokens kept for offboarding checks
-    /// (ADR-0046): 32 random bytes, base64. Without it the control plane
+    /// (ADR-0047): 32 random bytes, base64. Without it the control plane
     /// stores no refresh token and does not check logins against the IdP.
     #[arg(long, env = "LIMEN_IDP_TOKEN_KEY", value_parser = parse_secret)]
     pub idp_token_key: Option<Secret<String>>,
 
-    /// How often a login is checked against the IdP (ADR-0046). `0s` turns
+    /// How often a login is checked against the IdP (ADR-0047). `0s` turns
     /// the check off.
     #[arg(long, env = "LIMEN_IDP_CHECK_INTERVAL", value_parser = parse_duration, default_value = "5m")]
     pub idp_check_interval: Duration,
@@ -198,7 +198,7 @@ pub struct Config {
     /// Do not end logins when a refreshed ID token no longer grants a role.
     /// For an IdP that leaves groups out of refreshed tokens. IdPs also omit
     /// the claim for a person with no groups, so by default an absent claim
-    /// counts as no groups (ADR-0046).
+    /// counts as no groups (ADR-0047).
     #[arg(long, env = "LIMEN_IDP_IGNORE_GROUPS")]
     pub idp_ignore_groups: bool,
 
@@ -464,7 +464,7 @@ pub enum WideningApproval {
     All,
 }
 
-/// The rule when the IdP cannot be reached (ADR-0046).
+/// The rule when the IdP cannot be reached (ADR-0047).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum IdpCheckFailure {
     Open,

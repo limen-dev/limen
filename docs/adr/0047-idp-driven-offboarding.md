@@ -1,4 +1,4 @@
-# ADR-0046: IdP-driven offboarding with a stored refresh token
+# ADR-0047: IdP-driven offboarding with a stored refresh token
 
 - Status: Accepted (issue #111; the owner chose the refresh-token option and the fail-open default on 2026-11-08, and asked for it to be built). *As built* notes are at the end.
 - Date: 2026-11-08

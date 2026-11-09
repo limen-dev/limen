@@ -64,7 +64,7 @@ impl Auth for AuthService {
         Ok(Response::new(GetAuthConfigResponse {
             issuer_url: c.oidc_issuer.clone(),
             client_id: c.oidc_client_id.clone(),
-            // Ask the IdP for a refresh token only when we keep one (ADR-0046).
+            // Ask the IdP for a refresh token only when we keep one (ADR-0047).
             scopes: {
                 let mut scopes = c.oidc_scopes.clone();
                 if crate::idp_check::enabled(c) && !scopes.iter().any(|s| s == "offline_access") {
@@ -168,7 +168,7 @@ impl Auth for AuthService {
 
 /// Refuse a locked person. A lock placed because the IdP deactivated them
 /// lifts itself when the IdP vouches for them again (they just signed in); an
-/// admin's lock never does (ADR-0046).
+/// admin's lock never does (ADR-0047).
 async fn refuse_if_locked(
     state: &AppState,
     addr: Option<IpAddr>,
@@ -217,7 +217,7 @@ async fn record_user(state: &AppState, identity: &crate::oidc::VerifiedIdentity,
 }
 
 /// After the login is audited: keep the IdP's refresh token, sealed, so the
-/// login can be checked against the IdP (ADR-0046), and note where the person
+/// login can be checked against the IdP (ADR-0047), and note where the person
 /// came from. Best effort: a login without a token is simply not checked, and
 /// the console says so. Done only once the login cannot be refused any more,
 /// so a refused login leaves no credential behind.

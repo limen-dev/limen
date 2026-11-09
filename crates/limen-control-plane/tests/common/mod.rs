@@ -221,7 +221,7 @@ impl Harness {
         self.login_with_refresh(email, groups, "").await
     }
 
-    /// Like [`Harness::login`], handing over the IdP's refresh token (ADR-0046).
+    /// Like [`Harness::login`], handing over the IdP's refresh token (ADR-0047).
     pub async fn login_with_refresh(
         &self,
         email: &str,

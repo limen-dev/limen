@@ -568,7 +568,7 @@ async fn console_end_to_end() {
     let home = admin_user.get("/console/users").await;
     assert_eq!(home.status, 200);
     assert!(home.body.contains(DEVELOPER));
-    // Where people came from, and the filters (ADR-0046).
+    // Where people came from, and the filters (ADR-0047).
     assert!(home.body.contains("IdP sign-in"), "{}", home.body);
     assert!(home.body.contains("not checked"));
     let unchecked = admin_user.get("/console/users?status=unchecked").await;
