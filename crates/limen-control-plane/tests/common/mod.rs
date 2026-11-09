@@ -117,7 +117,7 @@ impl Harness {
             .chain(extra.iter().cloned())
             .collect();
         let config = Wrapper::try_parse_from(args).expect("config").config;
-        let state = build_state(config).await.expect("build state");
+        let state = Box::pin(build_state(config)).await.expect("build state");
         let (tx, rx) = watch::channel(false);
         let run_task = tokio::spawn(run(state.clone(), listener, rx));
         Self {

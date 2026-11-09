@@ -101,6 +101,7 @@ fn identity(config: &Config) -> Vec<IntegrationView> {
                 UsernameClaim::Sub => "sub",
             }
         ),
+        format!("Groups from the {} claim", config.oidc_groups_claim),
         console,
     ];
     if let Some(internal) = &config.oidc_internal_url {
