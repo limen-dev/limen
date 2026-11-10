@@ -1205,8 +1205,6 @@ pub struct PolicyPage {
     pub created: String,
     pub groups: Vec<PolicyGroup>,
     pub query: String,
-    pub pasted: String,
-    pub result: Option<DryRun>,
     pub draft: String,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -1217,6 +1215,9 @@ pub struct PolicyPage {
 pub struct SimulatorPage {
     pub chrome: Chrome,
     pub simulation: Option<Simulation>,
+    /// "Check a change": the YAML pasted and what it would do.
+    pub pasted: String,
+    pub result: Option<DryRun>,
 }
 
 pub struct RoleAccess {

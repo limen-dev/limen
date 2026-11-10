@@ -1825,8 +1825,6 @@ async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
 /// What the policy page shows besides the documents.
 #[derive(Default)]
 struct PolicyExtras {
-    pasted: String,
-    result: Option<DryRun>,
     query: String,
     /// A new document being written, kept when the write was refused.
     draft: String,
@@ -1860,8 +1858,6 @@ async fn policy_page(state: &AppState, auth: &Auth, extras: PolicyExtras) -> Res
             created: time_text(loaded.created_at),
             groups,
             query,
-            pasted: extras.pasted,
-            result: extras.result,
             draft: extras.draft,
             error: extras.error,
             notice: extras.notice,
@@ -1993,16 +1989,15 @@ pub async fn dry_run(
             removed: vec![],
         },
     };
-    policy_page(
-        &state,
-        &auth,
-        PolicyExtras {
+    html(
+        SimulatorPage {
+            chrome: chrome(&state, &auth, "simulator"),
+            simulation: None,
             pasted: form.yaml,
             result: Some(result),
-            ..PolicyExtras::default()
-        },
+        }
+        .render(),
     )
-    .await
 }
 
 #[derive(Deserialize)]
@@ -2023,6 +2018,8 @@ pub async fn simulator(State(state): State<AppState>, auth: Auth) -> Response {
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
             simulation: None,
+            pasted: String::new(),
+            result: None,
         }
         .render(),
     )
@@ -2098,6 +2095,8 @@ pub async fn simulate(
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
             simulation: Some(sim),
+            pasted: String::new(),
+            result: None,
         }
         .render(),
     )
