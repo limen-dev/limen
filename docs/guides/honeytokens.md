@@ -53,7 +53,7 @@ Each touch writes one `detect.honeytoken` audit event (at the proxy, beside the 
 | `data.action` | `ssh`, `db`, `redis`, `mongo`, `search`, `mq`, `kafka`, `tcp`, `kube`, `request`, `explain` or `console` (opening the decoy's page in the web console) |
 | `data.principal` | The login, role or user they tried, when the action names one |
 | `data.roles` | The roles on their certificate (for `request`, the roles their groups map to) |
-| `data.client_addr` | Their address, where the proxy sees it (not for `request` and `explain`) |
+| `data.client_addr` | Their address, where the proxy sees it (not for `request`, `explain` and `console`) |
 | `data.bot`, `data.ci` | For a bot: `true`, and the CI run (repository, workflow, commit) |
 
 Where it goes: the S3 trail and Datadog like any event, and the [OCSF export](audit-ocsf.md) as a Base Event with severity High and status Failure. Ready-made rules:

@@ -241,16 +241,33 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         "{:?}",
         explained_nothing.lines
     );
-    // A malformed principal doesn't hide the touch.
-    let _ = access
+    // A malformed principal is refused as for a real resource, and still
+    // counts; a principal the decoy doesn't list is told so.
+    let bad = access
         .explain(ExplainRequest {
             resource: "prod-backup-db".into(),
             principal: "not a principal".into(),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect_err("refused");
+    assert_eq!(bad.code(), tonic::Code::InvalidArgument);
+    let other = access
+        .explain(ExplainRequest {
+            resource: "prod-backup-db".into(),
+            principal: "login=nobody".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("explain")
+        .into_inner();
+    assert!(
+        other.lines.iter().any(|l| l.starts_with("But not as")),
+        "{:?}",
+        other.lines
+    );
     eventually(Duration::from_secs(15), "the other touches", || async {
-        events(&d, "detect.honeytoken").len() == 4
+        events(&d, "detect.honeytoken").len() == 5
     })
     .await;
     let actions: Vec<String> = events(&d, "detect.honeytoken")
@@ -271,5 +288,5 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         })
         .await
         .expect("admin explain");
-    assert_eq!(events(&d, "detect.honeytoken").len(), 4);
+    assert_eq!(events(&d, "detect.honeytoken").len(), 5);
 }

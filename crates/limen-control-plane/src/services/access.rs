@@ -158,11 +158,32 @@ impl Access for AccessService {
                     .into_iter()
                     .find(|d| d.name == resource)
                 {
+                    // Everything a real resource's answer does: a principal
+                    // that doesn't parse is refused, and one the resource
+                    // doesn't list is told so.
+                    let asked = if r.principal.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            Principal::parse(&r.principal, &r.database)
+                                .map_err(Status::invalid_argument)?,
+                        )
+                    };
+                    let mut lines = vec![
+                        format!("You can reach `{resource}`."),
+                        format!("Principals you may use: {}.", shown.principals.join(", ")),
+                    ];
+                    if let Some(p) = &asked {
+                        let value = r.principal.split_once('=').map_or("", |(_, v)| v);
+                        if !shown.principals.iter().any(|x| x == value) {
+                            lines.push(format!(
+                                "But not as {}: use one of the principals above.",
+                                limen_policy::trace::describe_principal(p)
+                            ));
+                        }
+                    }
                     return Ok(Response::new(ExplainResponse {
-                        lines: vec![
-                            format!("You can reach `{resource}`."),
-                            format!("Principals you may use: {}.", shown.principals.join(", ")),
-                        ],
+                        lines,
                         full_trace: false,
                         worker_connected: Some(true),
                     }));
