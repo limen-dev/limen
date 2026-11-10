@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <h1>Users</h1>
-    <p class="sub">People who have signed in with the CLI or the console, with where they came from and whether the IdP still vouches for them. Groups are as of their last sign-in. Disabled users can't sign in or open sessions, and their open sessions end. The IdP check disables a person whose IdP account is gone; an admin can disable anyone.</p>
+    <p class="sub">People who have signed in with the CLI or the console, with where they came from and whether the IdP still vouches for them. Groups are as of their last sign-in. Disabled users can't sign in. Open a user to disable, enable or delete them.</p>
   </div>
   <form method="get" action="/console/users" class="search" role="search">
     <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
@@ -29,18 +29,16 @@
 <div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#users"/></svg><div>{% if total == 0 %}Nobody has signed in yet.{% else %}No user matches. <a href="/console/users">Clear search and filters</a>{% endif %}</div></div>
 {% else %}
 <div class="table-wrap"><table>
-  <thead><tr><th>User</th><th>Source</th><th>Groups</th><th>Roles</th><th>IdP check</th><th>Last sign-in</th><th class="num">Sign-ins</th><th>State</th></tr></thead>
+  <thead><tr><th>User</th><th>State</th><th>Groups</th><th>Roles</th><th>IdP check</th><th>Last sign-in</th></tr></thead>
   <tbody>
   {% for u in users %}
     <tr>
-      <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a></div></td>
-      <td class="nowrap">{{ u.source }}{% if !u.issuer.is_empty() %}<div class="cell-sub">{{ u.issuer }}</div>{% endif %}</td>
+      <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><div><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a><div class="cell-sub" title="{{ u.issuer }}">{{ u.source }}</div></div></div></td>
+      <td>{% if u.locked %}<span class="pill bad">disabled</span><div class="cell-sub" style="max-width:16rem;white-space:normal">by {{ u.disabled_by() }}{% if !u.lock_reason.is_empty() %}: {{ u.lock_reason }}{% endif %}</div>{% else %}<span class="pill ok">enabled</span>{% endif %}</td>
       <td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td>
       <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td>
       <td>{% if u.idp_tone.is_empty() %}<span class="cell-sub">{{ u.idp }}</span>{% else %}<span class="pill {{ u.idp_tone }}">{{ u.idp }}</span>{% endif %}</td>
-      <td class="nowrap">{{ u.last_login }}</td>
-      <td class="num">{{ u.logins }}</td>
-      <td>{% if u.locked %}<span class="pill bad">disabled</span> <span class="cell-sub">by {{ u.disabled_by() }}: {{ u.lock_reason }}</span>{% else %}<span class="pill ok">enabled</span>{% endif %}</td>
+      <td class="nowrap">{{ u.last_login }}<div class="cell-sub">{{ u.logins }} sign-in{% if u.logins != 1 %}s{% endif %}</div></td>
     </tr>
   {% endfor %}
   </tbody>
