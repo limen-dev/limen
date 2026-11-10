@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="darkreader-lock">
+<title>Access simulator · Limen</title>
+<link rel="icon" href="/console/static/logo-mark.svg?v=ee6acea41c22" type="image/svg+xml">
+<link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/console/static/console.css?v=ee6acea41c22">
+<script src="/console/static/console.js?v=ee6acea41c22"></script>
+
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/console/">
+      <img class="logo-light" src="/console/static/logo-mark.svg?v=ee6acea41c22" alt="" width="26" height="26">
+      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=ee6acea41c22" alt="" width="26" height="26">
+      <span>Limen</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#key-round"/></svg><span>Access</span></a>
+      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#file-diff"/></svg><span>Policy changes</span></a>
+      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#shield-check"/></svg><span>Reviews</span></a>
+      
+      
+      <div class="nav-label">Administration</div>
+      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#users"/></svg><span>Users</span></a>
+      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#bot"/></svg><span>Bots</span></a>
+      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#server"/></svg><span>Workers</span></a>
+      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#activity"/></svg><span>Audit trail</span></a>
+      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#scroll-text"/></svg><span>Policy</span></a>
+      <a href="/console/simulator" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#play"/></svg><span>Access simulator</span></a>
+      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#chart-column"/></svg><span>Dashboards</span></a>
+      <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#plug"/></svg><span>Integrations</span></a>
+      
+    </nav>
+    <div class="sidebar-foot">
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#moon"/></svg></button>
+      </div>
+      <form method="post" action="/console/logout" class="me">
+        <span class="avatar av-4" aria-hidden="true">A</span>
+        <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#log-out"/></svg></button>
+      </form>
+    </div>
+  </aside>
+  <div class="main">
+    <main>
+
+<div class="page-head">
+  <div>
+    <h1>Access simulator</h1>
+    <p class="sub">See what a person, a bot or some IdP groups can reach and could ask for, using the same decision code as enforcement. Nothing is changed. To see what a change to a policy document would do, use <b>Preview impact</b> on the <a href="/console/policy">Policy</a> page.</p>
+  </div>
+</div>
+<div class="sim">
+  <div class="sim-pick">
+    <form method="get" action="/console/simulator" class="sim-search" role="search" autocomplete="off">
+      <div class="typeahead" data-typeahead="/console/simulator/suggest">
+        <div class="search">
+          <svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#search"/></svg>
+          <input type="search" name="q" value="" placeholder="Type a person, a bot or an IdP group" maxlength="300" aria-label="Search a person, a bot or an IdP group" data-focus-search autocomplete="off">
+        </div>
+        <ul class="ta-list" role="listbox" hidden></ul>
+      </div>
+      <noscript><button type="submit" class="secondary">Show access</button></noscript>
+    </form>
+    <div class="picks">
+      <div class="pick-row"><span class="pick-label">Groups <span class="hint">click one or more</span></span><div class="chips"><a class="chip pick" href="/console/simulator?group=auditors">auditors</a><a class="chip pick" href="/console/simulator?group=contractors">contractors</a><a class="chip pick" href="/console/simulator?group=developers">developers</a><a class="chip pick" href="/console/simulator?group=limen-admins">limen-admins</a><a class="chip pick" href="/console/simulator?group=sre">sre</a><a class="chip pick" href="/console/simulator?group=sre-oncall">sre-oncall</a><a class="chip pick" href="/console/simulator?group=viewers">viewers</a></div></div>
+      <div class="pick-row"><span class="pick-label">Bots</span><div class="chips"><a class="chip pick" href="/console/simulator?bot=argo-sync#simulated">argo-sync</a><a class="chip pick" href="/console/simulator?bot=deploy-staging#simulated">deploy-staging</a><a class="chip pick" href="/console/simulator?bot=nightly-report#simulated">nightly-report</a></div></div>
+      <div class="pick-row"><span class="pick-label">People <span class="hint">most recent sign-ins</span></span><div class="chips"><a class="chip pick" href="/console/simulator?person=admin%40example.com#simulated">admin@example.com</a><a class="chip pick" href="/console/simulator?person=developer%40example.com#simulated">developer@example.com</a></div></div>
+    </div>
+  </div>
+  <div class="sim-result">
+
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#play"/></svg><div>Pick someone on the left, or start typing, to see what they can reach.</div></div>
+
+  </div>
+</div>
+
+    </main>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
+  </div>
+</div>
+</body>
+</html>

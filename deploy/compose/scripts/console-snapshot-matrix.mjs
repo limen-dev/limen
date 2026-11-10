@@ -82,7 +82,11 @@ async function snapshot() {
     const file = target.endsWith('/') || !extname(target) ? join(dir, target, 'index.html') : join(dir, target);
     mkdirSync(dirname(file), { recursive: true });
     // End a page with a newline, so the saved files are clean in a diff.
-    writeFileSync(file, file.endsWith('.html') && typeof body === 'string' && !body.endsWith('\n') ? `${body}\n` : body);
+    // A page's CSRF token belongs to the signed-in session: a fixture keeps a constant in its place.
+    const clean = (b) => (Buffer.isBuffer(b) && file.endsWith('.html') ? b.toString('utf8') : b);
+    let out = clean(body);
+    if (typeof out === 'string') out = out.replace(/(name="csrf" value=")[^"]*"/g, '$1fixture"');
+    writeFileSync(file, file.endsWith('.html') && typeof out === 'string' && !out.endsWith('\n') ? `${out}\n` : out);
   };
   const collectAssets = (text) => {
     for (const m of text.matchAll(/\/console\/static\/[^"'()\s?#<>]+/g)) assets.add(m[0]);
@@ -157,6 +161,16 @@ function serve(root) {
   const server = createServer((req, res) => {
     const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
     const own = path.startsWith('/console/static/') ? assets.get(path.slice('/console/static/'.length)) : undefined;
+    // A recording is never saved (it holds what was on a screen): the player gets a short invented one
+    // so that it starts and its controls are measured.
+    if (/^\/console\/sessions\/[^/]+\/recording$/.test(path)) {
+      const cast = [
+        { version: 2, width: 100, height: 24, timestamp: 0 },
+        [0.2, 'o', '$ echo "a recording made up for the check"\r\n'],
+        [0.8, 'o', 'a recording made up for the check\r\n$ '],
+      ];
+      return res.writeHead(200, { 'content-type': 'application/x-asciicast' }).end(cast.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    }
     if (own) return res.writeHead(200, { 'content-type': types[extname(own)] ?? 'application/octet-stream' }).end(readFileSync(own));
     let file = normalize(join(root, path));
     if (!file.startsWith(normalize(root))) return res.writeHead(403).end();
@@ -222,7 +236,9 @@ async function check() {
     { engine: 'webkit', name: 'webkit-iphone13', ctx: devices['iPhone 13'], mobile: true },
     { engine: 'webkit', name: 'webkit-ipad', ctx: devices['iPad (gen 7)'], mobile: true },
     { engine: 'firefox', name: 'firefox-desktop-1440', ctx: desktop(1440, 900) },
-    { engine: 'firefox', name: 'firefox-360', ctx: { viewport: { width: 360, height: 740 }, hasTouch: false }, mobile: true },
+    // No touch emulation in Firefox (Playwright's or Puppeteer's), so `pointer: coarse` never matches: the 44px
+    // touch bar is measured in Chromium and WebKit, and this profile keeps the 24px bar (WCAG 2.5.8).
+    { engine: 'firefox', name: 'firefox-360', ctx: { viewport: { width: 360, height: 740 }, hasTouch: false }, mobile: false },
     // A browser window dragged to any width: both sides of the 900px breakpoint, a small laptop, a
     // wide monitor and a short window. Touch profiles (<= 480px) keep the 44px target bar.
     ...[320, 480, 600, 768, 899, 901, 1280, 1920].flatMap((w) => [
