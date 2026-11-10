@@ -57,7 +57,9 @@ run() { # run <what> <package> <test target>
   step "$1"
   out="$(cargo test -p "$2" --test "$3" -- --nocapture --test-threads=1 2>&1)" || { echo "$out" | tail -n 30; fail "$1"; }
   # A skipped test is not a pass.
-  if echo "$out" | grep -q SKIPPED; then fail "$1 was skipped"; fi
+  # A here-string, not a pipe: under pipefail, grep -q exiting early can
+  # SIGPIPE the echo and turn a match into a miss.
+  if grep -q SKIPPED <<<"$out"; then fail "$1 was skipped"; fi
   echo "$out" | tail -n 4
   pass "$1"
 }
