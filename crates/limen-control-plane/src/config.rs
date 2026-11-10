@@ -500,19 +500,48 @@ pub enum CaBackend {
     Kms,
 }
 
+// Claims Limen reads for other things are parsed apart from the rest, so a
+// groups claim with one of these names would silently read as absent.
+const STANDARD: &[&str] = &[
+    "iss",
+    "sub",
+    "aud",
+    "exp",
+    "iat",
+    "nbf",
+    "jti",
+    "nonce",
+    "auth_time",
+    "azp",
+    "acr",
+    "amr",
+    "at_hash",
+    "c_hash",
+    "email",
+    "email_verified",
+    "name",
+    "given_name",
+    "family_name",
+    "middle_name",
+    "nickname",
+    "preferred_username",
+    "profile",
+    "picture",
+    "website",
+    "gender",
+    "birthdate",
+    "zoneinfo",
+    "locale",
+    "phone_number",
+    "phone_number_verified",
+    "address",
+    "updated_at",
+];
+
 fn parse_claim_name(s: &str) -> Result<Box<str>, String> {
     if s.trim().is_empty() || s != s.trim() {
         return Err("a claim name can't be empty or have surrounding spaces".into());
     }
-    // Claims Limen reads for other things are parsed apart from the rest, so a
-    // groups claim with one of these names would silently read as absent.
-    const STANDARD: &[&str] = &[
-        "iss", "sub", "aud", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "azp", "acr",
-        "amr", "at_hash", "c_hash", "email", "email_verified", "name", "given_name",
-        "family_name", "middle_name", "nickname", "preferred_username", "profile", "picture",
-        "website", "gender", "birthdate", "zoneinfo", "locale", "phone_number",
-        "phone_number_verified", "address", "updated_at",
-    ];
     if STANDARD.contains(&s) {
         return Err(format!("{s} is a standard OIDC claim, not a groups claim"));
     }
