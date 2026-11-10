@@ -8,7 +8,8 @@
 #   deploy/compose/setup.sh --check               # only check the prerequisites
 #   deploy/compose/setup.sh status | down [--scale]
 #
-# Limen    postgres, dex, s3, kms, control plane, proxy, worker (always).
+# Limen    postgres, dex (on its own PostgreSQL), s3, kms, control plane, proxy, worker (always).
+#          Logins are checked against Dex every 15 seconds (offboarding, ADR-0047).
 #          docker-compose.yml, or stacks/scale.yml with --scale (3 of each component).
 # ssh      OpenSSH host that trusts Limen certificates          stacks/ssh.yml
 # db       PostgreSQL and MySQL with TLS, roles bootstrapped    stacks/db.yml
@@ -21,7 +22,6 @@
 # bots     fake CI identity issuer (bot logins)                 stacks/bots.yml
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
 # tcp      a raw TCP echo target for `limen tcp`                 stacks/tcp.yml
-# idp-check  Dex on PostgreSQL and a 15s IdP login check           stacks/idp-check.yml
 # web      an HTTP app target for browser SSO                    stacks/web.yml
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as

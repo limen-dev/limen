@@ -66,17 +66,17 @@ If your IdP expires refresh tokens early (idle or absolute lifetimes), an expire
 
 ## Dex
 
-Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refresh grant **never returns** when Dex keeps its state in memory or SQLite (the token update holds the storage lock while the connector reads storage). That also freezes the rest of that Dex. Use PostgreSQL (or another networked) storage, as production Dex deployments do. The development stack's Dex is in memory, so by default the dev stack leaves `--idp-token-key` unset and does not check logins; the opt-in `idp-check` stack turns it on (below). The check's HTTP calls time out after 10 seconds, so a stuck IdP shows up as `idp.check_failed`, not as a stuck control plane.
+Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refresh grant **never returns** when Dex keeps its state in memory or SQLite (the token update holds the storage lock while the connector reads storage). That also freezes the rest of that Dex. Use PostgreSQL (or another networked) storage, as production Dex deployments do. The development stack's Dex therefore runs on its own PostgreSQL (`limen-dex-db`, with a volume), and the stack sets a development-only `--idp-token-key` and a 15 second check interval, so logins are checked out of the box (the scaled stack, `--scale`, keeps Dex in memory and does not check). The check's HTTP calls time out after 10 seconds, so a stuck IdP shows up as `idp.check_failed`, not as a stuck control plane.
 
 ### Try it on the dev stack
 
 ```bash
-deploy/compose/setup.sh --stacks idp-check      # adds to any other stacks you pick
+deploy/compose/setup.sh                         # the check is on by default
 mise run install-cli                            # the CLI must send the refresh token
 limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # developer@example.com / password
 ```
 
-The `idp-check` stack moves the stack's Dex, with the same users, onto PostgreSQL (`dex-db`) and sets `LIMEN_IDP_TOKEN_KEY` (a development-only key) and `LIMEN_IDP_CHECK_INTERVAL=15s` on the control plane. Open `https://localhost:3443/console/users`: after one interval the person's *last check* is fresh. Then:
+Open `https://localhost:3443/console/users`: after one interval (15 seconds) the person's *last check* is fresh. Then:
 
 - **Offboard.** Delete the person's refresh token in Dex, which is what a revoked session looks like to the IdP:
   `docker exec limen-dex-db psql -U dex -d dex -c "delete from refresh_token where claims_email='developer@example.com'"`.

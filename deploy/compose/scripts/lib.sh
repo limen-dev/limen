@@ -13,7 +13,7 @@
 # Limen: docker-compose.yml (one of each component) or, with --scale,
 # stacks/scale.yml (3 control planes, 3 proxies, 3 workers).
 # Stacks (each a compose file and a profile of the same name):
-STACK_NAMES=(ssh db redis mongo search messaging observability tracing bots kube tcp web idp-check)
+STACK_NAMES=(ssh db redis mongo search messaging observability tracing bots kube tcp web)
 compose=() STACK_FLAGS=() # set by stack_setup
 POLICY_FILES=()
 
@@ -26,7 +26,7 @@ stack_policy_files() {
     case "$s" in
       db) kind=database ;;
       ssh|redis|mongo|search|messaging|bots|kube|tcp|web) kind="$s" ;;
-      observability|tracing|idp-check) continue ;;
+      observability|tracing) continue ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
     case "$selected" in *" $kind "*) continue ;; esac
@@ -113,9 +113,6 @@ stack_setup() {
             export LIMEN_KUBE_DIR="$STACK_STATE/kube"
             export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
       tcp) files+=(-f "$here/stacks/tcp.yml") ;;
-      idp-check) files+=(-f "$here/stacks/idp-check.yml")
-                 # Dev-only key: 32 bytes, base64. Real deployments generate their own.
-                 env+=("LIMEN_IDP_TOKEN_KEY=$(printf 'dev-only-idp-token-key-32-bytes!' | base64)" LIMEN_IDP_CHECK_INTERVAL=15s) ;;
       web)
         files+=(-f "$here/stacks/web.yml")
         if $scale; then files+=(-f "$here/stacks/web-scale.yml")
@@ -125,6 +122,12 @@ stack_setup() {
     esac
     profiles+=(--profile "$s")
   done
+  # Logins are checked against the IdP every 15 seconds (ADR-0047), with a
+  # dev-only key (32 bytes, base64; real deployments generate their own). Not in
+  # the scaled stack, whose Dex keeps its state in memory.
+  if ! $scale; then
+    env+=("LIMEN_IDP_TOKEN_KEY=$(printf 'dev-only-idp-token-key-32-bytes!' | base64)" LIMEN_IDP_CHECK_INTERVAL=15s)
+  fi
   mkdir -p "$STACK_STATE"
   export LIMEN_STACK_ENV="$STACK_STATE/stack.env"
   printf '%s\n' ${env[@]+"${env[@]}"} >"$LIMEN_STACK_ENV"
@@ -147,7 +150,6 @@ stack_describe() {
     observability) echo "fake Datadog intake, plus Trino and Grafana over the audit log" ;;
     tracing) echo "Jaeger, receiving the traces every component exports (OTLP)" ;;
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
-    idp-check) echo "IdP-driven offboarding: Dex on PostgreSQL, logins checked every 15s" ;;
     kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
     tcp) echo "a raw TCP echo target (limen tcp)" ;;
     web) echo "an HTTP app target for browser SSO and request auditing" ;;
@@ -412,10 +414,10 @@ YAML
 # Commands for what is running, ending with how to sign in. Needs stack_setup to have run.
 stack_endpoints() {
   ui_init
-  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_tracing=false has_bots=false has_kube=false has_tcp=false has_web=false has_idp=false
+  local scale=() s has_ssh=false has_db=false has_redis=false has_mongo=false has_search=false has_messaging=false has_obs=false has_tracing=false has_bots=false has_kube=false has_tcp=false has_web=false
   if [ "${1:-}" = --scale ]; then scale=(--scale); shift; fi
   for s in "$@"; do
-    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; tracing) has_tracing=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; idp-check) has_idp=true ;; esac
+    case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; tracing) has_tracing=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; esac
   done
   local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
   if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube || $has_tcp || $has_web; then
@@ -430,12 +432,11 @@ stack_endpoints() {
     $has_tcp && printf "$row" "TCP" "limen tcp tcp-echo"
     $has_web && printf "$row" "Web app" "limen web open web-demo"
   fi
-  if $has_obs || $has_tracing || $has_bots || $has_idp; then
+  if $has_obs || $has_tracing || $has_bots; then
     ui_section "Other"
     $has_obs && printf "$row" "Grafana" "http://localhost:3000   admin / limen-dev-only" "Datadog stub" "http://localhost:8126/fake/received"
     $has_tracing && printf "$row" "Jaeger" "http://localhost:${LIMEN_PORT_JAEGER:-16686}"
     $has_bots && printf "$row" "CI issuer" "http://localhost:8130"
-    $has_idp && printf "$row" "Offboarding" "docs/guides/offboarding.md#try-it-on-the-dev-stack"
   fi
   ui_section "Connect"
   printf "$row" "CLI" "limen --proxy $STACK_PROXY login --ca-file $ca" "" "limen ls"
