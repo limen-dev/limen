@@ -139,7 +139,8 @@ pub async fn note_user(
     checked: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE users SET issuer = $2, source = 'idp_login',
+        "UPDATE users SET issuer = $2,
+                source = CASE WHEN source = 'scim' THEN 'scim' ELSE 'idp_login' END,
                 idp_status = CASE WHEN $3 THEN 'ok' ELSE 'unchecked' END,
                 idp_checked_at = CASE WHEN $3 THEN now() ELSE NULL END
          WHERE username = $1 AND actor_type = 'user'",
@@ -499,6 +500,58 @@ async fn end_login(state: &AppState, t: &Tracked, reason: &str, deactivated: boo
     metrics::counter!("limen_idp_offboards_total", "deactivated" => deactivated.to_string())
         .increment(1);
     tracing::warn!(user = %t.username, login = %t.login_id, reason, "login ended by the identity provider check");
+}
+
+/// End the stored logins of a person at once: all of them (`new_groups` is
+/// `None`), or those that rely on a role `new_groups` no longer give. For
+/// SCIM, which learns of a deactivation or a group change before any check
+/// would. Returns how many were ended. Logins that sent no refresh token are
+/// not tracked here; a lock covers those.
+pub async fn end_logins_of(
+    state: &AppState,
+    username: &str,
+    new_groups: Option<&[String]>,
+    reason: &str,
+) -> usize {
+    let rows = sqlx::query(
+        "SELECT login_id, username, refresh_token, groups, expires_at, last_ok_at
+         FROM idp_logins WHERE lower(username) = lower($1)",
+    )
+    .bind(username)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let mut ended = 0;
+    for r in &rows {
+        let Ok(t) = (|| -> Result<Tracked, sqlx::Error> {
+            Ok(Tracked {
+                login_id: r.try_get("login_id")?,
+                username: r.try_get("username")?,
+                refresh_token: r.try_get("refresh_token")?,
+                groups: r.try_get("groups")?,
+                expires_at: r.try_get("expires_at")?,
+                last_ok_at: r.try_get("last_ok_at")?,
+            })
+        })() else {
+            continue;
+        };
+        let why = match new_groups {
+            None => reason.to_owned(),
+            Some(now) => {
+                let gone = lost(&roles_of(state, &t.groups), &roles_of(state, now));
+                if gone.is_empty() {
+                    continue;
+                }
+                format!(
+                    "{reason}: no longer in a group granting {}",
+                    gone.join(", ")
+                )
+            }
+        };
+        end_login(state, &t, &why, false).await;
+        ended += 1;
+    }
+    ended
 }
 
 async fn check_failed(state: &AppState, t: &Tracked, why: &str) {

@@ -30,7 +30,7 @@ pub struct Actor<'a> {
 
 /// Audit an action that must not take effect without its event: the error
 /// says the change was not made (the caller rolls it back).
-async fn audit_first(
+pub(crate) async fn audit_first(
     state: &AppState,
     kind: EventKind,
     actor: Actor<'_>,
@@ -124,7 +124,7 @@ pub enum DeleteRefused {
 
 /// Delete a disabled person's record (the Users page, `users` row) and their
 /// stored IdP tokens. Sessions, recordings and audit events stay: they name the
-/// person and are the history. A lock the IdP check placed is released, so the
+/// person and are the history. A lock the IdP check or SCIM placed is released, so the
 /// IdP decides if they come back; an admin's lock stays.
 ///
 /// The audit event is written in the same transaction, so a deletion never
@@ -179,7 +179,7 @@ pub async fn delete_disabled_user(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("deleting user", e))?;
-    if locked_by == crate::idp_check::LOCK_ACTOR {
+    if locked_by == crate::idp_check::LOCK_ACTOR || locked_by == crate::scim::ACTOR {
         db::unlock_user(&mut *tx, username, actor.username)
             .await
             .map_err(|e| internal("deleting user", e))?;

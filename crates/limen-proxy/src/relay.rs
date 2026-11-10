@@ -260,7 +260,10 @@ async fn relay(
     req: Request<Incoming>,
 ) -> Response<tonic::body::Body> {
     let path = req.uri().path().to_owned();
-    if path == "/console" || path.starts_with("/console/") {
+    // The console, and SCIM from the IdP (ADR-0048): plain HTTP requests, passed
+    // on without credentials of the proxy's own. The control plane serves
+    // `/scim/` only when it has a SCIM token, and checks it on every request.
+    if path == "/console" || path.starts_with("/console/") || path.starts_with("/scim/") {
         return relay_console(channel, req).await;
     }
     if !RELAYED_PREFIXES.iter().any(|p| path.starts_with(p)) {

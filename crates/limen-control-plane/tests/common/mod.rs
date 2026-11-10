@@ -67,7 +67,7 @@ impl Harness {
     pub async fn start_with(extra: &[String]) -> Option<Self> {
         let base = limen_testkit::database_url()?;
         let db_url = fresh_database(&base).await;
-        Some(Self::start_on(db_url, None, extra).await)
+        Some(Box::pin(Self::start_on(db_url, None, extra)).await)
     }
 
     /// Another replica on this one's database and CA keys. Give it its own `--id`.

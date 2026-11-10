@@ -58,7 +58,7 @@ fn event_view(e: &store::EventRow) -> EventView {
         tone: match e.kind.as_str() {
             "auth.denied" | "user.lock" | "user.delete" | "session.kill" | "component.revoke"
             | "idp.offboard" | "idp.check_failed" => "bad",
-            "auth.login" | "user.unlock" | "worker.enroll" => "ok",
+            "auth.login" | "user.unlock" | "user.provision" | "worker.enroll" => "ok",
             _ => "",
         },
         kind: e.kind.clone(),

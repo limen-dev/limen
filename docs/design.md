@@ -20,7 +20,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 - Workers connect outbound only. No inbound ports into private networks.
 - High availability for the control plane and proxy, with defined behavior when the control plane is down.
 
-**Non-goals (v1):** RDP, multi-tenancy, SAML, SCIM, and multi-region.
+**Non-goals (v1):** RDP, multi-tenancy, SAML, and multi-region. (SCIM: only the provisioning endpoint of ADR-0048, built for Okta; no directory sync.)
 
 **Design target:** about 500 users, 5,000 resources, and 500 concurrent sessions. The larger-scale path is noted where it matters.
 

@@ -568,11 +568,22 @@ impl UserView {
     pub fn disabled_by(&self) -> &'static str {
         if !self.locked {
             ""
-        } else if self.locked_by == crate::idp_check::LOCK_ACTOR {
+        } else if self.locked_by == crate::idp_check::LOCK_ACTOR
+            || self.locked_by == crate::scim::ACTOR
+        {
             "the IdP"
         } else {
             "an admin"
         }
+    }
+}
+
+/// A sign-in time, or "never" for a person SCIM provisioned who has not signed in.
+fn signed_in_text(logins: i64, at: OffsetDateTime) -> String {
+    if logins == 0 {
+        "never".to_owned()
+    } else {
+        time_text(Some(at))
     }
 }
 
@@ -617,8 +628,8 @@ impl From<&UserRow> for UserView {
                 .chars()
                 .next()
                 .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
-            first_login: time_text(Some(u.first_login_at)),
-            last_login: time_text(Some(u.last_login_at)),
+            first_login: signed_in_text(u.login_count, u.first_login_at),
+            last_login: signed_in_text(u.login_count, u.last_login_at),
             logins: u.login_count,
             locked: u.lock_reason.is_some(),
             lock_reason: u.lock_reason.clone().unwrap_or_default(),
@@ -627,10 +638,10 @@ impl From<&UserRow> for UserView {
             is_bot: u.actor_type == "bot",
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
-            source: if u.source == "bot" {
-                "CI bot".to_owned()
-            } else {
-                "IdP sign-in".to_owned()
+            source: match u.source.as_str() {
+                "bot" => "CI bot".to_owned(),
+                "scim" => "SCIM".to_owned(),
+                _ => "IdP sign-in".to_owned(),
             },
             issuer: issuer_host(u.issuer.as_deref()),
             idp: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").0,

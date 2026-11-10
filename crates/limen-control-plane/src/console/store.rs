@@ -21,9 +21,20 @@ pub async fn upsert_user(
     roles: &[String],
     groups: &[String],
 ) -> Result<(), sqlx::Error> {
+    // Provisioned by SCIM under another spelling of the name: take the
+    // spelling the IdP signs in with, so there is one person, not two.
+    sqlx::query(
+        "UPDATE users SET username = $1
+         WHERE lower(username) = lower($1) AND username <> $1
+           AND source = 'scim' AND login_count = 0",
+    )
+    .bind(username)
+    .execute(db)
+    .await?;
     sqlx::query(
         "INSERT INTO users (username, subject, roles, groups) VALUES ($1, $2, $3, $4)
          ON CONFLICT (username) DO UPDATE SET subject = $2, roles = $3, groups = $4,
+           first_login_at = CASE WHEN users.login_count = 0 THEN now() ELSE users.first_login_at END,
            last_login_at = now(), login_count = users.login_count + 1",
     )
     .bind(username)

@@ -1,6 +1,6 @@
 # Onboarding and offboarding from your IdP
 
-The IdP is the only source of truth for who may use Limen (ADR-0047). Limen has no user lifecycle of its own and needs no offboarding checklist.
+The IdP is the only source of truth for who may use Limen (ADR-0047). Limen has no user lifecycle of its own and needs no offboarding checklist. To have people appear in Limen before they sign in, and group changes applied at once, turn on [SCIM](scim.md).
 
 *Tested against Dex v2.46.0 (on PostgreSQL storage) and a stand-in IdP. Not verified against Okta, Entra or another hosted IdP (#64).*
 
@@ -98,4 +98,4 @@ Run `docker exec limen-dex-db psql -U dex -d dex -c 'select id, claims_email fro
 - Reaction time is the check interval, not instant. For instant, lock the user.
 - Roles are still fixed at login; a *new* group applies at the next sign-in. The IdP check sees the new group within one interval and the Users page shows it ("next sign-in: +ops", and "At next sign-in" on the user's page), so you can tell who needs to sign in again. Nothing is applied early: open sessions and certificates keep the roles they were issued with.
 - Bots and agents are not checked (they hold no refresh token).
-- SCIM and IdP event hooks are not built (ADR-0047, alternatives).
+- IdP event hooks are not built. SCIM provisioning is, as an option: see [Pre-provisioning with SCIM](scim.md) (ADR-0048). It closes the "removed from the last matching group" gap above and lets people exist before they sign in.
