@@ -52,7 +52,7 @@ Limen sees every attempt to use a resource, so it can raise an alarm that needs 
 - A discovered resource approved before a decoy took its name is skipped afterwards; nothing checks at apply time.
 
 ## As built
-- Tests: thirteen policy tests (no role reaches a decoy, validation, round trip and digest, exposure, discovery can't take a decoy's name), the OCSF table and `may_send` tests, and an end-to-end test (`limen-e2e/tests/honeytoken.rs`, run by `demos/demo-honeytoken.sh`) with a real control plane, proxy, worker and SSH target: listing, refusal text equal to an unknown name's, the touch events for connect, request and explain, none for listing, for the real resource, or for an admin explaining for someone else.
+- Tests: twelve policy tests (no role reaches a decoy, validation, round trip and digest, exposure, discovery can't take a decoy's name), the OCSF table and `may_send` tests, and an end-to-end test (`limen-e2e/tests/honeytoken.rs`, run by `demos/demo-honeytoken.sh`) with a real control plane, proxy, worker and SSH target: listing, refusal text equal to an unknown name's, the touch events for connect, request and explain, none for listing, for the real resource, or for an admin explaining for someone else.
 - Discovery (ADR-0027) skips a resource whose name is a decoy's and picks another name for a proposal.
 - Alert rules: Grafana (`limen-honeytoken-touched`, generated) and a Datadog monitor (`honeytoken`). Neither was evaluated by Grafana or Datadog.
 - Not built, as listed under Open for review: `who-can` and `policy test` support for decoys, decoys in the console's resource list.
