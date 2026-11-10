@@ -123,6 +123,25 @@ impl Rig {
         .expect("session");
     }
 
+    async fn apply(&self, yaml: &str) {
+        AdminClient::new(self.ch.clone())
+            .apply_policy(forwarded(
+                limen_proto::v1::ApplyPolicyRequest {
+                    source: String::new(),
+                    require_tests: false,
+                    sources: vec![limen_proto::v1::PolicySource {
+                        name: "p.yaml".into(),
+                        content: yaml.into(),
+                    }],
+                    dry_run: false,
+                    source_ref: String::new(),
+                },
+                Some(&self.admin),
+            ))
+            .await
+            .expect("apply");
+    }
+
     async fn suggest(
         &self,
         who: &CertificateDer<'static>,
@@ -242,4 +261,54 @@ async fn a_role_changed_recently_is_not_judged() {
         .expect("delete");
     let s = r.suggest(&r.admin, 90).await.expect("suggest");
     assert!(!s.yaml.contains("name: dba"), "{}", s.yaml);
+}
+
+#[tokio::test]
+async fn a_resource_with_no_recorded_age_blocks_the_rules_that_reach_it() {
+    // Accepted discovered resources have no document head (ADR-0027): a rule
+    // that reaches one is not judged, because its age is not known.
+    let Some(r) = rig().await else { return };
+    r.session(ONCALL, "web-1", "ubuntu", 3).await;
+    r.session(DEVELOPER, "db-1", "limen_read", 3).await;
+    sqlx::query("DELETE FROM policy_document_heads WHERE kind = 'resource' AND name = 'db-1'")
+        .execute(&r.h.state.db)
+        .await
+        .expect("delete");
+    let s = r.suggest(&r.admin, 90).await.expect("suggest");
+    assert!(!s.yaml.contains("name: dba"), "{}", s.yaml);
+    assert!(s.yaml.contains("name: ops"), "{}", s.yaml);
+}
+
+#[tokio::test]
+async fn applying_again_does_not_make_unchanged_roles_look_new() {
+    // Through the real ApplyPolicy path: only the document that changed gets
+    // a new age.
+    let Some(r) = rig().await else { return };
+    r.session(ONCALL, "web-1", "ubuntu", 3).await;
+    r.session(DEVELOPER, "db-1", "limen_read", 3).await;
+    r.apply(POLICY).await;
+    sqlx::query("UPDATE policy_document_heads SET created_at = now() - interval '400 days', updated_at = now() - interval '400 days'")
+        .execute(&r.h.state.db)
+        .await
+        .expect("backdate");
+    sqlx::query("UPDATE users SET first_login_at = now() - interval '400 days'")
+        .execute(&r.h.state.db)
+        .await
+        .expect("users");
+    // The same policy again, then a change to `ops` alone.
+    r.apply(POLICY).await;
+    let changed = POLICY.replace("logins: [ubuntu, root]", "logins: [ubuntu, root, deploy]");
+    assert_ne!(changed, POLICY);
+    r.apply(&changed).await;
+    let s = r.suggest(&r.admin, 90).await.expect("suggest");
+    assert!(
+        s.yaml.contains("name: dba"),
+        "dba never changed: {}",
+        s.yaml
+    );
+    assert!(
+        !s.yaml.contains("name: ops"),
+        "ops just changed: {}",
+        s.yaml
+    );
 }

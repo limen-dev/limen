@@ -436,9 +436,34 @@ impl Lcg {
     }
 }
 
+/// The fixture with the lists in `dev` and `cachers` drawn at random.
+fn random_policy(rng: &mut Lcg) -> Policy {
+    let pick = |rng: &mut Lcg, from: &[&str]| -> String {
+        let mut chosen: Vec<&str> = from.iter().copied().filter(|_| rng.next(2) == 0).collect();
+        if chosen.is_empty() {
+            chosen.push(from[rng.next(from.len())]);
+        }
+        chosen.join(", ")
+    };
+    let logins = pick(rng, &["ubuntu", "root", "batch", "wiki"]);
+    let db_roles = pick(rng, &["limen_read", "limen_write", "limen_admin"]);
+    let users = pick(rng, &["reader", "writer"]);
+    let roles = ROLES
+        .replace(
+            "logins: [ubuntu, root] }",
+            &format!("logins: [{logins}] }}"),
+        )
+        .replace(
+            "roles: [limen_read, limen_write], databases: ['*'] }",
+            &format!("roles: [{db_roles}], databases: ['*'] }}"),
+        )
+        .replace("users: [reader, writer]", &format!("users: [{users}]"));
+    Policy::parse_yaml([("r.yaml", RESOURCES), ("roles.yaml", roles.as_str())])
+        .expect("random policy")
+}
+
 #[test]
 fn suggestions_only_ever_lose_access_and_settle() {
-    let p = policy();
     let resources = [
         "web-prod",
         "web-staging",
@@ -462,7 +487,9 @@ fn suggestions_only_ever_lose_access_and_settle() {
         "admin",
     ];
     let mut rng = Lcg(0xfeed);
+    let mut with_changes = 0;
     for round in 0..1_500 {
+        let p = random_policy(&mut rng);
         let mut usage = Vec::new();
         for _ in 0..rng.next(14) {
             usage.push(row(
@@ -492,8 +519,20 @@ fn suggestions_only_ever_lose_access_and_settle() {
             .unwrap_or_else(|e| panic!("round {round}: {e}"));
         let diff = p.access_diff(&next);
         assert!(!diff.widens(), "round {round}: {}", diff.render_text());
+        if !s.roles.is_empty() {
+            with_changes += 1;
+            assert!(
+                !diff.changes.is_empty(),
+                "round {round}: a suggestion that changes nothing"
+            );
+        }
         // Settled: with the same use, the result suggests nothing more.
         let again = w.run(&next).unwrap();
         assert!(again.roles.is_empty(), "round {round}: {:?}", again.roles);
     }
+    // The property is not vacuous.
+    assert!(
+        with_changes > 500,
+        "only {with_changes} of 1500 rounds suggested anything"
+    );
 }

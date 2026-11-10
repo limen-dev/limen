@@ -456,7 +456,14 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         let unchanged = stored
             .get(&head.key())
             .is_some_and(|s| s.same_revision(head));
-        if !unchanged {
+        if unchanged {
+            // A document that did not change keeps the age, etag and version
+            // it had: re-applying a whole source must not make every role
+            // look new (`limen policy suggest` judges roles by their age).
+            if let Some(s) = stored.get(&head.key()) {
+                *head = s.clone();
+            }
+        } else {
             head.policy_version = version;
             head.updated_at = now;
             head.etag = etag(head);

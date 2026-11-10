@@ -35,9 +35,14 @@ Roles only grow: adding access is easy and nobody removes it. Unused access wide
 - A new gRPC call on the admin service (`SuggestPolicy`), a new audit kind (`policy.suggest`), a new module in `limen-policy`, and a CLI command. The threat model gets a row for the new entry point.
 - No schema change to policy documents and no migration.
 
+- **Version skew.** `policy.suggest` is a new audit kind. The control plane writes it itself (proxies never send it, so the ingest allow-list is not involved), but a replica from before this change cannot parse it if a spool holding one is handed to it (`handoff`) during a rolling upgrade. Use `policy suggest` once every control plane replica runs this version.
+- **Document ages needed a fix.** Role and resource ages come from `policy_document_heads`. `ApplyPolicy` used to rewrite every head of a source with the current time even when the document was unchanged, so each git apply would have made every role look new. Unchanged heads now keep their stored revision (`policy_store`). Heads written by migration 0023 carry the migration date, so on a deployment upgraded recently results start once roles have been unchanged for a full window.
+- **Accepted discovered resources (ADR-0027) have no document head.** They count as new, so a rule that reaches one is not judged until that is improved.
+
 ## Open for review
 - Whether labels (`suggest: keep`) are enough, or a per-rule marker is worth the version-skew cost later.
 - Whether to read the audit trail in S3 or Athena for history beyond what `sessions` keeps, once retention exists.
 - Narrowing selectors and database lists from `session.start` data.
 - Kubernetes, search and web-app rules, which need per-request usage with a principal.
 - Whether the console should show the report next to the access reviews.
+- Deriving a document's age from the version history (the earliest version since which its digest is unchanged), and giving discovered resources their acceptance time, so results do not wait on a full window after an upgrade.

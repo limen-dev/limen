@@ -96,7 +96,10 @@ How it stays safe:
 - **Use is counted generously.** A session records the resource and the login, not the role that allowed it, so it counts as use of every rule that could have allowed it. Overlapping roles can only hide a suggestion.
 - **Not enough history is refused.** If Limen has been watching for less than the window, there is no answer, and the error says how long it can honour. For a quarterly job, use `--window-days 120` or more.
 - **Never suggested:** break-glass and requestable roles, shadow roles, roles labelled `suggest: keep`, roles changed inside the window, and rules that reach a resource created inside the window.
+- **Results appear once roles are old enough.** A role's age is the last time its document changed, so right after an upgrade, or a change, a role is left alone until it has been unchanged for the window. A resource found by discovery counts as new, so rules that reach one are not judged yet.
 - **Not assessed:** Kubernetes, search and web-app rules (their use is recorded per request, without a login). They are left as they are and listed.
+
+To keep a role out of it, give the role the label `suggest: keep` (for example a quarterly job's role). A label, not a new field, so older components still read the policy.
 
 Every call writes a `policy.suggest` audit event (window, policy version, counts, no names), and fails if audit is unavailable.
 

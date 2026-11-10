@@ -391,7 +391,7 @@ fn exempt(role: &RoleDoc, changed: Option<i64>, since: i64) -> Option<String> {
         return Some(format!("labelled {KEEP_LABEL}: {KEEP_VALUE}"));
     }
     if changed.is_some_and(|c| c > since) {
-        return Some("changed inside the window, so it has not had a full window of use".into());
+        return Some("changed inside the window (or its age is not known), so it has not had a full window of use".into());
     }
     None
 }
@@ -519,7 +519,7 @@ pub fn suggest(policy: &Policy, input: &SuggestInput<'_>) -> Result<Suggestions,
                     skip(
                         &mut out,
                         format!(
-                            "{} reaches `{}`, created inside the window",
+                            "{} reaches `{}`, created inside the window (or its age is not known)",
                             g.name, new.metadata.name
                         ),
                     );
