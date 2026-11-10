@@ -122,6 +122,12 @@ stack_setup() {
     esac
     profiles+=(--profile "$s")
   done
+  # Logins are checked against the IdP every 15 seconds (ADR-0047), with a
+  # dev-only key (32 bytes, base64; real deployments generate their own). Not in
+  # the scaled stack, whose Dex keeps its state in memory.
+  if ! $scale; then
+    env+=("LIMEN_IDP_TOKEN_KEY=$(printf 'dev-only-idp-token-key-32-bytes!' | base64)" LIMEN_IDP_CHECK_INTERVAL=15s)
+  fi
   mkdir -p "$STACK_STATE"
   export LIMEN_STACK_ENV="$STACK_STATE/stack.env"
   printf '%s\n' ${env[@]+"${env[@]}"} >"$LIMEN_STACK_ENV"

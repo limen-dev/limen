@@ -1,7 +1,6 @@
 //! `limen mcp`: a read-only Model Context Protocol server over stdio.
 //!
-//! This is spike 0 of ADR-0032: a useful tool surface with **no agent
-//! identity**. Every tool runs this same binary with `--json` as the person who
+//! A useful tool surface with **no agent identity**. Every tool runs this same binary with `--json` as the person who
 //! is logged in, so it grants nothing `limen` doesn't already grant. There is
 //! no tool that connects, requests, approves, locks or writes anything.
 //!

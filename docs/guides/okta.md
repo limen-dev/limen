@@ -62,7 +62,7 @@ LIMEN_BOOTSTRAP_ADMIN_GROUPS=<an okta group of your admins>   # so the first adm
 
 ## 6. Refresh tokens, for offboarding
 
-To end a person's sessions when you deactivate them in Okta (or remove them from a group), turn on the **Refresh Token** grant for the CLI's native app, keep the refresh token lifetime at least as long as `LIMEN_MAX_CERT_TTL`, and set `LIMEN_IDP_TOKEN_KEY` on the control plane. With the key set, the control plane makes the CLI ask for `offline_access`. See [Onboarding and offboarding](offboarding.md).
+To end a person's sessions when you deactivate them in Okta (or remove them from a group), turn on the **Refresh Token** grant for the CLI's native app, keep the refresh token lifetime at least as long as `LIMEN_MAX_CERT_TTL`, and set `LIMEN_IDP_TOKEN_KEY` on the control plane. With the key set, the control plane makes the CLI ask for `offline_access`. See [Onboarding and offboarding](offboarding.md). To have people exist in Limen before they sign in, and to restrict Limen to the people assigned to the app, see [Pre-provisioning with SCIM](scim.md).
 
 ## 7. Check it
 

@@ -166,21 +166,38 @@ impl Auth for AuthService {
     }
 }
 
-/// Refuse a locked person. A lock placed because the IdP deactivated them
-/// lifts itself when the IdP vouches for them again (they just signed in); an
-/// admin's lock never does (ADR-0047).
+/// Is this person blocked by a lock? A lock placed because the IdP deactivated
+/// them (its check, or SCIM) lifts itself when the IdP vouches for them again (they just signed in,
+/// by the CLI or the console); an admin's lock never does (ADR-0047).
+pub(crate) async fn lock_blocks(state: &AppState, username: &str) -> Result<bool, Status> {
+    let Some(lock) = crate::db::active_lock(&state.db, username)
+        .await
+        .map_err(|e| internal("checking locks", e))?
+    else {
+        return Ok(false);
+    };
+    if !crate::idp_check::placed_by_idp(&lock.locked_by) {
+        return Ok(true);
+    }
+    crate::services::ops::unlock_user(
+        state,
+        crate::services::ops::Actor {
+            username: &lock.locked_by,
+            via: "idp",
+        },
+        username,
+    )
+    .await?;
+    Ok(false)
+}
+
+/// Refuse a locked person (see [`lock_blocks`]).
 async fn refuse_if_locked(
     state: &AppState,
     addr: Option<IpAddr>,
     username: &str,
 ) -> Result<(), Status> {
-    let Some(lock) = crate::db::active_lock(&state.db, username)
-        .await
-        .map_err(|e| internal("checking locks", e))?
-    else {
-        return Ok(());
-    };
-    if lock.locked_by != crate::idp_check::LOCK_ACTOR {
+    if lock_blocks(state, username).await? {
         return Err(deny(
             state.audit.clone(),
             addr,
@@ -189,16 +206,7 @@ async fn refuse_if_locked(
         )
         .await);
     }
-    crate::services::ops::unlock_user(
-        state,
-        crate::services::ops::Actor {
-            username: crate::idp_check::LOCK_ACTOR,
-            via: "idp",
-        },
-        username,
-    )
-    .await
-    .map(|_| ())
+    Ok(())
 }
 
 /// Remember the person (ADR-0017).

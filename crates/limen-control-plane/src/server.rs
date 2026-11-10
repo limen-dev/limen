@@ -187,6 +187,7 @@ async fn record_latency(
 /// GOAWAY (idle ones close at once), and in-flight calls have until
 /// `started + crate::ship_budget(drain_timeout)` before they are cut off.
 /// `started` is when shutdown began; the first caller to touch it sets it.
+#[allow(clippy::too_many_lines)]
 pub async fn serve_api(
     state: AppState,
     listener: TcpListener,
@@ -260,6 +261,12 @@ pub async fn serve_api(
             .into_axum_router()
             .merge(crate::console::router(state.clone())),
         None => routes.into_axum_router(),
+    };
+    // SCIM from the IdP (ADR-0048): off without a token.
+    let routes = if state.config.scim_token.is_some() {
+        routes.merge(crate::scim::router(state.clone()))
+    } else {
+        routes
     }
     .layer(axum::middleware::from_fn(record_latency));
 

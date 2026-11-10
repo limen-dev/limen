@@ -211,7 +211,7 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
 
 Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/limen-dev/limen/milestone/21).
 
-Production hardening (a Helm chart, cloud deployment modules, a penetration test) comes after the next phase, and there is no tagged release yet. Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
+Production hardening (a Helm chart, cloud deployment modules, a penetration test) comes after the next phase, and the only tagged release so far is a release candidate (`v0.1.0-rc.1`). Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
 
 ## Roadmap
 

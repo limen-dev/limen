@@ -23,6 +23,7 @@ use tokio::sync::watch;
 use crate::config::IdpCheckFailure;
 use crate::db::Db;
 use crate::http_client::HttpClient;
+use crate::services::ops;
 use crate::state::AppState;
 
 /// Logins claimed per tick, so one slow IdP cannot hold a whole fleet's checks.
@@ -33,6 +34,13 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// when the IdP vouches for the person again at their next sign-in; any other
 /// lock (an admin's) is never touched.
 pub const LOCK_ACTOR: &str = "system:idp-check";
+
+/// Whether a lock was placed by the IdP (its check, or SCIM) rather than an
+/// admin. Such a lock lifts itself when the IdP vouches for the person again.
+#[must_use]
+pub fn placed_by_idp(locked_by: &str) -> bool {
+    locked_by == LOCK_ACTOR || locked_by == crate::scim::ACTOR
+}
 /// How often a replica looks for due logins.
 const TICK: Duration = Duration::from_secs(20);
 
@@ -138,7 +146,8 @@ pub async fn note_user(
     checked: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE users SET issuer = $2, source = 'idp_login',
+        "UPDATE users SET issuer = $2,
+                source = CASE WHEN source = 'scim' THEN 'scim' ELSE 'idp_login' END,
                 idp_status = CASE WHEN $3 THEN 'ok' ELSE 'unchecked' END,
                 idp_checked_at = CASE WHEN $3 THEN now() ELSE NULL END
          WHERE username = $1 AND actor_type = 'user'",
@@ -196,22 +205,58 @@ pub async fn forget_login(db: &Db, login_id: &str) -> Result<(), sqlx::Error> {
     forget(db, login_id).await
 }
 
-async fn mark_ok(
-    db: &Db,
-    t: &Tracked,
-    rotated: Option<&[u8]>,
-    next: Duration,
-) -> Result<(), sqlx::Error> {
+/// Remember the groups the IdP reports for a person now, for the console to
+/// compare with what they had at their last sign-in.
+async fn note_groups(db: &Db, username: &str, groups: &[String]) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET idp_groups = $2, idp_groups_at = now()
+         WHERE lower(username) = lower($1) AND actor_type = 'user'",
+    )
+    .bind(username)
+    .bind(groups)
+    .execute(db)
+    .await
+    .map(|_| ())
+}
+
+/// Access the person's current groups would give or take away at their next
+/// sign-in, against the roles they had at their last: `(gained, lost)`.
+#[must_use]
+pub fn pending_roles(
+    state: &AppState,
+    roles_now: &[String],
+    idp_groups: Option<&[String]>,
+) -> (Vec<String>, Vec<String>) {
+    let Some(groups) = idp_groups else {
+        return (Vec::new(), Vec::new());
+    };
+    let will_have = roles_of(state, groups);
+    let have: BTreeSet<String> = roles_now.iter().cloned().collect();
+    (
+        will_have.difference(&have).cloned().collect(),
+        have.difference(&will_have).cloned().collect(),
+    )
+}
+
+/// Keep the refresh token the IdP just handed out in place of the one used.
+async fn store_rotated(db: &Db, login_id: &str, sealed: &[u8]) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE idp_logins SET refresh_token = $2 WHERE login_id = $1")
+        .bind(login_id)
+        .bind(sealed)
+        .execute(db)
+        .await
+        .map(|_| ())
+}
+
+async fn mark_ok(db: &Db, t: &Tracked, next: Duration) -> Result<(), sqlx::Error> {
     // The groups stay those the login was issued with: a role gained since
     // and lost again was never this login's.
     sqlx::query(
         "UPDATE idp_logins SET last_ok_at = now(),
-                refresh_token = COALESCE($2, refresh_token),
-                next_check_at = now() + make_interval(secs => $3)
+                next_check_at = now() + make_interval(secs => $2)
          WHERE login_id = $1",
     )
     .bind(&t.login_id)
-    .bind(rotated)
     .bind(jittered_secs(next))
     .execute(db)
     .await?;
@@ -380,7 +425,7 @@ impl Idp {
 // ---- deciding -----------------------------------------------------------------
 
 /// The roles `groups` map to under the current policy.
-fn roles_of(state: &AppState, groups: &[String]) -> BTreeSet<String> {
+pub(crate) fn roles_of(state: &AppState, groups: &[String]) -> BTreeSet<String> {
     state
         .policy
         .current()
@@ -464,6 +509,99 @@ async fn end_login(state: &AppState, t: &Tracked, reason: &str, deactivated: boo
     tracing::warn!(user = %t.username, login = %t.login_id, reason, "login ended by the identity provider check");
 }
 
+/// End the stored logins of a person at once: all of them (`new_groups` is
+/// `None`), or those that rely on a role `new_groups` no longer give. For
+/// SCIM, which learns of a deactivation or a group change before any check
+/// would. Returns how many were ended. Logins that sent no refresh token are
+/// not tracked here; a lock covers those.
+pub async fn end_logins_of(
+    state: &AppState,
+    username: &str,
+    new_groups: Option<&[String]>,
+    reason: &str,
+) -> usize {
+    let rows = sqlx::query(
+        "SELECT login_id, username, refresh_token, groups, expires_at, last_ok_at
+         FROM idp_logins WHERE lower(username) = lower($1)",
+    )
+    .bind(username)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let mut ended = 0;
+    for r in &rows {
+        let Ok(t) = (|| -> Result<Tracked, sqlx::Error> {
+            Ok(Tracked {
+                login_id: r.try_get("login_id")?,
+                username: r.try_get("username")?,
+                refresh_token: r.try_get("refresh_token")?,
+                groups: r.try_get("groups")?,
+                expires_at: r.try_get("expires_at")?,
+                last_ok_at: r.try_get("last_ok_at")?,
+            })
+        })() else {
+            continue;
+        };
+        let why = match new_groups {
+            None => reason.to_owned(),
+            Some(now) => {
+                let gone = lost(&roles_of(state, &t.groups), &roles_of(state, now));
+                if gone.is_empty() {
+                    continue;
+                }
+                format!(
+                    "{reason}: no longer in a group granting {}",
+                    gone.join(", ")
+                )
+            }
+        };
+        end_login(state, &t, &why, false).await;
+        ended += 1;
+    }
+    ended
+}
+
+/// The IdP answered and vouches for the person, but its token has no groups
+/// claim, so a group removal cannot be seen. Not an outage: the login counts as
+/// confirmed (so `--idp-check-failure=closed` does not end it), the console says
+/// what is not being checked, and one alert is raised until the claim returns.
+async fn groups_missing(state: &AppState, t: &Tracked, why: &str) {
+    metrics::counter!("limen_idp_checks_total", "outcome" => "groups_missing").increment(1);
+    tracing::warn!(user = %t.username, why, "identity provider sent no groups claim");
+    let _ = sqlx::query(
+        "UPDATE idp_logins SET last_ok_at = now(),
+                next_check_at = now() + make_interval(secs => $2)
+         WHERE login_id = $1",
+    )
+    .bind(&t.login_id)
+    .bind(jittered_secs(state.config.idp_check_interval))
+    .execute(&state.db)
+    .await;
+    let seen: bool = sqlx::query_scalar(
+        "SELECT idp_status = 'groups_missing' FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(&t.username)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+    if !seen {
+        let _ = state
+            .audit
+            .emit(
+                EventKind::IdpCheckFailed,
+                Context {
+                    user: Some(t.username.clone()),
+                    session_id: None,
+                },
+                json!({ "login_id": t.login_id, "reason": why, "kind": "groups_missing" }),
+            )
+            .await;
+    }
+    let _ = set_status(&state.db, &t.username, "groups_missing").await;
+}
+
 async fn check_failed(state: &AppState, t: &Tracked, why: &str) {
     metrics::counter!("limen_idp_checks_total", "outcome" => "failed").increment(1);
     tracing::warn!(user = %t.username, why, "identity provider check failed");
@@ -530,6 +668,15 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
             id_token,
             refresh_token,
         } => {
+            // The IdP may have rotated the refresh token, which uses the old
+            // one up. Keep the new one before anything below can return, or a
+            // check that only fails on the ID token would strand the login
+            // with a token the IdP now calls claimed.
+            if let Some(next) = refresh_token.and_then(|r| seal(key, &t.login_id, r.expose()).ok())
+                && let Err(e) = store_rotated(&state.db, &t.login_id, &next).await
+            {
+                tracing::warn!(error = %e, "storing a rotated refresh token");
+            }
             if let Some(raw) = id_token {
                 match state.oidc.verify(raw.expose().clone(), None).await {
                     Ok(id) => {
@@ -543,7 +690,29 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                             .await;
                             return;
                         }
+                        // A token with no groups claim at all is not "no groups":
+                        // many IdPs leave the claim out when a filter matches none.
+                        // For a login that had groups, say so and keep it, rather
+                        // than ending it on a guess.
+                        if !state.config.idp_ignore_groups
+                            && !id.groups_reported
+                            && !t.groups.is_empty()
+                        {
+                            groups_missing(
+                                state,
+                                &t,
+                                "the refreshed ID token has no groups claim, so group removals are not being checked (deactivation still is)",
+                            )
+                            .await;
+                            return;
+                        }
                         if !state.config.idp_ignore_groups {
+                            if id.groups_reported
+                                && let Err(e) =
+                                    note_groups(&state.db, &t.username, &id.groups).await
+                            {
+                                tracing::warn!(error = %e, "recording the IdP's groups");
+                            }
                             let gone =
                                 lost(&roles_of(state, &t.groups), &roles_of(state, &id.groups));
                             if !gone.is_empty() {
@@ -566,19 +735,80 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                     }
                 }
             }
-            let rotated = refresh_token.and_then(|r| seal(key, &t.login_id, r.expose()).ok());
             metrics::counter!("limen_idp_checks_total", "outcome" => "ok").increment(1);
-            if let Err(e) = mark_ok(
-                &state.db,
-                &t,
-                rotated.as_deref(),
-                state.config.idp_check_interval,
-            )
-            .await
-            {
+            if let Err(e) = mark_ok(&state.db, &t, state.config.idp_check_interval).await {
                 tracing::warn!(error = %e, "recording a successful check");
             }
         }
+    }
+}
+
+/// How often the purge looks for people to delete.
+const PURGE_EVERY: Duration = Duration::from_secs(3600);
+
+/// Delete the record of people the IdP check disabled more than
+/// `--idp-purge-after` ago and who never came back (a sign-in the IdP vouches
+/// for lifts the lock, so a person still locked here has not). An admin's lock
+/// never qualifies. Returns how many were deleted.
+pub async fn purge_disabled(state: &AppState) -> usize {
+    let after = state.config.idp_purge_after;
+    if after.is_zero() {
+        return 0;
+    }
+    let due: Vec<String> = match sqlx::query_scalar(
+        "SELECT username FROM user_locks
+         WHERE released_at IS NULL AND locked_by = ANY($1)
+           AND locked_at < now() - make_interval(secs => $2)
+         ORDER BY locked_at LIMIT $3",
+    )
+    .bind([LOCK_ACTOR, crate::scim::ACTOR].map(str::to_owned).to_vec())
+    .bind(after.as_secs_f64())
+    .bind(BATCH)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(error = %e, "looking for disabled people to purge failed");
+            return 0;
+        }
+    };
+    let mut deleted = 0;
+    for username in due {
+        let reason = format!(
+            "disabled by the identity provider (check or SCIM) for more than {}",
+            humantime_days(after)
+        );
+        match ops::delete_disabled_user(
+            state,
+            ops::Actor {
+                username: LOCK_ACTOR,
+                via: "idp",
+            },
+            &username,
+            &reason,
+        )
+        .await
+        {
+            Ok(Ok(())) => deleted += 1,
+            Ok(Err(why)) => tracing::debug!(user = %username, ?why, "not purged"),
+            Err(e) => {
+                tracing::warn!(user = %username, error = %e, "purging a disabled person failed");
+            }
+        }
+    }
+    if deleted > 0 {
+        metrics::counter!("limen_idp_purged_total").increment(deleted as u64);
+    }
+    deleted
+}
+
+fn humantime_days(d: Duration) -> String {
+    let days = d.as_secs() / 86_400;
+    if days > 0 {
+        format!("{days} days")
+    } else {
+        format!("{}s", d.as_secs())
     }
 }
 
@@ -594,10 +824,15 @@ pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
         return;
     };
     let mut tick = tokio::time::interval(interval.clamp(Duration::from_millis(200), TICK));
+    let mut last_purge: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
             _ = tick.tick() => {}
             _ = shutdown.changed() => return,
+        }
+        if last_purge.is_none_or(|t| t.elapsed() >= PURGE_EVERY) {
+            last_purge = Some(std::time::Instant::now());
+            purge_disabled(&state).await;
         }
         let _ = sqlx::query("DELETE FROM idp_logins WHERE expires_at < now() - interval '1 hour'")
             .execute(&state.db)

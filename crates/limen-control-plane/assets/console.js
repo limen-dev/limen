@@ -199,3 +199,64 @@ document.addEventListener('DOMContentLoaded', function () {
   var nav = cur && cur.parentElement;
   if (nav && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, cur.offsetLeft - (nav.clientWidth - cur.offsetWidth) / 2);
 });
+
+// Typeahead: <div data-typeahead="/url"> around an <input> and an empty <ul class="ta-list">.
+// As the box is typed in (or focused) the URL is asked, with ?q=, for [{name, kind, href}] and the
+// answers are listed; arrows and Enter choose, a click follows the link. Without script the form
+// submits and the server does the matching.
+(function () {
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[data-typeahead]').forEach(function (root) {
+      var src = root.getAttribute('data-typeahead');
+      var input = root.querySelector('input');
+      var list = root.querySelector('.ta-list');
+      if (!src || !input || !list) return;
+      var items = [], active = -1, timer = null, seq = 0;
+      function render() {
+        list.textContent = '';
+        if (!items.length) { list.hidden = true; return; }
+        items.forEach(function (it, i) {
+          var li = document.createElement('li');
+          li.setAttribute('role', 'option');
+          if (i === active) li.className = 'on';
+          var a = document.createElement('a');
+          a.href = it.href;
+          var n = document.createElement('span');
+          n.textContent = it.name;
+          var k = document.createElement('span');
+          k.className = 'ta-kind';
+          k.textContent = it.kind;
+          a.appendChild(n);
+          a.appendChild(k);
+          li.appendChild(a);
+          list.appendChild(li);
+        });
+        list.hidden = false;
+      }
+      function ask() {
+        var mine = ++seq;
+        fetch(src + '?q=' + encodeURIComponent(input.value), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (d) { if (mine !== seq) return; items = Array.isArray(d) ? d : []; active = -1; render(); })
+          .catch(function () {});
+      }
+      input.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(ask, 100); });
+      input.addEventListener('focus', ask);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          if (!items.length) return;
+          e.preventDefault();
+          active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length + 1) % (items.length + 1);
+          if (active === items.length) active = -1;
+          render();
+        } else if (e.key === 'Enter' && active >= 0) {
+          e.preventDefault();
+          window.location.href = items[active].href;
+        } else if (e.key === 'Escape') {
+          list.hidden = true;
+        }
+      });
+      document.addEventListener('click', function (e) { if (!root.contains(e.target)) list.hidden = true; });
+    });
+  });
+})();

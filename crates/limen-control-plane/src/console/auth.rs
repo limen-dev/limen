@@ -199,7 +199,7 @@ async fn finish_login(
     addr: Option<std::net::IpAddr>,
     identity: crate::oidc::VerifiedIdentity,
 ) -> Response {
-    match crate::db::is_locked(&state.db, &identity.username).await {
+    match crate::services::auth::lock_blocks(state, &identity.username).await {
         Ok(false) => {}
         Ok(true) => {
             return deny(

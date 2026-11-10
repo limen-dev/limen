@@ -136,7 +136,8 @@ async fn losing_a_group_ends_the_login_but_does_not_lock() {
         .await
         .expect("login");
 
-    h.idp.set_groups(ADMIN, &[]);
+    // Still in some group, just not the one that gave the role.
+    h.idp.set_groups(ADMIN, &["interns"]);
 
     eventually("the login to be ended", || async {
         !alive(&h, &proxy, &cert).await
@@ -158,6 +159,75 @@ async fn losing_a_group_ends_the_login_but_does_not_lock() {
 }
 
 #[tokio::test]
+async fn a_token_without_the_groups_claim_is_not_read_as_no_groups() {
+    let Some(h) = start(&[]).await else { return };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+
+    // The mock leaves the claim out for an empty list, as an IdP with a
+    // group filter does for someone in none of the filtered groups.
+    h.idp.set_groups(ADMIN, &[]);
+
+    eventually("the alert to show", || async {
+        status(&h).await == "groups_missing"
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(alive(&h, &proxy, &cert).await, "the login is kept");
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    let alerts = events(&h, EventKind::IdpCheckFailed).await;
+    assert_eq!(alerts.len(), 1, "one alert, not one per check");
+    assert!(
+        alerts[0].data["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("no groups claim"))
+    );
+
+    // Deactivation is still caught.
+    h.idp.deactivate(ADMIN);
+    eventually("the login to be ended", || async {
+        !alive(&h, &proxy, &cert).await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_missing_groups_claim_is_not_an_outage_even_when_failing_closed() {
+    let Some(h) = start(&["--idp-check-failure=closed", "--idp-check-grace=2s"]).await else {
+        return;
+    };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+    h.idp.set_groups(ADMIN, &[]);
+    eventually("the alert to show", || async {
+        status(&h).await == "groups_missing"
+    })
+    .await;
+    // Well past the grace period: the IdP answered every time, so the login stays.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(alive(&h, &proxy, &cert).await);
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    let alerts = events(&h, EventKind::IdpCheckFailed).await;
+    assert_eq!(alerts.len(), 1);
+    // Nothing was recorded as "the IdP reports no groups".
+    let seen: Option<Vec<String>> =
+        sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = $1")
+            .bind(ADMIN)
+            .fetch_one(&h.state.db)
+            .await
+            .expect("row");
+    assert_eq!(seen, None);
+}
+
+#[tokio::test]
 async fn a_still_valid_person_keeps_their_login_across_checks() {
     let Some(h) = start(&[]).await else { return };
     let (_, proxy) = h.enroll_proxy().await;
@@ -171,6 +241,42 @@ async fn a_still_valid_person_keeps_their_login_across_checks() {
     assert!(alive(&h, &proxy, &cert).await);
     assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
     assert_eq!(events(&h, EventKind::IdpCheckFailed).await.len(), 0);
+}
+
+#[tokio::test]
+async fn a_refreshed_id_token_that_fails_keeps_the_rotated_refresh_token() {
+    let Some(h) = start(&[]).await else { return };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+
+    // The IdP rotates the token on every refresh, but its ID token does not
+    // verify (a signing key the control plane has not seen yet).
+    h.idp.set_unverifiable_refreshed_tokens(true);
+    eventually("the failure to show", || async {
+        status(&h).await == "check_failed"
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    h.idp.set_unverifiable_refreshed_tokens(false);
+
+    // The next check must use the rotated token: the old one is spent, and
+    // using it would read as a deactivation.
+    eventually("the status to recover", || async {
+        status(&h).await == "ok"
+    })
+    .await;
+    assert!(alive(&h, &proxy, &cert).await);
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, ADMIN)
+            .await
+            .expect("lock check"),
+        "nobody is locked for an ID token that would not verify"
+    );
 }
 
 #[tokio::test]
@@ -348,6 +454,50 @@ async fn a_group_gained_and_lost_after_login_does_not_end_the_login() {
 
 const TWO_ROLES: &str = "kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n---\nkind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [postgres] }\n      db: { roles: [limen_read] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [dev] }\n  - { idp_group: sre, roles: [ops] }\n";
 
+/// A group gained after sign-in is seen at the next check and shown, but roles
+/// stay those of the login: nothing changes until the person signs in again.
+#[tokio::test]
+async fn a_gained_group_is_shown_but_not_applied_before_the_next_sign_in() {
+    let Some(h) = start(&[]).await else { return };
+    h.set_policy(&[("m.yaml", TWO_ROLES)]);
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["developers"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["developers"], &refresh)
+        .await
+        .expect("login");
+
+    h.idp.set_groups(ADMIN, &["developers", "sre"]);
+    eventually("the new group to be seen", || async {
+        let seen: Option<Vec<String>> =
+            sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = $1")
+                .bind(ADMIN)
+                .fetch_one(&h.state.db)
+                .await
+                .expect("row");
+        seen.is_some_and(|g| g.iter().any(|x| x == "sre"))
+    })
+    .await;
+    let (roles, groups): (Vec<String>, Vec<String>) =
+        sqlx::query_as("SELECT roles, groups FROM users WHERE username = $1")
+            .bind(ADMIN)
+            .fetch_one(&h.state.db)
+            .await
+            .expect("row");
+    assert_eq!(roles, ["dev"], "roles are those of the sign-in");
+    assert_eq!(groups, ["developers"]);
+    let seen = vec!["developers".to_owned(), "sre".to_owned()];
+    let (gained, lost) =
+        limen_control_plane::idp_check::pending_roles(&h.state, &roles, Some(&seen));
+    assert_eq!(gained, ["ops"]);
+    assert_eq!(lost.len(), 0);
+    assert!(alive(&h, &proxy, &cert).await, "the login is not disturbed");
+
+    // At the next sign-in it applies.
+    let (resp, _) = h.login(ADMIN, &["developers", "sre"]).await.expect("login");
+    assert_eq!(resp.roles, ["dev", "ops"]);
+}
+
 /// Onboarding is the IdP's: nobody is created in Limen, and the roles a person
 /// gets follow the groups the IdP puts in their ID token.
 #[tokio::test]
@@ -386,4 +536,171 @@ async fn a_person_inherits_the_roles_of_their_idp_groups_without_any_setup() {
         .await
         .expect_err("no mapped group");
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
+}
+
+// ---- purge and delete (ADR-0047) -------------------------------------------------
+
+async fn person(h: &Harness, name: &str, locked_by: Option<&str>, days: i32) {
+    sqlx::query("INSERT INTO users (username, subject) VALUES ($1, $1)")
+        .bind(name)
+        .execute(&h.state.db)
+        .await
+        .expect("user");
+    sqlx::query("INSERT INTO idp_logins (login_id, username, refresh_token, groups, expires_at, next_check_at) VALUES ($1, $2, '\\x00', '{}', now() + interval '1 day', now() + interval '1 day')")
+        .bind(format!("login-{name}"))
+        .bind(name)
+        .execute(&h.state.db)
+        .await
+        .expect("stored token");
+    if let Some(by) = locked_by {
+        limen_control_plane::db::lock_user(&h.state.db, name, "gone", by)
+            .await
+            .expect("lock");
+        sqlx::query("UPDATE user_locks SET locked_at = now() - make_interval(days => $2) WHERE username = $1")
+            .bind(name)
+            .bind(days)
+            .execute(&h.state.db)
+            .await
+            .expect("backdate");
+    }
+}
+
+async fn exists(h: &Harness, name: &str) -> bool {
+    sqlx::query_scalar("SELECT count(*) > 0 FROM users WHERE username = $1")
+        .bind(name)
+        .fetch_one(&h.state.db)
+        .await
+        .expect("exists")
+}
+
+#[tokio::test]
+async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
+    // The window is the default, 90 days. The IdP check runs, but with no
+    // logins to check it never touches these.
+    let Some(h) = start(&[]).await else { return };
+    person(&h, "old.idp@example.com", Some("system:idp-check"), 91).await;
+    person(&h, "old.scim@example.com", Some("system:scim"), 91).await;
+    person(&h, "recent.idp@example.com", Some("system:idp-check"), 89).await;
+    person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
+    person(&h, "enabled@example.com", None, 0).await;
+
+    // The background job runs the same purge, so it may get there first: what
+    // matters is who is left, not which of the two did the deleting.
+    let _ = limen_control_plane::idp_check::purge_disabled(&h.state).await;
+    assert!(!exists(&h, "old.idp@example.com").await);
+    assert!(
+        !exists(&h, "old.scim@example.com").await,
+        "SCIM never sends a delete for a user, so its deactivations are purged too"
+    );
+    assert!(exists(&h, "recent.idp@example.com").await, "89 days: kept");
+    assert!(
+        exists(&h, "old.admin@example.com").await,
+        "an admin's lock never purges"
+    );
+    assert!(
+        exists(&h, "enabled@example.com").await,
+        "enabled people are never purged"
+    );
+
+    // Its stored token went too; the IdP lock is released (the IdP decides if they return).
+    let tokens: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM idp_logins WHERE username = 'old.idp@example.com'",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .expect("count");
+    assert_eq!(tokens, 0);
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, "old.idp@example.com")
+            .await
+            .expect("lock check")
+    );
+    let deletes = events(&h, EventKind::UserDelete).await;
+    assert_eq!(deletes.len(), 2, "each deletion is audited");
+    let one = deletes
+        .iter()
+        .find(|e| e.data["target_user"] == "old.idp@example.com")
+        .expect("the IdP check's deletion");
+    assert_eq!(one.data["disabled_by"], "system:idp-check");
+    let deletes = [one.clone()];
+    assert_eq!(deletes[0].data["via"], "idp");
+}
+
+#[tokio::test]
+async fn the_purge_can_be_turned_off() {
+    let Some(h) = start(&["--idp-purge-after=0s"]).await else {
+        return;
+    };
+    person(&h, "old.idp@example.com", Some("system:idp-check"), 1000).await;
+    assert_eq!(
+        limen_control_plane::idp_check::purge_disabled(&h.state).await,
+        0
+    );
+    assert!(exists(&h, "old.idp@example.com").await);
+}
+
+#[tokio::test]
+async fn only_a_disabled_person_can_be_deleted_by_hand() {
+    use limen_control_plane::services::ops::{self, Actor, DeleteRefused};
+    let Some(h) = start(&[]).await else { return };
+    person(&h, "live@example.com", None, 0).await;
+    person(&h, "by.admin@example.com", Some("admin@example.com"), 1).await;
+    person(&h, "by.idp@example.com", Some("system:idp-check"), 1).await;
+    let me = Actor {
+        username: ADMIN,
+        via: "console",
+    };
+
+    let r = ops::delete_disabled_user(&h.state, me, "live@example.com", "tidy")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::NotDisabled));
+    assert!(
+        exists(&h, "live@example.com").await,
+        "an enabled person is untouched"
+    );
+    let r = ops::delete_disabled_user(&h.state, me, "bot:deploy", "tidy")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::Bot));
+    let e = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "")
+        .await
+        .expect_err("a reason is required");
+    assert_eq!(e.code(), tonic::Code::InvalidArgument);
+
+    // An admin's lock survives the deletion, so a return sign-in is still refused.
+    let r = ops::delete_disabled_user(&h.state, me, "by.admin@example.com", "left the company")
+        .await
+        .expect("ok");
+    assert_eq!(r, Ok(()));
+    assert!(!exists(&h, "by.admin@example.com").await);
+    assert!(
+        limen_control_plane::db::is_locked(&h.state.db, "by.admin@example.com")
+            .await
+            .expect("lock check"),
+        "the admin's decision stands"
+    );
+    // The IdP's lock does not: the IdP decides if they come back.
+    let r = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "left the company")
+        .await
+        .expect("ok");
+    assert_eq!(r, Ok(()));
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, "by.idp@example.com")
+            .await
+            .expect("lock check")
+    );
+    // Deleting twice finds nothing disabled.
+    let r = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "again")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::NotDisabled));
+
+    let deletes = events(&h, EventKind::UserDelete).await;
+    assert_eq!(deletes.len(), 2);
+    assert!(
+        deletes
+            .iter()
+            .all(|e| e.data["reason"] == "left the company")
+    );
 }

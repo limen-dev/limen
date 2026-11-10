@@ -18,7 +18,7 @@ use crate::sinks::{DatadogSink, OcsfSink, S3Sink, SignerSlot};
 pub const JSONL: &str = "jsonl";
 pub const S3: &str = "s3";
 pub const DATADOG: &str = "datadog";
-/// The OCSF projection for SIEMs (ADR-0048).
+/// The OCSF projection for SIEMs (ADR-0049).
 pub const OCSF: &str = "ocsf";
 /// Fills the `sessions` table the web console reads.
 pub const CONSOLE: &str = "console";
@@ -185,7 +185,7 @@ pub struct Pipeline {
 /// consumer is as far behind or further) while the spool holds more than `max_lag`
 /// bytes. Then, and only then, a failing OCSF send skips its batch: a
 /// projection must not be able to fill the spool and make audit fail closed
-/// (ADR-0048).
+/// (ADR-0049).
 fn ocsf_may_skip(spool: &Spool, names: &[String], max_lag: u64) -> bool {
     let mine = spool.pending(OCSF);
     // Only the sinks that hold a record durably matter for who is slowest, but
@@ -229,7 +229,7 @@ pub fn consumer_names(config: &Config) -> Vec<&'static str> {
     consumers
 }
 
-/// The OCSF sink, if a bucket is configured (ADR-0048). Kept out of
+/// The OCSF sink, if a bucket is configured (ADR-0049). Kept out of
 /// [`Pipeline::open`] so that function's future stays small.
 async fn open_ocsf(config: &Config) -> Option<Arc<OcsfSink>> {
     let bucket = config.audit_ocsf_s3_bucket.as_ref()?;
@@ -312,7 +312,7 @@ impl Pipeline {
         };
         let ocsf = Box::pin(open_ocsf(config)).await;
         // The console store and the OCSF projection are not an audit trail: the
-        // OCSF sink may skip a batch (ADR-0048), so something durable must hold it.
+        // OCSF sink may skip a batch (ADR-0049), so something durable must hold it.
         if !consumers.iter().any(|c| matches!(*c, JSONL | S3 | DATADOG)) {
             anyhow::bail!(
                 "no audit sink is configured: set --audit-file, an S3 bucket, or Datadog"

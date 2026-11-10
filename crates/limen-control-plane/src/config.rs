@@ -195,10 +195,22 @@ pub struct Config {
     #[arg(long, env = "LIMEN_IDP_CHECK_INTERVAL", value_parser = parse_duration, default_value = "5m")]
     pub idp_check_interval: Duration,
 
+    /// Delete the record of a person the IdP check disabled once they have
+    /// stayed disabled this long (ADR-0047). Their sessions, recordings and
+    /// audit history stay. An admin's lock never purges. `0s` turns it off.
+    /// Runs with the IdP check, so it needs `--idp-token-key` too.
+    #[arg(long, env = "LIMEN_IDP_PURGE_AFTER", value_parser = parse_duration_or_zero, default_value = "90d")]
+    pub idp_purge_after: Duration,
+
+    /// Bearer token the IdP's SCIM client presents to `/scim/v2` (ADR-0048).
+    /// At least 32 characters. Without it the SCIM endpoint is off.
+    #[arg(long, env = "LIMEN_SCIM_TOKEN", value_parser = parse_secret)]
+    pub scim_token: Option<Secret<String>>,
+
     /// Do not end logins when a refreshed ID token no longer grants a role.
-    /// For an IdP that leaves groups out of refreshed tokens. IdPs also omit
-    /// the claim for a person with no groups, so by default an absent claim
-    /// counts as no groups (ADR-0047).
+    /// For an IdP that leaves groups out of refreshed tokens. A token with no
+    /// groups claim at all is never read as "no groups" either way: the login
+    /// is kept and an alert raised (ADR-0047).
     #[arg(long, env = "LIMEN_IDP_IGNORE_GROUPS")]
     pub idp_ignore_groups: bool,
 
@@ -302,7 +314,7 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
     pub audit_s3_flush: Duration,
 
-    /// Write an OCSF projection of the audit trail (ADR-0048) to this bucket
+    /// Write an OCSF projection of the audit trail (ADR-0049) to this bucket
     /// for SIEMs. It must not be the audit bucket: a SIEM reader gets this
     /// bucket and nothing of the audit bucket, which holds recordings. Uses
     /// the audit bucket's path-style setting.
@@ -628,7 +640,7 @@ impl Config {
     }
 
     /// Refuses OCSF settings that would weaken the audit bucket's protection
-    /// or could never take effect (ADR-0048).
+    /// or could never take effect (ADR-0049).
     pub fn check_ocsf(&self) -> Result<(), String> {
         let Some(bucket) = &self.audit_ocsf_s3_bucket else {
             if self.audit_ocsf_s3_kms_key.is_some()
@@ -695,6 +707,16 @@ impl Config {
             ));
         }
         Ok(())
+    }
+
+    /// Refuses a SCIM token too short to be unguessable.
+    pub fn check_scim_token(&self) -> Result<(), String> {
+        match &self.scim_token {
+            Some(t) if t.expose().trim().len() < 32 => {
+                Err("--scim-token must be at least 32 characters".to_owned())
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The key for sealed refresh tokens, if configured. Refuses one that is

@@ -35,9 +35,11 @@ pass "Dex is up at $LIMEN_TEST_DEX_REFRESH_URL"
 
 step "Offboarding and onboarding against Dex"
 cd "$root"
-out="$(cargo test -p limen-control-plane --test dex_offboarding --test idp_offboarding 2>&1)" || { echo "$out"; fail "tests failed"; }
-echo "$out" | grep -E '^test |test result'
-echo "$out" | grep -q '^SKIPPED' && fail "a test was skipped"
+# --nocapture: libtest swallows a passing test's stderr, which is where a
+# skipped test says so.
+out="$(cargo test -p limen-control-plane --test dex_offboarding --test idp_offboarding -- --nocapture 2>&1)" || { echo "$out"; fail "tests failed"; }
+grep -E '^test |test result' <<<"$out"
+if grep -q 'SKIPPED' <<<"$out"; then fail "a test was skipped"; fi
 pass "groups became roles; a revoked session ended the login and locked the person; signing in lifted the lock"
 
 if [ "${1:-}" = "--down" ]; then "${stack[@]}" down -v >/dev/null; fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OCSF audit export demo (ADR-0048): the control plane writes an OCSF copy of
+# OCSF audit export demo (ADR-0049): the control plane writes an OCSF copy of
 # the audit trail to a bucket of its own. Every event arrives with its native
 # id, the audit bucket still verifies, a SIEM bucket that is down keeps its
 # events and gets them when it returns, and one that holds the spool back is

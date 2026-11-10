@@ -20,7 +20,7 @@ Each key decision has its own ADR in [`docs/adr/`](adr/). Threats and mitigation
 - Workers connect outbound only. No inbound ports into private networks.
 - High availability for the control plane and proxy, with defined behavior when the control plane is down.
 
-**Non-goals (v1):** RDP, multi-tenancy, SAML, SCIM, and multi-region.
+**Non-goals (v1):** RDP, multi-tenancy, SAML, and multi-region. (SCIM: only the provisioning endpoint of ADR-0048, built for Okta; no directory sync.)
 
 **Design target:** about 500 users, 5,000 resources, and 500 concurrent sessions. The larger-scale path is noted where it matters.
 
@@ -304,7 +304,7 @@ emitter ─► local spool (fsync) ─► CP ingest (ack after CP spool fsync) �
   - each batch has a manifest at `manifests/<writer>/<seq>.json`, signed by the control plane's certificate key (`Purpose::AuditManifest`) and chained by the previous manifest's SHA-256. The chain head is recovered from S3 on restart. `limen audit verify` (shipped in the control plane image) checks signatures, numbering, chain, and batch hashes. The planned `limen admin audit verify` is not built yet.
 
   Parquet is deferred. JSONL with the Glue JSON SerDe and partition projection is enough at the target scale.
-- **OCSF export (ADR-0048, [guide](guides/audit-ocsf.md)):** an optional spool consumer, `ocsf`, writes each event as an OCSF 1.9.0 record (gzipped NDJSON) to a bucket and KMS key of its own, so a SIEM reader never reaches the audit bucket's recordings. The mapping is an exhaustive `match` on `EventKind`; every record carries the native `event_id` as `metadata.uid` and the producer position. It is a projection: the S3 chain stays the source of truth. If it fails while it is the slowest sink and the spool is over `--audit-ocsf-max-lag-bytes`, it skips and counts rather than hold the spool back until audit fails closed.
+- **OCSF export (ADR-0049, [guide](guides/audit-ocsf.md)):** an optional spool consumer, `ocsf`, writes each event as an OCSF 1.9.0 record (gzipped NDJSON) to a bucket and KMS key of its own, so a SIEM reader never reaches the audit bucket's recordings. The mapping is an exhaustive `match` on `EventKind`; every record carries the native `event_id` as `metadata.uid` and the producer position. It is a projection: the S3 chain stays the source of truth. If it fails while it is the slowest sink and the spool is over `--audit-ocsf-max-lag-bytes`, it skips and counts rather than hold the spool back until audit fails closed.
 - **Datadog:**
   - audit events go to the Logs HTTP intake (`service:limen`, `source:limen`, tags `env`, `version`, `event_kind`, `component`)
   - service metrics go over DogStatsD to the agent sidecar
@@ -407,7 +407,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
   - Phase 11: Amazon MQ, MSK (the `AWS_MSK_IAM` payload, the AWS bundle), MSK Serverless. Not built: Amazon MQ IAM sign-in, MSK IAM re-authentication, Kafka transactions and administration APIs, flexible API versions, AMQP 1.0.
   - Phase 13: discovery runs in CI against the Moto AWS emulator (`discovery/emulator_tests.rs`): signed EC2, RDS/Aurora, Redshift and ElastiCache calls, `AssumeRole`, tag filtering, and the describe-only role being enough for those scans. That is emulator-tested, not verified. Moto is lenient about input and has no real engines, and EKS signing and permissions aren't covered (Moto refuses even botocore's signed EKS requests). Still open on real AWS: the describe response shapes, `GetConsoleOutput` host keys, `AssumeRole` across accounts, ElastiCache and Redshift tags, the Slack and webhook notifiers against real endpoints, and the audit-search history link to Athena. Not built: automatic approval from context, a signed Slack approval button, a PDF evidence pack, ElastiCache cluster mode in discovery, watching protocols other than SSH.
   - Offboarding (ADR-0047, #111): refresh token issuance, `invalid_grant` for a deactivated user, and groups in refreshed ID tokens are tested against Dex (PostgreSQL storage; `demos/demo-idp-offboarding.sh`) and a stand-in IdP; verify against Okta with #64.
-  - OCSF export (ADR-0048): tested against SeaweedFS only. No SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema.
+  - OCSF export (ADR-0049): tested against SeaweedFS only. No SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema.
   - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - **Deferred to Phase 15:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
 - **Deferred and not yet scheduled in §13:**

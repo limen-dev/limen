@@ -558,6 +558,31 @@ pub struct UserView {
     pub idp: String,
     /// `ok`, `warn`, `bad` or empty: the pill's tone.
     pub idp_tone: &'static str,
+    /// Access the IdP's groups give or take away at the next sign-in, e.g.
+    /// "+ops −dba"; empty when nothing is pending.
+    pub pending: String,
+}
+
+impl UserView {
+    /// Who disabled the person: the IdP check, or an admin. Empty when enabled.
+    pub fn disabled_by(&self) -> &'static str {
+        if !self.locked {
+            ""
+        } else if crate::idp_check::placed_by_idp(&self.locked_by) {
+            "the IdP"
+        } else {
+            "an admin"
+        }
+    }
+}
+
+/// A sign-in time, or "never" for a person SCIM provisioned who has not signed in.
+fn signed_in_text(logins: i64, at: OffsetDateTime) -> String {
+    if logins == 0 {
+        "never".to_owned()
+    } else {
+        time_text(Some(at))
+    }
 }
 
 /// How the IdP check stands, in words and as a tone (ADR-0047).
@@ -573,6 +598,10 @@ pub fn idp_check_text(
         "ok" => (format!("checked {}", time_text(checked)), "ok"),
         "check_failed" => (
             format!("IdP not reachable since {}", time_text(checked)),
+            "warn",
+        ),
+        "groups_missing" => (
+            "IdP sent no groups: group removals not checked".into(),
             "warn",
         ),
         "offboarded" => (format!("ended by the IdP {}", time_text(checked)), "bad"),
@@ -601,8 +630,8 @@ impl From<&UserRow> for UserView {
                 .chars()
                 .next()
                 .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
-            first_login: time_text(Some(u.first_login_at)),
-            last_login: time_text(Some(u.last_login_at)),
+            first_login: signed_in_text(u.login_count, u.first_login_at),
+            last_login: signed_in_text(u.login_count, u.last_login_at),
             logins: u.login_count,
             locked: u.lock_reason.is_some(),
             lock_reason: u.lock_reason.clone().unwrap_or_default(),
@@ -611,14 +640,15 @@ impl From<&UserRow> for UserView {
             is_bot: u.actor_type == "bot",
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
-            source: if u.source == "bot" {
-                "CI bot".to_owned()
-            } else {
-                "IdP sign-in".to_owned()
+            source: match u.source.as_str() {
+                "bot" => "CI bot".to_owned(),
+                "scim" => "SCIM".to_owned(),
+                _ => "IdP sign-in".to_owned(),
             },
             issuer: issuer_host(u.issuer.as_deref()),
             idp: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").0,
             idp_tone: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").1,
+            pending: String::new(),
         }
     }
 }
@@ -862,8 +892,8 @@ pub struct UsersPage {
     pub query: String,
     pub orphan_locks: Vec<UserView>,
     pub filter: UserFilter,
-    /// The page without its filters, keeping the search text.
-    pub clear_href: String,
+    /// The applied search and filters, each with the link that removes it.
+    pub chips: Vec<FilterChip>,
     /// Every group and role among the people listed, for the filter menus.
     pub groups: Vec<String>,
     pub roles: Vec<String>,
@@ -877,18 +907,32 @@ pub struct UserFilter {
     pub role: String,
     /// `ok`, `unchecked`, `check_failed`, `offboarded` or `locked`.
     pub status: String,
+    /// `enabled`, `disabled`, `disabled_idp` or `disabled_admin`. A disabled
+    /// person is a locked one; the lock's author says who disabled them.
+    pub state: String,
 }
 
 impl UserFilter {
+    /// Whether the state filter admits a person: `locked_by` is the author of
+    /// their lock, if they are locked.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.group.is_empty() && self.role.is_empty() && self.status.is_empty()
+    pub fn admits_state(&self, locked_by: Option<&str>) -> bool {
+        let idp = locked_by.is_some_and(crate::idp_check::placed_by_idp);
+        match self.state.as_str() {
+            "" => true,
+            "enabled" => locked_by.is_none(),
+            "disabled" => locked_by.is_some(),
+            "disabled_idp" => idp,
+            "disabled_admin" => locked_by.is_some() && !idp,
+            _ => false,
+        }
     }
 
     /// Whether a person passes every filter that is set.
     #[must_use]
     pub fn admits(&self, u: &UserRow, locked: bool) -> bool {
-        (self.group.is_empty() || u.groups.contains(&self.group))
+        self.admits_state(locked.then(|| u.locked_by.as_deref().unwrap_or("")))
+            && (self.group.is_empty() || u.groups.contains(&self.group))
             && (self.role.is_empty() || u.roles.contains(&self.role))
             && match self.status.as_str() {
                 "" => true,
@@ -1146,11 +1190,12 @@ pub struct DryRun {
     pub warnings: Vec<String>,
     /// `(passed, line)` for each `policy_test` case in the pasted policy.
     pub tests: Vec<(bool, String)>,
-    pub error: Option<String>,
     pub no_changes: bool,
     pub added: Vec<String>,
     pub changed: Vec<String>,
     pub removed: Vec<String>,
+    /// Saving it would wait for another admin's approval.
+    pub waits: bool,
 }
 
 #[derive(Template)]
@@ -1163,12 +1208,36 @@ pub struct PolicyPage {
     pub created: String,
     pub groups: Vec<PolicyGroup>,
     pub query: String,
-    pub pasted: String,
-    pub result: Option<DryRun>,
-    pub simulation: Option<Simulation>,
     pub draft: String,
+    /// "Preview impact" on a form: which document (kind and name empty for a
+    /// new one), the YAML as typed, and what saving it would do.
+    pub preview: Option<DryRun>,
+    pub preview_kind: String,
+    pub preview_name: String,
+    pub preview_yaml: String,
     pub error: Option<String>,
     pub notice: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "simulator.html")]
+pub struct SimulatorPage {
+    pub chrome: Chrome,
+    pub simulation: Option<Simulation>,
+    /// Clickable choices; a click runs the simulation.
+    pub groups: Vec<Pick>,
+    pub bots: Vec<Pick>,
+    pub people: Vec<Pick>,
+    /// People beyond those shown as choices: found with the search box.
+    pub more_people: usize,
+    pub q: String,
+}
+
+/// One choice: where it leads, and whether it is part of the current pick.
+pub struct Pick {
+    pub name: String,
+    pub href: String,
+    pub on: bool,
 }
 
 pub struct RoleAccess {
@@ -1400,6 +1469,7 @@ mod user_filter_tests {
             issuer: None,
             idp_status: status.into(),
             idp_checked_at: None,
+            idp_groups: None,
         }
     }
 
@@ -1411,6 +1481,7 @@ mod user_filter_tests {
             group: g.into(),
             role: r.into(),
             status: s.into(),
+            ..UserFilter::default()
         };
         assert!(f("platform", "", "").admits(&u, false));
         assert!(!f("other", "", "").admits(&u, false));
@@ -1418,6 +1489,28 @@ mod user_filter_tests {
         assert!(!f("platform", "admin", "ok").admits(&u, false));
         assert!(!f("", "", "check_failed").admits(&u, false));
         assert!(f("", "", "locked").admits(&u, true));
+        let state = |s: &str, by: Option<&str>| {
+            let mut u = person(&[], &[], "ok");
+            u.lock_reason = by.map(|_| "why".to_owned());
+            u.locked_by = by.map(str::to_owned);
+            UserFilter {
+                state: s.into(),
+                ..UserFilter::default()
+            }
+            .admits(&u, by.is_some())
+        };
+        let idp = Some("system:idp-check");
+        let admin = Some("admin@example.com");
+        assert!(state("enabled", None) && !state("enabled", idp) && !state("enabled", admin));
+        assert!(!state("disabled", None) && state("disabled", idp) && state("disabled", admin));
+        assert!(state("disabled_idp", idp) && !state("disabled_idp", admin));
+        let scim = Some("system:scim");
+        assert!(
+            state("disabled_idp", scim) && !state("disabled_admin", scim),
+            "SCIM is the IdP too"
+        );
+        assert!(state("disabled_admin", admin) && !state("disabled_admin", idp));
+        assert!(!state("disabled_admin", None) && !state("nonsense", None));
         assert!(!f("", "", "locked").admits(&u, false));
         assert!(
             !f("", "", "nonsense").admits(&u, false),

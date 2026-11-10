@@ -547,6 +547,15 @@ impl Spool {
             let mut file = File::open(&seg.path)?;
             let want = Self::end(seg).min(synced) - seg.first;
             let (records, _, _) = scan(&mut file, &seg.path, Some(want))?;
+            // Everything below `synced` was fsynced, so a segment that now
+            // holds fewer records was damaged after the fact. Returning what
+            // is left would leave a gap that a consumer commits past.
+            if records.len() as u64 != want {
+                return Err(corrupt(
+                    &seg.path,
+                    "segment holds fewer records than were written to it",
+                ));
+            }
             for (i, payload) in records.into_iter().enumerate() {
                 let index = seg.first + i as u64;
                 if index >= start && index < synced && out.len() < max {
@@ -831,6 +840,30 @@ mod tests {
         spool.start();
         let next = spool.append(b"new").await.expect("append after restart");
         assert!(next >= 1);
+    }
+
+    #[tokio::test]
+    async fn a_closed_segment_damaged_after_open_fails_the_read_instead_of_skipping() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        for _ in 0..30 {
+            spool.append(&[7; 20]).await.expect("append");
+        }
+        let mut segs: Vec<_> = std::fs::read_dir(dir.path().join("segments"))
+            .expect("ls")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .collect();
+        segs.sort();
+        assert!(segs.len() > 2, "small segments roll");
+        // Cut the last record off the first (closed, fsynced) segment.
+        let bytes = std::fs::read(&segs[0]).expect("read");
+        std::fs::write(&segs[0], &bytes[..bytes.len() - 5]).expect("write");
+        assert!(
+            matches!(spool.read("a", 100), Err(SpoolError::Corrupt { .. })),
+            "a read must not return a batch with a gap a consumer would commit past"
+        );
     }
 
     #[tokio::test]

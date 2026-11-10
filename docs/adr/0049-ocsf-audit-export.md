@@ -1,4 +1,4 @@
-# ADR-0048: OCSF audit export for SIEMs
+# ADR-0049: OCSF audit export for SIEMs
 
 - Status: Proposed (issue #112, `needs: design`). Built in PR #294 at the owner's request with the defaults below; the owner has not yet approved the decisions listed under Open for review, and the status stays Proposed until they do.
 - Date: 2026-11-09

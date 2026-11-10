@@ -127,6 +127,16 @@ pub enum EventKind {
     UserLock,
     #[serde(rename = "user.unlock")]
     UserUnlock,
+    /// A disabled person's record was deleted by an admin, or purged by the
+    /// IdP check after `--idp-purge-after` (ADR-0047). Their history stays.
+    #[serde(rename = "user.delete")]
+    UserDelete,
+    /// A person created (or claimed) by the IdP's SCIM push (ADR-0048).
+    #[serde(rename = "user.provision")]
+    UserProvision,
+    /// A SCIM group was created, renamed, deleted, or its members changed.
+    #[serde(rename = "user.groups_change")]
+    UserGroupsChange,
     /// The identity provider no longer vouches for a person (ADR-0047).
     /// `data.action` is `lock` (deactivated: locked, sessions ended) or
     /// `revoke_login` (a group that granted a role was removed: that login ended).

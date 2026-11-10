@@ -98,6 +98,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/users/{name}", get(pages::user_detail))
         .route("/console/users/{name}/lock", post(pages::lock_user))
         .route("/console/users/{name}/unlock", post(pages::unlock_user))
+        .route("/console/users/{name}/delete", post(pages::delete_user))
         .route("/console/workers", get(pages::workers))
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
@@ -106,8 +107,12 @@ pub fn router(state: AppState) -> Router {
         .route("/console/dashboards", get(dashboards::dashboards))
         .route("/console/integrations", get(integrations::integrations))
         .route("/console/policy", get(pages::policy))
-        .route("/console/policy/dry-run", post(pages::dry_run))
-        .route("/console/policy/simulate", post(pages::simulate))
+        .route(
+            "/console/policy/documents/preview",
+            post(policy_edit::preview_document),
+        )
+        .route("/console/simulator", get(pages::simulator))
+        .route("/console/simulator/suggest", get(pages::simulator_suggest))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

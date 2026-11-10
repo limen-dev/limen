@@ -47,15 +47,38 @@ services:
       timeout: 3s
       retries: 30
 
+  # Dex keeps its state in PostgreSQL, not memory: with Dex v2.46.0 a refresh grant
+  # against memory storage never returns, and the control plane's IdP check
+  # (ADR-0047) refreshes every login. A volume, like Limen's own database: the
+  # control plane holds each login's refresh token and Dex must still know it,
+  # or the next check reads every login as ended by the IdP. Development only.
+  dex-db:
+    container_name: limen-dex-db${LIMEN_SUFFIX:-}
+    image: ${POSTGRES_IMAGE}
+    environment: { POSTGRES_USER: dex, POSTGRES_PASSWORD: dex-dev-only, POSTGRES_DB: dex }
+    volumes: [dex-db:/var/lib/postgresql]
+    healthcheck:
+      # Over TCP: the Unix socket answers while the image's init scripts still run.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U dex -d dex"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   dex:
     container_name: limen-dex${LIMEN_SUFFIX:-}
     image: ${DEX_IMAGE}
+    depends_on:
+      dex-db: { condition: service_healthy }
     # The CLI reaches Dex on the host port; the config names the default ports, so
-    # it is rewritten for another stack's (LIMEN_PORT_DEX, LIMEN_PORT_PROXY).
+    # it is rewritten for another stack's (LIMEN_PORT_DEX, LIMEN_PORT_PROXY). The
+    # storage block (memory in config/dex/config.yaml, which the Dex tests and the
+    # scaled stack use) is swapped for PostgreSQL by the last two expressions.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
         sed -e 's#localhost:5556#localhost:${LIMEN_PORT_DEX:-5556}#' -e 's#localhost:3443#localhost:${LIMEN_PORT_PROXY:-3443}#'
+        -e 's#^storage:#storage: {type: postgres, config: {host: dex-db, port: 5432, database: dex, user: dex, password: dex-dev-only, ssl: {mode: disable}}}#'
+        -e '/^  type: memory$/d'
         /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
     volumes:
       - ./config/dex/config.yaml:/etc/dex/config.yaml:ro
@@ -195,6 +218,7 @@ volumes:
   db-secrets: {}
   db-tls: {}
   postgres: {}
+  dex-db: {}
   cp-ca: {}
   ca-public: {}
   audit: {}

@@ -17,8 +17,11 @@ use crate::http_client::HttpClient;
 /// Claims beyond the OIDC core set that Limen reads.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LimenClaims {
+    /// `None` when the token has no `groups` claim at all, which is not the
+    /// same as an empty list (an IdP may leave the claim out for people in
+    /// none of the groups it is set to send).
     #[serde(default)]
-    pub groups: Vec<String>,
+    pub groups: Option<Vec<String>>,
 }
 
 impl AdditionalClaims for LimenClaims {}
@@ -36,6 +39,8 @@ pub struct VerifiedIdentity {
     pub subject: String,
     pub username: String,
     pub groups: Vec<String>,
+    /// Whether the token had a `groups` claim at all.
+    pub groups_reported: bool,
     /// The token's `nonce` claim, if any.
     pub nonce: Option<String>,
     pub expires_at: time::OffsetDateTime,
@@ -287,7 +292,12 @@ impl OidcVerifier {
         Ok(VerifiedIdentity {
             subject,
             username,
-            groups: claims.additional_claims().groups.clone(),
+            groups: claims
+                .additional_claims()
+                .groups
+                .clone()
+                .unwrap_or_default(),
+            groups_reported: claims.additional_claims().groups.is_some(),
             nonce: claims.nonce().map(|n| n.secret().clone()),
             expires_at,
         })

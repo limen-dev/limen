@@ -1,4 +1,4 @@
-//! A projection of Limen audit events into OCSF (ADR-0048).
+//! A projection of Limen audit events into OCSF (ADR-0049).
 //!
 //! The native envelope and the S3 hash chain stay the source of truth. This
 //! module only reads an event and builds a second JSON document from it; it
@@ -16,7 +16,7 @@ use crate::{Event, EventKind};
 
 /// The OCSF schema version every record is written against
 /// (`metadata.version`). Class and activity ids below are from the 1.9.0
-/// class pages on schema.ocsf.io. Changing this is an ADR-0048 amendment.
+/// class pages on schema.ocsf.io. Changing this is an ADR-0049 amendment.
 pub const OCSF_VERSION: &str = "1.9.0";
 
 /// The most raw text kept from an event that could not be parsed. Native events
@@ -244,7 +244,7 @@ fn sql_activity(statement_type: Option<&str>) -> Activity {
 }
 
 /// The OCSF class, activity and severity for an event. Exhaustive on
-/// purpose: no `_` arm (ADR-0048).
+/// purpose: no `_` arm (ADR-0049).
 // Arms that look alike stay separate: one line per kind is the mapping table.
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
 fn classify(kind: EventKind, data: &Value) -> Mapped {
@@ -309,6 +309,10 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
         K::ComponentRevoke => Mapped::new(ENTITY_MANAGEMENT, act(7, "Unenroll")).severity(LOW),
         K::UserLock => Mapped::new(ENTITY_MANAGEMENT, act(12, "Suspend")).severity(LOW),
         K::UserUnlock => Mapped::new(ENTITY_MANAGEMENT, act(13, "Resume")),
+        K::UserDelete => Mapped::new(ENTITY_MANAGEMENT, act(4, "Delete")),
+        // Created or claimed by the IdP's SCIM push; its groups changed.
+        K::UserProvision => Mapped::new(ENTITY_MANAGEMENT, act(1, "Create")),
+        K::UserGroupsChange => Mapped::new(ENTITY_MANAGEMENT, act(3, "Update")),
         // The IdP stopped vouching for a person: their account is locked, or
         // one login ended (`data.action`).
         K::IdpOffboard => Mapped::new(ENTITY_MANAGEMENT, act(12, "Suspend")).severity(LOW),
@@ -633,6 +637,9 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::SessionRecording,
     EventKind::UserLock,
     EventKind::UserUnlock,
+    EventKind::UserDelete,
+    EventKind::UserProvision,
+    EventKind::UserGroupsChange,
     EventKind::IdpOffboard,
     EventKind::IdpCheckFailed,
     EventKind::SessionKill,
@@ -702,7 +709,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 58);
+        assert_eq!(before, 61);
     }
 
     #[test]

@@ -548,6 +548,11 @@ impl Policy {
             .unwrap_or(DEFAULT_MAX_SESSION_TTL)
     }
 
+    /// The IdP groups a `role_mapping` names, for pickers.
+    pub fn mapped_groups(&self) -> impl Iterator<Item = &String> {
+        self.group_roles.keys()
+    }
+
     #[must_use]
     pub fn bot(&self, name: &str) -> Option<&bot::BotDoc> {
         self.bots.get(name)
