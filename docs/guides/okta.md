@@ -58,7 +58,7 @@ LIMEN_OIDC_CLIENT_ID=<the native app's client id>
 LIMEN_BOOTSTRAP_ADMIN_GROUPS=<an okta group of your admins>   # so the first admin can log in and apply policy
 ```
 
-`LIMEN_OIDC_USERNAME_CLAIM` is `email` by default: the ID token must carry the user's email, which the `email` scope gives. The token must also say the address is verified (`email_verified: true`); a token without that claim is refused. If your IdP never sends it and verifies addresses itself, set `LIMEN_OIDC_ALLOW_UNVERIFIED_EMAIL=true` (a claim that says `false` is always refused). The [deploy guide](deploy.md) shows where these go on ECS, EC2 and Kubernetes.
+`LIMEN_OIDC_USERNAME_CLAIM` is `email` by default: the ID token must carry the user's email, which the `email` scope gives. The token must also say the address is verified (`email_verified: true`); a token without that claim is refused. If your IdP never sends it and verifies addresses itself, set `LIMEN_OIDC_ALLOW_UNVERIFIED_EMAIL=true` (a claim that says `false` is always refused). Groups are read from the `groups` claim. If your IdP names it differently, set `LIMEN_OIDC_GROUPS_CLAIM` to that top-level claim name (Amazon Cognito uses `cognito:groups`, and has no `groups` scope, so also set `LIMEN_OIDC_SCOPES=openid,email,profile`). Only a plain top-level name works: not a dotted path such as `realm_access.roles`, and not a standard claim such as `email`. A missing claim means no groups; a claim that isn't an array of strings refuses the login. The [deploy guide](deploy.md) shows where these go on ECS, EC2 and Kubernetes.
 
 ## 6. Refresh tokens, for offboarding
 

@@ -140,6 +140,17 @@ pub struct Config {
     )]
     pub oidc_username_claim: UsernameClaim,
 
+    /// ID token claim that lists the user's groups. A top-level claim name:
+    /// `cognito:groups` for Amazon Cognito (also drop the `groups` scope from
+    /// `--oidc-scopes`: Cognito has none). A missing claim means no groups.
+    #[arg(
+        long,
+        env = "LIMEN_OIDC_GROUPS_CLAIM",
+        default_value = "groups",
+        value_parser = parse_claim_name
+    )]
+    pub oidc_groups_claim: Box<str>,
+
     /// Accept an ID token that has no `email_verified` claim when the
     /// username is the email. By default a missing claim is refused (an
     /// explicit `false` always is). Set it for an IdP that never sends the
@@ -489,6 +500,54 @@ pub enum CaBackend {
     Kms,
 }
 
+// Claims Limen reads for other things are parsed apart from the rest, so a
+// groups claim with one of these names would silently read as absent.
+const STANDARD: &[&str] = &[
+    "iss",
+    "sub",
+    "aud",
+    "exp",
+    "iat",
+    "nbf",
+    "jti",
+    "nonce",
+    "auth_time",
+    "azp",
+    "acr",
+    "amr",
+    "at_hash",
+    "c_hash",
+    "email",
+    "email_verified",
+    "name",
+    "given_name",
+    "family_name",
+    "middle_name",
+    "nickname",
+    "preferred_username",
+    "profile",
+    "picture",
+    "website",
+    "gender",
+    "birthdate",
+    "zoneinfo",
+    "locale",
+    "phone_number",
+    "phone_number_verified",
+    "address",
+    "updated_at",
+];
+
+fn parse_claim_name(s: &str) -> Result<Box<str>, String> {
+    if s.trim().is_empty() || s != s.trim() {
+        return Err("a claim name can't be empty or have surrounding spaces".into());
+    }
+    if STANDARD.contains(&s) {
+        return Err(format!("{s} is a standard OIDC claim, not a groups claim"));
+    }
+    Ok(s.into())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum UsernameClaim {
     Email,
@@ -766,6 +825,18 @@ mod tests {
         ];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn the_groups_claim_defaults_to_groups_and_cannot_be_empty() {
+        assert_eq!(
+            &*parse_with(&[]).expect("defaults").oidc_groups_claim,
+            "groups"
+        );
+        let c = parse_with(&["--oidc-groups-claim=cognito:groups"]).expect("cognito");
+        assert_eq!(&*c.oidc_groups_claim, "cognito:groups");
+        assert!(parse_with(&["--oidc-groups-claim="]).is_err());
+        assert!(parse_with(&["--oidc-groups-claim= groups"]).is_err());
     }
 
     #[test]

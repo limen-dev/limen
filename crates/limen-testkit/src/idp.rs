@@ -332,6 +332,30 @@ impl MockIdp {
     /// If the claims can't be encoded. Tests only.
     #[must_use]
     pub fn id_token(&self, claims: &Claims) -> String {
+        self.sign_id_token(
+            claims,
+            GroupClaims {
+                groups: claims.groups.clone(),
+            },
+        )
+    }
+
+    /// Like [`id_token`](Self::id_token), but the groups sit in the claim
+    /// `name` (Cognito uses `cognito:groups`) and `groups` is absent (the claim is left out when there are none).
+    ///
+    /// # Panics
+    /// If the claims can't be encoded. Tests only.
+    #[must_use]
+    pub fn id_token_with_groups_claim(&self, claims: &Claims, name: &str) -> String {
+        let mut all = std::collections::BTreeMap::new();
+        // Like Cognito, leave the claim out for a user in no groups.
+        if !claims.groups.is_empty() {
+            all.insert(name.to_owned(), serde_json::json!(claims.groups));
+        }
+        self.sign_id_token(claims, FreeClaims { all })
+    }
+
+    fn sign_id_token<A: AdditionalClaims>(&self, claims: &Claims, extra: A) -> String {
         let now = chrono::Utc::now();
         let exp = now + chrono::Duration::seconds(claims.ttl_secs);
         let issuer = IssuerUrl::new(claims.issuer.clone().unwrap_or_else(|| self.issuer.clone()))
@@ -353,13 +377,11 @@ impl MockIdp {
             exp,
             now - chrono::Duration::seconds(5),
             standard,
-            GroupClaims {
-                groups: claims.groups.clone(),
-            },
+            extra,
         )
         .set_nonce(claims.nonce.clone().map(Nonce::new));
         let token: IdToken<
-            GroupClaims,
+            A,
             CoreGenderClaim,
             CoreJweContentEncryptionAlgorithm,
             CoreJwsSigningAlgorithm,

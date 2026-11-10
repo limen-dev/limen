@@ -14,14 +14,37 @@ use tokio::sync::RwLock;
 use crate::config::UsernameClaim;
 use crate::http_client::HttpClient;
 
-/// Claims beyond the OIDC core set that Limen reads.
+/// Claims beyond the OIDC core set. Kept whole so the groups claim can have
+/// any top-level name (`groups`, `cognito:groups`, a namespaced Auth0 claim).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LimenClaims {
-    /// `None` when the token has no `groups` claim at all, which is not the
-    /// same as an empty list (an IdP may leave the claim out for people in
-    /// none of the groups it is set to send).
-    #[serde(default)]
-    pub groups: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Read the groups from the configured claim. `None` means the token does not
+/// report groups (claim absent or `null`), which is not the same as an empty
+/// list: an IdP may leave the claim out for people in none of its groups.
+/// Anything but an array of strings refuses the token: a malformed claim must
+/// not quietly drop roles.
+fn groups_from(
+    extra: &serde_json::Map<String, serde_json::Value>,
+    claim: &str,
+) -> Result<Option<Vec<String>>, OidcError> {
+    use serde_json::Value;
+    let bad = || OidcError::Invalid(format!("the {claim} claim must be an array of strings"));
+    match extra.get(claim) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                _ => Err(bad()),
+            })
+            .collect::<Result<_, _>>()
+            .map(Some),
+        Some(_) => Err(bad()),
+    }
 }
 
 impl AdditionalClaims for LimenClaims {}
@@ -194,6 +217,7 @@ pub struct OidcVerifier {
     keys: KeyCache,
     client_id: ClientId,
     username_claim: UsernameClaim,
+    groups_claim: String,
     allow_unverified_email: bool,
 }
 
@@ -223,12 +247,14 @@ impl OidcVerifier {
         internal_url: Option<&str>,
         client_id: &str,
         username_claim: UsernameClaim,
+        groups_claim: &str,
         http: HttpClient,
     ) -> Result<Self, OidcError> {
         Ok(Self {
             keys: KeyCache::new(issuer, internal_url, http)?,
             client_id: ClientId::new(client_id.to_owned()),
             username_claim,
+            groups_claim: groups_claim.to_owned(),
             allow_unverified_email: false,
         })
     }
@@ -289,15 +315,12 @@ impl OidcVerifier {
         .ok_or_else(|| OidcError::Invalid("username claim missing".into()))?;
         let expires_at = time::OffsetDateTime::from_unix_timestamp(claims.expiration().timestamp())
             .map_err(|e| OidcError::Invalid(format!("exp: {e}")))?;
+        let reported = groups_from(&claims.additional_claims().extra, &self.groups_claim)?;
         Ok(VerifiedIdentity {
             subject,
             username,
-            groups: claims
-                .additional_claims()
-                .groups
-                .clone()
-                .unwrap_or_default(),
-            groups_reported: claims.additional_claims().groups.is_some(),
+            groups: reported.clone().unwrap_or_default(),
+            groups_reported: reported.is_some(),
             nonce: claims.nonce().map(|n| n.secret().clone()),
             expires_at,
         })
@@ -308,6 +331,50 @@ impl OidcVerifier {
 fn constant_time_eq(a: &str, b: &str) -> bool {
     use sha2::{Digest, Sha256};
     Sha256::digest(a.as_bytes()) == Sha256::digest(b.as_bytes())
+}
+
+#[cfg(test)]
+mod groups_tests {
+    use super::groups_from;
+    use serde_json::json;
+
+    fn claims(v: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        v.as_object().expect("an object").clone()
+    }
+
+    #[test]
+    fn reads_the_configured_claim_only() {
+        let c = claims(&json!({"groups": ["a"], "cognito:groups": ["b", "c"]}));
+        assert_eq!(
+            groups_from(&c, "cognito:groups").expect("groups"),
+            Some(vec!["b".to_owned(), "c".to_owned()])
+        );
+        assert_eq!(
+            groups_from(&c, "groups").expect("groups"),
+            Some(vec!["a".to_owned()])
+        );
+        let empty = claims(&json!({"groups": []}));
+        assert_eq!(groups_from(&empty, "groups").expect("groups"), Some(vec![]));
+    }
+
+    #[test]
+    fn a_missing_or_null_claim_is_not_reported() {
+        assert_eq!(
+            groups_from(&claims(&json!({})), "cognito:groups").expect("groups"),
+            None
+        );
+        assert_eq!(
+            groups_from(&claims(&json!({"groups": null})), "groups").expect("groups"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_malformed_claim_is_refused() {
+        for bad in [json!("admins"), json!(7), json!({"a": 1}), json!(["a", 1])] {
+            assert!(groups_from(&claims(&json!({"groups": bad})), "groups").is_err());
+        }
+    }
 }
 
 #[cfg(test)]

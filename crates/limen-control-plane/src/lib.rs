@@ -83,6 +83,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         config.oidc_internal_url.as_deref(),
         &config.oidc_client_id,
         config.oidc_username_claim,
+        &config.oidc_groups_claim,
         http.clone(),
     )?
     .allow_unverified_email(config.oidc_allow_unverified_email);
@@ -193,6 +194,7 @@ fn build_console(
         config.oidc_internal_url.as_deref(),
         &config.console_oidc_client_id,
         config.oidc_username_claim,
+        &config.oidc_groups_claim,
         http.clone(),
     )?
     .allow_unverified_email(config.oidc_allow_unverified_email);
