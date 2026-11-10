@@ -20,6 +20,7 @@ pub mod oidc;
 pub mod pipeline;
 pub mod policy_changes;
 pub mod policy_store;
+pub mod policy_suggest;
 pub mod replicas;
 pub mod reviews;
 pub mod scim;

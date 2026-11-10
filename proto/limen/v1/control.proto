@@ -57,6 +57,9 @@ service Admin {
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
   // The active policy's documents, for `limen policy who-can|what-can|diff`.
   rpc GetPolicyDocuments(GetPolicyDocumentsRequest) returns (GetPolicyDocumentsResponse);
+  // A tighter policy proposed from what people used (ADR-0050). Removals only,
+  // never applied. Writes a `policy.suggest` audit event before it answers.
+  rpc SuggestPolicy(SuggestPolicyRequest) returns (SuggestPolicyResponse);
   // Resources workers found in a cloud account (ADR-0027), and the admin's
   // decision on each.
   rpc ListDiscovered(ListDiscoveredRequest) returns (ListDiscoveredResponse);
@@ -287,6 +290,24 @@ message GetPolicyDocumentsResponse {
   int64 version = 1;
   // JSON array of policy documents, as in a policy snapshot.
   string documents_json = 2;
+}
+
+message SuggestPolicyRequest {
+  // Days of sessions to judge by; 0 means 90. 7 to 365.
+  uint32 window_days = 1;
+}
+
+message SuggestPolicyResponse {
+  int64 policy_version = 1;
+  string policy_digest = 2;
+  // The full result, as JSON.
+  string report_json = 3;
+  // The changed roles, as policy YAML.
+  string yaml = 4;
+  // A report for a person to read.
+  string text = 5;
+  // The effective-access diff from the active policy to the suggestion.
+  string diff = 6;
 }
 
 message GetPolicyRequest {}
