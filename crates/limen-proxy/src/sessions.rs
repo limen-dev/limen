@@ -270,6 +270,13 @@ pub(crate) struct Denial {
     pub(crate) code: Option<&'static str>,
 }
 
+/// When a session opened at `now` and lasting `ttl` ends, in Unix seconds, or
+/// `None` if that is past what a timestamp can hold.
+fn session_expiry(now: OffsetDateTime, ttl: Duration) -> Option<i64> {
+    let ttl = time::Duration::try_from(ttl).ok()?;
+    now.checked_add(ttl).map(OffsetDateTime::unix_timestamp)
+}
+
 pub(crate) fn denied(reason: impl Into<String>) -> Denial {
     Denial {
         reason: reason.into(),
@@ -621,6 +628,11 @@ pub(crate) async fn open_session(
         }
         ttl = ttl.min(Duration::from_secs(left));
     }
+    // A role's `max_session_ttl` is not capped, and adding one that reaches
+    // past year 9999 to `now` would panic on every session open.
+    let expires_at = session_expiry(now, ttl).ok_or_else(|| {
+        denied("the role's max_session_ttl is too long to compute an expiry".to_owned())
+    })?;
     let creds = proxy.credentials();
     // Load figures are a little stale, so the chosen worker (or the peer
     // proxy holding it) may turn out to be full, or to have started
@@ -650,7 +662,7 @@ pub(crate) async fn open_session(
             principal: target.principal.to_owned(),
             issued_at_unix: now.unix_timestamp(),
             establish_by_unix: (now + ESTABLISH_WITHIN).unix_timestamp(),
-            session_expires_at_unix: (now + ttl).unix_timestamp(),
+            session_expires_at_unix: expires_at,
             nonce: rand::random::<[u8; 32]>().to_vec(),
             user_cert_der: user_cert_der.to_vec(),
             proxy_id: creds.id.clone(),
@@ -1049,7 +1061,20 @@ async fn relay<IO>(
 
 #[cfg(test)]
 mod tests {
-    use super::connection_group;
+    use super::{connection_group, session_expiry};
+
+    #[test]
+    fn a_session_ttl_past_year_9999_is_refused_not_a_panic() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("time");
+        assert_eq!(
+            session_expiry(now, std::time::Duration::from_secs(3600)),
+            Some(1_800_003_600)
+        );
+        // `max_session_ttl: 3000000d` passes policy validation.
+        let huge = limen_policy::duration::DurationStr::parse("3000000d").expect("parses");
+        assert_eq!(session_expiry(now, huge.0), None);
+        assert_eq!(session_expiry(now, std::time::Duration::MAX), None);
+    }
 
     #[test]
     fn group_ids_are_labels_only() {
