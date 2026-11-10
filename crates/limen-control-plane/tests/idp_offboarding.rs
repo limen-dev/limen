@@ -136,7 +136,8 @@ async fn losing_a_group_ends_the_login_but_does_not_lock() {
         .await
         .expect("login");
 
-    h.idp.set_groups(ADMIN, &[]);
+    // Still in some group, just not the one that gave the role.
+    h.idp.set_groups(ADMIN, &["interns"]);
 
     eventually("the login to be ended", || async {
         !alive(&h, &proxy, &cert).await
@@ -155,6 +156,43 @@ async fn losing_a_group_ends_the_login_but_does_not_lock() {
             .expect("lock check"),
         "a person who is still valid is not locked"
     );
+}
+
+#[tokio::test]
+async fn a_token_without_the_groups_claim_is_not_read_as_no_groups() {
+    let Some(h) = start(&[]).await else { return };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+
+    // The mock leaves the claim out for an empty list, as an IdP with a
+    // group filter does for someone in none of the filtered groups.
+    h.idp.set_groups(ADMIN, &[]);
+
+    eventually("the alert to show", || async {
+        status(&h).await == "check_failed"
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(alive(&h, &proxy, &cert).await, "the login is kept");
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    let alerts = events(&h, EventKind::IdpCheckFailed).await;
+    assert_eq!(alerts.len(), 1, "one alert, not one per check");
+    assert!(
+        alerts[0].data["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("no groups claim"))
+    );
+
+    // Deactivation is still caught.
+    h.idp.deactivate(ADMIN);
+    eventually("the login to be ended", || async {
+        !alive(&h, &proxy, &cert).await
+    })
+    .await;
 }
 
 #[tokio::test]

@@ -55,7 +55,11 @@ Without the key, no refresh token is stored and nothing is checked.
 | `--idp-check-grace` | `1h` | With `closed`: how long a login may go unconfirmed |
 | `--idp-ignore-groups` | off | Do not end logins on group removal. For an IdP that leaves groups out of refreshed ID tokens |
 
-The IdP must allow `offline_access` and issue refresh tokens to the CLI's client (Okta: enable the Refresh Token grant on the native app) and put the groups claim in refreshed ID tokens. **An IdP that omits the claim for a person with no groups looks the same as a person with no groups**, so a refreshed token without `groups` counts as no groups. If your IdP drops the claim from refreshed tokens, every login would end at its first check; set `--idp-ignore-groups` and rely on deactivation only.
+The IdP must allow `offline_access` and issue refresh tokens to the CLI's client (Okta: enable the Refresh Token grant on the native app) and put the groups claim in refreshed ID tokens.
+
+**A refreshed token with no `groups` claim at all is not read as "no groups".** Many IdPs leave the claim out when a filter matches none of the person's groups (an Okta groups claim filtered to `limen-.*` does this for someone who is in no `limen-` group). For a login that had groups, Limen keeps the login, raises `idp.check_failed` once ("no groups claim") and counts `limen_idp_checks_total{outcome="groups_missing"}`. **Deactivation is still caught**, because the IdP then refuses the refresh. The cost: a person removed from their *last* matching group is not logged out by the group check, only by the IdP refusing them or by an admin (or SCIM, below). If you want that case caught, configure the IdP to send the claim (as an empty list) for people in no matching group, if it can (unverified for Okta, #64).
+
+If your IdP drops the claim from refreshed tokens altogether, the alert fires for everyone and group removals are never checked; set `--idp-ignore-groups` to say so deliberately and rely on deactivation only.
 
 If your IdP expires refresh tokens early (idle or absolute lifetimes), an expired token reads as a refusal (`invalid_grant`) and ends the login. Set the refresh token lifetime at least as long as `--max-cert-ttl`.
 

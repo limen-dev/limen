@@ -556,6 +556,24 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                             .await;
                             return;
                         }
+                        // A token with no groups claim at all is not "no groups":
+                        // many IdPs leave the claim out when a filter matches none.
+                        // For a login that had groups, say so and keep it, rather
+                        // than ending it on a guess.
+                        if !state.config.idp_ignore_groups
+                            && !id.groups_reported
+                            && !t.groups.is_empty()
+                        {
+                            metrics::counter!("limen_idp_checks_total", "outcome" => "groups_missing")
+                                .increment(1);
+                            check_failed(
+                                state,
+                                &t,
+                                "the refreshed ID token has no groups claim, so group removals are not being checked (deactivation still is)",
+                            )
+                            .await;
+                            return;
+                        }
                         if !state.config.idp_ignore_groups {
                             let gone =
                                 lost(&roles_of(state, &t.groups), &roles_of(state, &id.groups));
