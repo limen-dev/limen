@@ -247,6 +247,9 @@ message ApplyPolicyRequest {
   // The source these files replace (ADR-0042 §3). Empty is `default`: what
   // every apply before Phase 14 wrote. Other sources' documents are untouched.
   string source = 5;
+  // Dry run only: also replay the last N days (1 to 30) of recorded sessions
+  // through the active and the new policy (ADR-0049). 0 is no replay.
+  uint32 replay_days = 6;
 }
 
 message PolicyDiff {
@@ -272,6 +275,9 @@ message ApplyPolicyResponse {
   // mode or gives one more time (always): nothing was applied, and another
   // admin approves the held change (`limen manage changes approve <id>`).
   string pending_change_id = 8;
+  // The replay of recorded sessions, as JSON of limen_policy::replay::ReplayReport,
+  // when `replay_days` asked for one (ADR-0049).
+  string replay_json = 9;
 }
 
 message PolicyTestResult {

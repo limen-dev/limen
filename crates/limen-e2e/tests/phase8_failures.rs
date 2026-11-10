@@ -595,6 +595,7 @@ async fn removing_access_applies_to_the_next_request() {
             }],
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

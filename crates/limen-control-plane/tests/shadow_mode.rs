@@ -83,6 +83,7 @@ impl Fixture {
                     dry_run: false,
                     source_ref: String::new(),
                     require_tests: false,
+                    replay_days: 0,
                 },
                 Some(&self.admin),
             ))

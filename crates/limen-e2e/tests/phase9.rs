@@ -132,6 +132,7 @@ async fn mongodb_through_limen() {
             sources: policy(&target, &ca, creds.to_str().expect("utf8")),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

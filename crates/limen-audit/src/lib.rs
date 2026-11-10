@@ -102,6 +102,11 @@ pub enum EventKind {
     /// request itself went ahead.
     #[serde(rename = "policy.shadow_deny")]
     PolicyShadowDeny,
+    /// An admin replayed recorded sessions against a proposed policy
+    /// (ADR-0049). Holds who, the window, the policy digests and counts,
+    /// never the sessions replayed.
+    #[serde(rename = "policy.replay")]
+    PolicyReplay,
     /// A bot writer's write was refused by its grant or the escalation rules
     /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
     /// detection signal.

@@ -428,6 +428,8 @@ Options:
 - `--new <NEW>`: The new policy: files or directories (after `--new`).
 - `--format <FORMAT>`: text, json, or markdown (for a pull request comment). Values: text, json, markdown. Default: `text`.
 - `--fail-on-widening`: Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
+- `--replay <DAYS>`: Also replay the last DAYS (1 to 30, default 30) of recorded sessions through the active and the new policy and say who would have been refused (needs limen:admin; the old side must be `active`; the new files are read as `limen admin apply` reads them).
+- `--fail-on-affected`: With --replay: exit non-zero if any recorded session would have been refused.
 
 #### `limen policy suggest`
 
