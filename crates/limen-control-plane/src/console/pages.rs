@@ -118,6 +118,7 @@ fn access_for(policy: &limen_policy::Policy, roles: &[String]) -> Vec<ResourceVi
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
+            path: path_segment(&r.name),
             name: r.name,
             kind: r.kind.as_str().to_owned(),
             icon: views::kind_icon(r.kind.as_str()).0,
@@ -238,6 +239,7 @@ pub async fn home(
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
+            path: path_segment(&r.name),
             name: r.name,
             kind: r.kind.as_str().to_owned(),
             icon: views::kind_icon(r.kind.as_str()).0,
@@ -1227,6 +1229,42 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
     }
 }
 
+/// A bot that policy defines but that has not logged in: no user row exists yet.
+fn policy_bot_view(name: &str, roles: &[String]) -> UserView {
+    UserView {
+        name: name.to_owned(),
+        path: path_segment(name),
+        role_list: roles
+            .iter()
+            .map(|r| views::Chip {
+                text: r.clone(),
+                c: views::chip_color(r),
+            })
+            .collect(),
+        group_list: Vec::new(),
+        av: views::avatar_class(name),
+        initial: name
+            .chars()
+            .next()
+            .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
+        first_login: "never".into(),
+        last_login: "never".into(),
+        logins: 0,
+        locked: false,
+        lock_reason: String::new(),
+        locked_by: String::new(),
+        locked_at: String::new(),
+        is_bot: true,
+        ci: Vec::new(),
+        run_url: None,
+        source: "CI bot, defined in policy".into(),
+        issuer: String::new(),
+        idp: "not applicable".into(),
+        idp_tone: "",
+        pending: String::new(),
+    }
+}
+
 pub async fn bots(
     State(state): State<AppState>,
     auth: Auth,
@@ -1344,9 +1382,13 @@ pub async fn user_detail(
         None => {
             // A lock can name someone who never signed in.
             let locks = db::active_locks(&state.db).await.unwrap_or_default();
-            match locks.iter().find(|l| l.username == name) {
-                Some(l) => lock_only_view(&name, l),
-                None => {
+            let loaded = state.policy.current();
+            let defined_bot = loaded.policy.bots().find(|b| b.username() == name);
+            match (locks.iter().find(|l| l.username == name), defined_bot) {
+                (Some(l), _) => lock_only_view(&name, l),
+                // A bot in policy that has not logged in yet: the Bots page links here.
+                (None, Some(b)) => policy_bot_view(&name, &b.spec.roles),
+                (None, None) => {
                     return error_page(
                         StatusCode::NOT_FOUND,
                         "Not found",

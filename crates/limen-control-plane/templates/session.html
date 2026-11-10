@@ -162,7 +162,7 @@
 
 <h2>Details</h2>
 <div class="card facts-card"><table class="facts">
-  <tr><th>User</th><td>{% if chrome.is_admin %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>
+  <tr><th>User</th><td>{% if chrome.is_admin && s.user_known %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>
   <tr><th>Resource</th><td>{{ s.resource }} <span class="muted">({{ s.kind }})</span></td></tr>
   <tr><th>Login</th><td class="mono">{{ s.login }}</td></tr>
   <tr><th>Outcome</th><td>{% if s.reason.is_empty() %}<span class="muted">—</span>{% else %}{{ s.reason }}{% endif %}</td></tr>

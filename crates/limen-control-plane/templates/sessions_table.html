@@ -6,8 +6,8 @@
   <tbody>
   {% for s in sessions %}
     <tr>
-      <td><div class="kind-cell"><span class="kind {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><div class="cell-main">{{ s.resource }}</div><div class="cell-sub mono">{{ s.login }}{% if s.connections > 1 %} · {{ s.connections }} connections{% endif %}</div></div></div></td>
-      <td>{{ s.user }}{% if s.bot %} <span class="pill bot">bot</span>{% endif %}</td>
+      <td><div class="kind-cell"><span class="kind {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div>{% if let Some(rp) = s.resource_path %}{% if chrome.reads_record %}<a class="cell-main" href="/console/resources/{{ rp }}">{{ s.resource }}</a>{% else %}<div class="cell-main">{{ s.resource }}</div>{% endif %}{% else %}<div class="cell-main">{{ s.resource }}</div>{% endif %}<div class="cell-sub mono">{{ s.login }}{% if s.connections > 1 %} · {{ s.connections }} connections{% endif %}</div></div></div></td>
+      <td>{% if chrome.is_admin && s.user_known %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}{% if s.bot %} <span class="pill bot">bot</span>{% endif %}</td>
       <td class="nowrap">{{ s.started }}</td>
       <td>{{ s.duration }}</td>
       <td><span class="pill {{ s.status_class }}">{{ s.status }}</span>{% if !s.reason.is_empty() %} <span class="cell-sub">{{ s.reason }}</span>{% endif %}</td>

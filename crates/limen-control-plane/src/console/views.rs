@@ -305,6 +305,10 @@ pub struct SessionView {
     pub id: String,
     pub user: String,
     pub user_path: String,
+    /// Set only when the session names a user, so a link never points at nothing.
+    pub user_known: bool,
+    /// Set only when the session names a resource.
+    pub resource_path: Option<String>,
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
@@ -360,6 +364,12 @@ impl From<&SessionRow> for SessionView {
             id: s.session_id.to_string(),
             user: dash(s.username.as_deref()),
             user_path: path_segment(s.username.as_deref().unwrap_or_default()),
+            user_known: s.username.as_deref().is_some_and(|u| !u.is_empty()),
+            resource_path: s
+                .resource
+                .as_deref()
+                .filter(|r| !r.is_empty())
+                .map(path_segment),
             kind: dash(s.kind.as_deref()),
             icon: kind_icon(s.kind.as_deref().unwrap_or_default()).0,
             kclass: kind_icon(s.kind.as_deref().unwrap_or_default()).1,
@@ -664,6 +674,7 @@ pub struct Stats {
 
 pub struct ResourceView {
     pub name: String,
+    pub path: String,
     pub connect: Connect,
     pub kind: String,
     pub icon: &'static str,
