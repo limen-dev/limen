@@ -875,8 +875,8 @@ pub struct UsersPage {
     pub query: String,
     pub orphan_locks: Vec<UserView>,
     pub filter: UserFilter,
-    /// The page without its filters, keeping the search text.
-    pub clear_href: String,
+    /// The applied search and filters, each with the link that removes it.
+    pub chips: Vec<FilterChip>,
     /// Every group and role among the people listed, for the filter menus.
     pub groups: Vec<String>,
     pub roles: Vec<String>,
@@ -896,14 +896,6 @@ pub struct UserFilter {
 }
 
 impl UserFilter {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.group.is_empty()
-            && self.role.is_empty()
-            && self.status.is_empty()
-            && self.state.is_empty()
-    }
-
     /// Whether the state filter admits a person: `locked_by` is the author of
     /// their lock, if they are locked.
     #[must_use]

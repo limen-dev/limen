@@ -579,6 +579,15 @@ async fn console_end_to_end() {
     assert_eq!(nobody.status, 200);
     assert!(!nobody.body.contains(DEVELOPER));
     assert!(nobody.body.contains("Clear search and filters"));
+    // Applied filters are chips under the bar; removing one keeps the others.
+    assert!(
+        nobody.body.contains("Filtered by")
+            && nobody.body.contains("Group: no-such-group")
+            && nobody.body.contains("Clear all")
+            && nobody.body.contains("href=\"/console/users?status=ok\""),
+        "{}",
+        nobody.body
+    );
     let csrf = Browser::csrf(&home);
     let page = admin_user
         .post(

@@ -1091,16 +1091,7 @@ pub async fn users(
         state: filter_value(q.state.as_ref()),
     };
     let total = users.len();
-    let clear_href = if query.is_empty() {
-        "/console/users".to_owned()
-    } else {
-        format!(
-            "/console/users?{}",
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair("q", &query)
-                .finish()
-        )
-    };
+    let chips = user_chips(&query, &filter);
     let mut groups: Vec<String> = users.iter().flat_map(|u| u.groups.clone()).collect();
     let mut roles: Vec<String> = users.iter().flat_map(|u| u.roles.clone()).collect();
     for list in [&mut groups, &mut roles] {
@@ -1142,7 +1133,7 @@ pub async fn users(
                 .collect(),
             query,
             orphan_locks,
-            clear_href,
+            chips,
             filter,
             groups,
             roles,
@@ -1150,6 +1141,48 @@ pub async fn users(
         }
         .render(),
     )
+}
+
+/// A removable chip for each applied filter on the users page; removing one
+/// keeps the rest (and the search text).
+fn user_chips(query: &str, f: &views::UserFilter) -> Vec<views::FilterChip> {
+    let state = match f.state.as_str() {
+        "enabled" => "Enabled",
+        "disabled" => "Disabled",
+        "disabled_idp" => "Disabled by the IdP",
+        "disabled_admin" => "Disabled by an admin",
+        other => other,
+    };
+    let status = match f.status.as_str() {
+        "ok" => "Checked",
+        "unchecked" => "Not checked",
+        "check_failed" => "IdP not reachable",
+        "offboarded" => "Ended by the IdP",
+        "locked" => "Disabled",
+        other => other,
+    };
+    // (parameter, label, shown value, value)
+    let all = [
+        ("q", "Search", query, query),
+        ("state", "State", state, f.state.as_str()),
+        ("group", "Group", f.group.as_str(), f.group.as_str()),
+        ("role", "Role", f.role.as_str(), f.role.as_str()),
+        ("status", "IdP check", status, f.status.as_str()),
+    ];
+    all.iter()
+        .filter(|(_, _, _, v)| !v.is_empty())
+        .map(|(key, label, shown, _)| {
+            let rest: Vec<(&str, &str)> = all
+                .iter()
+                .filter(|(k, ..)| k != key)
+                .map(|(k, _, _, v)| (*k, *v))
+                .collect();
+            views::FilterChip {
+                label: format!("{label}: {shown}"),
+                remove: query::href("/console/users", &rest),
+            }
+        })
+        .collect()
 }
 
 fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
