@@ -81,7 +81,7 @@ pub enum PolicyCommand {
         #[arg(long, conflicts_with_all = ["json", "output"])]
         yaml: bool,
         /// Print the full result as JSON.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "yaml")]
         json: bool,
     },
 }
@@ -366,6 +366,15 @@ async fn suggest(
     yaml: bool,
     json: bool,
 ) -> anyhow::Result<()> {
+    // Before the question is asked (and audited): a new file, or nothing.
+    if let Some(path) = output
+        && path.exists()
+    {
+        bail!(
+            "{} already exists; --output writes a new file only",
+            path.display()
+        );
+    }
     let (_, channel) = api::authenticated(proxy)?;
     let resp = AdminClient::new(channel)
         .suggest_policy(SuggestPolicyRequest { window_days })

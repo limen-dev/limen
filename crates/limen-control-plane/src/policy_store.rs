@@ -452,23 +452,7 @@ pub async fn write(state: &AppState, request: Request) -> Result<Outcome, StoreE
         .await?
     };
     let now = OffsetDateTime::now_utc();
-    for head in heads.values_mut() {
-        let unchanged = stored
-            .get(&head.key())
-            .is_some_and(|s| s.same_revision(head));
-        if unchanged {
-            // A document that did not change keeps the age, etag and version
-            // it had: re-applying a whole source must not make every role
-            // look new (`limen policy suggest` judges roles by their age).
-            if let Some(s) = stored.get(&head.key()) {
-                *head = s.clone();
-            }
-        } else {
-            head.policy_version = version;
-            head.updated_at = now;
-            head.etag = etag(head);
-        }
-    }
+    stamp_heads(&stored, &mut heads, version, now);
     save_heads(&mut tx, &stored, &heads).await?;
     outcome.written = touched
         .iter()
@@ -1131,6 +1115,32 @@ fn head_from_row(row: &sqlx::postgres::PgRow) -> Result<Head, StoreError> {
         updated_at: row.try_get("updated_at")?,
         updated_by: row.try_get("updated_by")?,
     })
+}
+
+/// Give each changed head its new version, time and etag. A document that
+/// did not change keeps the age, etag and version it had: re-applying a whole
+/// source must not make every role look new (`limen policy suggest` judges
+/// roles by their age).
+fn stamp_heads(
+    stored: &BTreeMap<Key, Head>,
+    heads: &mut BTreeMap<Key, Head>,
+    version: i64,
+    now: OffsetDateTime,
+) {
+    for head in heads.values_mut() {
+        let unchanged = stored
+            .get(&head.key())
+            .is_some_and(|s| s.same_revision(head));
+        if unchanged {
+            if let Some(s) = stored.get(&head.key()) {
+                *head = s.clone();
+            }
+        } else {
+            head.policy_version = version;
+            head.updated_at = now;
+            head.etag = etag(head);
+        }
+    }
 }
 
 /// Write the heads that changed and delete the ones that went.

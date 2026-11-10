@@ -536,3 +536,15 @@ fn suggestions_only_ever_lose_access_and_settle() {
         "only {with_changes} of 1500 rounds suggested anything"
     );
 }
+
+#[test]
+fn a_login_listed_twice_is_judged_once() {
+    let roles = ROLES.replace("logins: [legacy] }", "logins: [legacy, legacy] }");
+    let p = Policy::parse_yaml([("r.yaml", RESOURCES), ("roles.yaml", roles.as_str())])
+        .expect("policy");
+    let w = World::new(vec![]);
+    let s = w
+        .run(&p)
+        .expect("a duplicate does not break the suggestion");
+    assert!(s.unused_roles.contains(&"ghost".to_owned()), "{s:?}");
+}

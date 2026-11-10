@@ -264,6 +264,16 @@ const DB_KINDS: &[ResourceKind] = &[
 
 /// The grants of a rule whose use is recorded per session with a principal.
 fn grants(rule: &Rule) -> Vec<GrantView> {
+    let mut out = grants_raw(rule);
+    // A list may name an entry twice; judge each once.
+    for g in &mut out {
+        let mut seen = BTreeSet::new();
+        g.entries.retain(|e| seen.insert(e.clone()));
+    }
+    out
+}
+
+fn grants_raw(rule: &Rule) -> Vec<GrantView> {
     let mut out = Vec::new();
     if let Some(g) = &rule.ssh {
         out.push(GrantView {

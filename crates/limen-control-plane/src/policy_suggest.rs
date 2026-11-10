@@ -80,10 +80,13 @@ pub async fn run(
     }
 
     let mut people: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for r in sqlx::query("SELECT username, roles FROM users")
-        .fetch_all(&state.db)
-        .await
-        .map_err(|e| internal("reading people", e))?
+    for r in sqlx::query(
+        "SELECT username, roles FROM users WHERE actor_type = 'user' AND first_login_at <= $1",
+    )
+    .bind(since)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| internal("reading people", e))?
     {
         people.insert(
             r.try_get("username").map_err(|e| internal("people", e))?,
@@ -108,7 +111,8 @@ pub async fn run(
             let at: OffsetDateTime = h.try_get("updated_at").map_err(|e| internal("heads", e))?;
             changed.insert(name, at.unix_timestamp());
         } else {
-            let at: OffsetDateTime = h.try_get("created_at").map_err(|e| internal("heads", e))?;
+            // Any edit (a relabel can bring it into a rule) restarts the clock.
+            let at: OffsetDateTime = h.try_get("updated_at").map_err(|e| internal("heads", e))?;
             created.insert(name, at.unix_timestamp());
         }
     }
@@ -149,6 +153,11 @@ pub async fn run(
         SuggestError::Unsafe(_) => internal("checking a suggestion", e),
     })?;
 
+    if state.policy.current().version != loaded.version {
+        return Err(Status::aborted(
+            "the policy changed while the suggestion was made; run it again",
+        ));
+    }
     let yaml = result
         .to_yaml(u64::try_from(loaded.version).unwrap_or(0))
         .map_err(|e| internal("writing the suggestion", e))?;
