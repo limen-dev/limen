@@ -104,6 +104,7 @@ export default defineConfig({
             { slug: 'docs/guides/console' },
             { slug: 'docs/guides/audit-search' },
             { slug: 'docs/guides/audit-ocsf' },
+            { slug: 'docs/guides/controls-report' },
             { slug: 'docs/guides/watching-sessions' },
             { slug: 'docs/guides/metrics' },
             { slug: 'docs/guides/tracing' },

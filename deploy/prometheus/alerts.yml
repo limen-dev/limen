@@ -77,3 +77,22 @@ groups:
         labels: { severity: page }
         annotations:
           summary: "{{ $labels.job }} {{ $labels.instance }} is not answering /metrics"
+
+      - alert: LimenSelfTestFailed
+        # Every control plane reports the same value, read from the database.
+        expr: min(limen_selftest_last_run_ok) == 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "The last Limen self-test found a control that is not working"
+          description: "Open the Controls page or run `limen admin selftest report`; the failing check and what it found are in the report. A run that could not finish (audit unavailable, no signing key) counts too."
+
+      - alert: LimenSelfTestStale
+        # Assumes the default 24h interval: two intervals. Tune with --selftest-interval.
+        # Silent while no run has ever finished (the schedule is off).
+        expr: time() - max(limen_selftest_last_run_timestamp_seconds) > 172800
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: "No Limen self-test has finished in over two days"
+          description: "A self-test that stops running looks like a clean one. Check that --selftest-interval is not 0s and that the control planes can write audit events and sign."

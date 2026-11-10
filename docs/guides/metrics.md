@@ -28,10 +28,15 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_policy_shadow_denies_total` | counter | `role`, `rule` | proxy |
 | `limen_policy_shadow_events_dropped_total` | counter | | proxy |
 | `limen_recordings_pending` | gauge | | worker |
+| `limen_selftest_last_run_timestamp_seconds`, `limen_selftest_last_run_ok` | gauge | | control plane |
+| `limen_selftest_checks` | gauge | `status` (`passed`, `failed`, `skipped`) | control plane |
+| `limen_selftest_check_ok` | gauge | `check` | control plane |
 
 `limen_policy_shadow_days_left` is the days until the first shadow rule runs out, or `+Inf` with none; alert before it reaches 0, because after that policy changes are refused until the rule is enforced or renewed (ADR-0046). `limen_policy_shadow_events_dropped_total` counts shadow denies whose audit event could not be written; the request is never refused for it.
 
 `limen_audit_ocsf_skipped_total` counts records the [OCSF export](audit-ocsf.md) gave up on because its bucket was failing while it held the audit spool back. They are still in the audit trail; alert on any increase.
+
+`limen_selftest_*` describe the last [self-test run](controls-report.md#alerts), read from the database so every control plane reports the same; alert when `limen_selftest_last_run_ok` is 0 and when the last run is older than twice `--selftest-interval`.
 
 Protocol-specific counters (`limen_mongo_*`, `limen_search_*`, `limen_broker_*`, `limen_kube_requests_total`) are described in the guide for each protocol.
 
