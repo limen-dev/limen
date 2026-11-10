@@ -1952,6 +1952,26 @@ pub async fn policy(
 /// How many people are offered as choices; the rest are found by searching.
 const PEOPLE_SHOWN: usize = 12;
 
+/// The simulator's address: `group` (any number), `person`, `bot` and `q`.
+fn parse_simulator_query(raw: Option<&str>) -> (Vec<String>, String, String, String) {
+    let (mut groups, mut person, mut bot, mut q) =
+        (Vec::new(), String::new(), String::new(), String::new());
+    for (k, v) in url::form_urlencoded::parse(raw.unwrap_or("").as_bytes()) {
+        let v = v.trim().to_owned();
+        if v.is_empty() {
+            continue;
+        }
+        match k.as_ref() {
+            "group" if groups.len() < 50 => groups.push(v),
+            "person" => person = v,
+            "bot" => bot = v,
+            "q" => q = v.chars().take(300).collect(),
+            _ => {}
+        }
+    }
+    (groups, person, bot, q)
+}
+
 /// `GET /console/simulator`: a search box, clickable groups, bots and people,
 /// and, once someone is chosen, what they can reach and could ask for. A GET,
 /// since it changes nothing: the address can be bookmarked or linked
@@ -1964,24 +1984,11 @@ pub async fn simulator(
     if let Err(r) = auth.admin() {
         return r;
     }
-    let (mut picked_groups, mut person, mut bot, mut q) =
-        (Vec::new(), String::new(), String::new(), String::new());
-    for (k, v) in url::form_urlencoded::parse(raw.as_deref().unwrap_or("").as_bytes()) {
-        let v = v.trim().to_owned();
-        if v.is_empty() {
-            continue;
-        }
-        match k.as_ref() {
-            "group" if picked_groups.len() < 50 => picked_groups.push(v),
-            "person" => person = v,
-            "bot" => bot = v,
-            "q" => q = v.chars().take(300).collect(),
-            _ => {}
-        }
-    }
+    let (mut picked_groups, person, bot, q) = parse_simulator_query(raw.as_deref());
+    let (mut person, mut bot) = (person, bot);
     let current = state.policy.current();
     let mut users = store::list_users(&state.db).await.unwrap_or_default();
-    users.sort_by(|a, b| b.last_login_at.cmp(&a.last_login_at));
+    users.sort_by_key(|u| std::cmp::Reverse(u.last_login_at));
     let bots: Vec<String> = current
         .policy
         .bots()
