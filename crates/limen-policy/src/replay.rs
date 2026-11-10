@@ -192,10 +192,10 @@ impl ReplayReport {
         for a in &self.affected {
             out.push(format!(
                 "  {}{} {} on {}: {} {}, now {}{}",
-                a.user,
+                plain(&a.user),
                 if a.bot { " (bot)" } else { "" },
-                a.principal,
-                a.resource,
+                plain(&a.principal),
+                plain(&a.resource),
                 a.sessions,
                 plural(a.sessions, "session", "sessions"),
                 a.now.text(),
@@ -209,7 +209,8 @@ impl ReplayReport {
         for s in &self.shadow {
             out.push(format!(
                 "  shadow rule {} would have fired for {} sessions",
-                s.rule, s.sessions
+                plain(&s.rule),
+                s.sessions
             ));
         }
         if self.already_refused > 0 {
@@ -281,6 +282,14 @@ pub const CAVEAT: &str = "Approximate: roles use each person's latest IdP groups
 
 fn plural(n: u64, one: &'static str, many: &'static str) -> &'static str {
     if n == 1 { one } else { many }
+}
+
+/// Text for a terminal: control characters (an ANSI escape in a name) become
+/// spaces. Names come from recorded sessions, so they are not trusted.
+fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Escape what a table cell cannot hold. Names and logins come from policy

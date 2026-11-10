@@ -422,3 +422,17 @@ fn replay_agrees_with_enforcement_on_random_records() {
         );
     }
 }
+
+#[test]
+fn terminal_output_carries_no_control_characters_from_names() {
+    let old = parse(ACTIVE);
+    let new = parse(&tightened());
+    let report = run(
+        &old,
+        &new,
+        &[person("evil\x1b[31m@x", &["developers"], "web-prod", "ubuntu", 1)],
+    );
+    let text = report.render_text();
+    assert!(!text.contains('\x1b'), "{text:?}");
+    assert!(text.contains("evil [31m@x"), "{text:?}");
+}
