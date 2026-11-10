@@ -113,7 +113,11 @@ pub struct ReplayReport {
     /// The active policy already refuses these today: not caused by the change.
     pub already_refused: u64,
     pub affected_sessions: u64,
+    /// The largest groups first, at most [`MAX_AFFECTED_ROWS`].
     pub affected: Vec<Affected>,
+    /// Affected groups left out of `affected` to bound the answer.
+    #[serde(default)]
+    pub affected_omitted: u64,
     pub shadow: Vec<ShadowHit>,
     /// Sessions that could not be replayed, by reason.
     pub skipped: BTreeMap<String, u64>,
@@ -158,10 +162,11 @@ impl ReplayReport {
     pub fn headline(&self) -> String {
         let (people, bots) = self.affected_users();
         let looked = format!(
-            "{} sessions replayed over {} days, {} not replayable",
+            "{} sessions replayed over {} days, {} not replayable{}",
             self.examined,
             self.window_days,
-            self.skipped_total()
+            self.skipped_total(),
+            if self.truncated { ", partial" } else { "" }
         );
         if self.affected_sessions == 0 {
             return format!("No replayed session would have been refused ({looked}).");
@@ -204,6 +209,12 @@ impl ReplayReport {
                 } else {
                     ""
                 },
+            ));
+        }
+        if self.affected_omitted > 0 {
+            out.push(format!(
+                "  ... and {} more groups not listed (the totals count them)",
+                self.affected_omitted
             ));
         }
         for s in &self.shadow {
@@ -254,11 +265,18 @@ impl ReplayReport {
             }
             out.push('\n');
         }
+        if self.affected_omitted > 0 {
+            let _ = writeln!(
+                out,
+                "- and {} more groups not listed",
+                self.affected_omitted
+            );
+        }
         for s in &self.shadow {
             let _ = writeln!(
                 out,
                 "- shadow rule `{}` would have fired for {} sessions",
-                md(&s.rule),
+                s.rule.replace('`', "'"),
                 s.sessions
             );
         }
@@ -276,6 +294,9 @@ impl ReplayReport {
         out
     }
 }
+
+/// The most affected groups a report lists; the totals still count all.
+pub const MAX_AFFECTED_ROWS: usize = 500;
 
 /// Printed with every report: what the replay rests on.
 pub const CAVEAT: &str = "Approximate: roles use each person's latest IdP groups and resource labels are today's, not those of the time. Only allowed sessions are recorded, so this shows narrowing; `policy diff` shows widening.";
@@ -297,13 +318,17 @@ fn plain(text: &str) -> String {
 fn md(text: &str) -> String {
     text.chars()
         .map(|c| match c {
-            '|' | '`' | '*' | '_' | '<' | '>' | '[' | ']' | '\\' | '!' | '&' => {
+            '|' | '`' | '*' | '_' | '<' | '>' | '[' | ']' | '\\' | '!' | '&' | '@' | '#' | '~' => {
                 format!("\\{c}")
             }
-            c if c.is_control() => " ".to_owned(),
+            c if c.is_control() || is_bidi(c) => " ".to_owned(),
             c => c.to_string(),
         })
         .collect()
+}
+
+fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 /// Why a recorded session could not become a request.
@@ -465,6 +490,10 @@ impl Policy {
                 .cmp(&a.sessions)
                 .then_with(|| a.user.cmp(&b.user))
         });
+        if report.affected.len() > MAX_AFFECTED_ROWS {
+            report.affected_omitted = (report.affected.len() - MAX_AFFECTED_ROWS) as u64;
+            report.affected.truncate(MAX_AFFECTED_ROWS);
+        }
         report.shadow = shadow
             .into_iter()
             .map(|(rule, sessions)| ShadowHit { rule, sessions })

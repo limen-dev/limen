@@ -84,7 +84,21 @@ pub async fn replay(
         })?;
     metrics::counter!("limen_policy_replays_total").increment(1);
 
-    let (mut report, groups_found) = run(state, active, proposed, days).await?;
+    let (mut report, groups_found) = match run(state, active, proposed, days).await {
+        Ok(done) => done,
+        Err(e) => {
+            // Leave an outcome next to the start event.
+            let _ = state
+                .audit
+                .emit(
+                    EventKind::PolicyReplay,
+                    context(),
+                    json!({ "phase": "failed", "via": who.via, "window_days": days }),
+                )
+                .await;
+            return Err(e);
+        }
+    };
     report.window_days = days;
     // The counts, for the record. The start event is what must not be lost.
     if let Err(e) = state
@@ -119,6 +133,21 @@ async fn run(
         truncated,
         ..ReplayReport::default()
     };
+    // Rows without a user or a resource (a session.end that arrived first,
+    // say) can't be replayed; they are counted, not dropped.
+    let unattributed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sessions
+         WHERE started_at >= now() - make_interval(days => $1)
+           AND (username IS NULL OR resource IS NULL)",
+    )
+    .bind(i32::try_from(days).unwrap_or(i32::MAX))
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| internal("reading sessions to replay", e))?;
+    report.skip(
+        "session rows without a recorded user or resource",
+        u64::try_from(unattributed).unwrap_or(0),
+    );
 
     let people: Vec<String> = groups
         .iter()
@@ -201,6 +230,16 @@ async fn run(
 }
 
 async fn load_groups(state: &AppState, days: u32) -> Result<(Vec<Group>, bool), Status> {
+    // A heavy scan is stopped, not left to hold the database.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("reading sessions to replay", e))?;
+    sqlx::query("SET LOCAL statement_timeout = '10s'")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("reading sessions to replay", e))?;
     // One more than the cap, to know whether there were more.
     let rows = sqlx::query(
         "SELECT username, kind, resource, login, database, request_ids,
@@ -209,12 +248,12 @@ async fn load_groups(state: &AppState, days: u32) -> Result<(Vec<Group>, bool), 
          WHERE started_at >= now() - make_interval(days => $1)
            AND username IS NOT NULL AND resource IS NOT NULL
          GROUP BY username, kind, resource, login, database, request_ids
-         ORDER BY n DESC, username, resource
+         ORDER BY last DESC, username, resource
          LIMIT $2",
     )
     .bind(i32::try_from(days).unwrap_or(i32::MAX))
     .bind(i64::try_from(MAX_GROUPS + 1).unwrap_or(i64::MAX))
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| internal("reading sessions to replay", e))?;
     let truncated = rows.len() > MAX_GROUPS;

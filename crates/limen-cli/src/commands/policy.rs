@@ -403,6 +403,15 @@ async fn diff(
     if fail_on_widening && result.widens_standing() {
         bail!("standing access widens (--fail-on-widening)");
     }
+    if let (Some((_, true)), Some(r)) = (replay, &replayed) {
+        // An incomplete replay is not an all-clear for a CI gate.
+        if r.affected_sessions == 0 && (r.truncated || (r.examined == 0 && r.skipped_total() > 0)) {
+            bail!(
+                "the replay was incomplete ({}); it cannot show that nothing would be refused (--fail-on-affected)",
+                r.headline()
+            );
+        }
+    }
     if let (Some((_, true)), Some(r)) = (replay, &replayed)
         && r.affected_sessions > 0
     {

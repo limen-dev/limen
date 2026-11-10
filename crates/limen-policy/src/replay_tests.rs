@@ -430,9 +430,47 @@ fn terminal_output_carries_no_control_characters_from_names() {
     let report = run(
         &old,
         &new,
-        &[person("evil\x1b[31m@x", &["developers"], "web-prod", "ubuntu", 1)],
+        &[person(
+            "evil\x1b[31m@x",
+            &["developers"],
+            "web-prod",
+            "ubuntu",
+            1,
+        )],
     );
     let text = report.render_text();
     assert!(!text.contains('\x1b'), "{text:?}");
     assert!(text.contains("evil [31m@x"), "{text:?}");
+}
+
+#[test]
+fn a_huge_answer_is_cut_to_the_largest_groups_with_the_totals_intact() {
+    let old = parse(ACTIVE);
+    let new = parse(&tightened());
+    let records: Vec<ReplayRecord> = (0..600)
+        .map(|i| {
+            person(
+                &format!("u{i}"),
+                &["developers"],
+                "web-prod",
+                "ubuntu",
+                1 + i,
+            )
+        })
+        .collect();
+    let report = run(&old, &new, &records);
+    assert_eq!(report.affected.len(), crate::replay::MAX_AFFECTED_ROWS);
+    assert_eq!(report.affected_omitted, 100);
+    assert_eq!(report.affected_sessions, (1..=600).sum::<u64>());
+    assert_eq!(report.affected[0].sessions, 600, "largest first");
+    assert!(report.render_text().contains("100 more groups"));
+}
+
+#[test]
+fn a_partial_replay_says_so_in_the_headline() {
+    let report = ReplayReport {
+        truncated: true,
+        ..ReplayReport::default()
+    };
+    assert!(report.headline().contains("partial"));
 }

@@ -161,6 +161,12 @@ async fn a_dry_run_replays_recorded_sessions_through_the_change() {
     .await;
     f.session("ghost@example.com", "ssh", "web-prod", "ubuntu", 1)
         .await;
+    // A row whose start never arrived has no user or resource: counted, not dropped.
+    sqlx::query("INSERT INTO sessions (session_id, started_at) VALUES ($1, now())")
+        .bind(uuid::Uuid::now_v7())
+        .execute(&f.h.state.db)
+        .await
+        .expect("insert half a session");
     // Outside the window.
     f.session("alice@example.com", "ssh", "web-prod", "ubuntu", 40)
         .await;
@@ -188,9 +194,16 @@ async fn a_dry_run_replays_recorded_sessions_through_the_change() {
     assert_eq!(r.affected_sessions, 4, "{r:?}");
     assert_eq!(r.affected_users(), (1, 1));
     assert_eq!(r.already_refused, 1);
-    assert_eq!(r.skipped.len(), 3, "{:?}", r.skipped);
+    assert_eq!(r.skipped.len(), 4, "{:?}", r.skipped);
     assert!(
         r.skipped.keys().any(|k| k.contains("Kubernetes")),
+        "{:?}",
+        r.skipped
+    );
+    assert!(
+        r.skipped
+            .keys()
+            .any(|k| k.contains("without a recorded user")),
         "{:?}",
         r.skipped
     );
