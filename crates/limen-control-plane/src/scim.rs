@@ -365,6 +365,9 @@ fn clean_username(v: &Value) -> Result<String, Response> {
     if limen_core::identity::is_bot(name) {
         return Err(bad_request("userName names a bot"));
     }
+    if limen_core::identity::is_selftest(name) {
+        return Err(bad_request("userName is in a reserved namespace"));
+    }
     Ok(name.to_owned())
 }
 

@@ -107,6 +107,19 @@ impl Caller {
 
 const MAX_FORWARDED_CERT_LEN: usize = 8 * 1024;
 
+/// Why an API call from a person or bot is refused, given what the database
+/// says about their account and login: `(audit reason, message)`, or `None`
+/// to let it through. A lock wins over an ended login. The scheduled
+/// self-test (ADR-0051) checks this very function.
+#[must_use]
+pub fn refusal(locked: bool, ended: bool) -> Option<(&'static str, &'static str)> {
+    match (locked, ended) {
+        (false, false) => None,
+        (true, _) => Some(("user locked", "user locked")),
+        (false, true) => Some(("logged out", "this login has ended; run `limen login`")),
+    }
+}
+
 /// Resolve the caller of `request` and refuse a person or bot whose account
 /// is locked, or whose login has ended (`limen logout`), while their
 /// certificate is still valid. Locks and ended logins are read from the
@@ -125,10 +138,8 @@ pub async fn resolve_current<T>(
         crate::db::lock_and_logout(&state.db, &identity.username, &identity.login_id)
             .await
             .map_err(|e| internal("checking locks", e))?;
-    let (reason, message) = match (locked, ended) {
-        (false, false) => return Ok(caller),
-        (true, _) => ("user locked", "user locked"),
-        (false, true) => ("logged out", "this login has ended; run `limen login`"),
+    let Some((reason, message)) = refusal(locked, ended) else {
+        return Ok(caller);
     };
     tracing::warn!(user = %identity.username, client_addr = ?addr, reason, "API call refused");
     let data = json!({

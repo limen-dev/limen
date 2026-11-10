@@ -70,6 +70,11 @@ pub enum AdminCommand {
         #[command(subcommand)]
         command: super::review::ReviewCommand,
     },
+    /// Test that the controls work, and keep a signed report (ADR-0051).
+    Selftest {
+        #[command(subcommand)]
+        command: super::selftest::SelftestCommand,
+    },
     /// A signed pack of compliance evidence for a period.
     Evidence {
         /// First day, as 2026-01-01.
@@ -356,6 +361,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
             );
         }
         AdminCommand::Review { command } => super::review::run(proxy, command).await?,
+        AdminCommand::Selftest { command } => super::selftest::run(proxy, command).await?,
         AdminCommand::Evidence { from, to, out } => {
             super::review::evidence(proxy, &from, &to, &out).await?;
         }

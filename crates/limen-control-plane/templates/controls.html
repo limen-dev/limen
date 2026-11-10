@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Controls{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Controls</h1>
+    <p class="sub">Limen tests its own controls with a test principal that can never gain access: a denied path is denied, an expired certificate is refused, a lock is seen, the audit trail is shipping. Tests run {{ interval }}.</p>
+  </div>
+</div>
+{% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
+{% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
+
+{% if chrome.is_admin %}
+<form method="post" action="/console/controls/run" class="inline">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Run a self-test now</button>
+</form>
+{% endif %}
+
+<h2>Latest result</h2>
+{% if let Some(l) = latest %}
+<p><span class="pill {{ l.tone }}">{{ l.status }}</span> {{ l.summary }}. Started {{ l.when }}, {{ l.trigger }}. <a href="/console/controls/{{ l.id }}/report">Download the signed report</a></p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Check</th><th>Result</th><th>What it found</th></tr></thead>
+  <tbody>
+  {% for c in checks %}
+  <tr>
+    <td><div class="cell-main">{{ c.title }}</div><div class="cell-sub">{{ c.id }}</div></td>
+    <td><span class="pill {{ c.tone }}">{{ c.status }}</span></td>
+    <td class="why">{{ c.detail }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="hint">A skipped check did not run and is not a pass. {{ attestation }}</p>
+{% else %}
+<div class="card empty"><div>No self-test has finished yet.</div></div>
+{% endif %}
+
+<h2>History <span class="count">{{ runs.len() }}</span></h2>
+{% if runs.is_empty() %}
+<div class="card empty"><div>No runs.</div></div>
+{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Started</th><th>By</th><th>Result</th><th>Checks</th><th></th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+  <tr>
+    <td class="nowrap">{{ r.when }}</td>
+    <td>{{ r.trigger }}</td>
+    <td><span class="pill {{ r.tone }}">{{ r.status }}</span></td>
+    <td>{{ r.summary }}</td>
+    <td>{% if r.has_report %}<a href="/console/controls/{{ r.id }}/report">Report</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+<p class="hint">Check a report anywhere with <code>limen audit verify --controls limen-controls.json --ca-file internal-ca.pem</code>. It shows the report is intact and signed by this control plane. It is the control plane attesting to itself, so verify the audit trail itself with <code>limen audit verify</code> too.</p>
+{% endblock %}

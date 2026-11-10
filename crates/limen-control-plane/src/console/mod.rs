@@ -17,6 +17,7 @@
 
 mod assets;
 mod auth;
+mod controls;
 mod dashboards;
 mod integrations;
 pub mod oidc_flow;
@@ -142,6 +143,9 @@ pub fn router(state: AppState) -> Router {
             "/console/access/grants/{id}/revoke",
             post(workflows::access_revoke),
         )
+        .route("/console/controls", get(controls::page))
+        .route("/console/controls/run", post(controls::run))
+        .route("/console/controls/{id}/report", get(controls::report))
         .route("/console/reviews", get(workflows::reviews_page))
         .route("/console/reviews/start", post(workflows::review_start))
         .route("/console/reviews/evidence", get(workflows::evidence))

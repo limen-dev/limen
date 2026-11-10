@@ -35,12 +35,23 @@ pub enum AuditCommand {
     ///
     /// With --evidence it checks a pack from `limen admin evidence` offline
     /// instead, with no login: give it the pack and the CA certificate.
+    /// With --controls it checks a controls report from `limen admin selftest
+    /// report` the same way. A controls report is the control plane attesting
+    /// to itself: this shows it is intact and signed, not that the checks were
+    /// honest, so run the plain `limen audit verify` as well.
     Verify {
         /// Check a pack from `limen admin evidence`, offline.
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "controls")]
         evidence: Option<std::path::PathBuf>,
-        /// With --evidence: an audit JSONL file; the pack's export event must be in it.
-        #[arg(long, value_name = "FILE", requires = "evidence")]
+        /// Check a controls report from `limen admin selftest report`, offline.
+        #[arg(long, value_name = "FILE")]
+        controls: Option<std::path::PathBuf>,
+        /// With --controls: fail on a skipped check too, not only a failed one.
+        #[arg(long, requires = "controls")]
+        strict: bool,
+        /// With --evidence or --controls: an audit JSONL file; the export or
+        /// run event must be in it.
+        #[arg(long, value_name = "FILE")]
         audit_events: Option<std::path::PathBuf>,
         /// The Limen internal CA certificate (PEM). Defaults to the CA pinned
         /// when you logged in. Needed with --evidence if you are not logged in.
@@ -54,13 +65,23 @@ pub async fn run(proxy: Option<&str>, command: AuditCommand) -> anyhow::Result<(
         AuditCommand::Search { query, limit, json } => search(proxy, &query, limit, json).await,
         AuditCommand::Verify {
             evidence,
+            controls,
+            strict,
             audit_events,
             ca_file,
         } => {
-            let ca = trusted_ca(proxy, ca_file.as_deref(), evidence.is_some())?;
-            match evidence {
-                Some(path) => verify_evidence(&path, audit_events.as_deref(), &ca),
-                None => verify_bucket(proxy, &ca).await,
+            if audit_events.is_some() && evidence.is_none() && controls.is_none() {
+                anyhow::bail!("--audit-events goes with --evidence or --controls");
+            }
+            let ca = trusted_ca(
+                proxy,
+                ca_file.as_deref(),
+                evidence.is_some() || controls.is_some(),
+            )?;
+            match (evidence, controls) {
+                (Some(path), _) => verify_evidence(&path, audit_events.as_deref(), &ca),
+                (None, Some(path)) => verify_controls(&path, audit_events.as_deref(), strict, &ca),
+                (None, None) => verify_bucket(proxy, &ca).await,
             }
         }
     }
@@ -309,6 +330,78 @@ fn verify_evidence(
     } else {
         for p in &problems {
             eprintln!("PROBLEM: {p}");
+        }
+        std::process::exit(2);
+    }
+}
+
+/// Check a controls report offline (ADR-0051): exit 2 if it is not intact, or
+/// if a control failed (or, with `--strict`, was skipped).
+fn verify_controls(
+    path: &std::path::Path,
+    audit_events: Option<&std::path::Path>,
+    strict: bool,
+    ca: &rustls_pki_types::CertificateDer<'_>,
+) -> anyhow::Result<()> {
+    use limen_verify::controls::{Counts, Status};
+    let bytes = std::fs::read(path)?;
+    let v = limen_verify::controls::verify_report(&bytes, ca);
+    let mut problems = v.problems().to_vec();
+    if let (Some(events), Some(_)) = (audit_events, &v.verification.manifest) {
+        let text = std::fs::read_to_string(events)?;
+        let anchored = text.lines().any(|l| {
+            serde_json::from_str::<serde_json::Value>(l).is_ok_and(|e| {
+                e["kind"] == "selftest.run"
+                    && e["data"]["manifest_sha256"] == v.verification.manifest_sha256
+            })
+        });
+        if anchored {
+            eprintln!("OK: the run is recorded in the audit trail");
+        } else {
+            problems.push(format!(
+                "no selftest.run event with manifest {} is in {}",
+                v.verification.manifest_sha256,
+                events.display()
+            ));
+        }
+    }
+    let mut failed = false;
+    let mut skipped = false;
+    if let Some(run) = &v.run {
+        eprintln!(
+            "run {} ({}) by {}, {} to {}, policy version {}",
+            run.meta.run_id,
+            run.meta.trigger,
+            run.meta.control_plane,
+            run.meta.started_at,
+            run.meta.finished_at,
+            run.meta.policy_version
+        );
+        for c in &run.checks {
+            let word = match c.status {
+                Status::Passed => "PASSED ",
+                Status::Failed => "FAILED ",
+                Status::Skipped => "SKIPPED",
+            };
+            eprintln!("{word} {}: {}", c.id, one_line(&c.detail));
+        }
+        let counts = Counts::of(&run.checks);
+        failed = counts.failed > 0;
+        skipped = counts.skipped > 0;
+        eprintln!(
+            "{} passed, {} failed, {} skipped. {}",
+            counts.passed, counts.failed, counts.skipped, run.meta.attestation
+        );
+    }
+    for p in &problems {
+        eprintln!("PROBLEM: {p}");
+    }
+    if problems.is_empty() && !failed && !(strict && skipped) {
+        eprintln!("OK: the report is signed by the control plane and every section matches it");
+        Ok(())
+    } else {
+        if problems.is_empty() && !failed {
+            eprintln!("A check was skipped, and --strict treats that as a failure.");
         }
         std::process::exit(2);
     }

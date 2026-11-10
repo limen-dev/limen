@@ -339,7 +339,7 @@ Check that the audit trail is intact: signed, chained, with nothing missing or a
 
 For auditors and admins (`limen:auditor` or `limen:admin`). Limen decides who may, records that you did, and gives your session short-lived read-only access to the audit bucket. The check itself runs on your machine, against the CA you pinned at login, so it does not rest on Limen's word. Exits 2 if anything fails.
 
-With --evidence it checks a pack from `limen admin evidence` offline instead, with no login: give it the pack and the CA certificate.
+With --evidence it checks a pack from `limen admin evidence` offline instead, with no login: give it the pack and the CA certificate. With --controls it checks a controls report from `limen admin selftest report` the same way. A controls report is the control plane attesting to itself: this shows it is intact and signed, not that the checks were honest, so run the plain `limen audit verify` as well.
 
 ```text
 Usage: limen audit verify [OPTIONS]
@@ -348,7 +348,9 @@ Usage: limen audit verify [OPTIONS]
 Options:
 
 - `--evidence <FILE>`: Check a pack from `limen admin evidence`, offline.
-- `--audit-events <FILE>`: With --evidence: an audit JSONL file; the pack's export event must be in it.
+- `--controls <FILE>`: Check a controls report from `limen admin selftest report`, offline.
+- `--strict`: With --controls: fail on a skipped check too, not only a failed one.
+- `--audit-events <FILE>`: With --evidence or --controls: an audit JSONL file; the export or run event must be in it.
 - `--ca-file <CA_FILE>`: The Limen internal CA certificate (PEM). Defaults to the CA pinned when you logged in. Needed with --evidence if you are not logged in.
 
 ### `limen policy`
@@ -1192,6 +1194,57 @@ Arguments:
 Options:
 
 - `--reason <REASON>`
+
+#### `limen admin selftest`
+
+Test that the controls work, and keep a signed report (ADR-0051)
+
+```text
+Usage: limen admin selftest [OPTIONS] <COMMAND>
+```
+
+##### `limen admin selftest run`
+
+Test the controls now and wait for the result (`limen:admin`).
+
+The control plane checks its own controls with a test principal that can never gain access: a denied path is denied, an expired certificate is refused, a lock is seen, the audit trail is shipping. It runs itself every day as well. A run is at most once a minute; if one is already running, you wait for that one. Exits 2 if a control failed.
+
+```text
+Usage: limen admin selftest run [OPTIONS]
+```
+
+Options:
+
+- `--no-wait`: Start it and return without waiting.
+
+##### `limen admin selftest ls`
+
+The latest runs (`limen:admin` or `limen:auditor`)
+
+```text
+Usage: limen admin selftest ls [OPTIONS]
+```
+
+Options:
+
+- `--limit <LIMIT>` Default: `10`.
+- `--json`
+
+##### `limen admin selftest report`
+
+Save the signed report of a run (`limen:admin` or `limen:auditor`)
+
+```text
+Usage: limen admin selftest report [OPTIONS] [ID]
+```
+
+Arguments:
+
+- `<ID>`: The run's id, from `limen admin selftest ls`. Default: the latest with a report.
+
+Options:
+
+- `--out <OUT>` Default: `limen-controls.json`.
 
 #### `limen admin evidence`
 

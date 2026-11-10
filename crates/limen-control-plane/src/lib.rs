@@ -24,6 +24,7 @@ pub mod replicas;
 pub mod reviews;
 pub mod scim;
 pub mod search;
+pub mod selftest;
 pub mod server;
 pub mod services;
 pub mod sinks;
@@ -252,6 +253,7 @@ pub async fn run(
     tokio::spawn(jobs::discovery_sweep(state.clone(), stop.clone()));
     tokio::spawn(jobs::reviews_tick(state.clone(), stop.clone()));
     tokio::spawn(idp_check::job(state.clone(), stop.clone()));
+    tokio::spawn(selftest::job(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),

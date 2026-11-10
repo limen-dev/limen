@@ -385,6 +385,12 @@ impl Pipeline {
     /// Pause (or resume) shipping to S3. Set when this replica can no longer
     /// confirm that it owns its id: another process may be about to write the
     /// same manifest chain.
+    /// The S3 audit sink, if one is configured.
+    #[must_use]
+    pub fn s3_sink(&self) -> Option<&S3Sink> {
+        self.s3.as_ref()
+    }
+
     pub fn set_fenced(&self, fenced: bool) {
         self.fenced
             .store(fenced, std::sync::atomic::Ordering::SeqCst);

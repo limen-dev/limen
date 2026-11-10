@@ -457,6 +457,12 @@ pub struct Config {
     #[arg(long, env = "LIMEN_SEARCH_HISTORY_URL")]
     pub search_history_url: Option<String>,
 
+    /// How often the controls are tested (ADR-0051): a signed "controls are
+    /// working" report with an audit event. `0s` turns the schedule off; an
+    /// admin can still run a test by hand.
+    #[arg(long, env = "LIMEN_SELFTEST_INTERVAL", value_parser = parse_duration_or_zero, default_value = "24h")]
+    pub selftest_interval: Duration,
+
     /// How often an access review starts by itself (ADR-0029). 0 turns the
     /// schedule off; admins can still start one.
     #[arg(long, env = "LIMEN_REVIEW_INTERVAL", value_parser = parse_duration_or_zero, default_value = "90d")]

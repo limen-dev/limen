@@ -299,14 +299,15 @@ pub(super) fn csr_spki(csr_der: &[u8]) -> Result<Vec<u8>, Status> {
     ))
 }
 
-/// `bot:` names belong to machine identities (ADR-0019). A person whose IdP
-/// user name starts with it must not be able to look like one.
+/// `bot:` names belong to machine identities (ADR-0019) and `selftest:` names
+/// to the scheduled self-test (ADR-0051). A person whose IdP user name starts
+/// with either must not be able to look like one.
 async fn refuse_reserved_name(
     state: &AppState,
     addr: Option<IpAddr>,
     username: &str,
 ) -> Result<(), Status> {
-    if limen_core::identity::is_bot(username) {
+    if limen_core::identity::is_bot(username) || limen_core::identity::is_selftest(username) {
         return Err(deny(
             state.audit.clone(),
             addr,
