@@ -174,6 +174,42 @@ async fn a_still_valid_person_keeps_their_login_across_checks() {
 }
 
 #[tokio::test]
+async fn a_refreshed_id_token_that_fails_keeps_the_rotated_refresh_token() {
+    let Some(h) = start(&[]).await else { return };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+
+    // The IdP rotates the token on every refresh, but its ID token does not
+    // verify (a signing key the control plane has not seen yet).
+    h.idp.set_unverifiable_refreshed_tokens(true);
+    eventually("the failure to show", || async {
+        status(&h).await == "check_failed"
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    h.idp.set_unverifiable_refreshed_tokens(false);
+
+    // The next check must use the rotated token: the old one is spent, and
+    // using it would read as a deactivation.
+    eventually("the status to recover", || async {
+        status(&h).await == "ok"
+    })
+    .await;
+    assert!(alive(&h, &proxy, &cert).await);
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, ADMIN)
+            .await
+            .expect("lock check"),
+        "nobody is locked for an ID token that would not verify"
+    );
+}
+
+#[tokio::test]
 async fn an_idp_that_is_down_fails_open_and_alerts_once() {
     let Some(h) = start(&[]).await else { return };
     let (_, proxy) = h.enroll_proxy().await;

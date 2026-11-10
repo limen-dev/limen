@@ -197,22 +197,25 @@ pub async fn forget_login(db: &Db, login_id: &str) -> Result<(), sqlx::Error> {
     forget(db, login_id).await
 }
 
-async fn mark_ok(
-    db: &Db,
-    t: &Tracked,
-    rotated: Option<&[u8]>,
-    next: Duration,
-) -> Result<(), sqlx::Error> {
+/// Keep the refresh token the IdP just handed out in place of the one used.
+async fn store_rotated(db: &Db, login_id: &str, sealed: &[u8]) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE idp_logins SET refresh_token = $2 WHERE login_id = $1")
+        .bind(login_id)
+        .bind(sealed)
+        .execute(db)
+        .await
+        .map(|_| ())
+}
+
+async fn mark_ok(db: &Db, t: &Tracked, next: Duration) -> Result<(), sqlx::Error> {
     // The groups stay those the login was issued with: a role gained since
     // and lost again was never this login's.
     sqlx::query(
         "UPDATE idp_logins SET last_ok_at = now(),
-                refresh_token = COALESCE($2, refresh_token),
-                next_check_at = now() + make_interval(secs => $3)
+                next_check_at = now() + make_interval(secs => $2)
          WHERE login_id = $1",
     )
     .bind(&t.login_id)
-    .bind(rotated)
     .bind(jittered_secs(next))
     .execute(db)
     .await?;
@@ -531,6 +534,15 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
             id_token,
             refresh_token,
         } => {
+            // The IdP may have rotated the refresh token, which uses the old
+            // one up. Keep the new one before anything below can return, or a
+            // check that only fails on the ID token would strand the login
+            // with a token the IdP now calls claimed.
+            if let Some(next) = refresh_token.and_then(|r| seal(key, &t.login_id, r.expose()).ok())
+                && let Err(e) = store_rotated(&state.db, &t.login_id, &next).await
+            {
+                tracing::warn!(error = %e, "storing a rotated refresh token");
+            }
             if let Some(raw) = id_token {
                 match state.oidc.verify(raw.expose().clone(), None).await {
                     Ok(id) => {
@@ -567,16 +579,8 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                     }
                 }
             }
-            let rotated = refresh_token.and_then(|r| seal(key, &t.login_id, r.expose()).ok());
             metrics::counter!("limen_idp_checks_total", "outcome" => "ok").increment(1);
-            if let Err(e) = mark_ok(
-                &state.db,
-                &t,
-                rotated.as_deref(),
-                state.config.idp_check_interval,
-            )
-            .await
-            {
+            if let Err(e) = mark_ok(&state.db, &t, state.config.idp_check_interval).await {
                 tracing::warn!(error = %e, "recording a successful check");
             }
         }

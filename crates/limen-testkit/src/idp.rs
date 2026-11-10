@@ -137,6 +137,8 @@ struct Browser {
     refresh: std::collections::HashMap<String, RefreshSession>,
     /// The token endpoint answers 503, as an IdP that is down.
     down: bool,
+    /// Refreshed ID tokens carry the wrong audience, so none verifies.
+    bad_refreshed_tokens: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +306,16 @@ impl MockIdp {
                 s.groups = groups.iter().map(|g| (*g).to_owned()).collect();
             }
         }
+    }
+
+    /// Make refreshed ID tokens fail verification (wrong audience), the way a
+    /// key rotation the control plane has not seen yet would. The refresh
+    /// token is still rotated.
+    ///
+    /// # Panics
+    /// If the internal lock is poisoned. Tests only.
+    pub fn set_unverifiable_refreshed_tokens(&self, on: bool) {
+        self.browser.lock().expect("lock").bad_refreshed_tokens = on;
     }
 
     /// Make the token endpoint answer 503 (or recover).
@@ -495,7 +507,11 @@ fn refresh_grant(
             .map(String::as_str)
             .collect::<Vec<_>>(),
     );
-    claims.audience = Some(f.client_id.clone());
+    claims.audience = Some(if idp.browser.lock().expect("lock").bad_refreshed_tokens {
+        "someone-else".to_owned()
+    } else {
+        f.client_id.clone()
+    });
     Ok(Json(serde_json::json!({
         "id_token": idp.id_token(&claims),
         "access_token": "unused",
