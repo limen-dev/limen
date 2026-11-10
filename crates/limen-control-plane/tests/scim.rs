@@ -87,6 +87,15 @@ async fn create_user(h: &Harness, name: &str) -> String {
     user["id"].as_str().expect("an id").to_owned()
 }
 
+/// The groups the console compares with a person's roles.
+async fn effective(h: &Harness, name: &str) -> Option<Vec<String>> {
+    limen_control_plane::console::store::user(&h.state.db, name)
+        .await
+        .expect("query")
+        .expect("a user")
+        .idp_groups
+}
+
 async fn events(h: &Harness, kind: EventKind) -> Vec<limen_audit::Event> {
     h.audit_events()
         .await
@@ -330,11 +339,7 @@ async fn pushed_groups_show_pending_access_and_removal_ends_the_login() {
 
     // Before any sign-in: the groups are known, and the console can show the
     // access they will give.
-    let groups: Option<Vec<String>> =
-        sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = 'eng@example.com'")
-            .fetch_one(&h.state.db)
-            .await
-            .expect("row");
+    let groups = effective(&h, "eng@example.com").await;
     assert_eq!(groups, Some(vec!["limen-engineering".to_owned()]));
     let (gained, lost) =
         limen_control_plane::idp_check::pending_roles(&h.state, &[], groups.as_deref());
@@ -407,12 +412,12 @@ async fn pushed_groups_show_pending_access_and_removal_ends_the_login() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, remaining) = scim(&h, "GET", "/scim/v2/Groups", None).await;
     assert_eq!(remaining["totalResults"], 0);
-    let groups: Option<Vec<String>> =
-        sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = 'eng@example.com'")
-            .fetch_one(&h.state.db)
-            .await
-            .expect("row");
-    assert_eq!(groups, Some(vec![]));
+    // Unlinking a pushed group does not remove anyone from it in the IdP: SCIM
+    // stops speaking for it, and the groups of their last token are theirs again.
+    assert_eq!(
+        effective(&h, "eng@example.com").await,
+        Some(vec!["limen-engineering".to_owned()])
+    );
 }
 
 #[tokio::test]
@@ -434,4 +439,101 @@ async fn a_member_that_is_not_a_user_is_refused() {
         .await
         .expect("count");
     assert_eq!(none, 0, "nothing was half-made");
+}
+
+const TWO_MAPPED: &str = "kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n---\nkind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [postgres] }\n      db: { roles: [limen_read] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: limen-engineering, roles: [dev] }\n  - { idp_group: limen-sre, roles: [ops] }\n";
+
+/// SCIM pushes some of a person's groups, not all. A group it never pushes
+/// still counts for them, and being added to a pushed group takes nothing away.
+#[tokio::test]
+async fn a_group_scim_never_pushes_still_counts_for_the_person() {
+    let Some(h) = start(true).await else { return };
+    h.set_policy(&[("m.yaml", TWO_MAPPED)]);
+    let (_, proxy) = h.enroll_proxy().await;
+    let who = "both@example.com";
+    let id = create_user(&h, who).await;
+    let refresh = h
+        .idp
+        .issue_refresh_token(who, &["limen-engineering", "limen-sre"]);
+    let (resp, cert) = h
+        .login_with_refresh(who, &["limen-engineering", "limen-sre"], &refresh)
+        .await
+        .expect("login");
+    assert_eq!(resp.roles, ["dev", "ops"]);
+    let alive = || async {
+        ResourcesClient::new(h.channel(Some(proxy.clone())))
+            .list_resources(common::forwarded(
+                ListResourcesRequest::default(),
+                Some(&cert),
+            ))
+            .await
+            .is_ok()
+    };
+
+    // Only `limen-engineering` is pushed, and they are added to it.
+    let (status, group) = scim(
+        &h,
+        "POST",
+        "/scim/v2/Groups",
+        Some(json!({ "displayName": "limen-engineering", "members": [{ "value": id }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{group}");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(alive().await, "being added to a group ends nothing");
+
+    // Both groups still count: nothing pending is lost.
+    let groups = effective(&h, who).await.expect("groups");
+    assert_eq!(groups, ["limen-engineering", "limen-sre"]);
+    let (gained, lost) = limen_control_plane::idp_check::pending_roles(
+        &h.state,
+        &["dev".to_owned(), "ops".to_owned()],
+        Some(&groups),
+    );
+    assert_eq!(gained.len() + lost.len(), 0);
+
+    // Removed from the pushed group: only what it gave goes.
+    let gid = group["id"].as_str().expect("id");
+    scim(
+        &h,
+        "PATCH",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(json!({ "Operations": [{ "op": "remove", "path": "members", "value": [{ "value": id }] }] })),
+    )
+    .await;
+    let groups = effective(&h, who).await.expect("groups");
+    assert_eq!(groups, ["limen-sre"]);
+}
+
+/// Two changes to one group at once both land.
+#[tokio::test]
+async fn concurrent_group_changes_are_not_lost() {
+    let Some(h) = start(true).await else { return };
+    let (_, group) = scim(
+        &h,
+        "POST",
+        "/scim/v2/Groups",
+        Some(json!({ "displayName": "limen-engineering" })),
+    )
+    .await;
+    let gid = group["id"].as_str().expect("id").to_owned();
+    let mut people = Vec::new();
+    for i in 0..6 {
+        people.push(create_user(&h, &format!("p{i}@example.com")).await);
+    }
+    let path = format!("/scim/v2/Groups/{gid}");
+    let adds = people.iter().map(|id| {
+        scim(
+            &h,
+            "PATCH",
+            &path,
+            Some(json!({ "Operations": [{ "op": "add", "path": "members",
+                                           "value": [{ "value": id }] }] })),
+        )
+    });
+    for (status, _) in futures::future::join_all(adds).await {
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (_, group) = scim(&h, "GET", &path, None).await;
+    assert_eq!(group["members"].as_array().map(Vec::len), Some(6));
 }

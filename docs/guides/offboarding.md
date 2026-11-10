@@ -53,6 +53,7 @@ Without the key, no refresh token is stored and nothing is checked.
 | `--idp-check-interval` | `5m` | How often a login is checked, spread by ±10%. `0s` turns the check off |
 | `--idp-check-failure` | `open` | `open`: keep sessions when the IdP cannot be reached and alert. `closed`: end logins not confirmed within the grace period |
 | `--idp-check-grace` | `1h` | With `closed`: how long a login may go unconfirmed |
+| `--idp-purge-after` | `90d` | Delete the record of a person the IdP check (or SCIM) disabled this long ago. `0s` turns it off. Runs with the check |
 | `--idp-ignore-groups` | off | Do not end logins on group removal. For an IdP that leaves groups out of refreshed ID tokens |
 
 The IdP must allow `offline_access` and issue refresh tokens to the CLI's client (Okta: enable the Refresh Token grant on the native app) and put the groups claim in refreshed ID tokens.

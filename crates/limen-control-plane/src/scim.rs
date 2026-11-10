@@ -764,38 +764,30 @@ async fn set_members(
     Ok(())
 }
 
-/// Copy the groups people are now in to `users.idp_groups`.
-async fn refresh_groups(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    people: &BTreeSet<Uuid>,
-) -> Result<(), Response> {
-    let ids: Vec<Uuid> = people.iter().copied().collect();
-    sqlx::query(
-        "UPDATE users u SET idp_groups_at = now(), idp_groups = COALESCE((
-             SELECT array_agg(g.display_name ORDER BY g.display_name)
-             FROM scim_group_members m JOIN scim_groups g ON g.id = m.group_id
-             WHERE m.user_scim_id = u.scim_id), '{}')
-         WHERE u.scim_id = ANY($1)",
-    )
-    .bind(&ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(|e| server_error("updating groups", &e))?;
-    Ok(())
-}
-
 /// After a commit: end the logins of people who lost access they relied on.
+/// Only for removals, deletions and renames; being added to a group never
+/// takes anything away. The comparison uses the groups the IdP puts the person
+/// in *now* (see `effective_groups`), not SCIM's pushed groups alone, so a
+/// group SCIM never pushes (a baseline group, a bootstrap admin group) still
+/// counts for the person.
 async fn enforce(state: &AppState, people: &BTreeSet<Uuid>) {
+    if people.is_empty() {
+        return;
+    }
     let ids: Vec<Uuid> = people.iter().copied().collect();
-    let rows = sqlx::query("SELECT username, idp_groups FROM users WHERE scim_id = ANY($1)")
-        .bind(&ids)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
+    let rows = sqlx::query(concat!(
+        "SELECT u.username, ",
+        crate::console::store::effective_groups!(),
+        " AS groups FROM users u WHERE u.scim_id = ANY($1)"
+    ))
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
     for r in &rows {
         let (Ok(name), Ok(Some(groups))) = (
             r.try_get::<String, _>("username"),
-            r.try_get::<Option<Vec<String>>, _>("idp_groups"),
+            r.try_get::<Option<Vec<String>>, _>("groups"),
         ) else {
             continue;
         };
@@ -821,26 +813,31 @@ async fn names_of(
         .unwrap_or_default()
 }
 
+/// What changed in a group, for the audit event and for enforcement.
+struct Change<'a> {
+    action: &'a str,
+    group: &'a str,
+    added: BTreeSet<Uuid>,
+    removed: BTreeSet<Uuid>,
+    /// People whose access may have shrunk: those removed, and everyone in a
+    /// group that was renamed or deleted.
+    enforce: BTreeSet<Uuid>,
+}
+
 /// Audit a group change inside its transaction, then commit and enforce.
-#[allow(clippy::too_many_arguments)]
 async fn finish_group_change(
     state: &AppState,
     mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
-    action: &str,
-    group: &str,
-    added: &BTreeSet<Uuid>,
-    removed: &BTreeSet<Uuid>,
-    affected: &BTreeSet<Uuid>,
+    change: Change<'_>,
 ) -> Result<(), Response> {
-    refresh_groups(&mut tx, affected).await?;
-    let added_names = names_of(&mut tx, added).await;
-    let removed_names = names_of(&mut tx, removed).await;
+    let added_names = names_of(&mut tx, &change.added).await;
+    let removed_names = names_of(&mut tx, &change.removed).await;
     ops::audit_first(
         state,
         EventKind::UserGroupsChange,
         ACTOR_AS,
         None,
-        json!({ "group": group, "action": action,
+        json!({ "group": change.group, "action": change.action,
                 "added": added_names, "removed": removed_names }),
     )
     .await
@@ -848,8 +845,31 @@ async fn finish_group_change(
     tx.commit()
         .await
         .map_err(|e| server_error("changing a group", &e))?;
-    enforce(state, affected).await;
+    enforce(state, &change.enforce).await;
     Ok(())
+}
+
+/// One step of a members change, applied in order under the group's row lock.
+enum Step {
+    Add(Vec<Uuid>),
+    Remove(Vec<Uuid>),
+    Replace(Vec<Uuid>),
+    Clear,
+}
+
+fn apply_steps(members: &mut BTreeSet<Uuid>, steps: &[Step]) {
+    for step in steps {
+        match step {
+            Step::Add(ids) => members.extend(ids.iter().copied()),
+            Step::Remove(ids) => {
+                for id in ids {
+                    members.remove(id);
+                }
+            }
+            Step::Replace(ids) => *members = ids.iter().copied().collect(),
+            Step::Clear => members.clear(),
+        }
+    }
 }
 
 async fn create_group(State(state): State<AppState>, body: Bytes) -> Reply {
@@ -885,11 +905,13 @@ async fn create_group(State(state): State<AppState>, body: Bytes) -> Reply {
     finish_group_change(
         &state,
         tx,
-        "create",
-        &name,
-        &wanted,
-        &BTreeSet::new(),
-        &wanted,
+        Change {
+            action: "create",
+            group: &name,
+            added: wanted,
+            removed: BTreeSet::new(),
+            enforce: BTreeSet::new(),
+        },
     )
     .await?;
     Ok(reply(
@@ -909,19 +931,28 @@ async fn replace_group(
         .await?
         .ok_or_else(|| not_found("group"))?;
     let name = clean_group_name(&v)?;
-    let wanted: BTreeSet<Uuid> = match v.get("members") {
-        Some(m) => member_ids(m)?.into_iter().collect(),
-        None => BTreeSet::new(),
+    let wanted = match v.get("members") {
+        Some(m) => member_ids(m)?,
+        None => Vec::new(),
     };
-    apply_group(&state, id, Some(&name), Some(wanted), "replace").await
+    apply_group(
+        &state,
+        id,
+        Some(&name),
+        vec![Step::Replace(wanted)],
+        "replace",
+    )
+    .await
 }
 
-/// Rename and/or set the members of a group, in one audited transaction.
+/// Rename and/or change the members of a group, in one audited transaction
+/// that holds the group's row, so concurrent changes to it queue up and none
+/// is lost.
 async fn apply_group(
     state: &AppState,
     id: Uuid,
     new_name: Option<&str>,
-    new_members: Option<BTreeSet<Uuid>>,
+    steps: Vec<Step>,
     action: &str,
 ) -> Reply {
     let mut tx = state
@@ -959,45 +990,42 @@ async fn apply_group(
             ));
         }
     }
-    let after = match new_members {
-        Some(m) => {
-            set_members(&mut tx, id, &m).await?;
-            m
-        }
-        None => before.clone(),
-    };
+    let mut after = before.clone();
+    apply_steps(&mut after, &steps);
+    if after != before {
+        set_members(&mut tx, id, &after).await?;
+    }
     let added: BTreeSet<Uuid> = after.difference(&before).copied().collect();
     let removed: BTreeSet<Uuid> = before.difference(&after).copied().collect();
-    // A rename changes the group everyone in it is in.
-    let affected: BTreeSet<Uuid> = if name == current {
-        added.union(&removed).copied().collect()
+    // A rename takes the old name away from everyone who had it.
+    let enforce = if name == current {
+        removed.clone()
     } else {
-        before.union(&after).copied().collect()
+        before.clone()
     };
-    finish_group_change(state, tx, action, &name, &added, &removed, &affected).await?;
+    finish_group_change(
+        state,
+        tx,
+        Change {
+            action,
+            group: &name,
+            added,
+            removed,
+            enforce,
+        },
+    )
+    .await?;
     Ok(reply(StatusCode::OK, &group_json(state, id, &name).await?))
 }
 
-async fn patch_group(State(state): State<AppState>, Path(id): Path<String>, body: Bytes) -> Reply {
-    let id = parse_id(&id, "group")?;
-    let v = parse_body(&body)?;
-    find_group(&state, id)
-        .await?
-        .ok_or_else(|| not_found("group"))?;
+/// Read a PATCH into steps, without touching the database.
+fn plan_patch(v: &Value) -> Result<(Option<String>, Vec<Step>), Response> {
     let ops_list = v
         .get("Operations")
         .and_then(Value::as_array)
         .ok_or_else(|| bad_request("Operations is required"))?;
-
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| server_error("reading a group", &e))?;
-    let mut members = members_of(&mut tx, id).await?;
-    drop(tx);
-    let mut members_changed = false;
     let mut name: Option<String> = None;
+    let mut steps = Vec::new();
     for op in ops_list {
         let kind = op
             .get("op")
@@ -1007,42 +1035,29 @@ async fn patch_group(State(state): State<AppState>, Path(id): Path<String>, body
         let path = op.get("path").and_then(Value::as_str).unwrap_or("");
         let value = op.get("value");
         let lower = path.to_lowercase();
-        if lower == "displayname"
-            || (lower.is_empty() && value.is_some_and(|x| x.get("displayName").is_some()))
-        {
-            let src = if lower.is_empty() {
-                value.cloned().unwrap_or_default()
-            } else {
-                json!({ "displayName": value })
-            };
-            name = Some(clean_group_name(&src)?);
-            if lower.is_empty() && value.is_some_and(|x| x.get("members").is_some()) {
-                // A pathless replace may carry members too.
-                members = member_ids(&value.unwrap_or(&Value::Null)["members"])?
-                    .into_iter()
-                    .collect();
-                members_changed = true;
+        if lower == "displayname" {
+            name = Some(clean_group_name(&json!({ "displayName": value }))?);
+        } else if lower.is_empty() {
+            // Okta's pathless form: {"op":"replace","value":{"displayName":...}}
+            if let Some(obj) = value.filter(|x| x.is_object()) {
+                if obj.get("displayName").is_some() {
+                    name = Some(clean_group_name(obj)?);
+                }
+                if let Some(m) = obj.get("members") {
+                    let ids = member_ids(m)?;
+                    steps.push(if kind == "add" {
+                        Step::Add(ids)
+                    } else {
+                        Step::Replace(ids)
+                    });
+                }
             }
         } else if lower == "members" {
             match (kind.as_str(), value) {
-                ("add", Some(v)) => {
-                    members.extend(member_ids(v)?);
-                    members_changed = true;
-                }
-                ("replace", Some(v)) => {
-                    members = member_ids(v)?.into_iter().collect();
-                    members_changed = true;
-                }
-                ("remove", Some(v)) => {
-                    for m in member_ids(v)? {
-                        members.remove(&m);
-                    }
-                    members_changed = true;
-                }
-                ("remove", None) => {
-                    members.clear();
-                    members_changed = true;
-                }
+                ("add", Some(v)) => steps.push(Step::Add(member_ids(v)?)),
+                ("replace", Some(v)) => steps.push(Step::Replace(member_ids(v)?)),
+                ("remove", Some(v)) => steps.push(Step::Remove(member_ids(v)?)),
+                ("remove", None) => steps.push(Step::Clear),
                 _ => return Err(bad_request("unsupported members operation")),
             }
         } else if let Some(rest) = lower.strip_prefix("members[value eq ") {
@@ -1051,29 +1066,24 @@ async fn patch_group(State(state): State<AppState>, Path(id): Path<String>, body
             let target = Uuid::parse_str(id_text)
                 .map_err(|_| bad_request("a members filter needs a user id"))?;
             if kind == "remove" {
-                members.remove(&target);
-                members_changed = true;
+                steps.push(Step::Remove(vec![target]));
             } else {
                 return Err(bad_request("unsupported members operation"));
             }
-        } else if let (true, "add", Some(m)) = (
-            lower.is_empty(),
-            kind.as_str(),
-            value.and_then(|x| x.get("members")),
-        ) {
-            members.extend(member_ids(m)?);
-            members_changed = true;
         }
         // Anything else (other attributes) is accepted and ignored.
     }
-    apply_group(
-        &state,
-        id,
-        name.as_deref(),
-        members_changed.then_some(members),
-        "patch",
-    )
-    .await
+    Ok((name, steps))
+}
+
+async fn patch_group(State(state): State<AppState>, Path(id): Path<String>, body: Bytes) -> Reply {
+    let id = parse_id(&id, "group")?;
+    let v = parse_body(&body)?;
+    find_group(&state, id)
+        .await?
+        .ok_or_else(|| not_found("group"))?;
+    let (name, steps) = plan_patch(&v)?;
+    apply_group(&state, id, name.as_deref(), steps, "patch").await
 }
 
 async fn delete_group(State(state): State<AppState>, Path(id): Path<String>) -> Reply {
@@ -1101,11 +1111,13 @@ async fn delete_group(State(state): State<AppState>, Path(id): Path<String>) -> 
     finish_group_change(
         &state,
         tx,
-        "delete",
-        &name,
-        &BTreeSet::new(),
-        &before,
-        &before,
+        Change {
+            action: "delete",
+            group: &name,
+            added: BTreeSet::new(),
+            removed: before.clone(),
+            enforce: before,
+        },
     )
     .await?;
     Ok(StatusCode::NO_CONTENT.into_response())

@@ -709,11 +709,11 @@ pub async fn purge_disabled(state: &AppState) -> usize {
     }
     let due: Vec<String> = match sqlx::query_scalar(
         "SELECT username FROM user_locks
-         WHERE released_at IS NULL AND locked_by = $1
+         WHERE released_at IS NULL AND locked_by = ANY($1)
            AND locked_at < now() - make_interval(secs => $2)
          ORDER BY locked_at LIMIT $3",
     )
-    .bind(LOCK_ACTOR)
+    .bind([LOCK_ACTOR, crate::scim::ACTOR].map(str::to_owned).to_vec())
     .bind(after.as_secs_f64())
     .bind(BATCH)
     .fetch_all(&state.db)
@@ -728,7 +728,7 @@ pub async fn purge_disabled(state: &AppState) -> usize {
     let mut deleted = 0;
     for username in due {
         let reason = format!(
-            "disabled by the identity provider check for more than {}",
+            "disabled by the identity provider (check or SCIM) for more than {}",
             humantime_days(after)
         );
         match ops::delete_disabled_user(

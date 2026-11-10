@@ -37,9 +37,9 @@ spec:
 | They are added to a pushed group | Their groups update; the Users page shows the access they will have ("next sign-in: +engineer"). Roles apply at their sign-in |
 | They are removed from a pushed group | Logins that relied on a role the group gave end at once (`user.groups_change`, `idp.offboard`). They are not locked |
 | They are deactivated in the app (Okta's Deactivate Users) | They are disabled as `system:scim` (`user.lock`) and their logins end. Signing in does not lift it; reactivating them in Okta does, and only a lock SCIM placed (never an admin's) |
-| A user is deleted | The record is deleted through the audited path the console's Delete uses (`user.delete`) |
+| A user is deleted | The record is deleted through the audited path the console's Delete uses (`user.delete`). Okta does not send this for users, so a deactivated person stays on the Users page, disabled, until an admin deletes them or the 90-day purge (`--idp-purge-after`; it runs with the IdP check, so it needs `--idp-token-key`) does |
 
-Ending logins for a group change needs the IdP check's stored logins (`--idp-token-key`); without it a deactivation still locks, but a group removal waits for the person's next sign-in. A lock stops everything immediately either way.
+Groups are judged against the groups of the person's last token, with the pushed groups taken from SCIM: a group you do not push (an `Everyone` baseline, an admin group) keeps counting for them, and adding someone to a group never ends a login. Ending logins for a group removal needs the IdP check's stored logins (`--idp-token-key`); without it a deactivation still locks, but a group removal waits for the person's next sign-in. A lock stops everything immediately either way.
 
 ## Limits
 

@@ -547,15 +547,20 @@ async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
     // logins to check it never touches these.
     let Some(h) = start(&[]).await else { return };
     person(&h, "old.idp@example.com", Some("system:idp-check"), 91).await;
+    person(&h, "old.scim@example.com", Some("system:scim"), 91).await;
     person(&h, "recent.idp@example.com", Some("system:idp-check"), 89).await;
     person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
     person(&h, "enabled@example.com", None, 0).await;
 
     assert_eq!(
         limen_control_plane::idp_check::purge_disabled(&h.state).await,
-        1
+        2
     );
     assert!(!exists(&h, "old.idp@example.com").await);
+    assert!(
+        !exists(&h, "old.scim@example.com").await,
+        "SCIM never sends a delete for a user, so its deactivations are purged too"
+    );
     assert!(exists(&h, "recent.idp@example.com").await, "89 days: kept");
     assert!(
         exists(&h, "old.admin@example.com").await,
@@ -580,9 +585,13 @@ async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
             .expect("lock check")
     );
     let deletes = events(&h, EventKind::UserDelete).await;
-    assert_eq!(deletes.len(), 1, "one audited deletion");
-    assert_eq!(deletes[0].data["target_user"], "old.idp@example.com");
-    assert_eq!(deletes[0].data["disabled_by"], "system:idp-check");
+    assert_eq!(deletes.len(), 2, "each deletion is audited");
+    let one = deletes
+        .iter()
+        .find(|e| e.data["target_user"] == "old.idp@example.com")
+        .expect("the IdP check's deletion");
+    assert_eq!(one.data["disabled_by"], "system:idp-check");
+    let deletes = [one.clone()];
     assert_eq!(deletes[0].data["via"], "idp");
 }
 
