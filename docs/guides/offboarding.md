@@ -24,6 +24,14 @@ Deactivate the person, or remove them from the group that grants a role. Within 
 
 An admin lock is still the immediate tool (see [locking a user](../runbooks/lock-user.md)); this removes the need to remember to use it.
 
+### Deleting the record
+
+A disabled person's record is kept at first, because their sessions, recordings and audit events name them and a false alarm should be recoverable. After that:
+
+- **Automatically.** Someone the IdP check disabled and who has not signed in again for `--idp-purge-after` (`LIMEN_IDP_PURGE_AFTER`, **90 days** by default, `0s` turns it off) has their user record and stored IdP tokens deleted, audited as `user.delete` by `system:idp-check`. Sessions, recordings and audit events stay. A person an **admin** disabled is never purged automatically. The purge runs hourly, as part of the IdP check, so it needs `--idp-token-key` too.
+- **By hand.** On a disabled user's page, **Delete** removes the record, with a reason in the audit trail. Enabled users can't be deleted, and bots are managed on the Bots page. If an admin had disabled them, that lock stays, so they can't come back unnoticed; they are listed under "Disabled, no user record" until an admin enables them.
+- **If they come back.** A person deleted after the IdP disabled them simply signs in again if the IdP accepts them, and gets a new record with no history on the Users page (their old sessions and audit events are still there under their name).
+
 ## How it works
 
 When the check is on, the control plane tells the CLI to add the `offline_access` scope, so the IdP issues a refresh token; the CLI sends it to the control plane with the ID token. The control plane stores it **sealed** (AES-256-GCM, bound to the login) and uses it to ask the IdP, on a schedule, whether the session is still valid. The token is never returned by any API, logged, or audited, and it is deleted when the login ends, is revoked, or expires.

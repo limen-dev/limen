@@ -387,3 +387,160 @@ async fn a_person_inherits_the_roles_of_their_idp_groups_without_any_setup() {
         .expect_err("no mapped group");
     assert_eq!(err.code(), tonic::Code::PermissionDenied);
 }
+
+// ---- purge and delete (ADR-0047) -------------------------------------------------
+
+async fn person(h: &Harness, name: &str, locked_by: Option<&str>, days: i64) {
+    sqlx::query("INSERT INTO users (username, subject) VALUES ($1, $1)")
+        .bind(name)
+        .execute(&h.state.db)
+        .await
+        .expect("user");
+    sqlx::query("INSERT INTO idp_logins (login_id, username, refresh_token, groups, expires_at, next_check_at) VALUES ($1, $2, '\\x00', '{}', now() + interval '1 day', now() + interval '1 day')")
+        .bind(format!("login-{name}"))
+        .bind(name)
+        .execute(&h.state.db)
+        .await
+        .expect("stored token");
+    if let Some(by) = locked_by {
+        limen_control_plane::db::lock_user(&h.state.db, name, "gone", by)
+            .await
+            .expect("lock");
+        sqlx::query("UPDATE user_locks SET locked_at = now() - make_interval(days => $2) WHERE username = $1")
+            .bind(name)
+            .bind(days as i32)
+            .execute(&h.state.db)
+            .await
+            .expect("backdate");
+    }
+}
+
+async fn exists(h: &Harness, name: &str) -> bool {
+    sqlx::query_scalar("SELECT count(*) > 0 FROM users WHERE username = $1")
+        .bind(name)
+        .fetch_one(&h.state.db)
+        .await
+        .expect("exists")
+}
+
+#[tokio::test]
+async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
+    // The window is the default, 90 days. The IdP check runs, but with no
+    // logins to check it never touches these.
+    let Some(h) = start(&[]).await else { return };
+    person(&h, "old.idp@example.com", Some("system:idp-check"), 91).await;
+    person(&h, "recent.idp@example.com", Some("system:idp-check"), 89).await;
+    person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
+    person(&h, "enabled@example.com", None, 0).await;
+
+    let deleted = limen_control_plane::idp_check::purge_disabled(&h.state).await;
+    assert_eq!(deleted, 1);
+    assert!(!exists(&h, "old.idp@example.com").await);
+    assert!(exists(&h, "recent.idp@example.com").await, "89 days: kept");
+    assert!(
+        exists(&h, "old.admin@example.com").await,
+        "an admin's lock never purges"
+    );
+    assert!(
+        exists(&h, "enabled@example.com").await,
+        "enabled people are never purged"
+    );
+
+    // Its stored token went too; the IdP lock is released (the IdP decides if they return).
+    let tokens: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM idp_logins WHERE username = 'old.idp@example.com'",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .expect("count");
+    assert_eq!(tokens, 0);
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, "old.idp@example.com")
+            .await
+            .expect("lock check")
+    );
+    let deletes = events(&h, EventKind::UserDelete).await;
+    assert_eq!(deletes.len(), 1, "one audited deletion");
+    assert_eq!(deletes[0].data["target_user"], "old.idp@example.com");
+    assert_eq!(deletes[0].data["disabled_by"], "system:idp-check");
+    assert_eq!(deletes[0].data["via"], "idp");
+}
+
+#[tokio::test]
+async fn the_purge_can_be_turned_off() {
+    let Some(h) = start(&["--idp-purge-after=0s"]).await else {
+        return;
+    };
+    person(&h, "old.idp@example.com", Some("system:idp-check"), 1000).await;
+    assert_eq!(
+        limen_control_plane::idp_check::purge_disabled(&h.state).await,
+        0
+    );
+    assert!(exists(&h, "old.idp@example.com").await);
+}
+
+#[tokio::test]
+async fn only_a_disabled_person_can_be_deleted_by_hand() {
+    use limen_control_plane::services::ops::{self, Actor, DeleteRefused};
+    let Some(h) = start(&[]).await else { return };
+    person(&h, "live@example.com", None, 0).await;
+    person(&h, "by.admin@example.com", Some("admin@example.com"), 1).await;
+    person(&h, "by.idp@example.com", Some("system:idp-check"), 1).await;
+    let me = Actor {
+        username: ADMIN,
+        via: "console",
+    };
+
+    let r = ops::delete_disabled_user(&h.state, me, "live@example.com", "tidy")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::NotDisabled));
+    assert!(
+        exists(&h, "live@example.com").await,
+        "an enabled person is untouched"
+    );
+    let r = ops::delete_disabled_user(&h.state, me, "bot:deploy", "tidy")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::Bot));
+    let e = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "")
+        .await
+        .expect_err("a reason is required");
+    assert_eq!(e.code(), tonic::Code::InvalidArgument);
+
+    // An admin's lock survives the deletion, so a return sign-in is still refused.
+    let r = ops::delete_disabled_user(&h.state, me, "by.admin@example.com", "left the company")
+        .await
+        .expect("ok");
+    assert_eq!(r, Ok(()));
+    assert!(!exists(&h, "by.admin@example.com").await);
+    assert!(
+        limen_control_plane::db::is_locked(&h.state.db, "by.admin@example.com")
+            .await
+            .expect("lock check"),
+        "the admin's decision stands"
+    );
+    // The IdP's lock does not: the IdP decides if they come back.
+    let r = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "left the company")
+        .await
+        .expect("ok");
+    assert_eq!(r, Ok(()));
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, "by.idp@example.com")
+            .await
+            .expect("lock check")
+    );
+    // Deleting twice finds nothing disabled.
+    let r = ops::delete_disabled_user(&h.state, me, "by.idp@example.com", "again")
+        .await
+        .expect("ok");
+    assert_eq!(r, Err(DeleteRefused::NotDisabled));
+
+    let deletes = events(&h, EventKind::UserDelete).await;
+    assert_eq!(deletes.len(), 2);
+    assert!(
+        deletes
+            .iter()
+            .all(|e| e.data["reason"] == "left the company")
+    );
+}

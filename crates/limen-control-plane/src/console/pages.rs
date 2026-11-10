@@ -56,8 +56,8 @@ fn event_view(e: &store::EventRow) -> EventView {
         icon,
         kclass,
         tone: match e.kind.as_str() {
-            "auth.denied" | "user.lock" | "session.kill" | "component.revoke" | "idp.offboard"
-            | "idp.check_failed" => "bad",
+            "auth.denied" | "user.lock" | "user.delete" | "session.kill" | "component.revoke"
+            | "idp.offboard" | "idp.check_failed" => "bad",
             "auth.login" | "user.unlock" | "worker.enroll" => "ok",
             _ => "",
         },
@@ -171,6 +171,7 @@ fn notice(code: Option<&str>) -> Option<&'static str> {
     Some(match code? {
         "locked" => "User locked. Their sessions end within about 11 seconds.",
         "unlocked" => "User unlocked.",
+        "deleted" => "User deleted. Their sessions and audit history stay.",
         "killed" => "The session will end within about 11 seconds.",
         "revoked" => "Revoked. Proxies drop its tunnels within about 10 seconds.",
         _ => return None,
@@ -1418,6 +1419,41 @@ pub async fn lock_user(
             ))
             .into_response()
         }
+        Err(s) => action_error(&s),
+    }
+}
+
+/// `POST /console/users/{name}/delete`: delete a disabled person's record.
+/// Enabled people can't be deleted, and their history stays (ADR-0047).
+pub async fn delete_user(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Form(form): Form<ReasonForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    match ops::delete_disabled_user(&state, actor(&auth), &name, &form.reason).await {
+        Ok(Ok(())) => Redirect::to("/console/users?done=deleted").into_response(),
+        Ok(Err(ops::DeleteRefused::NotDisabled)) => error_page(
+            StatusCode::CONFLICT,
+            "Disable them first",
+            "Only a disabled user can be deleted. Disable the account, then delete it.",
+        ),
+        Ok(Err(ops::DeleteRefused::Bot)) => error_page(
+            StatusCode::BAD_REQUEST,
+            "That is a bot",
+            "Bots are managed on the Bots page, not deleted here.",
+        ),
         Err(s) => action_error(&s),
     }
 }

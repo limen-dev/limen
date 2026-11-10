@@ -195,6 +195,13 @@ pub struct Config {
     #[arg(long, env = "LIMEN_IDP_CHECK_INTERVAL", value_parser = parse_duration, default_value = "5m")]
     pub idp_check_interval: Duration,
 
+    /// Delete the record of a person the IdP check disabled once they have
+    /// stayed disabled this long (ADR-0047). Their sessions, recordings and
+    /// audit history stay. An admin's lock never purges. `0s` turns it off.
+    /// Runs with the IdP check, so it needs `--idp-token-key` too.
+    #[arg(long, env = "LIMEN_IDP_PURGE_AFTER", value_parser = parse_duration_or_zero, default_value = "90d")]
+    pub idp_purge_after: Duration,
+
     /// Do not end logins when a refreshed ID token no longer grants a role.
     /// For an IdP that leaves groups out of refreshed tokens. IdPs also omit
     /// the claim for a person with no groups, so by default an absent claim

@@ -227,7 +227,7 @@ pub async fn login_callback(
         )
         .await;
     }
-    match crate::db::is_locked(&state.db, &identity.username).await {
+    match crate::services::auth::lock_blocks(&state, &identity.username).await {
         Ok(false) => {}
         Ok(true) => {
             return denied(

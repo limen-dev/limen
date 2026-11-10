@@ -43,6 +43,14 @@
   <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#lock-open"/></svg>Enable {{ u.name }}</button>
   <span class="hint">They can sign in and open sessions again. (If the IdP no longer has them, they still can't sign in.)</span>
 </form>
+{% if !u.is_bot %}
+<form method="post" action="/console/users/{{ u.path }}/delete" class="danger-zone">
+  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+  <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360">
+  <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Delete {{ u.name }}</button>
+  <span class="hint">Removes their user record. Their sessions, recordings and audit history stay. Only disabled users can be deleted.</span>
+</form>
+{% endif %}
 {% else %}
 <form method="post" action="/console/users/{{ u.path }}/lock" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">

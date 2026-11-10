@@ -715,6 +715,84 @@ async fn console_end_to_end() {
     assert_eq!(page.status, 303);
     assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
 
+    // ---- deleting: only a disabled person, and their history stays ---------------------
+    let csrf = Browser::csrf(
+        &admin_user
+            .get(&format!("/console/users/{DEVELOPER_ENC}"))
+            .await,
+    );
+    let refused = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/delete"),
+            &[("csrf", &csrf), ("reason", "tidy up")],
+        )
+        .await;
+    assert_eq!(
+        refused.status, 409,
+        "an enabled user can't be deleted: {}",
+        refused.body
+    );
+    assert!(refused.body.contains("Disable them first"));
+    let page = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/lock"),
+            &[("csrf", &csrf), ("reason", "left the company")],
+        )
+        .await;
+    assert_eq!(page.status, 303);
+    let gone = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/delete"),
+            &[("csrf", &csrf), ("reason", "left the company")],
+        )
+        .await;
+    assert_eq!(gone.status, 303, "{}", gone.body);
+    let users = admin_user.get("/console/users?state=enabled").await;
+    assert!(
+        !users.body.contains(DEVELOPER),
+        "the record is gone from the list"
+    );
+    let users = admin_user.get("/console/users").await;
+    assert!(
+        users.body.contains("Disabled, no user record") && users.body.contains(DEVELOPER),
+        "an admin's lock outlives the record, so a return is still refused: {}",
+        users.body
+    );
+    // Enable them again; a fresh sign-in makes a new record.
+    let page = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/unlock"),
+            &[("csrf", &csrf)],
+        )
+        .await;
+    assert_eq!(page.status, 303);
+    assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
+
+    // The console lifts a lock the IdP check placed when the IdP vouches for them
+    // again, as the CLI does; an admin's lock it never lifts.
+    {
+        let pool = sqlx::PgPool::connect(&d.db_url).await.expect("db");
+        sqlx::query("INSERT INTO user_locks (id, username, reason, locked_by) VALUES ($1, $2, 'deactivated', 'system:idp-check')")
+            .bind(uuid::Uuid::now_v7())
+            .bind(DEVELOPER)
+            .execute(&pool)
+            .await
+            .expect("an IdP lock");
+        assert_eq!(
+            dev_user.login(&d, DEVELOPER, &["ops"]).await.status,
+            200,
+            "the IdP vouches for them: the lock lifts"
+        );
+        let active: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM user_locks WHERE username = $1 AND released_at IS NULL",
+        )
+        .bind(DEVELOPER)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+        assert_eq!(active, 0);
+    }
+
     // ---- a bot: a CI job's session, with the run behind it ----------------------------
     let bot_token = d.idp.workload_token(&WorkloadToken::github(
         "acme/infra",

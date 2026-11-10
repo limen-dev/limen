@@ -23,6 +23,7 @@ use tokio::sync::watch;
 use crate::config::IdpCheckFailure;
 use crate::db::Db;
 use crate::http_client::HttpClient;
+use crate::services::ops;
 use crate::state::AppState;
 
 /// Logins claimed per tick, so one slow IdP cannot hold a whole fleet's checks.
@@ -583,6 +584,75 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
 }
 
 /// The background job (every replica runs it; claims keep them apart).
+/// How often the purge looks for people to delete.
+const PURGE_EVERY: Duration = Duration::from_secs(3600);
+
+/// Delete the record of people the IdP check disabled more than
+/// `--idp-purge-after` ago and who never came back (a sign-in the IdP vouches
+/// for lifts the lock, so a person still locked here has not). An admin's lock
+/// never qualifies. Returns how many were deleted.
+pub async fn purge_disabled(state: &AppState) -> usize {
+    let after = state.config.idp_purge_after;
+    if after.is_zero() {
+        return 0;
+    }
+    let due: Vec<String> = match sqlx::query_scalar(
+        "SELECT username FROM user_locks
+         WHERE released_at IS NULL AND locked_by = $1
+           AND locked_at < now() - make_interval(secs => $2)
+         ORDER BY locked_at LIMIT $3",
+    )
+    .bind(LOCK_ACTOR)
+    .bind(after.as_secs_f64())
+    .bind(BATCH)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!(error = %e, "looking for disabled people to purge failed");
+            return 0;
+        }
+    };
+    let mut deleted = 0;
+    for username in due {
+        let reason = format!(
+            "disabled by the identity provider check for more than {}",
+            humantime_days(after)
+        );
+        match ops::delete_disabled_user(
+            state,
+            ops::Actor {
+                username: LOCK_ACTOR,
+                via: "idp",
+            },
+            &username,
+            &reason,
+        )
+        .await
+        {
+            Ok(Ok(())) => deleted += 1,
+            Ok(Err(why)) => tracing::debug!(user = %username, ?why, "not purged"),
+            Err(e) => {
+                tracing::warn!(user = %username, error = %e, "purging a disabled person failed");
+            }
+        }
+    }
+    if deleted > 0 {
+        metrics::counter!("limen_idp_purged_total").increment(deleted as u64);
+    }
+    deleted
+}
+
+fn humantime_days(d: Duration) -> String {
+    let days = d.as_secs() / 86_400;
+    if days > 0 {
+        format!("{days} days")
+    } else {
+        format!("{}s", d.as_secs())
+    }
+}
+
 pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let interval = state.config.idp_check_interval;
     let key = match state.config.idp_token_key() {
@@ -594,10 +664,15 @@ pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
         return;
     };
     let mut tick = tokio::time::interval(interval.clamp(Duration::from_millis(200), TICK));
+    let mut last_purge: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
             _ = tick.tick() => {}
             _ = shutdown.changed() => return,
+        }
+        if last_purge.is_none_or(|t| t.elapsed() >= PURGE_EVERY) {
+            last_purge = Some(std::time::Instant::now());
+            purge_disabled(&state).await;
         }
         let _ = sqlx::query("DELETE FROM idp_logins WHERE expires_at < now() - interval '1 hour'")
             .execute(&state.db)

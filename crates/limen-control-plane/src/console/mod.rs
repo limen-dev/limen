@@ -98,6 +98,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/users/{name}", get(pages::user_detail))
         .route("/console/users/{name}/lock", post(pages::lock_user))
         .route("/console/users/{name}/unlock", post(pages::unlock_user))
+        .route("/console/users/{name}/delete", post(pages::delete_user))
         .route("/console/workers", get(pages::workers))
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
