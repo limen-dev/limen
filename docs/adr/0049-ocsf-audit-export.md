@@ -38,7 +38,7 @@ Limen ships audit events to S3 (hash-chained, signed) and Datadog, always in its
 - **Schema drift:** the version is pinned and written into every record.
 
 ## Consequences
-- A new consumer, config flags, metrics, and an OCSF bucket, KMS key, writer policy and reader role in the new `deploy/terraform/modules/ocsf`. No change to the native format, chain or verifier.
+- A new consumer, config flags, metrics, and an OCSF bucket, KMS key, writer policy and reader role in the existing `audit` Terraform module, behind `ocsf.enabled` (off by default), built on the community `s3-bucket` and `kms` modules. No change to the native format, chain or verifier.
 - A mapping table to edit whenever an event kind is added, enforced by the compiler.
 - No dependency added in v1.
 
@@ -60,7 +60,7 @@ Built for issue #112 in PR #294. Differences from the text above, and what is op
 - **Object keys** are `<prefix>dt=…/hour=…/<control plane id>-<first 32 hex of the SHA-256 of the batch>.jsonl.gz`, so a retry rewrites the same bytes and a wiped spool cannot overwrite an older object.
 - **The lag bound** acts only when all three hold: the OCSF send failed, every other consumer has strictly fewer records pending than the OCSF consumer (a tie frees nothing), and the spool is over `--audit-ocsf-max-lag-bytes`. Then the batch is skipped and counted (`limen_audit_ocsf_skipped_total`). The flag must be below `--audit-spool-max-bytes`.
 - **Secret scrub:** fields named like a secret are replaced with `[redacted]` at any depth (`token` is redacted unless the name ends in `_id`, `_sha256` or `_hash`).
-- **Terraform:** a new `ocsf` module (bucket, key, writer and reader policies); the audit module is unchanged.
+- **Terraform:** an `ocsf` variable on the `audit` module (and `audit.ocsf` on `foundation`) turns on a bucket, key, writer and reader policies; nothing changes while it is off.
 - **Not validated against each class's full schema.** The records carry the base attributes and the class-specific ones that Limen has (`user`, `actor`, `src_endpoint`, `http_request`, `http_response`, `status_id`); required attributes Limen has no value for are absent. A SIEM's first ingest is the test that is still missing, together with Security Lake.
 - **Tested** against SeaweedFS (all events arrive with their ids; the audit bucket is untouched and verifies; an outage keeps events and delivers them on return; a blocking outage is skipped and counted), not against a SIEM.
 - **Startup refusals:** no native sink configured (the OCSF sink can skip, so something durable must hold the events); an OCSF bucket or KMS key that looks like the audit one. The name check cannot see aliases or access points that resolve to the same resource, so the Terraform module is the real control: it fails an apply given the audit key, denies writes under any other key, and limits the reader's `kms:Decrypt` to S3.

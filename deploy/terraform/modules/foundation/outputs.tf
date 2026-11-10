@@ -12,6 +12,10 @@ output "control_plane_environment" {
       LIMEN_AUDIT_S3_BUCKET     = module.audit.bucket
       LIMEN_ENVIRONMENT         = var.name
     },
+    var.audit.ocsf.enabled ? {
+      LIMEN_AUDIT_OCSF_S3_BUCKET  = module.audit.ocsf_bucket
+      LIMEN_AUDIT_OCSF_S3_KMS_KEY = module.audit.ocsf_kms_key_arn
+    } : {},
     length(var.proxy_dns_names) > 0 ? { LIMEN_PROXY_DNS_NAMES = join(",", var.proxy_dns_names) } : {},
     var.console_public_url == null ? {} : { LIMEN_CONSOLE_PUBLIC_URL = var.console_public_url },
   )
@@ -36,11 +40,14 @@ output "join_token_secret_arns" {
 }
 
 output "control_plane_policy_arns" {
-  description = "Policies for the control plane's role: KMS signing and audit writes."
-  value = {
-    kms   = aws_iam_policy.control_plane_kms.arn
-    audit = aws_iam_policy.audit_writer.arn
-  }
+  description = "Policies for the control plane's role: KMS signing, audit writes and, with audit.ocsf.enabled, OCSF writes."
+  value = merge(
+    {
+      kms   = aws_iam_policy.control_plane_kms.arn
+      audit = aws_iam_policy.audit_writer.arn
+    },
+    var.audit.ocsf.enabled ? { ocsf = aws_iam_policy.ocsf_writer[0].arn } : {},
+  )
 }
 
 output "control_plane_irsa_role_arn" {
@@ -56,6 +63,16 @@ output "database_security_group_id" {
 output "database_endpoint" {
   description = "PostgreSQL address."
   value       = module.database.db_instance_address
+}
+
+output "ocsf_reader_policy_json" {
+  description = "IAM policy for the SIEM's collector: the OCSF bucket and key only. Null unless audit.ocsf.enabled."
+  value       = module.audit.ocsf_reader_policy_json
+}
+
+output "ocsf_bucket" {
+  description = "OCSF bucket name. Null unless audit.ocsf.enabled."
+  value       = module.audit.ocsf_bucket
 }
 
 output "audit_bucket" {

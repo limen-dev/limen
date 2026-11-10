@@ -657,7 +657,7 @@ impl Config {
         // Names are compared the way S3 reads them (no padding, no case). A
         // different spelling of the same bucket (an access point, another
         // account's alias) can't be seen from here: the IAM separation in the
-        // `ocsf` Terraform module is the control, this is a guard against
+        // `audit` Terraform module (`ocsf.enabled`) is the control, this is a guard against
         // mistakes.
         let same_bucket = self
             .audit_s3_bucket

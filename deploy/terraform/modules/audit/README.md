@@ -20,7 +20,12 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | terraform | >= 1.6 |
 | aws | >= 6.0, < 7.0 |
 
+## Modules
 
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| ocsf\_bucket | terraform-aws-modules/s3-bucket/aws | ~> 5.0 |
+| ocsf\_kms | terraform-aws-modules/kms/aws | ~> 4.2 |
 
 ## Resources
 
@@ -46,9 +51,12 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | [aws_s3_bucket_server_side_encryption_configuration.athena_results](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
 | [aws_s3_bucket_server_side_encryption_configuration.audit](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
 | [aws_s3_bucket_versioning.audit](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
+| [terraform_data.ocsf_key_guard](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_policy_document.assume_verifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.ocsf_reader](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.ocsf_writer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.reader](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.verifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.verifier_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
@@ -67,6 +75,7 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | deny\_version\_deletion | Deny s3:DeleteObjectVersion on the audit bucket to every principal. Lifecycle expiry still applies. | `bool` | `true` | no |
 | kms\_key\_arn | Existing KMS key for the bucket. A new key is created when null. | `string` | `null` | no |
 | object\_lock\_days | Object Lock retention in compliance mode, in days. 0 disables Object Lock.<br/>Object Lock can only be turned on when the bucket is created, and nobody,<br/>including the account root, can delete a locked object early. | `number` | `0` | no |
+| ocsf | The OCSF export of the audit trail for SIEMs (ADR-0049): a bucket and KMS<br/>key of their own, off by default. `kms_key_arn` is an existing key for the<br/>bucket (a new one is created when null); it must not be the audit key, which<br/>also protects recordings. `retention_days` 0 keeps objects forever: the<br/>audit bucket is the record, this copy is for the SIEM. | <pre>object({<br/>    enabled        = optional(bool, false)<br/>    bucket_name    = optional(string)<br/>    retention_days = optional(number, 90)<br/>    kms_key_arn    = optional(string)<br/>  })</pre> | `{}` | no |
 | retention\_days | Days to keep audit events, manifests, and recordings. 0 keeps them forever. | `number` | `400` | no |
 | tags | Tags for every resource. | `map(string)` | `{}` | no |
 | verifier\_trusted\_principal\_arns | IAM principals allowed to assume the verifier role: the control plane's task<br/>or instance role. The control plane assumes it to give auditors short-lived,<br/>read-only access for `limen audit verify`. Leave empty to create no role and<br/>attach verifier\_policy\_json yourself. | `list(string)` | `[]` | no |
@@ -82,6 +91,11 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | glue\_database | Glue database holding the events table. |
 | glue\_table | Glue table over the audit events, with partition projection. |
 | kms\_key\_arn | Key for --audit-s3-kms-key. |
+| ocsf\_bucket | OCSF bucket name, for --audit-ocsf-s3-bucket. Null unless ocsf.enabled. |
+| ocsf\_bucket\_arn | OCSF bucket ARN. Null unless ocsf.enabled. |
+| ocsf\_kms\_key\_arn | Key for --audit-ocsf-s3-kms-key. Null unless ocsf.enabled. |
+| ocsf\_reader\_policy\_json | IAM policy for the SIEM's collector: the OCSF bucket and key only. Null unless ocsf.enabled. |
+| ocsf\_writer\_policy\_json | IAM policy for the control plane's OCSF writes. Null unless ocsf.enabled. |
 | reader\_policy\_json | IAM policy for Grafana. |
 | verifier\_policy\_json | Read-only IAM policy for the audit bucket. Attached to the verifier role when verifier\_trusted\_principal\_arns is set. |
 | verifier\_role\_arn | Role for the control plane's LIMEN\_AUDIT\_VERIFIER\_ROLE\_ARN. Null when verifier\_trusted\_principal\_arns is empty. |

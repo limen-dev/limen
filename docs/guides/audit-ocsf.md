@@ -6,12 +6,12 @@ Limen can write its audit trail in [OCSF](https://schema.ocsf.io) (the Open Cybe
 
 ## Turn it on
 
-The export writes gzipped NDJSON (one OCSF event per line) to an S3 bucket of its own. Create the bucket with the [`ocsf` Terraform module](../../deploy/terraform/modules/ocsf/README.md), which also outputs the IAM policies, then start the control plane with:
+The export writes gzipped NDJSON (one OCSF event per line) to an S3 bucket of its own. Create the bucket by setting `ocsf = { enabled = true }` on the [`audit` Terraform module](../../deploy/terraform/modules/audit/README.md) (or `audit.ocsf` on `foundation`, which then wires the control plane's flags and writer policy); the module outputs the IAM policies too. Then start the control plane with:
 
 | Flag (environment) | Meaning |
 |---|---|
 | `--audit-ocsf-s3-bucket` (`LIMEN_AUDIT_OCSF_S3_BUCKET`) | The OCSF bucket. Turns the export on. **Must not be the audit bucket.** |
-| `--audit-ocsf-s3-kms-key` (`LIMEN_AUDIT_OCSF_S3_KMS_KEY`) | SSE-KMS key for the objects. **Must not be the audit KMS key.** With the `ocsf` Terraform module this flag is **required and must be the module's `kms_key_arn` output, the full ARN**: the module's bucket policy denies any write that names no key or another one (an alias or a bare key id does not match). |
+| `--audit-ocsf-s3-kms-key` (`LIMEN_AUDIT_OCSF_S3_KMS_KEY`) | SSE-KMS key for the objects. **Must not be the audit KMS key.** With the Terraform module this flag is **required and must be the `ocsf_kms_key_arn` output, the full ARN**: the bucket policy denies any write that names no key or another one (an alias or a bare key id does not match). |
 | `--audit-ocsf-s3-prefix` (`LIMEN_AUDIT_OCSF_S3_PREFIX`) | Key prefix: empty, or ending in `/`. |
 | `--audit-ocsf-s3-endpoint` (`LIMEN_AUDIT_OCSF_S3_ENDPOINT`) | Endpoint if it differs from `--audit-s3-endpoint` (another account or region, S3-compatible store). Path-style addressing follows `--audit-s3-path-style`. |
 | `--audit-ocsf-s3-flush` (`LIMEN_AUDIT_OCSF_S3_FLUSH`, default `60s`) | Close a batch after this long. |

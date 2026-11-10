@@ -62,16 +62,16 @@ jobs:
 
       - name: Terraform validate
         run: |
-          for dir in deploy/terraform/modules/audit deploy/terraform/modules/ocsf deploy/terraform/modules/datadog deploy/terraform/modules/foundation deploy/terraform/modules/discovery deploy/terraform/modules/ecs deploy/terraform/modules/ec2 deploy/terraform/examples/audit deploy/terraform/examples/complete deploy/terraform/examples/kubernetes; do
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/datadog deploy/terraform/modules/foundation deploy/terraform/modules/discovery deploy/terraform/modules/ecs deploy/terraform/modules/ec2 deploy/terraform/examples/audit deploy/terraform/examples/complete deploy/terraform/examples/kubernetes; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
 
-      # Plans the ECS and EC2 modules with a mocked AWS provider: `validate` cannot see an
+      # Plans the audit, ECS and EC2 modules with a mocked AWS provider: `validate` cannot see an
       # expression that fails only for one component (a worker has no service port).
       - name: Terraform plan tests (mocked provider)
         run: |
-          for dir in deploy/terraform/modules/ecs deploy/terraform/modules/ec2; do
+          for dir in deploy/terraform/modules/audit deploy/terraform/modules/ecs deploy/terraform/modules/ec2; do
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" test
           done

@@ -37,6 +37,23 @@ variable "kms_key_arn" {
   default     = null
 }
 
+variable "ocsf" {
+  description = <<-EOT
+    The OCSF export of the audit trail for SIEMs (ADR-0049): a bucket and KMS
+    key of their own, off by default. `kms_key_arn` is an existing key for the
+    bucket (a new one is created when null); it must not be the audit key, which
+    also protects recordings. `retention_days` 0 keeps objects forever: the
+    audit bucket is the record, this copy is for the SIEM.
+  EOT
+  type = object({
+    enabled        = optional(bool, false)
+    bucket_name    = optional(string)
+    retention_days = optional(number, 90)
+    kms_key_arn    = optional(string)
+  })
+  default = {}
+}
+
 variable "athena_bytes_scanned_cutoff" {
   description = "Per-query scan limit for the Athena workgroup, in bytes."
   type        = number
