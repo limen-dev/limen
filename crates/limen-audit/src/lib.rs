@@ -216,6 +216,11 @@ pub enum EventKind {
     /// the audit chain.
     #[serde(rename = "evidence.export")]
     EvidenceExport,
+    /// A scheduled or requested self-test of the controls finished (ADR-0051).
+    /// `data.status` is `passed`, `failed`, or `error`; `data.manifest_sha256`
+    /// anchors the signed report in the chain. Never holds a credential.
+    #[serde(rename = "selftest.run")]
+    SelftestRun,
     /// Someone began or stopped watching a live session (ADR-0030).
     #[serde(rename = "session.watch.start")]
     SessionWatchStart,

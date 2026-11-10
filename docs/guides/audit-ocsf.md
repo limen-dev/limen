@@ -108,6 +108,7 @@ An *Other* activity carries a readable `activity_name` (for example `access appr
 | `review.complete` | Entity Management (3004) | access review (99) | Informational |
 | `access.deny_override` | Entity Management (3004) | access deny override (99) | Informational |
 | `evidence.export` | API Activity (6003) | Create (1) | Informational |
+| `selftest.run` | Base Event (0) | controls self-test (99) | Informational |
 | `session.watch.start` | Base Event (0) | session watch (99) | Informational |
 | `session.watch.stop` | Base Event (0) | session watch (99) | Informational |
 <!-- END_OCSF_MAPPING -->

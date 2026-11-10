@@ -49,9 +49,35 @@ pub fn verify_user(
     cert: &CertificateDer<'_>,
     ca_cert: &CertificateDer<'_>,
 ) -> Result<UserIdentity, VerifyError> {
-    verify_chain(cert, ca_cert, KeyUsage::client_auth(), UnixTime::now())?;
+    verify_user_as_of(cert, ca_cert, UnixTime::now())
+}
+
+fn verify_user_as_of(
+    cert: &CertificateDer<'_>,
+    ca_cert: &CertificateDer<'_>,
+    at: UnixTime,
+) -> Result<UserIdentity, VerifyError> {
+    verify_chain(cert, ca_cert, KeyUsage::client_auth(), at)?;
     let (uris, not_after) = identity_uris(cert)?;
     user_identity(uris, not_after)
+}
+
+/// [`verify_user`] as of `at` instead of now: the same checks with a chosen
+/// clock. The scheduled self-test (ADR-0051) uses it to ask the production
+/// verifier whether a certificate is still accepted after its end date,
+/// without waiting for one to expire.
+pub fn verify_user_at(
+    cert: &CertificateDer<'_>,
+    ca_cert: &CertificateDer<'_>,
+    at: OffsetDateTime,
+) -> Result<UserIdentity, VerifyError> {
+    let secs = u64::try_from(at.unix_timestamp())
+        .map_err(|_| VerifyError::Chain("a time before 1970".into()))?;
+    verify_user_as_of(
+        cert,
+        ca_cert,
+        UnixTime::since_unix_epoch(std::time::Duration::from_secs(secs)),
+    )
 }
 
 /// The user identity a certificate's SAN URIs describe. Strict: anything
@@ -91,6 +117,11 @@ fn user_identity(
         }
     }
     let username = username.ok_or_else(|| VerifyError::Identity("missing user".into()))?;
+    if limen_core::identity::is_selftest(&username) {
+        return Err(VerifyError::Identity(
+            "the selftest: prefix is reserved and never an identity".into(),
+        ));
+    }
     if limen_core::identity::is_bot(&username) != bot || (!bot && !ci.is_empty()) {
         return Err(VerifyError::Identity(
             "the bot marker and the bot: username prefix must agree".into(),
@@ -254,6 +285,61 @@ mod tests {
         )
         .await
         .expect("ca")
+    }
+
+    #[tokio::test]
+    async fn the_self_test_name_is_never_issued_or_accepted() {
+        let user_ca = ca(CaPurpose::UserX509).await;
+        for name in ["selftest:probe", "SelfTest:probe", "selftest:"] {
+            let (_k, csr_der) = csr();
+            let refused = user_ca
+                .issue_user(UserCertRequest {
+                    csr_der,
+                    username: name.into(),
+                    roles: vec!["limen:admin".into()],
+                    login_id: Uuid::now_v7(),
+                    ttl: Duration::from_secs(60),
+                    ci: None,
+                })
+                .await;
+            assert!(refused.is_err(), "{name} must not get a certificate");
+        }
+        // Even a certificate that a CA signed anyway (a bug, or a stolen
+        // key) is not an identity: the verifier refuses the name.
+        let names = vec![
+            IdentityUri::User("selftest:probe".into()),
+            IdentityUri::Login(Uuid::now_v7().to_string()),
+        ];
+        assert!(user_identity(names, OffsetDateTime::now_utc()).is_err());
+    }
+
+    #[tokio::test]
+    async fn verifying_as_of_a_later_time_refuses_an_expired_certificate() {
+        let user_ca = ca(CaPurpose::UserX509).await;
+        let (_key, csr_der) = csr();
+        let issued = user_ca
+            .issue_user(UserCertRequest {
+                csr_der,
+                username: "someone".into(),
+                roles: vec![],
+                login_id: Uuid::now_v7(),
+                ttl: Duration::from_secs(60),
+                ci: None,
+            })
+            .await
+            .expect("issue");
+        let now = OffsetDateTime::now_utc();
+        assert!(verify_user_at(&issued.der, user_ca.cert_der(), now).is_ok());
+        assert!(
+            verify_user_at(
+                &issued.der,
+                user_ca.cert_der(),
+                now + time::Duration::hours(1)
+            )
+            .is_err()
+        );
+        let other = ca(CaPurpose::UserX509).await;
+        assert!(verify_user_at(&issued.der, other.cert_der(), now).is_err());
     }
 
     #[tokio::test]

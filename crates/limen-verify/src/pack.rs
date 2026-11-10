@@ -62,12 +62,27 @@ impl Verification {
     }
 }
 
-/// Check a pack offline: the manifest is signed by a control plane the
-/// internal CA issued, and every section is what the manifest says.
+/// Check an evidence pack offline: the manifest is signed by a control plane
+/// the internal CA issued, and every section is what the manifest says.
 #[must_use]
 pub fn verify_pack(
     pack: &[u8],
     internal_ca: &rustls_pki_types::CertificateDer<'_>,
+) -> Verification {
+    verify_signed(pack, internal_ca, FORMAT, Purpose::EvidencePack)
+}
+
+/// Check a signed, sectioned document offline: the same envelope serves
+/// evidence packs and controls reports (ADR-0029, ADR-0051). `format` is the
+/// format string it must carry, both outside and inside the signed manifest,
+/// and `purpose` the signature label, so one kind of document can't be passed
+/// off as the other.
+#[must_use]
+pub fn verify_signed(
+    pack: &[u8],
+    internal_ca: &rustls_pki_types::CertificateDer<'_>,
+    format: &str,
+    purpose: Purpose,
 ) -> Verification {
     let mut out = Verification::default();
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -75,8 +90,8 @@ pub fn verify_pack(
         out.problems.push("not a JSON document".into());
         return out;
     };
-    if v["format"] != FORMAT {
-        out.problems.push(format!("not a {FORMAT} pack"));
+    if v["format"] != format {
+        out.problems.push(format!("not a {format} document"));
         return out;
     }
     let (Some(manifest_json), Some(sig), Some(cert)) = (
@@ -112,7 +127,13 @@ pub fn verify_pack(
             .push("the manifest's generation time is out of range".into());
         return out;
     };
-    if let Err(e) = verify_at(&signed, Purpose::EvidencePack, internal_ca, generated_at) {
+    if manifest.format != format {
+        out.problems.push(format!(
+            "the signed manifest says {:?}, not {format}",
+            manifest.format
+        ));
+    }
+    if let Err(e) = verify_at(&signed, purpose, internal_ca, generated_at) {
         out.problems
             .push(format!("the manifest's signature is not valid: {e}"));
         return out;

@@ -361,6 +361,152 @@ pub async fn verify_bucket(
     Ok(report)
 }
 
+/// What a check of the newest manifests found.
+#[derive(Debug, Default)]
+pub struct TailReport {
+    pub writers: usize,
+    /// Manifests whose signature, signer, sequence and chain link were read.
+    pub manifests: usize,
+    pub problems: Vec<String>,
+}
+
+impl TailReport {
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.problems.is_empty()
+    }
+}
+
+/// Most problems a tail check reports before it stops describing them.
+const MAX_TAIL_PROBLEMS: usize = 20;
+
+/// Check the newest `last` manifests of every writer under `prefix`, and the
+/// one before them as the anchor of the chain: each is signed by its own
+/// control plane, numbered without a gap, and names the hash of the file
+/// before it.
+///
+/// This reads **manifests only**. It never fetches a batch, so it can run
+/// with the control plane's own write role (ADR-0051) and costs the same on a
+/// small trail and a large one. It therefore can't see a modified batch or a
+/// gap in the events' own numbering; [`verify_bucket`] does, with read access
+/// to the batches.
+///
+/// # Errors
+/// If the bucket can't be listed or a manifest can't be read.
+pub async fn verify_manifest_tail(
+    client: &aws_sdk_s3::Client,
+    bucket: &str,
+    prefix: &str,
+    internal_ca: &CertificateDer<'_>,
+    last: usize,
+) -> anyhow::Result<TailReport> {
+    let mut by_writer: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let manifests = format!("{prefix}manifests/");
+    let mut pages = client
+        .list_objects_v2()
+        .bucket(bucket)
+        .prefix(&manifests)
+        .into_paginator()
+        .send();
+    while let Some(page) = pages.next().await {
+        let page =
+            page.map_err(|e| anyhow::anyhow!("{}", aws_sdk_s3::error::DisplayErrorContext(&e)))?;
+        for obj in page.contents() {
+            if let Some(key) = obj.key()
+                && let Some(writer) = key
+                    .strip_prefix(&manifests)
+                    .and_then(|r| r.split('/').next())
+            {
+                by_writer
+                    .entry(writer.to_owned())
+                    .or_default()
+                    .push(key.to_owned());
+            }
+        }
+    }
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut report = TailReport {
+        writers: by_writer.len(),
+        ..TailReport::default()
+    };
+    for (writer, mut keys) in by_writer {
+        keys.sort();
+        // One more than asked for: the oldest only anchors the chain.
+        let start = keys.len().saturating_sub(last.saturating_add(1));
+        let mut prev: Option<(u64, String)> = None;
+        for (i, key) in keys.iter().enumerate().skip(start) {
+            let problem = |what: String| format!("{writer} #{i} ({key}): {what}");
+            let mut add = |what: String| {
+                if report.problems.len() < MAX_TAIL_PROBLEMS {
+                    report.problems.push(what);
+                }
+            };
+            let file = get(client, bucket, key).await?;
+            let file_sha = hex(&Sha256::digest(&file));
+            let this = (|| -> Result<Manifest, String> {
+                let signed: SignedManifest = serde_json::from_slice(&file)
+                    .map_err(|e| format!("unreadable manifest: {e}"))?;
+                let manifest: Manifest = serde_json::from_str(&signed.manifest)
+                    .map_err(|e| format!("unreadable manifest body: {e}"))?;
+                let envelope = Signed {
+                    payload: signed.manifest.clone().into_bytes(),
+                    signature: b64.decode(&signed.signature).unwrap_or_default(),
+                    signer_cert_der: b64.decode(&signed.signer_cert).unwrap_or_default(),
+                };
+                let at = time::OffsetDateTime::parse(
+                    &manifest.created_at,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|e| format!("unreadable manifest time: {e}"))?;
+                let (by, _) = verify_at(&envelope, Purpose::AuditManifest, internal_ca, at)
+                    .map_err(|e| format!("signature: {e}"))?;
+                if let Some(why) = crate::manifest::signer_problem(&by.id, &manifest.writer) {
+                    return Err(why);
+                }
+                Ok(manifest)
+            })();
+            let manifest = match this {
+                Ok(m) => m,
+                Err(e) => {
+                    add(problem(e));
+                    break;
+                }
+            };
+            report.manifests += 1;
+            if manifest.writer != writer {
+                add(problem(format!(
+                    "manifest names writer {}",
+                    manifest.writer
+                )));
+            }
+            // Keys are `<seq:012>.json` and the full check numbers manifests
+            // by their place in the list: a manifest must sit at its own seq.
+            if usize::try_from(manifest.seq).ok() != Some(i) {
+                add(problem(format!(
+                    "sequence {} found where {i} was expected (a batch is missing)",
+                    manifest.seq
+                )));
+            }
+            match &prev {
+                Some((_, prev_sha)) => {
+                    if manifest.prev_manifest_sha256 != *prev_sha {
+                        add(problem(
+                            "chain broken: previous manifest hash doesn't match".into(),
+                        ));
+                    }
+                }
+                // The very first manifest of a writer names no predecessor.
+                None if i == 0 && !manifest.prev_manifest_sha256.is_empty() => {
+                    add(problem("the first manifest names a predecessor".into()));
+                }
+                None => {}
+            }
+            prev = Some((manifest.seq, file_sha));
+        }
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
