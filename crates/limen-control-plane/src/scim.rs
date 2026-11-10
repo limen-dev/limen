@@ -215,16 +215,19 @@ fn eq_filter<'a>(filter: &'a str, attr: &str) -> Result<&'a str, Response> {
         )
     };
     let rest = filter.trim();
-    if rest.len() < attr.len() || !rest[..attr.len()].eq_ignore_ascii_case(attr) {
+    // `get`, not indexing: the text is the caller's and may hold multi-byte
+    // characters where a byte offset would fall inside one.
+    if !rest
+        .get(..attr.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(attr))
+    {
         return Err(bad());
     }
     let rest = rest[attr.len()..].trim_start();
-    let rest = rest
-        .strip_prefix("eq")
-        .or_else(|| rest.strip_prefix("EQ"))
-        .or_else(|| rest.strip_prefix("Eq"))
-        .ok_or_else(bad)?
-        .trim();
+    let rest = match rest.get(..2) {
+        Some(op) if op.eq_ignore_ascii_case("eq") => rest[2..].trim(),
+        _ => return Err(bad()),
+    };
     rest.strip_prefix('"')
         .and_then(|r| r.strip_suffix('"'))
         .filter(|v| !v.contains('"'))
@@ -1143,6 +1146,11 @@ mod tests {
             "userName eq a",
             "userName eq \"a\" or userName eq \"b\"",
             "",
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+            "userName\u{e9}eq \"a\"",
+            "userName e",
+            // Byte 8 falls inside a character: indexing there would panic.
+            "a\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
         ] {
             assert!(eq_filter(bad, "userName").is_err(), "{bad}");
         }
