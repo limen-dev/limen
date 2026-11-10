@@ -4,38 +4,33 @@
 <div class="page-head">
   <div>
     <h1>Access simulator</h1>
-    <p class="sub">Choose who to look at and see what they can reach and could ask for, using the same decision code as enforcement. Nothing is changed. To see what a change to a policy document would do, use <b>Preview impact</b> on the <a href="/console/policy">Policy</a> page.</p>
+    <p class="sub">See what a person, a bot or some IdP groups can reach and could ask for, using the same decision code as enforcement. Nothing is changed. To see what a change to a policy document would do, use <b>Preview impact</b> on the <a href="/console/policy">Policy</a> page.</p>
   </div>
 </div>
-<form method="get" action="/console/simulator#simulated" class="stack wide">
-  <div class="card">
-    <fieldset><legend>A person</legend>
-      <input type="search" name="person" value="{{ person }}" list="sim-people" placeholder="Search by name or email" autocomplete="off" maxlength="256" class="w-360" aria-label="A person">
-      <datalist id="sim-people">{% for p in people %}<option value="{{ p }}">{% endfor %}</datalist>
-      <p class="hint">Uses the groups the IdP puts them in now.</p>
-    </fieldset>
-    <fieldset><legend>A bot</legend>
-      <input type="search" name="bot" value="{{ bot }}" list="sim-bots" placeholder="Search bots in policy" autocomplete="off" maxlength="128" class="w-360" aria-label="A bot">
-      <datalist id="sim-bots">{% for b in bots %}<option value="{{ b }}">{% endfor %}</datalist>
-    </fieldset>
-    <fieldset><legend>Or IdP groups</legend>
-      {% if groups.is_empty() %}<p class="hint">No group is named by a role mapping or carried by anyone yet.</p>{% else %}
-      <div class="opts">{% for g in groups %}<label><input type="checkbox" name="group" value="{{ g.name }}"{% if g.checked %} checked{% endif %}> {{ g.name }}</label>{% endfor %}</div>{% endif %}
-    </fieldset>
-    <div class="row"><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg>Show what they can reach</button> <a class="button secondary" href="/console/simulator">Clear</a></div>
-    <p class="hint">Choose one: a person, a bot, or one or more groups.</p>
+<form method="get" action="/console/simulator#simulated" class="sim-search" role="search">
+  <div class="search">
+    <svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#search"/></svg>
+    <input type="search" name="q" value="{{ q }}" list="sim-options" placeholder="Search a person, a bot or an IdP group" autocomplete="off" maxlength="300" aria-label="Search a person, a bot or an IdP group" data-focus-search>
   </div>
+  <datalist id="sim-options">{% for (v, k) in suggestions %}<option value="{{ v }}" label="{{ k }}">{% endfor %}</datalist>
+  <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#play"/></svg>Show access</button>
 </form>
+<div class="picks">
+  {% if !groups.is_empty() %}<div class="pick-row"><span class="pick-label">Groups <span class="hint">click one or more</span></span><div class="chips">{% for g in groups %}<a class="chip pick{% if g.on %} on{% endif %}" href="{{ g.href }}"{% if g.on %} aria-current="true"{% endif %}>{{ g.name }}</a>{% endfor %}</div></div>{% endif %}
+  {% if !bots.is_empty() %}<div class="pick-row"><span class="pick-label">Bots</span><div class="chips">{% for b in bots %}<a class="chip pick{% if b.on %} on{% endif %}" href="{{ b.href }}"{% if b.on %} aria-current="true"{% endif %}>{{ b.name }}</a>{% endfor %}</div></div>{% endif %}
+  {% if !people.is_empty() %}<div class="pick-row"><span class="pick-label">People <span class="hint">most recent sign-ins</span></span><div class="chips">{% for p in people %}<a class="chip pick{% if p.on %} on{% endif %}" href="{{ p.href }}"{% if p.on %} aria-current="true"{% endif %}>{{ p.name }}</a>{% endfor %}{% if more_people > 0 %}<span class="hint">and {{ more_people }} more: search above</span>{% endif %}</div></div>{% endif %}
+</div>
 {% if let Some(sim) = simulation %}
 <a id="simulated"></a>
 {% if let Some(e) = sim.error %}<pre class="error">{{ e }}</pre>{% else %}
-<h3>{{ sim.who }} can reach</h3>
+<h2>{{ sim.who }}</h2>
+<h3>Can reach</h3>
 {% if sim.standing.is_empty() %}<div class="card empty"><div>Nothing, with standing access.</div></div>{% else %}
 <div class="table-wrap"><table><thead><tr><th>Resource</th><th>Kind</th><th>As</th></tr></thead><tbody>
 {% for (n, k, p) in sim.standing %}<tr><td><a href="/console/resources/{{ n }}">{{ n }}</a></td><td>{{ k }}</td><td>{{ p }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 {% if !sim.requestable.is_empty() %}
-<h3>and could ask for</h3>
+<h3>Could ask for</h3>
 <div class="table-wrap"><table><thead><tr><th>Resource</th><th>Kind</th><th>Through</th></tr></thead><tbody>
 {% for (n, k, r) in sim.requestable %}<tr><td><a href="/console/resources/{{ n }}">{{ n }}</a></td><td>{{ k }}</td><td>{{ r }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}

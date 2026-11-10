@@ -1131,44 +1131,42 @@ async fn the_console_pages_for_the_workflows() {
     let sim_page = admin.get("/console/simulator").await;
     assert_eq!(sim_page.status, 200, "{}", sim_page.body);
     assert!(sim_page.body.contains("Access simulator"));
-    // A group picked in the page's boxes; a person searched by name; a bot.
+    // One search box, and the groups, bots and people as links to click.
     assert!(
-        sim_page
-            .body
-            .contains("name=\"group\" value=\"developers\""),
-        "the groups a mapping names are offered as boxes: {}",
+        sim_page.body.contains("group=developers#simulated"),
+        "the groups a mapping names are links: {}",
         sim_page.body
     );
-    assert!(sim_page.body.contains("list=\"sim-people\""));
+    assert!(sim_page.body.contains("list=\"sim-options\""));
     let sim = admin.get("/console/simulator?group=developers").await;
     assert_eq!(sim.status, 200, "{}", sim.body);
     assert!(
-        sim.body.contains("could ask for") && sim.body.contains("web-prod"),
+        sim.body.contains("Could ask for") && sim.body.contains("web-prod"),
         "{}",
         sim.body
     );
     assert!(
-        sim.body
-            .contains("name=\"group\" value=\"developers\" checked"),
-        "the pick is kept"
+        sim.body.contains("chip pick on"),
+        "the clicked choice is marked"
     );
+    // Typing a group in the search box does the same.
+    let typed = admin.get("/console/simulator?q=developers").await;
+    assert!(typed.body.contains("web-prod") && typed.body.contains("chip pick on"));
     let person = admin
         .get(&format!("/console/simulator?person={ADMIN_ENC}"))
         .await;
     assert_eq!(person.status, 200, "{}", person.body);
     assert!(
-        person.body.contains("can reach") && !person.body.contains("No person named"),
+        person.body.contains("Can reach") && !person.body.contains("Nothing named"),
         "someone who has signed in is found by name: {}",
         person.body
     );
-    let nobody = admin
-        .get("/console/simulator?person=nobody%40example.com")
+    let by_search = admin
+        .get(&format!("/console/simulator?q={ADMIN_ENC}"))
         .await;
-    assert!(
-        nobody
-            .body
-            .contains("No person named nobody@example.com has signed in.")
-    );
+    assert!(by_search.body.contains("Can reach"), "{}", by_search.body);
+    let nobody = admin.get("/console/simulator?q=nobody%40example.com").await;
+    assert!(nobody.body.contains("Nothing named nobody@example.com"));
     let both = admin
         .get("/console/simulator?group=developers&bot=anything")
         .await;

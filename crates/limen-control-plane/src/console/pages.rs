@@ -1949,10 +1949,13 @@ pub async fn policy(
     .await
 }
 
-/// `GET /console/simulator`: the picker, and, once someone is chosen, what
-/// they can reach and could ask for. A GET, since it changes nothing: the
-/// address can be bookmarked or linked (`?person=...`, `?bot=...`,
-/// `?group=a&group=b`).
+/// How many people are offered as choices; the rest are found by searching.
+const PEOPLE_SHOWN: usize = 12;
+
+/// `GET /console/simulator`: a search box, clickable groups, bots and people,
+/// and, once someone is chosen, what they can reach and could ask for. A GET,
+/// since it changes nothing: the address can be bookmarked or linked
+/// (`?person=...`, `?bot=...`, `?group=a&group=b`).
 pub async fn simulator(
     State(state): State<AppState>,
     auth: Auth,
@@ -1961,7 +1964,8 @@ pub async fn simulator(
     if let Err(r) = auth.admin() {
         return r;
     }
-    let (mut picked_groups, mut person, mut bot) = (Vec::new(), String::new(), String::new());
+    let (mut picked_groups, mut person, mut bot, mut q) =
+        (Vec::new(), String::new(), String::new(), String::new());
     for (k, v) in url::form_urlencoded::parse(raw.as_deref().unwrap_or("").as_bytes()) {
         let v = v.trim().to_owned();
         if v.is_empty() {
@@ -1971,13 +1975,13 @@ pub async fn simulator(
             "group" if picked_groups.len() < 50 => picked_groups.push(v),
             "person" => person = v,
             "bot" => bot = v,
+            "q" => q = v.chars().take(300).collect(),
             _ => {}
         }
     }
     let current = state.policy.current();
-    let users = store::list_users(&state.db).await.unwrap_or_default();
-    let mut people: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
-    people.sort();
+    let mut users = store::list_users(&state.db).await.unwrap_or_default();
+    users.sort_by(|a, b| b.last_login_at.cmp(&a.last_login_at));
     let bots: Vec<String> = current
         .policy
         .bots()
@@ -1989,44 +1993,139 @@ pub async fn simulator(
     for u in &users {
         names.extend(u.idp_groups.clone().unwrap_or_else(|| u.groups.clone()));
     }
+
+    // The search box names one thing, or several groups, separated by commas.
+    let mut not_found = None;
+    if !q.is_empty() {
+        let parts: Vec<&str> = q
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        let find = |mut list: std::slice::Iter<'_, String>, p: &str| -> Option<String> {
+            list.find(|x| x.eq_ignore_ascii_case(p)).cloned()
+        };
+        let people_names: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
+        let group_names: Vec<String> = names.iter().cloned().collect();
+        if let [one] = parts.as_slice() {
+            if let Some(n) = find(people_names.iter(), one) {
+                person = n;
+            } else if let Some(n) = find(bots.iter(), one) {
+                bot = n;
+            } else if let Some(n) = find(group_names.iter(), one) {
+                picked_groups.push(n);
+            } else {
+                not_found = Some(format!(
+                    "Nothing named {one}: try a person, a bot or an IdP group."
+                ));
+            }
+        } else {
+            for p in parts.iter().take(50) {
+                match find(group_names.iter(), p) {
+                    Some(n) => picked_groups.push(n),
+                    None => {
+                        not_found = Some(format!("{p} is not a known IdP group."));
+                        break;
+                    }
+                }
+            }
+        }
+    }
     names.extend(picked_groups.iter().cloned());
-    let choices: Vec<views::GroupChoice> = names
-        .into_iter()
-        .map(|name| views::GroupChoice {
-            checked: picked_groups.contains(&name),
-            name,
+
+    // Choices. A group toggles in and out of the pick; a person or a bot
+    // replaces it.
+    let to =
+        |pairs: &[(&str, &str)]| format!("{}#simulated", query::href("/console/simulator", pairs));
+    let group_pick = |name: &str| {
+        let on = picked_groups.iter().any(|g| g == name);
+        let rest: Vec<(&str, &str)> = picked_groups
+            .iter()
+            .filter(|g| g.as_str() != name)
+            .map(|g| ("group", g.as_str()))
+            .chain((!on).then_some(("group", name)))
+            .collect();
+        let href = if rest.is_empty() {
+            "/console/simulator".to_owned()
+        } else {
+            format!(
+                "/console/simulator?{}#simulated",
+                rest.iter()
+                    .map(|(k, v)| format!("{k}={}", views::path_segment(v)))
+                    .collect::<Vec<_>>()
+                    .join("&")
+            )
+        };
+        views::Pick {
+            name: name.to_owned(),
+            href,
+            on,
+        }
+    };
+    let groups: Vec<views::Pick> = names.iter().map(|n| group_pick(n)).collect();
+    let bot_picks: Vec<views::Pick> = bots
+        .iter()
+        .map(|b| views::Pick {
+            name: b.clone(),
+            href: to(&[("bot", b)]),
+            on: bot.eq_ignore_ascii_case(b),
         })
         .collect();
+    let people: Vec<views::Pick> = users
+        .iter()
+        .take(PEOPLE_SHOWN)
+        .map(|u| views::Pick {
+            name: u.username.clone(),
+            href: to(&[("person", &u.username)]),
+            on: person.eq_ignore_ascii_case(&u.username),
+        })
+        .collect();
+    let mut suggestions: Vec<(String, &'static str)> = users
+        .iter()
+        .map(|u| (u.username.clone(), "person"))
+        .collect();
+    suggestions.extend(bots.iter().map(|b| (b.clone(), "bot")));
+    suggestions.extend(names.iter().map(|g| (g.clone(), "group")));
 
     // One kind of choice at a time.
     let chosen = usize::from(!picked_groups.is_empty())
         + usize::from(!person.is_empty())
         + usize::from(!bot.is_empty());
-    let simulation = match chosen {
-        0 => None,
-        1 => Some(simulate(
-            &current.policy,
-            &users,
-            &picked_groups,
-            &person,
-            &bot,
-        )),
-        _ => Some(Simulation {
+    let simulation = if let Some(e) = not_found {
+        Some(Simulation {
             who: String::new(),
-            error: Some("Pick one: groups, a person or a bot.".into()),
+            error: Some(e),
             standing: vec![],
             requestable: vec![],
-        }),
+        })
+    } else {
+        match chosen {
+            0 => None,
+            1 => Some(simulate(
+                &current.policy,
+                &users,
+                &picked_groups,
+                &person,
+                &bot,
+            )),
+            _ => Some(Simulation {
+                who: String::new(),
+                error: Some("Pick one: groups, a person or a bot.".into()),
+                standing: vec![],
+                requestable: vec![],
+            }),
+        }
     };
     html(
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
             simulation,
-            groups: choices,
+            groups,
+            bots: bot_picks,
+            more_people: users.len().saturating_sub(PEOPLE_SHOWN),
             people,
-            bots,
-            person,
-            bot,
+            suggestions,
+            q,
         }
         .render(),
     )

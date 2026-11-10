@@ -1224,17 +1224,22 @@ pub struct PolicyPage {
 pub struct SimulatorPage {
     pub chrome: Chrome,
     pub simulation: Option<Simulation>,
-    pub groups: Vec<GroupChoice>,
-    /// Usernames to search, and bots in policy.
-    pub people: Vec<String>,
-    pub bots: Vec<String>,
-    pub person: String,
-    pub bot: String,
+    /// Clickable choices; a click runs the simulation.
+    pub groups: Vec<Pick>,
+    pub bots: Vec<Pick>,
+    pub people: Vec<Pick>,
+    /// People beyond those shown as choices: found with the search box.
+    pub more_people: usize,
+    /// What the search box suggests: (value, kind).
+    pub suggestions: Vec<(String, &'static str)>,
+    pub q: String,
 }
 
-pub struct GroupChoice {
+/// One choice: where it leads, and whether it is part of the current pick.
+pub struct Pick {
     pub name: String,
-    pub checked: bool,
+    pub href: String,
+    pub on: bool,
 }
 
 pub struct RoleAccess {
