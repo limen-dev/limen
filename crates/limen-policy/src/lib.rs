@@ -6,6 +6,7 @@ pub mod delegation;
 pub mod discovery;
 pub mod duration;
 pub mod model;
+pub mod replay;
 pub mod schema;
 pub mod shadow;
 pub mod suggest;
@@ -2118,6 +2119,8 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     Ok(())
 }
 
+#[cfg(test)]
+mod replay_tests;
 #[cfg(test)]
 mod shadow_tests;
 #[cfg(test)]
