@@ -58,6 +58,17 @@ resource "datadog_monitor" "denied_spike" {
   tags = var.tags
 }
 
+resource "datadog_monitor" "honeytoken" {
+  name    = "Limen: honeytoken touched (${var.environment})"
+  type    = "log alert"
+  query   = "logs(\"${local.logs} event_kind:detect.honeytoken\").index(\"*\").rollup(\"count\").last(\"5m\") > 0"
+  message = "{{log.attributes.user}} tried to use the honeytoken {{log.attributes.data.resource}} (ADR-0050). No one has a reason to: treat it as a stolen credential, a scan, or someone looking around. ${local.notify}"
+  monitor_thresholds {
+    critical = 0
+  }
+  tags = var.tags
+}
+
 resource "datadog_monitor" "audit_silent" {
   name    = "Limen: no audit events (${var.environment})"
   type    = "log alert"

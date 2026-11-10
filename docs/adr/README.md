@@ -54,5 +54,6 @@ Each ADR's status line gives its approval date.
 | [0047](0047-idp-driven-offboarding.md) | IdP-driven offboarding: a stored, encrypted refresh token checked by one leased job; deactivation locks and kills, group loss revokes the login; fail open with an alert | Accepted |
 | [0048](0048-scim-provisioning.md) | SCIM 2.0 provisioning from the IdP: a bearer-token endpoint relayed by the proxy; pre-provisions users, applies deactivation and pushed-group changes at once, grants nothing by itself | Accepted |
 | [0049](0049-ocsf-audit-export.md) | OCSF audit export for SIEMs: a projection sink with one exhaustive event mapping, a bucket and key of its own, the native hash chain staying the source of truth, and a bounded lag so a dead SIEM cannot fill the spool | Proposed (built in PR #294) |
+| [0050](0050-honeytoken-resources.md) | Honeytoken resources: a decoy resource kept apart from real ones, listed only to chosen roles, refused like any unreachable name, with every touch audited as `detect.honeytoken` | Proposed (built in the honeytoken PR) |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

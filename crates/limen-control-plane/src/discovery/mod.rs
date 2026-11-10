@@ -390,7 +390,8 @@ async fn unique_name(
     let base = state.policy.base();
     let mut candidate = wanted.to_owned();
     for attempt in 0..20 {
-        let taken_static = base.policy.resource(&candidate).is_some();
+        let taken_static = base.policy.resource(&candidate).is_some()
+            || base.policy.honeytoken(&candidate).is_some();
         let taken_discovered: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM discovered_resources
                WHERE key <> $1 AND state <> 'rejected'

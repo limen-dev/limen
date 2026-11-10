@@ -141,6 +141,27 @@ impl Access for AccessService {
             (user.username.clone(), user.roles.clone())
         };
         let resource = r.resource.trim();
+        // Explaining a honeytoken is a touch (ADR-0050); an admin looking at
+        // another user's access is not. The answer is the same either way.
+        if !admin_view
+            && self
+                .0
+                .policy
+                .current()
+                .policy
+                .honeytoken(resource)
+                .is_some()
+        {
+            access::report_honeytoken(
+                &self.0,
+                &subject,
+                &roles,
+                "explain",
+                resource,
+                principal_text(&r.principal),
+            )
+            .await;
+        }
         let (lines, worker_connected) = explain(
             &self.0,
             &subject,
@@ -279,6 +300,10 @@ pub async fn explain(
         None
     };
     Ok((lines, worker_connected))
+}
+
+fn principal_text(p: &str) -> Option<&str> {
+    (!p.is_empty()).then_some(p)
 }
 
 fn join_or_none(v: &[String]) -> String {

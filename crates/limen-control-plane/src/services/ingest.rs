@@ -35,10 +35,10 @@ fn component_name(kind: ComponentKind) -> &'static str {
 /// projection keeps the first identity a session was given.)
 fn may_send(kind: ComponentKind, event: EventKind) -> bool {
     use EventKind::{
-        AuthDenied, DbBootstrap, DbQuery, DbQueryEnd, KafkaRequest, KafkaSummary, KubeRequest,
-        MongoCommand, MongoCommandEnd, MqOperation, MqSummary, PolicyShadowDeny, RedisCommand,
-        SearchRequest, SearchResponse, SessionEnd, SessionStart, SshExec, WebRequest, WebResponse,
-        WebSocket,
+        AuthDenied, DbBootstrap, DbQuery, DbQueryEnd, DetectHoneytoken, KafkaRequest, KafkaSummary,
+        KubeRequest, MongoCommand, MongoCommandEnd, MqOperation, MqSummary, PolicyShadowDeny,
+        RedisCommand, SearchRequest, SearchResponse, SessionEnd, SessionStart, SshExec, WebRequest,
+        WebResponse, WebSocket,
     };
     match kind {
         ComponentKind::ControlPlane => true,
@@ -65,9 +65,12 @@ fn may_send(kind: ComponentKind, event: EventKind) -> bool {
         // `PolicyShadowDeny` (ADR-0046) is the proxy's report of a deny rule
         // that only reports; it changes no decision, so forging one only
         // adds noise to a log the control plane's own events outrank.
+        // `DetectHoneytoken` (ADR-0050): the proxy sees the attempt before
+        // any worker does. A forged one is a false alarm, never an access.
         ComponentKind::Proxy => matches!(
             event,
             AuthDenied
+                | DetectHoneytoken
                 | PolicyShadowDeny
                 | SessionEnd
                 | SessionStart
@@ -308,6 +311,13 @@ mod tests {
         assert!(!may_send(
             ComponentKind::Worker,
             EventKind::PolicyShadowDeny
+        ));
+        // The proxy refuses a honeytoken touch before any worker sees it
+        // (ADR-0050), so only the proxy reports one.
+        assert!(may_send(ComponentKind::Proxy, EventKind::DetectHoneytoken));
+        assert!(!may_send(
+            ComponentKind::Worker,
+            EventKind::DetectHoneytoken
         ));
         assert!(!may_send(ComponentKind::Proxy, EventKind::DbQuery));
     }

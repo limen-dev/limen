@@ -29,6 +29,7 @@ Unverified: validated with `terraform validate`, never applied to AWS (#123).
 | ---- | ---- |
 | [datadog_monitor.audit_silent](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor) | resource |
 | [datadog_monitor.denied_spike](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor) | resource |
+| [datadog_monitor.honeytoken](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor) | resource |
 | [datadog_monitor.metric](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor) | resource |
 | [datadog_monitor.policy_change](https://registry.terraform.io/providers/DataDog/datadog/latest/docs/resources/monitor) | resource |
 

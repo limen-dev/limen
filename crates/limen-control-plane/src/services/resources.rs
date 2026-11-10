@@ -19,9 +19,19 @@ impl Resources for ResourcesService {
         let caller = caller::resolve_current(&request, &self.0).await?;
         let user = caller.user()?;
         let loaded = self.0.policy.current();
-        let reachable = crate::access::reachable(&self.0, &user.username, &user.roles)
+        let mut reachable = crate::access::reachable(&self.0, &user.username, &user.roles)
             .await
             .map_err(|e| crate::state::internal("reading access grants", e))?;
+        // Honeytokens (ADR-0050) are listed like any resource, in name order,
+        // for the roles the admin exposed them to. They grant nothing.
+        reachable.extend(
+            loaded
+                .policy
+                .exposed_honeytokens(&user.roles)
+                .into_iter()
+                .map(|r| (r, 0)),
+        );
+        reachable.sort_by(|a, b| a.0.name.cmp(&b.0.name));
         let requestable = crate::access::requestable_for(&self.0, &user.username, &user.roles)
             .await
             .map_err(|e| crate::state::internal("reading groups", e))?;

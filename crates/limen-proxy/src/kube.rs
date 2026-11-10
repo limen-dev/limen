@@ -309,11 +309,22 @@ async fn open(
         .policy
         .fresh(now)
         .map_err(|e| sessions::failed(format!("access can't be decided right now ({e})")))?;
+    // A honeytoken answers like any cluster the caller can't reach (ADR-0050).
+    let decoy = snapshot.policy.honeytoken(cluster).is_some();
     if let Some(why) = snapshot
         .restrictions
         .blocks(&user.username, &user.login_id, "")
     {
-        return Err(sessions::denied(why));
+        return Err(Denial {
+            honeytoken: decoy,
+            ..sessions::denied(why)
+        });
+    }
+    if decoy {
+        return Err(Denial {
+            honeytoken: true,
+            ..sessions::denied(format!("access denied to {cluster}"))
+        });
     }
     // Roles from approved access requests count (ADR-0025).
     let effective = snapshot.roles_for(&user.username, &user.roles, cluster, now);
@@ -378,6 +389,10 @@ async fn refuse(
             .await
         {
             tracing::error!(error = %e, "failed to audit a denied kube request");
+        }
+        if denial.honeytoken {
+            sessions::report_honeytoken(proxy, user, cluster, "kube", None, client_addr.as_deref())
+                .await;
         }
         tracing::info!(user = %user.username, %cluster, reason = %denial.reason, "kube request refused");
         // Capacity is the pool's state, not the user's access.

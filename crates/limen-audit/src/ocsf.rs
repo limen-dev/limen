@@ -299,6 +299,12 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
         K::PolicyShadowDeny => Mapped::new(BASE, OTHER)
             .detail("shadow deny")
             .severity(MEDIUM),
+        // A detection, not an entity change or a network event: the whole
+        // event stays in `unmapped`, with severity High so a SIEM routes it.
+        K::DetectHoneytoken => Mapped::new(BASE, OTHER)
+            .detail("honeytoken touched")
+            .severity(HIGH)
+            .status(FAILURE),
         K::PolicyWriteDenied => Mapped::new(BASE, OTHER)
             .detail("policy write denied")
             .severity(LOW)
@@ -627,6 +633,7 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::WebResponse,
     EventKind::WebSocket,
     EventKind::PolicyChange,
+    EventKind::DetectHoneytoken,
     EventKind::PolicyShadowDeny,
     EventKind::PolicyWriteDenied,
     EventKind::PolicyOwnershipTransfer,
@@ -709,7 +716,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 61);
+        assert_eq!(before, 62);
     }
 
     #[test]
@@ -823,6 +830,7 @@ mod tests {
         assert_eq!(sev(EventKind::PolicyShadowDeny), Some(3));
         assert_eq!(sev(EventKind::AccessBreakGlass), Some(4));
         assert_eq!(sev(EventKind::PolicyWriteDenied), Some(2));
+        assert_eq!(sev(EventKind::DetectHoneytoken), Some(4));
     }
 
     #[test]

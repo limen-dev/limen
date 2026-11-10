@@ -171,8 +171,13 @@ fn every_resource_field_is_classified() {
     let sections = fields_of(json!({ "__probe__": 1 }));
     assert!(sections.len() > 10, "probe failed: {sections:?}");
     for section in &sections {
-        if matches!(section.as_str(), "worker_selector" | "delegated") {
-            continue; // Profile-only, and set by the control plane.
+        if matches!(
+            section.as_str(),
+            "worker_selector" | "delegated" | "honeytoken"
+        ) {
+            // Profile-only, and set by the control plane; a decoy is a
+            // person's alone (ADR-0050).
+            continue;
         }
         let reviewed = shared
             .iter()

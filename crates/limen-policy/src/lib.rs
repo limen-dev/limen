@@ -195,6 +195,12 @@ pub struct Policy {
     group_roles: BTreeMap<String, BTreeSet<String>>,
     mapping_docs: BTreeMap<String, model::RoleMappingDoc>,
     resources: BTreeMap<String, ResourceDoc>,
+    /// Decoys (ADR-0050), kept apart from `resources` on purpose: everything
+    /// that routes, grants, bootstraps or connects reads `resources`, so a
+    /// decoy is absent from all of it. Only the code that lists or alerts
+    /// reads this map.
+    #[serde(default)]
+    honeytokens: BTreeMap<String, ResourceDoc>,
     #[serde(default)]
     bots: BTreeMap<String, bot::BotDoc>,
     #[serde(default)]
@@ -334,6 +340,16 @@ impl Policy {
                         });
                     }
                 }
+                Document::Resource(resource) if resource.spec.honeytoken.is_some() => {
+                    validate_honeytoken(&resource)?;
+                    let name = resource.metadata.name.clone();
+                    if policy.honeytokens.insert(name.clone(), resource).is_some() {
+                        return Err(PolicyError::Duplicate {
+                            kind: "resource",
+                            name,
+                        });
+                    }
+                }
                 Document::Resource(resource) => {
                     validate_resource(&resource)?;
                     let name = resource.metadata.name.clone();
@@ -381,6 +397,7 @@ impl Policy {
             }
         }
         check_writer_references(&policy)?;
+        check_honeytokens(&policy)?;
         let mut web_hosts = BTreeMap::new();
         for (name, resource) in &policy.resources {
             if let Some(web) = &resource.spec.web
@@ -423,6 +440,7 @@ impl Policy {
                 .map(Document::RoleMapping),
         );
         out.extend(self.resources.values().cloned().map(Document::Resource));
+        out.extend(self.honeytokens.values().cloned().map(Document::Resource));
         out.extend(self.bots.values().cloned().map(Document::Bot));
         out.extend(self.discovery.values().cloned().map(Document::Discovery));
         out.extend(
@@ -629,6 +647,47 @@ impl Policy {
         self.resources.len()
     }
 
+    /// The decoy called `name` (ADR-0050), if there is one. Enforcement and
+    /// listing code asks this where a person names a resource; nothing that
+    /// grants access reads decoys.
+    #[must_use]
+    pub fn honeytoken(&self, name: &str) -> Option<&ResourceDoc> {
+        self.honeytokens.get(name)
+    }
+
+    /// Every decoy, in name order. For admin tooling only: showing this list
+    /// to anyone else gives the decoys away.
+    pub fn honeytokens(&self) -> impl Iterator<Item = &ResourceDoc> {
+        self.honeytokens.values()
+    }
+
+    /// The decoys shown to a principal holding `roles`, shaped like the
+    /// resources `accessible` returns so `limen ls` can't tell them apart.
+    /// Granted by nothing: this is exposure, not access.
+    #[must_use]
+    pub fn exposed_honeytokens(&self, roles: &[String]) -> Vec<AccessibleResource> {
+        self.honeytokens
+            .iter()
+            .filter_map(|(name, doc)| {
+                let h = doc.spec.honeytoken.as_ref()?;
+                h.exposed_to
+                    .iter()
+                    .any(|r| roles.contains(r))
+                    .then(|| AccessibleResource {
+                        name: name.clone(),
+                        kind: h.kind,
+                        labels: doc
+                            .metadata
+                            .labels
+                            .iter()
+                            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                            .collect(),
+                        principals: h.principals.clone(),
+                    })
+            })
+            .collect()
+    }
+
     /// Deny by default. Any matching deny rule wins. Otherwise some allow rule
     /// must match the resource and list the requested principal.
     #[must_use]
@@ -833,7 +892,7 @@ impl Policy {
         let mut skipped = Vec::new();
         for resource in discovered {
             let name = resource.metadata.name.clone();
-            if out.resources.contains_key(&name) {
+            if out.resources.contains_key(&name) || out.honeytokens.contains_key(&name) {
                 skipped.push((name, "a resource with that name already exists".to_owned()));
                 continue;
             }
@@ -1966,6 +2025,82 @@ fn check_delegated(
     Ok(())
 }
 
+/// A decoy's name is free and the roles it is exposed to exist.
+fn check_honeytokens(policy: &Policy) -> Result<(), PolicyError> {
+    for (name, decoy) in &policy.honeytokens {
+        if policy.resources.contains_key(name) {
+            return Err(PolicyError::Duplicate {
+                kind: "resource",
+                name: name.clone(),
+            });
+        }
+        for role in decoy
+            .spec
+            .honeytoken
+            .iter()
+            .flat_map(|h| h.exposed_to.iter())
+        {
+            if !limen_core::identity::is_builtin_role(role) && !policy.roles.contains_key(role) {
+                return Err(invalid(
+                    "resource",
+                    name,
+                    format!("honeytoken.exposed_to names unknown role {role:?}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Most principals a decoy lists.
+const MAX_HONEYTOKEN_PRINCIPALS: usize = 8;
+/// Most roles a decoy is exposed to.
+const MAX_HONEYTOKEN_EXPOSURE: usize = 32;
+
+/// A decoy is a name, labels, a kind and some principals: no address, no
+/// worker, nothing that could be connected to.
+fn validate_honeytoken(resource: &ResourceDoc) -> Result<(), PolicyError> {
+    let name = &resource.metadata.name;
+    validate_name("resource", name, name)?;
+    let err = |m: &str| invalid("resource", name, format!("honeytoken: {m}"));
+    let Some(h) = &resource.spec.honeytoken else {
+        return Err(err("missing"));
+    };
+    let spec = &resource.spec;
+    if !spec.kinds().is_empty() {
+        return Err(err(
+            "a decoy has no protocol section: it is backed by nothing",
+        ));
+    }
+    if spec.worker_selector.iter().next().is_some() || spec.delegated.is_some() {
+        return Err(err("a decoy has no worker_selector and is never delegated"));
+    }
+    if h.kind == ResourceKind::Web {
+        return Err(err(
+            "kind web isn't offered: a web app is reached by host name, so a decoy of it would never be touched",
+        ));
+    }
+    if h.principals.is_empty() || h.principals.len() > MAX_HONEYTOKEN_PRINCIPALS {
+        return Err(err("principals must list 1 to 8 names"));
+    }
+    if h.principals.iter().any(|p| {
+        p.is_empty() || p.len() > 64 || p.chars().any(|c| c.is_control() || c.is_whitespace())
+    }) {
+        return Err(err(
+            "each principal must be 1 to 64 characters without spaces or control characters",
+        ));
+    }
+    if h.exposed_to.is_empty() || h.exposed_to.len() > MAX_HONEYTOKEN_EXPOSURE {
+        return Err(err(
+            "exposed_to must name 1 to 32 roles: a decoy nobody can see catches nothing",
+        ));
+    }
+    if h.exposed_to.iter().any(String::is_empty) {
+        return Err(err("exposed_to can't hold an empty role name"));
+    }
+    Ok(())
+}
+
 fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     let name = &resource.metadata.name;
     validate_name("resource", name, name)?;
@@ -2117,6 +2252,8 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
     Ok(())
 }
 
+#[cfg(test)]
+mod honeytoken_tests;
 #[cfg(test)]
 mod shadow_tests;
 #[cfg(test)]

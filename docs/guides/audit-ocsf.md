@@ -72,6 +72,7 @@ An *Other* activity carries a readable `activity_name` (for example `access appr
 | `web.response` | HTTP Activity (4002) | by method | Informational |
 | `web.websocket` | HTTP Activity (4002) | by method | Informational |
 | `policy.change` | Entity Management (3004) | Update (3) | Informational |
+| `detect.honeytoken` | Base Event (0) | honeytoken touched (99) | High |
 | `policy.shadow_deny` | Base Event (0) | shadow deny (99) | Medium |
 | `policy.write_denied` | Base Event (0) | policy write denied (99) | Low |
 | `policy.ownership_transfer` | Entity Management (3004) | Move (5) | Informational |

@@ -178,12 +178,59 @@ pub(crate) async fn handle(
                     tracing::error!(error = %e, "failed to audit a denied session");
                 }
             }
+            if denial.honeytoken {
+                report_honeytoken(
+                    proxy,
+                    &user,
+                    &request.resource,
+                    protocol.action(),
+                    Some(&request.principal),
+                    client_addr.as_deref(),
+                )
+                .await;
+            }
             tracing::info!(user = %user.username, resource = %request.resource, login = %request.principal, reason = %denial.reason, "session refused");
             // A policy refusal, not capacity or an outage: `explain` can say why.
             let denied = denial.audit && denial.code.is_none();
             let _ = respond(&mut tls, Err((denial.reason, denied))).await;
         }
     }
+}
+
+/// Report that `user` touched a honeytoken (ADR-0050). The request is already
+/// refused, so a failure to write this is logged loudly rather than turned
+/// into a different answer, which would tell the caller what they hit.
+pub(crate) async fn report_honeytoken(
+    proxy: &Proxy,
+    user: &UserIdentity,
+    resource: &str,
+    action: &str,
+    principal: Option<&str>,
+    client_addr: Option<&str>,
+) {
+    let data = limen_audit::touch_data(&limen_audit::Touch {
+        resource,
+        action,
+        principal,
+        roles: &user.roles,
+        client_addr,
+        ci: user.bot.then_some(&user.ci),
+    });
+    if let Err(e) = proxy
+        .audit
+        .emit(
+            EventKind::DetectHoneytoken,
+            Context {
+                user: Some(user.username.clone()),
+                session_id: None,
+            },
+            data,
+        )
+        .await
+    {
+        tracing::error!(error = %e, user = %user.username, "failed to audit a honeytoken touch");
+    }
+    tracing::warn!(user = %user.username, "honeytoken touched");
 }
 
 fn identify(proxy: &Proxy, peer: &PeerInfo) -> Result<UserIdentity, String> {
@@ -268,6 +315,9 @@ pub(crate) struct Denial {
     pub(crate) audit: bool,
     /// For the audit event's `data.reason` instead of the message.
     pub(crate) code: Option<&'static str>,
+    /// The request named a honeytoken (ADR-0050). The caller also reports
+    /// `detect.honeytoken`; the refusal itself reads like any other.
+    pub(crate) honeytoken: bool,
 }
 
 /// When a session opened at `now` and lasting `ttl` ends, in Unix seconds, or
@@ -282,6 +332,7 @@ pub(crate) fn denied(reason: impl Into<String>) -> Denial {
         reason: reason.into(),
         audit: true,
         code: None,
+        honeytoken: false,
     }
 }
 
@@ -290,6 +341,7 @@ pub(crate) fn failed(reason: impl Into<String>) -> Denial {
         reason: reason.into(),
         audit: false,
         code: None,
+        honeytoken: false,
     }
 }
 
@@ -302,6 +354,7 @@ fn no_capacity(resource: &str) -> Denial {
         ),
         audit: true,
         code: Some("capacity"),
+        honeytoken: false,
     }
 }
 
@@ -471,11 +524,27 @@ async fn establish(
         .fresh(now)
         .map_err(|e| failed(format!("access can't be decided right now ({e})")))?;
     let policy = &snapshot.policy;
+    // A honeytoken is refused before anything else looks at the request, so
+    // a malformed probe still counts, and the refusal says what a refusal of
+    // any resource says (ADR-0050).
+    let decoy = policy.honeytoken(&request.resource).is_some();
     if let Some(why) = snapshot
         .restrictions
         .blocks(&user.username, &user.login_id, "")
     {
-        return Err(denied(why));
+        return Err(Denial {
+            honeytoken: decoy,
+            ..denied(why)
+        });
+    }
+    if decoy {
+        return Err(Denial {
+            honeytoken: true,
+            ..denied(format!(
+                "access denied to {}@{}",
+                request.principal, request.resource
+            ))
+        });
     }
     let (principal, kind, database) = resolve_principal(policy, request, protocol)?;
     // The certificate's roles, plus roles an approved access request gave on

@@ -206,6 +206,11 @@ pub(crate) fn validate_profile(doc: &ResourceProfileDoc) -> Result<(), PolicyErr
     let err = |m: String| invalid("resource_profile", name, m);
     validate_name("resource_profile", name, name)?;
     let spec = &doc.spec;
+    if spec.template.contains_key("honeytoken") {
+        return Err(err(
+            "template can't set honeytoken: decoys are written by people (ADR-0050)".into(),
+        ));
+    }
     if spec.template.contains_key("delegated") {
         return Err(err(
             "template can't set delegated: the control plane sets it".into(),

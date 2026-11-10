@@ -502,6 +502,19 @@ fn check_content(kind: &str, value: &Value) -> Result<(), StoreError> {
                 return Err(denied("field", "a writer's role can't be break-glass"));
             }
         }
+        // A decoy (ADR-0050) is a person's: a writer that could make one
+        // could also learn which names are traps, or set a few off.
+        "resource" => {
+            if spec
+                .and_then(|s| s.get("honeytoken"))
+                .is_some_and(|h| !h.is_null())
+            {
+                return Err(denied(
+                    "field",
+                    "a writer can't create a honeytoken: decoys are for people to set",
+                ));
+            }
+        }
         "role_mapping" => {
             for role in mapped_roles(value) {
                 if builtin_role(role) {

@@ -297,6 +297,19 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 | T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
 | Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |
 
+### TB16: Honeytoken resources (ADR-0050)
+*Built in the honeytoken PR. Tested against local stand-ins only.*
+
+| Threat | Mitigation |
+|---|---|
+| I: a decoy is told apart from a real resource, so it is avoided | Listed with the same fields in name order; refused with the text any unreachable name gets and the same `denied` flag; no distinct deny reason in `Decision` or the trace; `explain` and access requests answer as for an unknown name. Timing was not measured |
+| E: a role or selector grants a decoy | Decoys live in their own map; every grant, routing and bootstrap path reads `resources` only. A test uses a role that matches every label and kind |
+| E/I: a bot writer sets, clears, or reads decoys | `honeytoken` is refused in a writer's resource and in a profile template; documents outside a writer's namespace read as missing. A writer whose name pattern covers a decoy's name can still learn it exists from a duplicate-name refusal: keep decoy names outside writer namespaces |
+| R: a touch leaves no trace | `detect.honeytoken` is written beside `auth.denied`, with the user, roles, address and (for bots) the CI run. If it cannot be written the failure is logged and the refusal is unchanged; the request is refused either way |
+| S: a compromised component forges alerts | Only proxies may send the kind through ingest; a forged one is a false alarm, never an access |
+| D: someone sets off alerts to drown real ones | Only a principal shown the decoy, or one who guesses its name, can; one event per attempt, alerting is the SIEM's or Datadog's to rate-limit |
+| Limit | An older component can't read a policy holding a decoy, so decoys are added only after every component is upgraded (as with shadow mode, ADR-0046) |
+
 ### TB15: AI agent ↔ `limen mcp` (ADR-0032, spike 0)
 *Built: a read-only stdio server in the CLI. There is no agent identity yet; the agent borrows the logged-in person's own login. Tested without a live session only.*
 
@@ -345,6 +358,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-10 | #108 | Honeytoken resources (ADR-0050, TB16): a decoy resource kind kept apart from real resources, new audit event `detect.honeytoken`, new proxy and control-plane touch checks. No new store or entry point |
 | 2026-11-08 | #111 | IdP-driven offboarding (ADR-0047): the CLI sends the IdP's refresh token at login; the control plane stores it sealed and checks logins on a schedule (TB0). New table `idp_logins`, new audit events `idp.offboard` and `idp.check_failed`. Reverses the ADR-0006 default of storing no refresh token, when `--idp-token-key` is set |
 | 2026-11-05 | Pentest | Static code review ([`pentest-plan.md`](pentest-plan.md)): revoked components are refused at grant admission, by peer proxies and by the control plane API (TB2); components send only their own audit event kinds and sessions, and a session keeps its first identity, recording link and hash (TB3, TB6, TB7); connections are capped per source and anonymous API connections are time-limited (TB1); the policy access diff sees a grant's scope, not only its principals (ADR-0042 §4). Still open, so the mitigations above are not fully true for them: a worker's forged `session.start` that is projected first, the unsigned chain-resume manifest, and worker dials to brokers a Kafka or Mongo server names (see the plan) |
 | 2026-11-09 | ADR-0049 | OCSF export (TB6): separate bucket and key for the SIEM, secret-named fields redacted, a bounded lag so the projection cannot fill the spool. Tested against SeaweedFS only (no SIEM or Security Lake) |

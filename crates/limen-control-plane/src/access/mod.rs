@@ -199,7 +199,21 @@ pub async fn request_access(
         candidates.retain(|r| *r == new.role);
     }
     let role_name = match candidates.as_slice() {
-        [] => return Err(nothing()),
+        [] => {
+            // A honeytoken is never requestable (ADR-0050): asking for one
+            // gets the answer any unreachable name gets, and an alert.
+            if policy.honeytoken(resource).is_some() {
+                let roles: Vec<String> = policy
+                    .roles_for_groups(
+                        groups.iter().map(String::as_str),
+                        &state.config.bootstrap_admin_groups,
+                    )
+                    .into_iter()
+                    .collect();
+                report_honeytoken(state, who.username, &roles, "request", resource, None).await;
+            }
+            return Err(nothing());
+        }
         [one] => one.clone(),
         many => {
             return Err(Status::invalid_argument(format!(
@@ -1001,6 +1015,42 @@ pub async fn reachable(
         }
     }
     Ok(out.into_values().collect())
+}
+
+/// Report that `username` touched a honeytoken from the control plane's side
+/// (ADR-0050): an access request or an `explain`. The caller still answers
+/// as it would for any name the person can't reach.
+pub async fn report_honeytoken(
+    state: &AppState,
+    username: &str,
+    roles: &[String],
+    action: &str,
+    resource: &str,
+    principal: Option<&str>,
+) {
+    let data = limen_audit::touch_data(&limen_audit::Touch {
+        resource,
+        action,
+        principal,
+        roles,
+        client_addr: None,
+        ci: None,
+    });
+    if let Err(e) = state
+        .audit
+        .emit(
+            limen_audit::EventKind::DetectHoneytoken,
+            limen_audit::Context {
+                user: Some(username.to_owned()),
+                session_id: None,
+            },
+            data,
+        )
+        .await
+    {
+        tracing::error!(error = %e, user = %username, "failed to audit a honeytoken touch");
+    }
+    tracing::warn!(user = %username, action, "honeytoken touched");
 }
 
 /// What the user could get by asking, for `limen ls`.

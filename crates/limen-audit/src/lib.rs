@@ -98,6 +98,13 @@ pub enum EventKind {
     /// request itself went ahead.
     #[serde(rename = "policy.shadow_deny")]
     PolicyShadowDeny,
+    /// Someone touched a honeytoken (ADR-0050): a decoy resource that looks
+    /// real, is granted by no role and is backed by nothing. Every attempt to
+    /// use one is a high-signal alert. `data.resource`, `action` (`ssh`, `db`,
+    /// `kube`, `request`, `explain`, …), `principal`, `roles`, `client_addr`,
+    /// and for a bot the CI run (`ci`). Written beside the ordinary refusal.
+    #[serde(rename = "detect.honeytoken")]
+    DetectHoneytoken,
     /// A bot writer's write was refused by its grant or the escalation rules
     /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
     /// detection signal.
@@ -247,6 +254,54 @@ pub struct Event {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
     pub data: serde_json::Value,
+}
+
+/// Longest name or principal a `detect.honeytoken` event copies from a
+/// request. Both are typed by whoever is probing.
+const TOUCH_FIELD_MAX: usize = 128;
+
+fn clipped(s: &str) -> String {
+    s.chars().take(TOUCH_FIELD_MAX).collect()
+}
+
+/// Who touched a honeytoken (ADR-0050), for [`touch_data`].
+#[derive(Debug, Clone, Copy)]
+pub struct Touch<'a> {
+    /// The decoy's name, as the caller typed it.
+    pub resource: &'a str,
+    /// What they tried: `ssh`, `db`, `redis`, `mongo`, `search`, `mq`,
+    /// `kafka`, `tcp`, `kube`, `request` (an access request), or `explain`.
+    pub action: &'a str,
+    /// The login, role or user they asked to act as, if the action names one.
+    pub principal: Option<&'a str>,
+    /// The roles on their certificate.
+    pub roles: &'a [String],
+    /// Their address, where the component sees it.
+    pub client_addr: Option<&'a str>,
+    /// The CI run behind a bot login (ADR-0019); `None` for a person.
+    pub ci: Option<&'a std::collections::BTreeMap<String, String>>,
+}
+
+/// The `data` of a `detect.honeytoken` event: the full actor context and the
+/// attempt, never anything the decoy could reveal about itself.
+#[must_use]
+pub fn touch_data(t: &Touch<'_>) -> serde_json::Value {
+    let mut data = serde_json::json!({
+        "resource": clipped(t.resource),
+        "action": t.action,
+        "roles": t.roles,
+    });
+    if let Some(p) = t.principal.filter(|p| !p.is_empty()) {
+        data["principal"] = serde_json::json!(clipped(p));
+    }
+    if let Some(addr) = t.client_addr {
+        data["client_addr"] = serde_json::json!(addr);
+    }
+    if let Some(ci) = t.ci {
+        data["bot"] = serde_json::json!(true);
+        data["ci"] = serde_json::json!(ci);
+    }
+    data
 }
 
 impl Event {

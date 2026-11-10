@@ -98,6 +98,23 @@ spec:
 - **Where it is reported.** The proxy reports at the point it allows a session or web request. Checks made only by a worker are not reported yet: Kubernetes groups, and the database a MongoDB command names.
 - **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`+Inf` when none), `limen policy explain`, and `limen policy test` (`shadow_deny: [role/rule]`; rules with a `web` grant can't be asserted there yet, since a case has no method or path).
 
+## Honeytokens
+
+A `resource` with a `honeytoken` block instead of a protocol section is a decoy (ADR-0050, [guide](guides/honeytokens.md)): it looks like a resource in `limen ls` for the roles it is exposed to, no role grants it, nothing backs it, and every attempt to use it is audited as `detect.honeytoken`.
+
+```yaml
+kind: resource
+version: v1
+metadata: { name: prod-backup-db, labels: { env: prod } }
+spec:
+  honeytoken:
+    kind: postgres               # what it pretends to be (not web)
+    principals: [backup_admin]   # what `limen ls` shows (1 to 8)
+    exposed_to: [developer]      # roles whose holders see it
+```
+
+A decoy has no address, no `worker_selector` and no protocol section. `exposed_to` names existing roles. No role reaches a decoy, whatever its selectors say. Only people may write decoys: a bot writer can't set `honeytoken` in a resource or a profile. Add one only after every control plane, proxy and worker runs a version that knows the field.
+
 ## `role_mapping`
 
 ```yaml

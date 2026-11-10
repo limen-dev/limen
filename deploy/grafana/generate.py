@@ -208,6 +208,13 @@ ALERTS = [
         "summary": "More than 20 denied logins or sessions in 10 minutes.",
     },
     {
+        "uid": "limen-honeytoken-touched",
+        "title": "Limen: honeytoken touched",
+        "sql": "SELECT count(DISTINCT event_id) AS value FROM {T} WHERE kind = 'detect.honeytoken' AND from_iso8601_timestamp(\"time\") > current_timestamp - INTERVAL '15' MINUTE AND dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd')",
+        "threshold": 0,
+        "summary": "Someone tried to use a honeytoken (ADR-0050). Nobody has a reason to: check the detect.honeytoken events for the user, address and what they tried.",
+    },
+    {
         "uid": "limen-sequence-gaps",
         "title": "Limen: audit events missing",
         "sql": "SELECT coalesce(sum(missing), 0) AS value FROM (SELECT max(producer.seq) - min(producer.seq) + 1 - count(DISTINCT producer.seq) AS missing FROM {T} WHERE dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd') GROUP BY producer.instance_id)",

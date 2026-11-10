@@ -569,6 +569,27 @@ pub struct ResourceSpec {
     /// every other resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated: Option<Delegated>,
+    /// Makes the document a decoy instead of a resource (ADR-0050). Set, no
+    /// protocol section may be. Left out otherwise, so components from before
+    /// the decoy read every other resource.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub honeytoken: Option<Honeytoken>,
+}
+
+/// A resource that looks real and is backed by nothing (ADR-0050). It is
+/// listed for the principals holding a role in `exposed_to`, granted by no
+/// role, and every attempt to use it is audited as `detect.honeytoken`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Honeytoken {
+    /// The kind it pretends to be. Decides which commands name it in
+    /// `limen ls`. Web is not offered: a web app is reached by host name, not
+    /// by the name of the resource.
+    pub kind: ResourceKind,
+    /// The logins, roles or users `limen ls` shows for it (1 to 8).
+    pub principals: Vec<String>,
+    /// Roles whose holders are shown it. Nobody else sees it.
+    pub exposed_to: Vec<String>,
 }
 
 /// Marks a resource a bot writer completed from a profile. The worker refuses

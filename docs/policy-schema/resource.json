@@ -237,6 +237,36 @@
       ],
       "type": "object"
     },
+    "Honeytoken": {
+      "additionalProperties": false,
+      "description": "A resource that looks real and is backed by nothing (ADR-0050). It is\nlisted for the principals holding a role in `exposed_to`, granted by no\nrole, and every attempt to use it is audited as `detect.honeytoken`.",
+      "properties": {
+        "exposed_to": {
+          "description": "Roles whose holders are shown it. Nobody else sees it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ResourceKind",
+          "description": "The kind it pretends to be. Decides which commands name it in\n`limen ls`. Web is not offered: a web app is reached by host name, not\nby the name of the resource."
+        },
+        "principals": {
+          "description": "The logins, roles or users `limen ls` shows for it (1 to 8).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "principals",
+        "exposed_to"
+      ],
+      "type": "object"
+    },
     "KafkaSasl": {
       "description": "The SASL mechanism the worker uses toward a Kafka cluster (ADR-0037).",
       "oneOf": [
@@ -449,6 +479,25 @@
       ],
       "type": "object"
     },
+    "ResourceKind": {
+      "description": "The protocol family of a resource. Determines which worker type serves it.",
+      "enum": [
+        "ssh",
+        "postgres",
+        "mysql",
+        "redshift",
+        "redis",
+        "kubernetes",
+        "mongodb",
+        "opensearch",
+        "elasticsearch",
+        "rabbitmq",
+        "kafka",
+        "web",
+        "tcp"
+      ],
+      "type": "string"
+    },
     "SearchAudit": {
       "additionalProperties": false,
       "description": "What a `search.request` event may contain (ADR-0036). Request bodies are\nnever logged unless `log_bodies` is set, and never for security APIs.",
@@ -613,6 +662,17 @@
           "type": "null"
         }
       ]
+    },
+    "honeytoken": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Honeytoken"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Makes the document a decoy instead of a resource (ADR-0050). Set, no\nprotocol section may be. Left out otherwise, so components from before\nthe decoy read every other resource."
     },
     "kafka": {
       "anyOf": [
