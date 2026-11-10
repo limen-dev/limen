@@ -52,3 +52,28 @@ output "assume_verifier_policy_json" {
   description = "IAM policy for the control plane's role, letting it assume the verifier role. Null when no verifier role exists."
   value       = try(data.aws_iam_policy_document.assume_verifier[0].json, null)
 }
+
+output "ocsf_bucket" {
+  description = "OCSF bucket name, for --audit-ocsf-s3-bucket. Null unless ocsf.enabled."
+  value       = local.ocsf_enabled ? module.ocsf_bucket.s3_bucket_id : null
+}
+
+output "ocsf_bucket_arn" {
+  description = "OCSF bucket ARN. Null unless ocsf.enabled."
+  value       = local.ocsf_enabled ? module.ocsf_bucket.s3_bucket_arn : null
+}
+
+output "ocsf_kms_key_arn" {
+  description = "Key for --audit-ocsf-s3-kms-key. Null unless ocsf.enabled."
+  value       = local.ocsf_kms_arn
+}
+
+output "ocsf_writer_policy_json" {
+  description = "IAM policy for the control plane's OCSF writes. Null unless ocsf.enabled."
+  value       = try(data.aws_iam_policy_document.ocsf_writer[0].json, null)
+}
+
+output "ocsf_reader_policy_json" {
+  description = "IAM policy for the SIEM's collector: the OCSF bucket and key only. Null unless ocsf.enabled."
+  value       = try(data.aws_iam_policy_document.ocsf_reader[0].json, null)
+}

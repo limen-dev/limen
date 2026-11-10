@@ -19,6 +19,7 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_audit_spool_pending` | gauge | `consumer` | all |
 | `limen_audit_spool_bytes` | gauge | | all |
 | `limen_audit_shipped_total`, `limen_audit_ship_errors_total` | counter | `consumer` | all |
+| `limen_audit_ocsf_events_total`, `limen_audit_ocsf_skipped_total` | counter | | control plane |
 | `limen_ca_sign_seconds` | summary (quantiles) | `kind` (`x509`, `ssh`) | control plane |
 | `limen_ca_sign_errors_total` | counter | `kind` | control plane |
 | `limen_api_request_seconds` | histogram | `service` | control plane |
@@ -29,6 +30,8 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_recordings_pending` | gauge | | worker |
 
 `limen_policy_shadow_days_left` is the days until the first shadow rule runs out, or `+Inf` with none; alert before it reaches 0, because after that policy changes are refused until the rule is enforced or renewed (ADR-0046). `limen_policy_shadow_events_dropped_total` counts shadow denies whose audit event could not be written; the request is never refused for it.
+
+`limen_audit_ocsf_skipped_total` counts records the [OCSF export](audit-ocsf.md) gave up on because its bucket was failing while it held the audit spool back. They are still in the audit trail; alert on any increase.
 
 Protocol-specific counters (`limen_mongo_*`, `limen_search_*`, `limen_broker_*`, `limen_kube_requests_total`) are described in the guide for each protocol.
 

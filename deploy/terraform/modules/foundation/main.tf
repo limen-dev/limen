@@ -5,6 +5,7 @@ module "audit" {
   name             = var.name
   retention_days   = var.audit.retention_days
   object_lock_days = var.audit.object_lock_days
+  ocsf             = var.audit.ocsf
 }
 
 # --------------------------------------------------------------- CA signing keys
@@ -177,6 +178,15 @@ resource "aws_iam_policy" "audit_writer" {
   tags        = var.tags
 }
 
+# The OCSF export's writes (audit.ocsf.enabled): a bucket and key of their own.
+resource "aws_iam_policy" "ocsf_writer" {
+  count = var.audit.ocsf.enabled ? 1 : 0
+
+  name_prefix = "${var.name}-ocsf-writer-"
+  policy      = module.audit.ocsf_writer_policy_json
+  tags        = var.tags
+}
+
 # IRSA: the control plane's Kubernetes service account assumes this role.
 module "control_plane_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
@@ -209,10 +219,13 @@ module "control_plane_irsa" {
     }
   }
 
-  policies = {
-    kms   = aws_iam_policy.control_plane_kms.arn
-    audit = aws_iam_policy.audit_writer.arn
-  }
+  policies = merge(
+    {
+      kms   = aws_iam_policy.control_plane_kms.arn
+      audit = aws_iam_policy.audit_writer.arn
+    },
+    var.audit.ocsf.enabled ? { ocsf = aws_iam_policy.ocsf_writer[0].arn } : {},
+  )
 
   tags = var.tags
 }

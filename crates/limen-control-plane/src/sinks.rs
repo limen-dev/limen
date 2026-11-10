@@ -1,4 +1,5 @@
-//! Audit sinks that leave the host: S3 and Datadog (ADR-0009).
+//! Audit sinks that leave the host: S3, Datadog (ADR-0009) and the OCSF
+//! projection (ADR-0049).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -369,6 +370,88 @@ fn consistent_manifest(file: &[u8], key: &str, writer: &str) -> Result<Manifest,
     Ok(manifest)
 }
 
+// ---- OCSF -------------------------------------------------------------------
+
+/// The OCSF projection (ADR-0049): gzipped NDJSON in a bucket of its own, one
+/// object per `(date, hour)` of the events in a batch. It is a projection of
+/// the native trail and never part of the hash chain.
+#[derive(Debug, Clone)]
+pub struct OcsfSink {
+    pub client: aws_sdk_s3::Client,
+    pub bucket: String,
+    pub prefix: String,
+    pub kms_key: Option<String>,
+    pub writer: String,
+}
+
+impl OcsfSink {
+    /// The object key for one partition of a batch. Named by the SHA-256 of
+    /// its content, so shipping the same batch again (a retry, or a restart
+    /// before the commit) writes the same key with the same bytes, and a
+    /// spool that was wiped can never overwrite an older, different object.
+    fn key(&self, day: &str, hour: &str, digest: &str) -> String {
+        format!(
+            "{}dt={day}/hour={hour}/{}-{}.jsonl.gz",
+            self.prefix,
+            self.writer,
+            &digest[..32]
+        )
+    }
+
+    /// Project a batch into `(day, hour) -> NDJSON`. Unreadable lines are kept
+    /// as Base Events under `unknown/00` (fixed, so a retry rewrites the same
+    /// bytes); nothing is dropped.
+    fn partitions(batch: &[(u64, Vec<u8>)]) -> BTreeMap<(String, String), Vec<u8>> {
+        let mut out: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
+        for (_, raw) in batch {
+            let (record, day_hour) = limen_audit::ocsf::raw_to_ocsf(raw, limen_core::VERSION);
+            let (day, hour) = day_hour
+                .as_deref()
+                .and_then(|dh| dh.split_once('/'))
+                .unwrap_or(("unknown", "00"));
+            let body = out.entry((day.to_owned(), hour.to_owned())).or_default();
+            // `Value` always serializes.
+            if serde_json::to_writer(&mut *body, &record).is_ok() {
+                body.push(b'\n');
+            }
+        }
+        out
+    }
+
+    async fn put(&self, key: &str, body: Vec<u8>) -> Result<(), ShipError> {
+        let mut req = self
+            .client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(ByteStream::from(body))
+            .content_type("application/gzip");
+        if let Some(kms) = &self.kms_key {
+            req = req
+                .server_side_encryption(ServerSideEncryption::AwsKms)
+                .ssekms_key_id(kms);
+        }
+        req.send().await.map(|_| ()).map_err(|e| {
+            ShipError::Retry(format!(
+                "put {key}: {}",
+                aws_sdk_s3::error::DisplayErrorContext(&e)
+            ))
+        })
+    }
+
+    /// Write a batch. Retryable failures retry the whole batch.
+    pub async fn ship(&self, batch: Vec<(u64, Vec<u8>)>) -> Result<(), ShipError> {
+        let count = batch.len() as u64;
+        for ((day, hour), ndjson) in Self::partitions(&batch) {
+            let body = gzip(&ndjson).map_err(|e| ShipError::Retry(e.to_string()))?;
+            let key = self.key(&day, &hour, &hex(&Sha256::digest(&ndjson)));
+            self.put(&key, body).await?;
+        }
+        metrics::counter!("limen_audit_ocsf_events_total").increment(count);
+        Ok(())
+    }
+}
+
 // ---- Datadog ----------------------------------------------------------------
 
 /// Datadog intake limits (<https://docs.datadoghq.com/api/latest/logs/send-logs>).
@@ -531,6 +614,90 @@ mod tests {
             signer_cert: String::new(),
         })
         .expect("file")
+    }
+
+    fn event_line(kind: limen_audit::EventKind, at: time::OffsetDateTime) -> Vec<u8> {
+        let mut e = limen_audit::Event::new(
+            kind,
+            limen_audit::Producer {
+                component: "proxy".into(),
+                instance_id: "p-1".into(),
+                seq: 1,
+            },
+            serde_json::json!({"password": "hunter2", "resource": "orders"}),
+        );
+        e.time = at;
+        serde_json::to_vec(&e).expect("line")
+    }
+
+    #[test]
+    fn ocsf_batches_split_by_utc_hour_keep_unreadable_lines_and_hide_secrets() {
+        use limen_audit::EventKind::AuthLogin;
+        let h1 = time::macros::datetime!(2026-11-09 10:05:00 UTC);
+        let h2 = time::macros::datetime!(2026-11-09 11:05:00 UTC);
+        let batch = vec![
+            (0, event_line(AuthLogin, h1)),
+            (1, event_line(AuthLogin, h2)),
+            (2, event_line(AuthLogin, h1)),
+            (3, b"not json at all".to_vec()),
+        ];
+        let parts = OcsfSink::partitions(&batch);
+        let lines = |day: &str, hour: &str| -> Vec<serde_json::Value> {
+            parts
+                .get(&(day.to_owned(), hour.to_owned()))
+                .map(|b| {
+                    String::from_utf8_lossy(b)
+                        .lines()
+                        .map(|l| serde_json::from_str(l).expect("one json value per line"))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(lines("2026-11-09", "10").len(), 2);
+        assert_eq!(lines("2026-11-09", "11").len(), 1);
+        // The unreadable line is under unknown/00, as a Base Event; 4 records in all.
+        assert_eq!(lines("unknown", "00").len(), 1);
+        let total: usize = parts.keys().map(|(d, h)| lines(d, h).len()).sum();
+        assert_eq!(total, 4);
+        let all = parts
+            .values()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .collect::<String>();
+        assert!(
+            !all.contains("not json at all"),
+            "unparseable text is not copied"
+        );
+        assert!(!all.contains("hunter2"), "a secret reached the projection");
+        assert!(all.contains("orders"));
+    }
+
+    #[test]
+    fn ocsf_object_keys_are_stable_for_a_batch_and_differ_for_another() {
+        let sink = |prefix: &str| OcsfSink {
+            client: aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
+                    .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                    .build(),
+            ),
+            bucket: "siem".into(),
+            prefix: prefix.into(),
+            kms_key: None,
+            writer: "cp-a".into(),
+        };
+        let s = sink("ocsf/");
+        let a = hex(&Sha256::digest(b"one"));
+        let b = hex(&Sha256::digest(b"two"));
+        let key = s.key("2026-11-09", "10", &a);
+        assert_eq!(
+            key,
+            s.key("2026-11-09", "10", &a),
+            "a retry writes the same key"
+        );
+        assert_ne!(key, s.key("2026-11-09", "10", &b));
+        assert!(key.starts_with("ocsf/dt=2026-11-09/hour=10/cp-a-"));
+        assert!(key.ends_with(".jsonl.gz"));
+        assert!(sink("").key("d", "h", &a).starts_with("dt=d/hour=h/"));
     }
 
     #[test]

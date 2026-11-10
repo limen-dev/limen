@@ -84,10 +84,16 @@ variable "console_public_url" {
 }
 
 variable "audit" {
-  description = "Settings passed to the audit module (S3 Object Lock, retention)."
+  description = "Settings passed to the audit module (S3 Object Lock, retention, the optional OCSF export for SIEMs)."
   type = object({
     retention_days   = optional(number, 400)
     object_lock_days = optional(number, 0)
+    ocsf = optional(object({
+      enabled        = optional(bool, false)
+      bucket_name    = optional(string)
+      retention_days = optional(number, 90)
+      kms_key_arn    = optional(string)
+    }), {})
   })
   default = {}
 }

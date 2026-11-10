@@ -2,7 +2,7 @@
 
 | Module | What it creates |
 |---|---|
-| `audit` | S3 audit store, KMS, Glue and Athena |
+| `audit` | S3 audit store, KMS, Glue and Athena; optionally (`ocsf.enabled`) the OCSF export bucket and key for SIEMs (ADR-0049) |
 | `datadog` | Datadog sink monitors |
 | `foundation` | Everything Limen depends on: PostgreSQL (RDS), four KMS signing keys, the audit store, join tokens, secrets, control plane IAM and optional EKS IRSA role. Wraps `terraform-aws-modules` `rds`, `kms`, `secrets-manager`, `iam` |
 | `discovery` | The describe-only IAM role workers assume for resource discovery (ADR-0027): trust limited to the worker roles, optional external id, read actions per enabled source. Wraps `terraform-aws-modules` `iam-role` |

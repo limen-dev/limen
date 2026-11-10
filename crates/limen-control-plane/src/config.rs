@@ -314,6 +314,40 @@ pub struct Config {
     #[arg(long, env = "LIMEN_AUDIT_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
     pub audit_s3_flush: Duration,
 
+    /// Write an OCSF projection of the audit trail (ADR-0049) to this bucket
+    /// for SIEMs. It must not be the audit bucket: a SIEM reader gets this
+    /// bucket and nothing of the audit bucket, which holds recordings. Uses
+    /// the audit bucket's path-style setting.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_BUCKET")]
+    pub audit_ocsf_s3_bucket: Option<String>,
+
+    /// S3 endpoint for the OCSF bucket, if it differs from `--audit-s3-endpoint`
+    /// (another account or region, or an S3-compatible store in development).
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_ENDPOINT")]
+    pub audit_ocsf_s3_endpoint: Option<String>,
+
+    /// Key prefix in the OCSF bucket. Empty, or ending in `/`.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_PREFIX", default_value = "")]
+    pub audit_ocsf_s3_prefix: String,
+
+    /// Encrypt OCSF objects with this KMS key. Must differ from
+    /// `--audit-s3-kms-key`: the audit key protects recordings.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_KMS_KEY")]
+    pub audit_ocsf_s3_kms_key: Option<String>,
+
+    /// Close an OCSF batch after this long, even if it isn't full.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_S3_FLUSH", value_parser = parse_duration, default_value = "60s")]
+    pub audit_ocsf_s3_flush: Duration,
+
+    /// If the OCSF sink fails while the spool holds more than this many bytes
+    /// and the OCSF sink is the slowest consumer, it skips the batch (counted
+    /// in `limen_audit_ocsf_skipped_total`) instead of holding the spool
+    /// until it is full and audit fails closed. The events stay in the S3
+    /// trail. Must be below `--audit-spool-max-bytes`.
+    #[arg(long, env = "LIMEN_AUDIT_OCSF_MAX_LAG_BYTES", default_value_t = 256 * 1024 * 1024,
+          value_parser = clap::value_parser!(u64).range(1..))]
+    pub audit_ocsf_max_lag_bytes: u64,
+
     /// Datadog Logs intake URL, for example
     /// `https://http-intake.logs.datadoghq.eu/api/v2/logs`. Enables the Datadog sink.
     #[arg(long, env = "LIMEN_DATADOG_LOGS_URL")]
@@ -605,6 +639,76 @@ impl Config {
         Ok(())
     }
 
+    /// Refuses OCSF settings that would weaken the audit bucket's protection
+    /// or could never take effect (ADR-0049).
+    pub fn check_ocsf(&self) -> Result<(), String> {
+        let Some(bucket) = &self.audit_ocsf_s3_bucket else {
+            if self.audit_ocsf_s3_kms_key.is_some()
+                || self.audit_ocsf_s3_endpoint.is_some()
+                || !self.audit_ocsf_s3_prefix.is_empty()
+            {
+                return Err("the other --audit-ocsf-s3-* flags need --audit-ocsf-s3-bucket".into());
+            }
+            return Ok(());
+        };
+        if bucket.trim().is_empty() {
+            return Err("--audit-ocsf-s3-bucket is empty".into());
+        }
+        // Names are compared the way S3 reads them (no padding, no case). A
+        // different spelling of the same bucket (an access point, another
+        // account's alias) can't be seen from here: the IAM separation in the
+        // `audit` Terraform module (`ocsf.enabled`) is the control, this is a guard against
+        // mistakes.
+        let same_bucket = self
+            .audit_s3_bucket
+            .as_deref()
+            .is_some_and(|a| a.trim().eq_ignore_ascii_case(bucket.trim()));
+        // The same name on another endpoint is another store; on the same one it is not.
+        let norm = |e: &str| e.trim().trim_end_matches('/').to_ascii_lowercase();
+        let other_endpoint = self.audit_ocsf_s3_endpoint.as_deref().is_some_and(|e| {
+            let e = norm(e);
+            match self.audit_s3_endpoint.as_deref() {
+                Some(a) => e != norm(a),
+                // The audit bucket is on AWS (no endpoint): an AWS endpoint is the same store.
+                None => !e.contains("amazonaws.com"),
+            }
+        });
+        if same_bucket && !other_endpoint {
+            return Err(
+                "--audit-ocsf-s3-bucket must not be the audit bucket: whoever reads the SIEM feed would be able to read recordings"
+                    .into(),
+            );
+        }
+        // A key id, `alias/name` and a full ARN can name one key. Compare the
+        // last path segment, which catches an alias or key id written two ways;
+        // an alias and the key id it points to can't be told apart offline.
+        let kms_name = |k: &str| k.trim().rsplit('/').next().unwrap_or_default().to_owned();
+        if let Some(key) = &self.audit_ocsf_s3_kms_key
+            && self
+                .audit_s3_kms_key
+                .as_deref()
+                .is_some_and(|a| kms_name(a) == kms_name(key))
+        {
+            return Err(
+                "--audit-ocsf-s3-kms-key must not be the audit KMS key: it also protects recordings"
+                    .into(),
+            );
+        }
+        let prefix = &self.audit_ocsf_s3_prefix;
+        if prefix.starts_with('/') || (!prefix.is_empty() && !prefix.ends_with('/')) {
+            return Err(
+                "--audit-ocsf-s3-prefix must be empty, or end in `/` and not start with one".into(),
+            );
+        }
+        if self.audit_ocsf_max_lag_bytes >= self.audit_spool_max_bytes {
+            return Err(format!(
+                "--audit-ocsf-max-lag-bytes ({}) must be below --audit-spool-max-bytes ({}), or the OCSF sink could still fill the spool",
+                self.audit_ocsf_max_lag_bytes, self.audit_spool_max_bytes
+            ));
+        }
+        Ok(())
+    }
+
     /// Refuses a SCIM token too short to be unguessable.
     pub fn check_scim_token(&self) -> Result<(), String> {
         match &self.scim_token {
@@ -780,6 +884,111 @@ mod tests {
         let over = parse_with(&["--default-cert-ttl=2h", "--max-cert-ttl=1h"]).expect("parses");
         let err = over.check_cert_ttls().expect_err("above the max");
         assert!(err.contains("--default-cert-ttl"), "{err}");
+    }
+
+    #[test]
+    fn ocsf_settings_cannot_share_the_audit_bucket_or_key_or_outgrow_the_spool() {
+        let ok = |extra: &[&str]| parse_with(extra).expect("parses").check_ocsf();
+        // Off by default, and nothing else may be set without the bucket.
+        assert!(ok(&[]).is_ok());
+        assert!(ok(&["--audit-ocsf-s3-kms-key=k"]).is_err());
+        assert!(ok(&["--audit-ocsf-s3-prefix=x/"]).is_err());
+        assert!(ok(&["--audit-ocsf-s3-bucket=siem"]).is_ok());
+        // The audit bucket holds recordings.
+        let same = ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=audit"])
+            .expect_err("same bucket");
+        assert!(same.contains("must not be the audit bucket"), "{same}");
+        assert!(ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=siem"]).is_ok());
+        // A different spelling of the same name is the same bucket.
+        assert!(ok(&["--audit-s3-bucket=audit", "--audit-ocsf-s3-bucket=AUDIT "]).is_err());
+        // The same name on another endpoint is a different store.
+        assert!(
+            ok(&[
+                "--audit-s3-bucket=audit",
+                "--audit-ocsf-s3-bucket=audit",
+                "--audit-ocsf-s3-endpoint=https://other.example"
+            ])
+            .is_ok()
+        );
+        // On AWS (no audit endpoint), spelling out an AWS endpoint is the same store.
+        assert!(
+            ok(&[
+                "--audit-s3-bucket=audit",
+                "--audit-ocsf-s3-bucket=audit",
+                "--audit-ocsf-s3-endpoint=https://s3.eu-west-1.amazonaws.com"
+            ])
+            .is_err()
+        );
+        // Spelling out the audit endpoint again does not make it another store.
+        for same in ["http://s3:8333", "http://s3:8333/"] {
+            assert!(
+                ok(&[
+                    "--audit-s3-bucket=audit",
+                    "--audit-s3-endpoint=http://s3:8333",
+                    "--audit-ocsf-s3-bucket=audit",
+                    &format!("--audit-ocsf-s3-endpoint={same}"),
+                ])
+                .is_err(),
+                "{same}"
+            );
+        }
+        // And so does its key.
+        let key = ok(&[
+            "--audit-s3-kms-key=k1",
+            "--audit-ocsf-s3-bucket=siem",
+            "--audit-ocsf-s3-kms-key=k1",
+        ])
+        .expect_err("same key");
+        assert!(key.contains("KMS key"), "{key}");
+        assert!(
+            ok(&[
+                "--audit-s3-kms-key=k1",
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-kms-key=k2"
+            ])
+            .is_ok()
+        );
+        // An alias and its ARN, or a key id and its ARN, are the same key.
+        for (audit, ocsf) in [
+            (
+                "alias/limen",
+                "arn:aws:kms:eu-west-1:111122223333:alias/limen",
+            ),
+            ("arn:aws:kms:eu-west-1:111122223333:key/abc-123", "abc-123"),
+        ] {
+            let both = ok(&[
+                &format!("--audit-s3-kms-key={audit}"),
+                "--audit-ocsf-s3-bucket=siem",
+                &format!("--audit-ocsf-s3-kms-key={ocsf}"),
+            ]);
+            assert!(both.is_err(), "{audit} vs {ocsf}");
+        }
+        // Prefix shape.
+        assert!(ok(&["--audit-ocsf-s3-bucket=siem", "--audit-ocsf-s3-prefix=ocsf"]).is_err());
+        assert!(
+            ok(&[
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-prefix=/ocsf/"
+            ])
+            .is_err()
+        );
+        assert!(
+            ok(&[
+                "--audit-ocsf-s3-bucket=siem",
+                "--audit-ocsf-s3-prefix=ocsf/"
+            ])
+            .is_ok()
+        );
+        assert!(ok(&["--audit-ocsf-s3-bucket= "]).is_err());
+        // The lag bound must be reachable before the spool is full.
+        let lag = ok(&[
+            "--audit-ocsf-s3-bucket=siem",
+            "--audit-spool-max-bytes=1000",
+            "--audit-ocsf-max-lag-bytes=1000",
+        ])
+        .expect_err("not below the spool size");
+        assert!(lag.contains("must be below"), "{lag}");
+        assert!(parse_with(&["--audit-ocsf-max-lag-bytes=0"]).is_err());
     }
 
     #[test]

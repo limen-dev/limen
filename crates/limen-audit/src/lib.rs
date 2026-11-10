@@ -7,6 +7,7 @@
 //! so changes must bump [`SCHEMA_VERSION`].
 
 pub mod emitter;
+pub mod ocsf;
 pub mod ship;
 pub mod sink;
 pub mod spool;

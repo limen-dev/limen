@@ -46,6 +46,7 @@ use state::{AppState, Limits, PolicyStore};
 pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     config.check_cert_ttls().map_err(anyhow::Error::msg)?;
     config.idp_token_key().map_err(anyhow::Error::msg)?;
+    config.check_ocsf().map_err(anyhow::Error::msg)?;
     config.check_scim_token().map_err(anyhow::Error::msg)?;
     if config.scim_token.is_some()
         && !config.idp_purge_after.is_zero()

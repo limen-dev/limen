@@ -24,5 +24,6 @@ running one: they build the CLI and start containers.
 | `demo-phase14.sh` | The management API (ADR-0042) |
 | `demo-shadow.sh` | Shadow mode for deny rules (ADR-0046) |
 | `demo-idp-offboarding.sh` | IdP-driven onboarding (groups become roles) and offboarding against a real Dex (ADR-0047) |
+| `demo-ocsf.sh` | OCSF export of the audit trail for SIEMs (ADR-0048) |
 | `demo-dx.sh` | First five minutes: `limen doctor`, ssh, scp, rsync, git, `limen kube config` |
 | `demo-website.sh` | Builds and checks the documentation site |
