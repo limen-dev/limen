@@ -111,10 +111,7 @@ pub fn router(state: AppState) -> Router {
             "/console/policy/documents/preview",
             post(policy_edit::preview_document),
         )
-        .route(
-            "/console/simulator",
-            get(pages::simulator).post(pages::simulate),
-        )
+        .route("/console/simulator", get(pages::simulator))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

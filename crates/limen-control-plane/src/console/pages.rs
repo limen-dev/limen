@@ -1949,102 +1949,150 @@ pub async fn policy(
     .await
 }
 
-#[derive(Deserialize)]
-pub struct SimulateForm {
-    csrf: String,
-    #[serde(default)]
-    groups: String,
-    #[serde(default)]
-    bot: String,
-}
-
-/// `GET /console/simulator`: the form.
-pub async fn simulator(State(state): State<AppState>, auth: Auth) -> Response {
-    if let Err(r) = auth.admin() {
-        return r;
-    }
-    html(
-        SimulatorPage {
-            chrome: chrome(&state, &auth, "simulator"),
-            simulation: None,
-        }
-        .render(),
-    )
-}
-
-/// `POST /console/simulator`: what groups or a bot can reach and could ask for.
-pub async fn simulate(
+/// `GET /console/simulator`: the picker, and, once someone is chosen, what
+/// they can reach and could ask for. A GET, since it changes nothing: the
+/// address can be bookmarked or linked (`?person=...`, `?bot=...`,
+/// `?group=a&group=b`).
+pub async fn simulator(
     State(state): State<AppState>,
     auth: Auth,
-    headers: HeaderMap,
-    Form(form): Form<SimulateForm>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
-    let console = match console(&state) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
-        return r;
+    let (mut picked_groups, mut person, mut bot) = (Vec::new(), String::new(), String::new());
+    for (k, v) in url::form_urlencoded::parse(raw.as_deref().unwrap_or("").as_bytes()) {
+        let v = v.trim().to_owned();
+        if v.is_empty() {
+            continue;
+        }
+        match k.as_ref() {
+            "group" if picked_groups.len() < 50 => picked_groups.push(v),
+            "person" => person = v,
+            "bot" => bot = v,
+            _ => {}
+        }
     }
-    let groups: Vec<String> = form
-        .groups
-        .split(',')
-        .map(str::trim)
-        .filter(|g| !g.is_empty())
-        .take(50)
-        .map(str::to_owned)
-        .collect();
-    let bot = Some(form.bot.trim()).filter(|b| !b.is_empty());
-    let who = match (groups.is_empty(), bot) {
-        (false, _) => format!("Members of {}", groups.join(" and ")),
-        (true, Some(b)) => format!("The bot {b}"),
-        (true, None) => String::new(),
-    };
     let current = state.policy.current();
-    let sim = if who.is_empty() {
-        Simulation {
-            who,
-            error: Some("Name at least one group, or a bot.".into()),
+    let users = store::list_users(&state.db).await.unwrap_or_default();
+    let mut people: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
+    people.sort();
+    let bots: Vec<String> = current
+        .policy
+        .bots()
+        .map(|b| b.metadata.name.clone())
+        .collect();
+    // The groups a mapping names, and those people carry.
+    let mut names: std::collections::BTreeSet<String> =
+        current.policy.mapped_groups().cloned().collect();
+    for u in &users {
+        names.extend(u.idp_groups.clone().unwrap_or_else(|| u.groups.clone()));
+    }
+    names.extend(picked_groups.iter().cloned());
+    let choices: Vec<views::GroupChoice> = names
+        .into_iter()
+        .map(|name| views::GroupChoice {
+            checked: picked_groups.contains(&name),
+            name,
+        })
+        .collect();
+
+    // One kind of choice at a time.
+    let chosen = usize::from(!picked_groups.is_empty())
+        + usize::from(!person.is_empty())
+        + usize::from(!bot.is_empty());
+    let simulation = match chosen {
+        0 => None,
+        1 => Some(simulate(
+            &current.policy,
+            &users,
+            &picked_groups,
+            &person,
+            &bot,
+        )),
+        _ => Some(Simulation {
+            who: String::new(),
+            error: Some("Pick one: groups, a person or a bot.".into()),
             standing: vec![],
             requestable: vec![],
-        }
-    } else {
-        match current
-            .policy
-            .what_can(&groups, if groups.is_empty() { bot } else { None })
-        {
-            Ok(can) => Simulation {
-                who,
-                error: None,
-                standing: can
-                    .standing
-                    .into_iter()
-                    .map(|r| (r.name, r.kind.as_str().to_owned(), r.principals.join(", ")))
-                    .collect(),
-                requestable: can
-                    .requestable
-                    .into_iter()
-                    .map(|r| (r.name, r.kind.as_str().to_owned(), r.roles.join(", ")))
-                    .collect(),
-            },
-            Err(e) => Simulation {
-                who,
-                error: Some(e),
-                standing: vec![],
-                requestable: vec![],
-            },
-        }
+        }),
     };
     html(
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
-            simulation: Some(sim),
+            simulation,
+            groups: choices,
+            people,
+            bots,
+            person,
+            bot,
         }
         .render(),
     )
+}
+
+/// What one choice can reach: a person (the groups the IdP puts them in now),
+/// a bot, or groups.
+fn simulate(
+    policy: &limen_policy::Policy,
+    users: &[store::UserRow],
+    groups: &[String],
+    person: &str,
+    bot: &str,
+) -> Simulation {
+    let failed = |who: String, error: String| Simulation {
+        who,
+        error: Some(error),
+        standing: vec![],
+        requestable: vec![],
+    };
+    let (who, groups, bot) = if !person.is_empty() {
+        let Some(u) = users
+            .iter()
+            .find(|u| u.username.eq_ignore_ascii_case(person))
+        else {
+            return failed(
+                person.to_owned(),
+                format!("No person named {person} has signed in."),
+            );
+        };
+        let theirs = u.idp_groups.clone().unwrap_or_else(|| u.groups.clone());
+        (
+            if theirs.is_empty() {
+                format!("{} (in no groups)", u.username)
+            } else {
+                format!("{} (in {})", u.username, theirs.join(", "))
+            },
+            theirs,
+            None,
+        )
+    } else if !bot.is_empty() {
+        (format!("The bot {bot}"), Vec::new(), Some(bot))
+    } else {
+        (
+            format!("Members of {}", groups.join(" and ")),
+            groups.to_vec(),
+            None,
+        )
+    };
+    match policy.what_can(&groups, bot) {
+        Ok(can) => Simulation {
+            who,
+            error: None,
+            standing: can
+                .standing
+                .into_iter()
+                .map(|r| (r.name, r.kind.as_str().to_owned(), r.principals.join(", ")))
+                .collect(),
+            requestable: can
+                .requestable
+                .into_iter()
+                .map(|r| (r.name, r.kind.as_str().to_owned(), r.roles.join(", ")))
+                .collect(),
+        },
+        Err(e) => failed(who, e),
+    }
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {

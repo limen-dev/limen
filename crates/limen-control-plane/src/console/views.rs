@@ -1224,6 +1224,17 @@ pub struct PolicyPage {
 pub struct SimulatorPage {
     pub chrome: Chrome,
     pub simulation: Option<Simulation>,
+    pub groups: Vec<GroupChoice>,
+    /// Usernames to search, and bots in policy.
+    pub people: Vec<String>,
+    pub bots: Vec<String>,
+    pub person: String,
+    pub bot: String,
+}
+
+pub struct GroupChoice {
+    pub name: String,
+    pub checked: bool,
 }
 
 pub struct RoleAccess {
