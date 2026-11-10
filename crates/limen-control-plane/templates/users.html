@@ -34,7 +34,7 @@
   {% for u in users %}
     <tr>
       <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><div><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a><div class="cell-sub" title="{{ u.issuer }}">{{ u.source }}</div></div></div></td>
-      <td>{% if u.locked %}<span class="pill bad">disabled</span><div class="cell-sub" style="max-width:16rem;white-space:normal">by {{ u.disabled_by() }}{% if !u.lock_reason.is_empty() %}: {{ u.lock_reason }}{% endif %}</div>{% else %}<span class="pill ok">enabled</span>{% endif %}</td>
+      <td>{% if u.locked %}<span class="pill bad">disabled</span><div class="cell-sub" title="{{ u.lock_reason }}">by {{ u.disabled_by() }}</div>{% else %}<span class="pill ok">enabled</span>{% endif %}</td>
       <td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td>
       <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td>
       <td>{% if u.idp_tone.is_empty() %}<span class="cell-sub">{{ u.idp }}</span>{% else %}<span class="pill {{ u.idp_tone }}">{{ u.idp }}</span>{% endif %}</td>
@@ -50,7 +50,7 @@
   <thead><tr><th>User</th><th>Disabled by</th><th>Reason</th></tr></thead>
   <tbody>
   {% for l in orphan_locks %}
-    <tr><td><a class="cell-main" href="/console/users/{{ l.path }}">{{ l.name }}</a></td><td>{{ l.disabled_by() }}</td><td>{{ l.lock_reason }}</td></tr>
+    <tr><td><a class="cell-main" href="/console/users/{{ l.path }}">{{ l.name }}</a></td><td>{{ l.disabled_by() }}</td><td title="{{ l.lock_reason }}"><div style="max-width:28rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ l.lock_reason }}</div></td></tr>
   {% endfor %}
   </tbody>
 </table></div>
