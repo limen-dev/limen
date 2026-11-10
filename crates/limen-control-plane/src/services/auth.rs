@@ -167,7 +167,7 @@ impl Auth for AuthService {
 }
 
 /// Is this person blocked by a lock? A lock placed because the IdP deactivated
-/// them lifts itself when the IdP vouches for them again (they just signed in,
+/// them (its check, or SCIM) lifts itself when the IdP vouches for them again (they just signed in,
 /// by the CLI or the console); an admin's lock never does (ADR-0047).
 pub(crate) async fn lock_blocks(state: &AppState, username: &str) -> Result<bool, Status> {
     let Some(lock) = crate::db::active_lock(&state.db, username)
@@ -176,13 +176,13 @@ pub(crate) async fn lock_blocks(state: &AppState, username: &str) -> Result<bool
     else {
         return Ok(false);
     };
-    if lock.locked_by != crate::idp_check::LOCK_ACTOR {
+    if !crate::idp_check::placed_by_idp(&lock.locked_by) {
         return Ok(true);
     }
     crate::services::ops::unlock_user(
         state,
         crate::services::ops::Actor {
-            username: crate::idp_check::LOCK_ACTOR,
+            username: &lock.locked_by,
             via: "idp",
         },
         username,

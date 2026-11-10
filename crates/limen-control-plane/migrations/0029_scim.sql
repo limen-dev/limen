@@ -2,8 +2,10 @@
 
 -- A person provisioned by the IdP has no subject until they first sign in.
 ALTER TABLE users ALTER COLUMN subject DROP NOT NULL;
-ALTER TABLE users ADD COLUMN scim_id UUID;
-CREATE UNIQUE INDEX users_scim_id ON users (scim_id) WHERE scim_id IS NOT NULL;
+-- Everyone has an id from the start (a volatile default is evaluated per row),
+-- so SCIM never has to number people on a read.
+ALTER TABLE users ADD COLUMN scim_id UUID NOT NULL DEFAULT gen_random_uuid();
+CREATE UNIQUE INDEX users_scim_id ON users (scim_id);
 
 -- Groups the IdP pushes, and who is in them. Members are SCIM user ids.
 CREATE TABLE scim_groups (

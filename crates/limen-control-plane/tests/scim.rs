@@ -191,22 +191,24 @@ async fn a_person_is_provisioned_before_they_ever_sign_in() {
 }
 
 #[tokio::test]
-async fn a_deactivation_is_instant_and_only_scim_lifts_it() {
+async fn a_deactivation_is_instant_and_the_idp_vouching_lifts_it() {
     let Some(h) = start(true).await else { return };
     let id = create_user(&h, "leaver@example.com").await;
     let path = format!("/scim/v2/Users/{id}");
+    let deactivate = || {
+        scim(
+            &h,
+            "PATCH",
+            &path,
+            Some(json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                // Okta's deactivation: a pathless replace.
+                "Operations": [{ "op": "replace", "value": { "active": false } }],
+            })),
+        )
+    };
 
-    // Okta's deactivation: a pathless replace.
-    let (status, user) = scim(
-        &h,
-        "PATCH",
-        &path,
-        Some(json!({
-            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{ "op": "replace", "value": { "active": false } }],
-        })),
-    )
-    .await;
+    let (status, user) = deactivate().await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(user["active"], false);
     let lock = limen_control_plane::db::active_lock(&h.state.db, "leaver@example.com")
@@ -215,13 +217,7 @@ async fn a_deactivation_is_instant_and_only_scim_lifts_it() {
         .expect("locked");
     assert_eq!(lock.locked_by, "system:scim");
 
-    // Signing in does not lift a SCIM lock: only the IdP's SCIM does.
-    let err = h
-        .login("leaver@example.com", &["admins"])
-        .await
-        .expect_err("refused");
-    assert_eq!(err.code(), tonic::Code::PermissionDenied);
-
+    // Reactivation in Okta lifts it.
     let (_, user) = scim(
         &h,
         "PATCH",
@@ -230,11 +226,22 @@ async fn a_deactivation_is_instant_and_only_scim_lifts_it() {
     )
     .await;
     assert_eq!(user["active"], true);
+
+    // A sign-in the IdP vouches for lifts it too, so a missed "active: true"
+    // push never strands someone the IdP lets in (as the IdP check's lock).
+    let (status, _) = deactivate().await;
+    assert_eq!(status, StatusCode::OK);
     h.login("leaver@example.com", &["admins"])
         .await
-        .expect("signs in again");
+        .expect("the IdP vouches, the lock lifts");
+    assert!(
+        !limen_control_plane::db::is_locked(&h.state.db, "leaver@example.com")
+            .await
+            .expect("lock check")
+    );
+    assert_eq!(events(&h, EventKind::UserUnlock).await.len(), 2);
 
-    // An admin's lock is not SCIM's to lift.
+    // An admin's lock is not the IdP's to lift, by SCIM or by signing in.
     limen_control_plane::db::lock_user(
         &h.state.db,
         "leaver@example.com",
@@ -251,6 +258,9 @@ async fn a_deactivation_is_instant_and_only_scim_lifts_it() {
     )
     .await;
     assert_eq!(user["active"], false, "the admin's lock stays");
+    h.login("leaver@example.com", &["admins"])
+        .await
+        .expect_err("still locked");
 }
 
 #[tokio::test]
@@ -536,4 +546,91 @@ async fn concurrent_group_changes_are_not_lost() {
     }
     let (_, group) = scim(&h, "GET", &path, None).await;
     assert_eq!(group["members"].as_array().map(Vec::len), Some(6));
+}
+
+/// Okta retries a create: two at once give one person and a conflict, not a 500.
+#[tokio::test]
+async fn concurrent_creates_of_one_person_give_a_conflict_not_an_error() {
+    let Some(h) = start(true).await else { return };
+    let body = || Some(json!({ "userName": "twice@example.com" }));
+    let (a, b) = futures::future::join(
+        scim(&h, "POST", "/scim/v2/Users", body()),
+        scim(&h, "POST", "/scim/v2/Users", body()),
+    )
+    .await;
+    let mut codes = [a.0.as_u16(), b.0.as_u16()];
+    codes.sort_unstable();
+    assert_eq!(codes, [201, 409]);
+}
+
+/// A person deleted in the console (or by the purge) leaves their pushed
+/// groups, so the next change to such a group still works.
+#[tokio::test]
+async fn deleting_a_person_leaves_their_groups_working() {
+    let Some(h) = start(true).await else { return };
+    let gone = create_user(&h, "gone@example.com").await;
+    let stays = create_user(&h, "stays@example.com").await;
+    let (_, group) = scim(
+        &h,
+        "POST",
+        "/scim/v2/Groups",
+        Some(json!({ "displayName": "g", "members": [{ "value": gone }] })),
+    )
+    .await;
+    let gid = group["id"].as_str().expect("id").to_owned();
+
+    // The console's Delete path: lock, then delete.
+    let actor = limen_control_plane::services::ops::Actor {
+        username: "admin@example.com",
+        via: "console",
+    };
+    limen_control_plane::services::ops::lock_user(&h.state, actor, "gone@example.com", "left")
+        .await
+        .expect("lock");
+    limen_control_plane::services::ops::delete_disabled_user(
+        &h.state,
+        actor,
+        "gone@example.com",
+        "left",
+    )
+    .await
+    .expect("delete")
+    .expect("allowed");
+
+    let (status, group) = scim(
+        &h,
+        "PATCH",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(json!({ "Operations": [{ "op": "add", "path": "members",
+                                       "value": [{ "value": stays }] }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{group}");
+    assert_eq!(group["members"].as_array().map(Vec::len), Some(1));
+}
+
+/// A lock with no user record has nothing to delete, and says so.
+#[tokio::test]
+async fn deleting_a_lock_without_a_record_deletes_nothing() {
+    let Some(h) = start(true).await else { return };
+    let actor = limen_control_plane::services::ops::Actor {
+        username: "admin@example.com",
+        via: "console",
+    };
+    limen_control_plane::services::ops::lock_user(&h.state, actor, "ghost@example.com", "x")
+        .await
+        .expect("lock");
+    let refused = limen_control_plane::services::ops::delete_disabled_user(
+        &h.state,
+        actor,
+        "ghost@example.com",
+        "x",
+    )
+    .await
+    .expect("no error");
+    assert_eq!(
+        refused,
+        Err(limen_control_plane::services::ops::DeleteRefused::NoRecord)
+    );
+    assert_eq!(events(&h, EventKind::UserDelete).await.len(), 0);
 }

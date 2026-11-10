@@ -15,10 +15,13 @@
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 <form method="get" action="/console/users" class="filters" data-autosubmit>
   <input type="hidden" name="q" value="{{ query }}">
+  {% if !filter.status.is_empty() %}<input type="hidden" name="status" value="{{ filter.status }}">{% endif %}
   <label><span>State</span><select name="state">
     <option value="">Any</option>
     <option value="enabled"{% if filter.state == "enabled" %} selected{% endif %}>Enabled</option>
-    <option value="disabled"{% if filter.state == "disabled" || filter.state == "disabled_idp" || filter.state == "disabled_admin" %} selected{% endif %}>Disabled</option>
+    <option value="disabled"{% if filter.state == "disabled" %} selected{% endif %}>Disabled</option>
+    {% if filter.state == "disabled_idp" %}<option value="disabled_idp" selected>Disabled by the IdP</option>{% endif %}
+    {% if filter.state == "disabled_admin" %}<option value="disabled_admin" selected>Disabled by an admin</option>{% endif %}
   </select></label>
   <label><span>Group</span><select name="group"><option value="">Any</option>{% for g in groups %}<option value="{{ g }}"{% if filter.group == g.as_str() %} selected{% endif %}>{{ g }}</option>{% endfor %}</select></label>
   <label><span>Role</span><select name="role"><option value="">Any</option>{% for r in roles %}<option value="{{ r }}"{% if filter.role == r.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>

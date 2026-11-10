@@ -129,7 +129,8 @@ fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
 /// person (no check yet, never touched by SCIM).
 macro_rules! effective_groups {
     () => {
-        "CASE WHEN u.idp_groups IS NULL AND u.scim_id IS NULL
+        "CASE WHEN u.idp_groups IS NULL AND u.source <> 'scim'
+               AND NOT EXISTS (SELECT 1 FROM scim_group_members m WHERE m.user_scim_id = u.scim_id)
               THEN NULL
          ELSE COALESCE((SELECT array_agg(g ORDER BY g) FROM (
               (SELECT unnest(COALESCE(u.idp_groups, u.groups)) AS g

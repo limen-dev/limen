@@ -1158,6 +1158,7 @@ fn user_chips(query: &str, f: &views::UserFilter) -> Vec<views::FilterChip> {
         "ok" => "Checked",
         "unchecked" => "Not checked",
         "check_failed" => "IdP not reachable",
+        "groups_missing" => "IdP sent no groups",
         "offboarded" => "Ended by the IdP",
         "locked" => "Disabled",
         other => other,
@@ -1460,6 +1461,11 @@ pub async fn delete_user(
             StatusCode::CONFLICT,
             "Disable them first",
             "Only a disabled user can be deleted. Disable the account, then delete it.",
+        ),
+        Ok(Err(ops::DeleteRefused::NoRecord)) => error_page(
+            StatusCode::CONFLICT,
+            "Nothing to delete",
+            "This person has no user record: they never signed in. Enable them to remove the lock.",
         ),
         Ok(Err(ops::DeleteRefused::Bot)) => error_page(
             StatusCode::BAD_REQUEST,

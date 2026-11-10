@@ -120,6 +120,8 @@ pub enum DeleteRefused {
     NotDisabled,
     /// Bots have their own lifecycle.
     Bot,
+    /// A lock names them but there is no user record to delete.
+    NoRecord,
 }
 
 /// Delete a disabled person's record (the Users page, `users` row) and their
@@ -127,8 +129,9 @@ pub enum DeleteRefused {
 /// person and are the history. A lock the IdP check or SCIM placed is released, so the
 /// IdP decides if they come back; an admin's lock stays.
 ///
-/// The audit event is written in the same transaction, so a deletion never
-/// stands without it. Returns `Ok(Err(why))` when the person may not be deleted.
+/// The audit event is written before the transaction commits (and the
+/// transaction is dropped if it cannot be), so a deletion never stands
+/// without it. Returns `Ok(Err(why))` when the person may not be deleted.
 pub async fn delete_disabled_user(
     state: &AppState,
     actor: Actor<'_>,
@@ -161,6 +164,17 @@ pub async fn delete_disabled_user(
     };
     let locked_by: String =
         sqlx::Row::try_get(&lock, "locked_by").map_err(|e| internal("deleting user", e))?;
+    // Something to delete: a lock alone (a person who never signed in) is not a record.
+    let scim_id: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT scim_id FROM users WHERE lower(username) = lower($1) FOR UPDATE",
+    )
+    .bind(username)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| internal("deleting user", e))?;
+    let Some(scim_id) = scim_id else {
+        return Ok(Err(DeleteRefused::NoRecord));
+    };
     audit_first(
         state,
         EventKind::UserDelete,
@@ -174,12 +188,18 @@ pub async fn delete_disabled_user(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("deleting user", e))?;
+    // And out of the groups SCIM pushed, which have no foreign key to users.
+    sqlx::query("DELETE FROM scim_group_members WHERE user_scim_id = $1")
+        .bind(scim_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("deleting user", e))?;
     sqlx::query("DELETE FROM idp_logins WHERE lower(username) = lower($1)")
         .bind(username)
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("deleting user", e))?;
-    if locked_by == crate::idp_check::LOCK_ACTOR || locked_by == crate::scim::ACTOR {
+    if crate::idp_check::placed_by_idp(&locked_by) {
         db::unlock_user(&mut *tx, username, actor.username)
             .await
             .map_err(|e| internal("deleting user", e))?;

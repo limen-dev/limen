@@ -285,17 +285,6 @@ fn user_record(r: &sqlx::postgres::PgRow) -> Result<UserRecord, sqlx::Error> {
     })
 }
 
-/// Give people who signed in before SCIM was on an id to be known by.
-async fn assign_ids(state: &AppState) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE users SET scim_id = gen_random_uuid()
-         WHERE scim_id IS NULL AND actor_type = 'user'",
-    )
-    .execute(&state.db)
-    .await
-    .map(|_| ())
-}
-
 async fn find_user(state: &AppState, id: Uuid) -> Result<Option<UserRecord>, Response> {
     sqlx::query(concat!(user_select!(), " WHERE u.scim_id = $1"))
         .bind(id)
@@ -310,9 +299,6 @@ async fn find_user(state: &AppState, id: Uuid) -> Result<Option<UserRecord>, Res
 
 async fn list_users(State(state): State<AppState>, Query(q): Query<ListQuery>) -> Reply {
     let (start, count) = q.window();
-    assign_ids(&state)
-        .await
-        .map_err(|e| server_error("numbering users", &e))?;
     let (rows, total) = match q.filter.as_deref() {
         Some(f) => {
             let name = eq_filter(f, "userName")?;
@@ -402,52 +388,59 @@ async fn create_user(State(state): State<AppState>, body: Bytes) -> Reply {
         .begin()
         .await
         .map_err(|e| server_error("creating a user", &e))?;
+    // Two creates of one name (Okta retries) queue here instead of racing to
+    // the unique index.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext(lower($1)))")
+        .bind(&username)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| server_error("creating a user", &e))?;
     let existing = sqlx::query(
-        "SELECT scim_id, actor_type FROM users WHERE lower(username) = lower($1) FOR UPDATE",
+        "SELECT scim_id, actor_type, source FROM users WHERE lower(username) = lower($1) FOR UPDATE",
     )
     .bind(&username)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| server_error("creating a user", &e))?;
-    let adopted = match &existing {
-        Some(r) => {
-            let scim_id: Option<Uuid> = r.try_get("scim_id").unwrap_or(None);
-            let actor: String = r.try_get("actor_type").unwrap_or_default();
-            if scim_id.is_some() || actor != "user" {
-                return Err(error(
-                    StatusCode::CONFLICT,
-                    Some("uniqueness"),
-                    "User already exists in the database.",
-                ));
-            }
-            true
-        }
-        None => false,
+    let conflict = || {
+        error(
+            StatusCode::CONFLICT,
+            Some("uniqueness"),
+            "User already exists in the database.",
+        )
     };
-    let row = if adopted {
-        // They signed in before SCIM was on: give them an id, change nothing else.
-        sqlx::query(
-            "UPDATE users SET scim_id = gen_random_uuid() WHERE lower(username) = lower($1)
-             RETURNING scim_id",
-        )
-        .bind(&username)
-        .fetch_one(&mut *tx)
-        .await
+    let (scim_id, adopted) = if let Some(r) = existing {
+        // SCIM already made them, or they are a bot: a conflict, and Okta then
+        // looks them up by name. A person who signed in before SCIM was on is
+        // taken over as they are.
+        let actor: String = r.try_get("actor_type").unwrap_or_default();
+        let source: String = r.try_get("source").unwrap_or_default();
+        if actor != "user" || source == "scim" {
+            return Err(conflict());
+        }
+        let id: Uuid = r
+            .try_get("scim_id")
+            .map_err(|e| server_error("creating a user", &e))?;
+        (id, true)
     } else {
-        sqlx::query(
+        let row = sqlx::query(
             "INSERT INTO users (username, subject, roles, groups, source, login_count,
-                                first_login_at, last_login_at, scim_id)
-             VALUES ($1, NULL, '{}', '{}', 'scim', 0, now(), 'epoch', gen_random_uuid())
+                                first_login_at, last_login_at)
+             VALUES ($1, NULL, '{}', '{}', 'scim', 0, now(), 'epoch')
              RETURNING scim_id",
         )
         .bind(&username)
         .fetch_one(&mut *tx)
         .await
-    }
-    .map_err(|e| server_error("creating a user", &e))?;
-    let scim_id: Uuid = row
-        .try_get("scim_id")
-        .map_err(|e| server_error("creating a user", &e))?;
+        .map_err(|e| match &e {
+            sqlx::Error::Database(d) if d.is_unique_violation() => conflict(),
+            _ => server_error("creating a user", &e),
+        })?;
+        let id: Uuid = row
+            .try_get("scim_id")
+            .map_err(|e| server_error("creating a user", &e))?;
+        (id, false)
+    };
     ops::audit_first(
         &state,
         EventKind::UserProvision,
@@ -587,7 +580,7 @@ async fn delete_user(State(state): State<AppState>, Path(id): Path<String>) -> R
     .await
     {
         Ok(Ok(())) => {}
-        Ok(Err(DeleteRefused::NotDisabled | DeleteRefused::Bot)) => {
+        Ok(Err(DeleteRefused::NotDisabled | DeleteRefused::Bot | DeleteRefused::NoRecord)) => {
             return Err(error(
                 StatusCode::CONFLICT,
                 None,
@@ -596,10 +589,6 @@ async fn delete_user(State(state): State<AppState>, Path(id): Path<String>) -> R
         }
         Err(s) => return Err(status_error(&s)),
     }
-    let _ = sqlx::query("DELETE FROM scim_group_members WHERE user_scim_id = $1")
-        .bind(id)
-        .execute(&state.db)
-        .await;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -726,12 +715,14 @@ async fn members_of(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     group: Uuid,
 ) -> Result<BTreeSet<Uuid>, Response> {
-    let ids: Vec<Uuid> =
-        sqlx::query_scalar("SELECT user_scim_id FROM scim_group_members WHERE group_id = $1")
-            .bind(group)
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(|e| server_error("reading group members", &e))?;
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT m.user_scim_id FROM scim_group_members m
+             JOIN users u ON u.scim_id = m.user_scim_id WHERE m.group_id = $1",
+    )
+    .bind(group)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| server_error("reading group members", &e))?;
     Ok(ids.into_iter().collect())
 }
 

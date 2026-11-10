@@ -34,6 +34,13 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// when the IdP vouches for the person again at their next sign-in; any other
 /// lock (an admin's) is never touched.
 pub const LOCK_ACTOR: &str = "system:idp-check";
+
+/// Whether a lock was placed by the IdP (its check, or SCIM) rather than an
+/// admin. Such a lock lifts itself when the IdP vouches for the person again.
+#[must_use]
+pub fn placed_by_idp(locked_by: &str) -> bool {
+    locked_by == LOCK_ACTOR || locked_by == crate::scim::ACTOR
+}
 /// How often a replica looks for due logins.
 const TICK: Duration = Duration::from_secs(20);
 
@@ -554,6 +561,47 @@ pub async fn end_logins_of(
     ended
 }
 
+/// The IdP answered and vouches for the person, but its token has no groups
+/// claim, so a group removal cannot be seen. Not an outage: the login counts as
+/// confirmed (so `--idp-check-failure=closed` does not end it), the console says
+/// what is not being checked, and one alert is raised until the claim returns.
+async fn groups_missing(state: &AppState, t: &Tracked, why: &str) {
+    metrics::counter!("limen_idp_checks_total", "outcome" => "groups_missing").increment(1);
+    tracing::warn!(user = %t.username, why, "identity provider sent no groups claim");
+    let _ = sqlx::query(
+        "UPDATE idp_logins SET last_ok_at = now(),
+                next_check_at = now() + make_interval(secs => $2)
+         WHERE login_id = $1",
+    )
+    .bind(&t.login_id)
+    .bind(jittered_secs(state.config.idp_check_interval))
+    .execute(&state.db)
+    .await;
+    let seen: bool = sqlx::query_scalar(
+        "SELECT idp_status = 'groups_missing' FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(&t.username)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+    if !seen {
+        let _ = state
+            .audit
+            .emit(
+                EventKind::IdpCheckFailed,
+                Context {
+                    user: Some(t.username.clone()),
+                    session_id: None,
+                },
+                json!({ "login_id": t.login_id, "reason": why, "kind": "groups_missing" }),
+            )
+            .await;
+    }
+    let _ = set_status(&state.db, &t.username, "groups_missing").await;
+}
+
 async fn check_failed(state: &AppState, t: &Tracked, why: &str) {
     metrics::counter!("limen_idp_checks_total", "outcome" => "failed").increment(1);
     tracing::warn!(user = %t.username, why, "identity provider check failed");
@@ -650,9 +698,7 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                             && !id.groups_reported
                             && !t.groups.is_empty()
                         {
-                            metrics::counter!("limen_idp_checks_total", "outcome" => "groups_missing")
-                                .increment(1);
-                            check_failed(
+                            groups_missing(
                                 state,
                                 &t,
                                 "the refreshed ID token has no groups claim, so group removals are not being checked (deactivation still is)",
@@ -661,7 +707,10 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                             return;
                         }
                         if !state.config.idp_ignore_groups {
-                            if let Err(e) = note_groups(&state.db, &t.username, &id.groups).await {
+                            if id.groups_reported
+                                && let Err(e) =
+                                    note_groups(&state.db, &t.username, &id.groups).await
+                            {
                                 tracing::warn!(error = %e, "recording the IdP's groups");
                             }
                             let gone =
@@ -694,7 +743,6 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
     }
 }
 
-/// The background job (every replica runs it; claims keep them apart).
 /// How often the purge looks for people to delete.
 const PURGE_EVERY: Duration = Duration::from_secs(3600);
 
@@ -764,6 +812,7 @@ fn humantime_days(d: Duration) -> String {
     }
 }
 
+/// The background job (every replica runs it; claims keep them apart).
 pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let interval = state.config.idp_check_interval;
     let key = match state.config.idp_token_key() {

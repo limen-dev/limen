@@ -568,9 +568,7 @@ impl UserView {
     pub fn disabled_by(&self) -> &'static str {
         if !self.locked {
             ""
-        } else if self.locked_by == crate::idp_check::LOCK_ACTOR
-            || self.locked_by == crate::scim::ACTOR
-        {
+        } else if crate::idp_check::placed_by_idp(&self.locked_by) {
             "the IdP"
         } else {
             "an admin"
@@ -600,6 +598,10 @@ pub fn idp_check_text(
         "ok" => (format!("checked {}", time_text(checked)), "ok"),
         "check_failed" => (
             format!("IdP not reachable since {}", time_text(checked)),
+            "warn",
+        ),
+        "groups_missing" => (
+            "IdP sent no groups: group removals not checked".into(),
             "warn",
         ),
         "offboarded" => (format!("ended by the IdP {}", time_text(checked)), "bad"),
@@ -915,7 +917,7 @@ impl UserFilter {
     /// their lock, if they are locked.
     #[must_use]
     pub fn admits_state(&self, locked_by: Option<&str>) -> bool {
-        let idp = locked_by == Some(crate::idp_check::LOCK_ACTOR);
+        let idp = locked_by.is_some_and(crate::idp_check::placed_by_idp);
         match self.state.as_str() {
             "" => true,
             "enabled" => locked_by.is_none(),
@@ -1484,6 +1486,11 @@ mod user_filter_tests {
         assert!(state("enabled", None) && !state("enabled", idp) && !state("enabled", admin));
         assert!(!state("disabled", None) && state("disabled", idp) && state("disabled", admin));
         assert!(state("disabled_idp", idp) && !state("disabled_idp", admin));
+        let scim = Some("system:scim");
+        assert!(
+            state("disabled_idp", scim) && !state("disabled_admin", scim),
+            "SCIM is the IdP too"
+        );
         assert!(state("disabled_admin", admin) && !state("disabled_admin", idp));
         assert!(!state("disabled_admin", None) && !state("nonsense", None));
         assert!(!f("", "", "locked").admits(&u, false));

@@ -173,7 +173,7 @@ async fn a_token_without_the_groups_claim_is_not_read_as_no_groups() {
     h.idp.set_groups(ADMIN, &[]);
 
     eventually("the alert to show", || async {
-        status(&h).await == "check_failed"
+        status(&h).await == "groups_missing"
     })
     .await;
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -193,6 +193,38 @@ async fn a_token_without_the_groups_claim_is_not_read_as_no_groups() {
         !alive(&h, &proxy, &cert).await
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_missing_groups_claim_is_not_an_outage_even_when_failing_closed() {
+    let Some(h) = start(&["--idp-check-failure=closed", "--idp-check-grace=2s"]).await else {
+        return;
+    };
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["admins"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["admins"], &refresh)
+        .await
+        .expect("login");
+    h.idp.set_groups(ADMIN, &[]);
+    eventually("the alert to show", || async {
+        status(&h).await == "groups_missing"
+    })
+    .await;
+    // Well past the grace period: the IdP answered every time, so the login stays.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(alive(&h, &proxy, &cert).await);
+    assert_eq!(events(&h, EventKind::IdpOffboard).await.len(), 0);
+    let alerts = events(&h, EventKind::IdpCheckFailed).await;
+    assert_eq!(alerts.len(), 1);
+    // Nothing was recorded as "the IdP reports no groups".
+    let seen: Option<Vec<String>> =
+        sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = $1")
+            .bind(ADMIN)
+            .fetch_one(&h.state.db)
+            .await
+            .expect("row");
+    assert_eq!(seen, None);
 }
 
 #[tokio::test]
@@ -552,10 +584,9 @@ async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
     person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
     person(&h, "enabled@example.com", None, 0).await;
 
-    assert_eq!(
-        limen_control_plane::idp_check::purge_disabled(&h.state).await,
-        2
-    );
+    // The background job runs the same purge, so it may get there first: what
+    // matters is who is left, not which of the two did the deleting.
+    let _ = limen_control_plane::idp_check::purge_disabled(&h.state).await;
     assert!(!exists(&h, "old.idp@example.com").await);
     assert!(
         !exists(&h, "old.scim@example.com").await,
