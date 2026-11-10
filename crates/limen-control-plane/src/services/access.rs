@@ -138,8 +138,8 @@ impl Access for AccessService {
         let resource = r.resource.trim();
         // Explaining a honeytoken is a touch (ADR-0050), before anything can
         // fail on the request; an admin looking at another user's access is
-        // not. The answer is the one `limen ls` implies: a decoy shown to the
-        // caller reads as reachable.
+        // not. The answer is the ordinary one: the decoy is in no role's
+        // reach, so it reads as a resource the caller can't reach.
         if !admin_view {
             let loaded = self.0.policy.current();
             if loaded.policy.honeytoken(resource).is_some() {
@@ -152,42 +152,6 @@ impl Access for AccessService {
                     principal_text(&r.principal),
                 )
                 .await;
-                if let Some(shown) = loaded
-                    .policy
-                    .exposed_honeytokens(&roles)
-                    .into_iter()
-                    .find(|d| d.name == resource)
-                {
-                    // Everything a real resource's answer does: a principal
-                    // that doesn't parse is refused, and one the resource
-                    // doesn't list is told so.
-                    let asked = if r.principal.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            Principal::parse(&r.principal, &r.database)
-                                .map_err(Status::invalid_argument)?,
-                        )
-                    };
-                    let mut lines = vec![
-                        format!("You can reach `{resource}`."),
-                        format!("Principals you may use: {}.", shown.principals.join(", ")),
-                    ];
-                    if let Some(p) = &asked {
-                        let value = r.principal.split_once('=').map_or("", |(_, v)| v);
-                        if !shown.principals.iter().any(|x| x == value) {
-                            lines.push(format!(
-                                "But not as {}: use one of the principals above.",
-                                limen_policy::trace::describe_principal(p)
-                            ));
-                        }
-                    }
-                    return Ok(Response::new(ExplainResponse {
-                        lines,
-                        full_trace: false,
-                        worker_connected: Some(true),
-                    }));
-                }
             }
         }
         let principal = if r.principal.is_empty() {

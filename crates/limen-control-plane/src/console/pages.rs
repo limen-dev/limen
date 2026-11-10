@@ -567,19 +567,6 @@ pub async fn resource_detail(
     };
     let loaded = state.policy.current();
     let Some(r) = loaded.policy.resource(&name) else {
-        // The page of a decoy reads as one that doesn't exist, and is a touch
-        // (ADR-0050) unless an admin is looking.
-        if !auth.is_admin && loaded.policy.honeytoken(&name).is_some() {
-            crate::access::report_honeytoken(
-                &state,
-                &auth.username,
-                &auth.roles,
-                "console",
-                &name,
-                None,
-            )
-            .await;
-        }
         return not_found();
     };
     let accessible = match reachable_for(&state, &auth).await {
@@ -1810,7 +1797,9 @@ fn summarize(doc: &Document) -> String {
 /// The policy's documents by kind, each with its owner. Only documents the
 /// console owns can be edited here; the rest belong to another channel.
 async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
-    let docs = state.policy.base().policy.documents();
+    let base = state.policy.base();
+    let base = &base.policy;
+    let docs = base.documents();
     let heads = crate::policy_store::heads(&state.db)
         .await
         .inspect_err(|e| tracing::warn!(error = %e, "reading document owners"))
@@ -1837,7 +1826,15 @@ async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
                 PolicyDoc {
                     kind,
                     name: d.name().to_owned(),
-                    summary: summarize(d),
+                    summary: {
+                        let mut s = summarize(d);
+                        let missing = base.honeytoken_missing_roles(d.name());
+                        if !missing.is_empty() {
+                            s.push_str(" · exposed to missing role ");
+                            s.push_str(&missing.join(", "));
+                        }
+                        s
+                    },
                     yaml: serde_saphyr::to_string(d)
                         .unwrap_or_else(|e| format!("(couldn't render: {e})")),
                     owner: head.map_or_else(|| "unknown".to_owned(), |h| h.owner.describe()),

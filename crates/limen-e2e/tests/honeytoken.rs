@@ -227,22 +227,16 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         .await
         .expect("explain")
         .into_inner();
-    // `ls` shows the decoy as reachable, so `explain` does too.
+    let flat = |lines: &[String], name: &str| lines.join("\n").replace(name, "X");
     assert_eq!(
-        explained_decoy.lines,
-        [
-            "You can reach `prod-backup-db`.",
-            "Principals you may use: ubuntu."
-        ]
+        flat(&explained_decoy.lines, "prod-backup-db"),
+        flat(&explained_nothing.lines, "no-such-db")
     );
-    assert_eq!(explained_decoy.worker_connected, Some(true));
-    assert!(
-        explained_nothing.lines[0].contains("does not exist"),
-        "{:?}",
-        explained_nothing.lines
+    assert_eq!(
+        explained_decoy.worker_connected,
+        explained_nothing.worker_connected
     );
-    // A malformed principal is refused as for a real resource, and still
-    // counts; a principal the decoy doesn't list is told so.
+    // A malformed principal is refused as for any name, and still counts.
     let bad = access
         .explain(ExplainRequest {
             resource: "prod-backup-db".into(),
@@ -252,22 +246,8 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         .await
         .expect_err("refused");
     assert_eq!(bad.code(), tonic::Code::InvalidArgument);
-    let other = access
-        .explain(ExplainRequest {
-            resource: "prod-backup-db".into(),
-            principal: "login=nobody".into(),
-            ..Default::default()
-        })
-        .await
-        .expect("explain")
-        .into_inner();
-    assert!(
-        other.lines.iter().any(|l| l.starts_with("But not as")),
-        "{:?}",
-        other.lines
-    );
     eventually(Duration::from_secs(15), "the other touches", || async {
-        events(&d, "detect.honeytoken").len() == 5
+        events(&d, "detect.honeytoken").len() == 4
     })
     .await;
     let actions: Vec<String> = events(&d, "detect.honeytoken")
@@ -288,5 +268,5 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         })
         .await
         .expect("admin explain");
-    assert_eq!(events(&d, "detect.honeytoken").len(), 5);
+    assert_eq!(events(&d, "detect.honeytoken").len(), 4);
 }

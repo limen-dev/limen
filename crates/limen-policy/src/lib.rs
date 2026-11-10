@@ -661,6 +661,22 @@ impl Policy {
         self.honeytokens.values()
     }
 
+    /// The roles decoy `name` is exposed to that don't exist. Not a policy
+    /// warning: warnings reach every writer's write results, which would
+    /// name the decoy to whoever deleted a role. The admin-only policy page
+    /// shows it.
+    #[must_use]
+    pub fn honeytoken_missing_roles(&self, name: &str) -> Vec<String> {
+        self.honeytokens
+            .get(name)
+            .and_then(|d| d.spec.honeytoken.as_ref())
+            .into_iter()
+            .flat_map(|h| h.exposed_to.iter())
+            .filter(|r| !limen_core::identity::is_builtin_role(r) && !self.roles.contains_key(*r))
+            .cloned()
+            .collect()
+    }
+
     /// The decoys shown to a principal holding `roles`, shaped like the
     /// resources `accessible` returns so `limen ls` can't tell them apart.
     /// Granted by nothing: this is exposure, not access.
@@ -940,15 +956,6 @@ impl Policy {
     #[must_use]
     pub fn warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for (name, decoy) in &self.honeytokens {
-            for role in decoy.spec.honeytoken.iter().flat_map(|h| &h.exposed_to) {
-                if !limen_core::identity::is_builtin_role(role) && !self.roles.contains_key(role) {
-                    out.push(format!(
-                        "resource {name}: honeytoken exposed to role {role:?}, which doesn't exist, so nobody sees it through that role"
-                    ));
-                }
-            }
-        }
         for role in self.roles.values() {
             let name = &role.metadata.name;
             if role.spec.is_shadow()

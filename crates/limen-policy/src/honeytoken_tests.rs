@@ -193,12 +193,18 @@ fn a_decoy_must_be_visible_to_someone_and_plausible() {
     assert!(invalid_text(&[ROLES, &web]).contains("kind web"));
     let nobody = DECOY.replace("exposed_to: [bait]", "exposed_to: []");
     assert!(invalid_text(&[ROLES, &nobody]).contains("exposed_to"));
-    // A role that doesn't exist is a warning: refusing would tell whoever
-    // deletes a role which decoys it was exposed to.
+    // A role that doesn't exist is no error and no warning: either would
+    // tell whoever deletes a role which decoys it was exposed to.
     let unknown_role = DECOY.replace("exposed_to: [bait]", "exposed_to: [ghost]");
     let p = policy(&[ROLES, &unknown_role]).expect("valid");
-    assert!(p.warnings().iter().any(|w| w.contains("ghost")));
-    assert!(with_decoy().warnings().iter().all(|w| !w.contains("ghost")));
+    assert_eq!(p.honeytoken_missing_roles("prod-backup-db"), ["ghost"]);
+    assert!(
+        with_decoy()
+            .honeytoken_missing_roles("prod-backup-db")
+            .is_empty()
+    );
+    // Not a policy warning: those reach every writer's write results.
+    assert!(p.warnings().iter().all(|w| !w.contains("prod-backup-db")));
     let db_name = DECOY.replace("principals:", "default_database: orders\n    principals:");
     assert!(policy(&[ROLES, &db_name]).is_ok());
     let ssh_db = db_name.replace("kind: postgres", "kind: ssh");

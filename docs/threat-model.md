@@ -302,10 +302,10 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 
 | Threat | Mitigation |
 |---|---|
-| I: a decoy is told apart from a real resource, so it is avoided | Listed with the same fields in name order; refused with the text any unreachable name gets and the same `denied` flag; no distinct deny reason in `Decision` or the trace; `explain` and access requests answer as for an unknown name. Timing was not measured |
+| I: a decoy is told apart from a real resource, so it is avoided | Listed with the same fields in name order; refused with the text any unreachable name gets and the same `denied` flag; no distinct deny reason in `Decision` or the trace; access requests and `explain` answer as for an unknown name (though `limen ls` lists the decoy). Viewing a decoy's console page is deliberately not a touch: a GET that alerts could be set off by a link in someone else's name. Timing was not measured |
 | E: a role or selector grants a decoy | Decoys live in their own map; every grant, routing and bootstrap path reads `resources` only. A test uses a role that matches every label and kind |
 | E/I: a bot writer sets, clears, or reads decoys | `honeytoken` is refused in a writer's resource and in a profile template; documents outside a writer's namespace read as missing. A writer whose name pattern covers a decoy's name can still learn it exists from a duplicate-name refusal: keep decoy names outside writer namespaces |
-| R: a touch leaves no trace | `detect.honeytoken` is written beside `auth.denied`, with the user, roles, address and (for bots) the CI run. If it cannot be written the failure is logged and the refusal is unchanged; the request is refused either way |
+| R: a touch leaves no trace | `detect.honeytoken` is written (beside `auth.denied` at the proxy; alone for access requests and `explain`), with the user, roles, address and (for bots) the CI run. If it cannot be written the failure is logged and the refusal is unchanged; the request is refused either way |
 | S: a compromised component forges alerts | Only proxies may send the kind through ingest; a forged one is a false alarm, never an access |
 | D: someone sets off alerts to drown real ones | Only a principal shown the decoy, or one who guesses its name, can; one event per attempt, alerting is the SIEM's or Datadog's to rate-limit |
 | Limit | An older component can't read a policy holding a decoy, so decoys are added only after every component is upgraded (as with shadow mode, ADR-0046) |
