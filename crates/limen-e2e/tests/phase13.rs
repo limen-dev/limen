@@ -1125,13 +1125,12 @@ async fn the_console_pages_for_the_workflows() {
     // ---- policy: simulator and the effective-access diff -------------------
     let page = admin.get("/console/policy").await;
     assert!(
-        !page.body.contains("Simulate access") && !page.body.contains("Show the difference"),
-        "the tools have their own page, not a section of the policy page"
+        !page.body.contains("Simulate access") && !page.body.contains("Show what they can reach"),
+        "the simulator has its own page, not a section of the policy page"
     );
     let sim_page = admin.get("/console/simulator").await;
     assert_eq!(sim_page.status, 200, "{}", sim_page.body);
-    assert!(sim_page.body.contains("Policy tools"));
-    assert!(sim_page.body.contains("Check a change") && sim_page.body.contains("Simulate access"));
+    assert!(sim_page.body.contains("Access simulator"));
     let sim = admin
         .post(
             "/console/simulator",
@@ -1148,14 +1147,15 @@ async fn the_console_pages_for_the_workflows() {
         "{}",
         sim.body
     );
-    let dry = admin
-        .post("/console/policy/dry-run", &[("csrf", &csrf_of(&page)), ("yaml", "kind: role\nversion: v1\nmetadata: { name: everything }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { \"*\": [\"*\"] } }\n      ssh: { logins: [ubuntu] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [everything] }\n")])
+    let preview = admin
+        .post("/console/policy/documents/preview", &[("csrf", &csrf_of(&page)), ("yaml", "kind: role\nversion: v1\nmetadata: { name: everything }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { \"*\": [\"*\"] } }\n      ssh: { logins: [ubuntu] }\n")])
         .await;
-    assert_eq!(dry.status, 200, "{}", dry.body);
+    assert_eq!(preview.status, 200, "{}", preview.body);
     assert!(
-        dry.body.contains("Who gains or loses access") || dry.body.contains("No changes"),
+        preview.body.contains("What saving this would do")
+            && preview.body.contains("Preview only: nothing was saved."),
         "{}",
-        dry.body
+        preview.body
     );
 
     // ---- reviews and evidence ---------------------------------------------

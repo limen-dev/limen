@@ -39,7 +39,7 @@ limen policy test policy/ --coverage      # exits non-zero on any failure; lists
 limen admin apply policy/ --require-tests # refuses to apply if a case fails, or if there are none
 ```
 
-`apply` and the console's *Policy tools → Check a change* also show the policy's test results next to the diff.
+`apply` and the console's *Preview impact* also show the policy's test results next to the diff.
 
 ## Who can reach this, and what can they reach
 
@@ -50,7 +50,7 @@ limen policy what-can --group developers --group on-call
 limen policy what-can --bot deploy-staging
 ```
 
-Each lists the role, how (`standing`, `by request`, `break-glass`), the principals, the groups and bots that hold it, and who approves. In the console, a resource page has **Who can reach it**, and **Policy tools** (Administration) has *Simulate access*, which answers `what-can`, next to *Check a change*.
+Each lists the role, how (`standing`, `by request`, `break-glass`), the principals, the groups and bots that hold it, and who approves. In the console, a resource page has **Who can reach it**, and **Access simulator** (Administration) answers `what-can`.
 
 ## What a change does
 

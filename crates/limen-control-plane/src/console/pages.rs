@@ -18,12 +18,12 @@ use uuid::Uuid;
 use super::query;
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, DryRun, EventView, HitView,
-    Home, KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup,
-    PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView,
-    SessionPage, SessionView, SessionsPage, Simulation, SimulatorPage, StatementView, Stats,
-    TokenPage, UserPage, UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers,
-    error_page, list_text, path_segment, time_text,
+    self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, EventView, HitView, Home,
+    KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage,
+    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView, SessionPage,
+    SessionView, SessionsPage, Simulation, SimulatorPage, StatementView, Stats, TokenPage,
+    UserPage, UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page,
+    list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -1831,6 +1831,7 @@ async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
 /// What the policy page shows besides the documents.
 #[derive(Default)]
 struct PolicyExtras {
+    preview: Option<(String, String, String, views::DryRun)>,
     query: String,
     /// A new document being written, kept when the write was refused.
     draft: String,
@@ -1865,6 +1866,22 @@ async fn policy_page(state: &AppState, auth: &Auth, extras: PolicyExtras) -> Res
             groups,
             query,
             draft: extras.draft,
+            preview_kind: extras
+                .preview
+                .as_ref()
+                .map(|p| p.0.clone())
+                .unwrap_or_default(),
+            preview_name: extras
+                .preview
+                .as_ref()
+                .map(|p| p.1.clone())
+                .unwrap_or_default(),
+            preview_yaml: extras
+                .preview
+                .as_ref()
+                .map(|p| p.2.clone())
+                .unwrap_or_default(),
+            preview: extras.preview.map(|p| p.3),
             error: extras.error,
             notice: extras.notice,
         }
@@ -1892,6 +1909,26 @@ pub(super) async fn policy_page_with(
     .await
 }
 
+/// The policy page with what saving a document would do, from "Preview impact".
+pub(super) async fn policy_page_preview(
+    state: &AppState,
+    auth: &Auth,
+    kind: String,
+    name: String,
+    yaml: String,
+    result: views::DryRun,
+) -> Response {
+    policy_page(
+        state,
+        auth,
+        PolicyExtras {
+            preview: Some((kind, name, yaml, result)),
+            ..PolicyExtras::default()
+        },
+    )
+    .await
+}
+
 pub async fn policy(
     State(state): State<AppState>,
     auth: Auth,
@@ -1913,100 +1950,6 @@ pub async fn policy(
 }
 
 #[derive(Deserialize)]
-pub struct DryRunForm {
-    csrf: String,
-    yaml: String,
-}
-
-/// What `limen admin apply --dry-run` would show. Never applies anything.
-pub async fn dry_run(
-    State(state): State<AppState>,
-    auth: Auth,
-    headers: HeaderMap,
-    Form(form): Form<DryRunForm>,
-) -> Response {
-    if let Err(r) = auth.admin() {
-        return r;
-    }
-    let console = match console(&state) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
-        return r;
-    }
-    if form.yaml.len() > 1024 * 1024 {
-        return error_page(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "Too large",
-            "Policy YAML is limited to 1 MiB.",
-        );
-    }
-    let result = match limen_policy::Policy::parse_yaml([("pasted", form.yaml.as_str())]) {
-        Ok(next) => {
-            let base = state.policy.base();
-            let diff = base.policy.diff(&next);
-            let access = base.policy.access_diff(&next);
-            let report = next.run_tests();
-            DryRun {
-                access: access
-                    .changes
-                    .iter()
-                    .map(|c| {
-                        (
-                            c.change == limen_policy::tooling::ChangeKind::Gain,
-                            c.text(),
-                        )
-                    })
-                    .collect(),
-                warnings: next.warnings(),
-                tests: report
-                    .results
-                    .iter()
-                    .map(|r| {
-                        (
-                            r.passed,
-                            if r.passed {
-                                format!("{}: {}", r.test, r.name)
-                            } else {
-                                format!(
-                                    "{}: {} (expected {}, got {} {})",
-                                    r.test, r.name, r.expected, r.got, r.detail
-                                )
-                            },
-                        )
-                    })
-                    .collect(),
-                error: None,
-                no_changes: diff.is_empty(),
-                added: diff.added,
-                changed: diff.changed,
-                removed: diff.removed,
-            }
-        }
-        Err(e) => DryRun {
-            access: vec![],
-            warnings: vec![],
-            tests: vec![],
-            error: Some(e.to_string()),
-            no_changes: false,
-            added: vec![],
-            changed: vec![],
-            removed: vec![],
-        },
-    };
-    html(
-        SimulatorPage {
-            chrome: chrome(&state, &auth, "simulator"),
-            simulation: None,
-            pasted: form.yaml,
-            result: Some(result),
-        }
-        .render(),
-    )
-}
-
-#[derive(Deserialize)]
 pub struct SimulateForm {
     csrf: String,
     #[serde(default)]
@@ -2024,8 +1967,6 @@ pub async fn simulator(State(state): State<AppState>, auth: Auth) -> Response {
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
             simulation: None,
-            pasted: String::new(),
-            result: None,
         }
         .render(),
     )
@@ -2101,8 +2042,6 @@ pub async fn simulate(
         SimulatorPage {
             chrome: chrome(&state, &auth, "simulator"),
             simulation: Some(sim),
-            pasted: String::new(),
-            result: None,
         }
         .render(),
     )

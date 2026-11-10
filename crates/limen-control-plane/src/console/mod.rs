@@ -107,7 +107,10 @@ pub fn router(state: AppState) -> Router {
         .route("/console/dashboards", get(dashboards::dashboards))
         .route("/console/integrations", get(integrations::integrations))
         .route("/console/policy", get(pages::policy))
-        .route("/console/policy/dry-run", post(pages::dry_run))
+        .route(
+            "/console/policy/documents/preview",
+            post(policy_edit::preview_document),
+        )
         .route(
             "/console/simulator",
             get(pages::simulator).post(pages::simulate),

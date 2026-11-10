@@ -1190,11 +1190,12 @@ pub struct DryRun {
     pub warnings: Vec<String>,
     /// `(passed, line)` for each `policy_test` case in the pasted policy.
     pub tests: Vec<(bool, String)>,
-    pub error: Option<String>,
     pub no_changes: bool,
     pub added: Vec<String>,
     pub changed: Vec<String>,
     pub removed: Vec<String>,
+    /// Saving it would wait for another admin's approval.
+    pub waits: bool,
 }
 
 #[derive(Template)]
@@ -1208,6 +1209,12 @@ pub struct PolicyPage {
     pub groups: Vec<PolicyGroup>,
     pub query: String,
     pub draft: String,
+    /// "Preview impact" on a form: which document (kind and name empty for a
+    /// new one), the YAML as typed, and what saving it would do.
+    pub preview: Option<DryRun>,
+    pub preview_kind: String,
+    pub preview_name: String,
+    pub preview_yaml: String,
     pub error: Option<String>,
     pub notice: Option<String>,
 }
@@ -1217,9 +1224,6 @@ pub struct PolicyPage {
 pub struct SimulatorPage {
     pub chrome: Chrome,
     pub simulation: Option<Simulation>,
-    /// "Check a change": the YAML pasted and what it would do.
-    pub pasted: String,
-    pub result: Option<DryRun>,
 }
 
 pub struct RoleAccess {

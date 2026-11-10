@@ -1200,50 +1200,51 @@ async fn console_end_to_end() {
     assert!(policy_page.body.contains("web-1") && policy_page.body.contains("ops"));
     assert!(policy_page.body.contains("host_key"), "the YAML behind it");
     let csrf = Browser::csrf(&policy_page);
-    let changed = "kind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [prod] } }\n      ssh: { logins: [ubuntu] }\n";
+    assert!(policy_page.body.contains("Preview impact"));
+    // Preview a new document: what saving it would do, nothing saved.
+    let extra = "kind: role\nversion: v1\nmetadata: { name: extra }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [prod] } }\n      ssh: { logins: [ubuntu] }\n";
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
-            &[("csrf", &csrf), ("yaml", changed)],
+            "/console/policy/documents/preview",
+            &[("csrf", &csrf), ("yaml", extra)],
         )
         .await;
     assert_eq!(page.status, 200);
     assert!(
-        page.body.contains("Dry run: nothing was applied."),
+        page.body.contains("Preview only: nothing was saved."),
         "{}",
         page.body
-            .split("<h2>Result</h2>")
-            .nth(1)
-            .unwrap_or(&page.body)
     );
-    let result = page.body.split("<h2>Result</h2>").nth(1).expect("a result");
+    assert!(page.body.contains("What saving this would do"));
     assert!(
-        result.contains("web-1"),
-        "the removed resource is listed: {result}"
+        page.body.contains("extra"),
+        "the document is listed in the diff and kept in the form"
     );
+    let after = admin_user.get("/console/policy").await;
     assert!(
-        result.contains("ops"),
-        "the changed role is listed: {result}"
+        !after.body.contains("metadata: { name: extra }") && !after.body.contains("name: extra"),
+        "a preview saves nothing"
     );
+    // A refused document shows the reason.
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
+            "/console/policy/documents/preview",
             &[("csrf", &csrf), ("yaml", "kind: nonsense")],
         )
         .await;
     assert_eq!(page.status, 200);
-    assert!(page.body.contains("class=\"error\""));
+    assert!(page.body.contains("Not saved:"));
     assert_eq!(
         d.proxy().policy_version(),
         Some(applied.version),
-        "a dry run applies nothing"
+        "a preview applies nothing"
     );
 
     // ---- XSS: hostile text is escaped ---------------------------------------------------------
     let evil = "<script>alert(1)</script>";
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
+            "/console/policy/documents/preview",
             &[("csrf", &csrf), ("yaml", evil)],
         )
         .await;
@@ -1522,6 +1523,34 @@ async fn the_console_edits_what_it_owns_and_decides_held_changes() {
         .await;
     let page = admin.get(&location(&saved)).await;
     assert!(page.body.contains("Applied"));
+    // Preview an edit: the form stays open with what was typed, the result
+    // sits under it, and nothing is saved.
+    let fresh = etag_of(&page.body, "console-viewers");
+    let typed = edited.replace("deploy", "deploy, auditor");
+    let previewed = admin
+        .post(
+            "/console/policy/documents/preview",
+            &[
+                ("csrf", &csrf),
+                ("yaml", &typed),
+                ("kind", "role"),
+                ("name", "console-viewers"),
+                ("etag", &fresh),
+            ],
+        )
+        .await;
+    assert_eq!(previewed.status, 200, "{}", previewed.body);
+    assert!(previewed.body.contains("Preview only: nothing was saved."));
+    assert!(previewed.body.contains("<details open>"));
+    assert!(
+        previewed.body.contains("deploy, auditor"),
+        "what was typed is kept"
+    );
+    assert_eq!(
+        etag_of(&admin.get("/console/policy").await.body, "console-viewers"),
+        fresh,
+        "the document was not changed"
+    );
     // A stale etag, a file's document, or two documents are refused, with
     // what was typed kept for a new one.
     let stale = admin

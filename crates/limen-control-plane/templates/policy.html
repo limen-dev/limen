@@ -24,7 +24,7 @@
 {% for group in groups %}
 <h2>{{ group.title }} <span class="count">{{ group.docs.len() }}</span></h2>
 {% for d in group.docs %}
-<details>
+<details{% if preview.is_some() && preview_kind.as_str() == d.kind && preview_name == d.name %} open{% endif %}>
   <summary><b>{{ d.name }}</b> <span class="muted">{{ d.summary }}</span> {% if d.editable %}<span class="pill ok">console</span>{% else %}<span class="pill">{{ d.owner }}</span>{% endif %}</summary>
   {% if d.editable %}
   <form method="post" action="/console/policy/documents" class="stack wide">
@@ -32,11 +32,13 @@
     <input type="hidden" name="kind" value="{{ d.kind }}">
     <input type="hidden" name="name" value="{{ d.name }}">
     <input type="hidden" name="etag" value="{{ d.etag }}">
-    <textarea name="yaml" rows="12" spellcheck="false" class="mono" required aria-label="{{ d.kind }} {{ d.name }} as YAML">{{ d.yaml }}</textarea>
+    <textarea name="yaml" rows="12" spellcheck="false" class="mono" required aria-label="{{ d.kind }} {{ d.name }} as YAML">{% if preview.is_some() && preview_kind.as_str() == d.kind && preview_name == d.name %}{{ preview_yaml }}{% else %}{{ d.yaml }}{% endif %}</textarea>
     <div class="row">
       <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Save</button>
+      <button type="submit" class="secondary" formaction="/console/policy/documents/preview#preview"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Preview impact</button>
     </div>
   </form>
+  {% if preview.is_some() && preview_kind.as_str() == d.kind && preview_name == d.name %}{% include "policy_preview.html" %}{% endif %}
   <form method="post" action="/console/policy/documents/delete" class="row">
     <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
     <input type="hidden" name="kind" value="{{ d.kind }}">
@@ -53,13 +55,17 @@
 {% endfor %}
 
 <h2>New document</h2>
-<p class="hint">Not sure what a change would do? <a href="/console/simulator">Check it first</a>: it shows who gains or loses access and applies nothing. One document, as YAML. The console owns it from then on. It goes through the same checks as every write: a write that widens standing access may wait for another admin, and failing policy tests may refuse it.</p>
+<p class="hint">One document, as YAML. The console owns it from then on. It goes through the same checks as every write: a write that widens standing access may wait for another admin, and failing policy tests may refuse it.</p>
 <div class="card">
 <form method="post" action="/console/policy/documents" class="stack wide">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
   <textarea name="yaml" rows="10" spellcheck="false" class="mono" required aria-label="A new policy document as YAML" placeholder="kind: role&#10;version: v1&#10;metadata: { name: ... }&#10;spec: { ... }">{{ draft }}</textarea>
-  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plus"/></svg>Create</button></div>
+  <div class="row">
+    <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plus"/></svg>Create</button>
+    <button type="submit" class="secondary" formaction="/console/policy/documents/preview#preview"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Preview impact</button>
+  </div>
 </form>
+{% if preview.is_some() && preview_kind.is_empty() && preview_name.is_empty() %}{% include "policy_preview.html" %}{% endif %}
 </div>
 
 {% endblock %}
