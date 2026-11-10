@@ -1133,11 +1133,31 @@ async fn the_console_pages_for_the_workflows() {
     assert!(sim_page.body.contains("Access simulator"));
     // One search box, and the groups, bots and people as links to click.
     assert!(
-        sim_page.body.contains("group=developers#simulated"),
+        sim_page
+            .body
+            .contains("href=\"/console/simulator?group=developers\""),
         "the groups a mapping names are links: {}",
         sim_page.body
     );
-    assert!(sim_page.body.contains("list=\"sim-options\""));
+    assert!(
+        sim_page
+            .body
+            .contains("data-typeahead=\"/console/simulator/suggest\"")
+    );
+    // As the box is typed in, the options come from the server.
+    let hints = admin.get("/console/simulator/suggest?q=dev").await;
+    assert_eq!(hints.status, 200, "{}", hints.body);
+    assert!(
+        hints.body.contains("\"name\":\"developers\"") && hints.body.contains("\"kind\":\"group\""),
+        "{}",
+        hints.body
+    );
+    let hints = admin.get("/console/simulator/suggest?q=zzz-nothing").await;
+    assert_eq!(hints.body.trim(), "[]");
+    let hints = admin.get("/console/simulator/suggest").await;
+    assert!(
+        hints.body.contains("\"kind\":\"person\"") || hints.body.contains("\"kind\":\"group\"")
+    );
     let sim = admin.get("/console/simulator?group=developers").await;
     assert_eq!(sim.status, 200, "{}", sim.body);
     assert!(

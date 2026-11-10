@@ -112,6 +112,7 @@ pub fn router(state: AppState) -> Router {
             post(policy_edit::preview_document),
         )
         .route("/console/simulator", get(pages::simulator))
+        .route("/console/simulator/suggest", get(pages::simulator_suggest))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

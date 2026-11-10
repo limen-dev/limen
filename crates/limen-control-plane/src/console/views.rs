@@ -1230,8 +1230,6 @@ pub struct SimulatorPage {
     pub people: Vec<Pick>,
     /// People beyond those shown as choices: found with the search box.
     pub more_people: usize,
-    /// What the search box suggests: (value, kind).
-    pub suggestions: Vec<(String, &'static str)>,
     pub q: String,
 }
 

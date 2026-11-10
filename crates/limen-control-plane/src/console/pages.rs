@@ -1972,6 +1972,110 @@ fn parse_simulator_query(raw: Option<&str>) -> (Vec<String>, String, String, Str
     (groups, person, bot, q)
 }
 
+/// Everything the simulator can look at: people (most recent sign-in first),
+/// bots in policy, and the IdP groups a mapping names or people carry.
+async fn simulator_sources(
+    state: &AppState,
+) -> (
+    Vec<store::UserRow>,
+    Vec<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let current = state.policy.current();
+    let mut users = store::list_users(&state.db).await.unwrap_or_default();
+    users.sort_by_key(|u| std::cmp::Reverse(u.last_login_at));
+    let bots: Vec<String> = current
+        .policy
+        .bots()
+        .map(|b| b.metadata.name.clone())
+        .collect();
+    let mut names: std::collections::BTreeSet<String> =
+        current.policy.mapped_groups().cloned().collect();
+    for u in &users {
+        names.extend(u.idp_groups.clone().unwrap_or_else(|| u.groups.clone()));
+    }
+    (users, bots, names)
+}
+
+#[derive(Deserialize)]
+pub struct SuggestQuery {
+    #[serde(default)]
+    q: String,
+}
+
+/// `GET /console/simulator/suggest?q=`: what to offer as the box is typed in,
+/// as JSON `[{name, kind, href}]`. People, bots and groups whose name contains
+/// the text, those that start with it first; nothing typed offers a few of each.
+pub async fn simulator_suggest(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<SuggestQuery>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let (users, bots, names) = simulator_sources(&state).await;
+    let needle: String =
+        q.q.trim()
+            .chars()
+            .take(100)
+            .collect::<String>()
+            .to_lowercase();
+    let rank = |name: &str| -> Option<u8> {
+        let n = name.to_lowercase();
+        if needle.is_empty() || n.starts_with(&needle) {
+            Some(0)
+        } else {
+            n.contains(&needle).then_some(1)
+        }
+    };
+    let pick = |names: Vec<&str>, kind: &str, key: &str, limit: usize| -> Vec<serde_json::Value> {
+        let mut hits: Vec<(u8, &str)> = names
+            .into_iter()
+            .filter_map(|n| rank(n).map(|r| (r, n)))
+            .collect();
+        hits.sort_by_key(|(r, _)| *r);
+        hits.into_iter()
+            .take(limit)
+            .map(|(_, n)| {
+                serde_json::json!({
+                    "name": n,
+                    "kind": kind,
+                    "href": query::href("/console/simulator", &[(key, n)]),
+                })
+            })
+            .collect()
+    };
+    let (people_max, bots_max, groups_max) = if needle.is_empty() {
+        (4, 3, 5)
+    } else {
+        (6, 4, 6)
+    };
+    let mut out = pick(
+        users.iter().map(|u| u.username.as_str()).collect(),
+        "person",
+        "person",
+        people_max,
+    );
+    out.extend(pick(
+        bots.iter().map(String::as_str).collect(),
+        "bot",
+        "bot",
+        bots_max,
+    ));
+    out.extend(pick(
+        names.iter().map(String::as_str).collect(),
+        "group",
+        "group",
+        groups_max,
+    ));
+    (
+        [(CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::Value::Array(out)),
+    )
+        .into_response()
+}
+
 /// `GET /console/simulator`: a search box, clickable groups, bots and people,
 /// and, once someone is chosen, what they can reach and could ask for. A GET,
 /// since it changes nothing: the address can be bookmarked or linked
@@ -1987,20 +2091,7 @@ pub async fn simulator(
     let (mut picked_groups, person, bot, q) = parse_simulator_query(raw.as_deref());
     let (mut person, mut bot) = (person, bot);
     let current = state.policy.current();
-    let mut users = store::list_users(&state.db).await.unwrap_or_default();
-    users.sort_by_key(|u| std::cmp::Reverse(u.last_login_at));
-    let bots: Vec<String> = current
-        .policy
-        .bots()
-        .map(|b| b.metadata.name.clone())
-        .collect();
-    // The groups a mapping names, and those people carry.
-    let mut names: std::collections::BTreeSet<String> =
-        current.policy.mapped_groups().cloned().collect();
-    for u in &users {
-        names.extend(u.idp_groups.clone().unwrap_or_else(|| u.groups.clone()));
-    }
-
+    let (users, bots, mut names) = simulator_sources(&state).await;
     // The search box names one thing, or several groups, separated by commas.
     let mut not_found = None;
     if !q.is_empty() {
@@ -2056,7 +2147,7 @@ pub async fn simulator(
             "/console/simulator".to_owned()
         } else {
             format!(
-                "/console/simulator?{}#simulated",
+                "/console/simulator?{}",
                 rest.iter()
                     .map(|(k, v)| format!("{k}={}", views::path_segment(v)))
                     .collect::<Vec<_>>()
@@ -2087,13 +2178,6 @@ pub async fn simulator(
             on: person.eq_ignore_ascii_case(&u.username),
         })
         .collect();
-    let mut suggestions: Vec<(String, &'static str)> = users
-        .iter()
-        .map(|u| (u.username.clone(), "person"))
-        .collect();
-    suggestions.extend(bots.iter().map(|b| (b.clone(), "bot")));
-    suggestions.extend(names.iter().map(|g| (g.clone(), "group")));
-
     // One kind of choice at a time.
     let chosen = usize::from(!picked_groups.is_empty())
         + usize::from(!person.is_empty())
@@ -2131,7 +2215,6 @@ pub async fn simulator(
             bots: bot_picks,
             more_people: users.len().saturating_sub(PEOPLE_SHOWN),
             people,
-            suggestions,
             q,
         }
         .render(),
