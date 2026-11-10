@@ -11,6 +11,9 @@ services:
     profiles: ["idp-check"]
     image: ${POSTGRES_IMAGE}
     environment: { POSTGRES_USER: dex, POSTGRES_PASSWORD: dex-dev-only, POSTGRES_DB: dex }
+    # Kept across rebuilds, like Limen's own database: the control plane holds each login's refresh token
+    # and Dex must still know it, or the next check reads every login as ended by the IdP.
+    volumes: [dex-db:/var/lib/postgresql]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U dex -d dex"]
       interval: 2s
@@ -28,3 +31,6 @@ services:
         -e 's#^storage:#storage: {type: postgres, config: {host: dex-db, port: 5432, database: dex, user: dex, password: dex-dev-only, ssl: {mode: disable}}}#'
         -e '/^  type: memory$/d'
         /etc/dex/config.yaml > /tmp/dex.yaml && exec dex serve /tmp/dex.yaml
+
+volumes:
+  dex-db: {}
