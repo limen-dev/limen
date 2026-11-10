@@ -8,7 +8,8 @@
 #   deploy/compose/setup.sh --check               # only check the prerequisites
 #   deploy/compose/setup.sh status | down [--scale]
 #
-# Limen    postgres, dex, s3, kms, control plane, proxy, worker (always).
+# Limen    postgres, dex (on its own PostgreSQL), s3, kms, control plane, proxy, worker (always).
+#          Logins are checked against Dex every 15 seconds (offboarding, ADR-0047).
 #          docker-compose.yml, or stacks/scale.yml with --scale (3 of each component).
 # ssh      OpenSSH host that trusts Limen certificates          stacks/ssh.yml
 # db       PostgreSQL and MySQL with TLS, roles bootstrapped    stacks/db.yml

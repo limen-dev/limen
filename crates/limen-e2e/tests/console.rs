@@ -579,6 +579,15 @@ async fn console_end_to_end() {
     assert_eq!(nobody.status, 200);
     assert!(!nobody.body.contains(DEVELOPER));
     assert!(nobody.body.contains("Clear search and filters"));
+    // Applied filters are chips under the bar; removing one keeps the others.
+    assert!(
+        nobody.body.contains("Filtered by")
+            && nobody.body.contains("Group: no-such-group")
+            && nobody.body.contains("Clear all")
+            && nobody.body.contains("href=\"/console/users?status=ok\""),
+        "{}",
+        nobody.body
+    );
     let csrf = Browser::csrf(&home);
     let page = admin_user
         .post(
@@ -635,7 +644,37 @@ async fn console_end_to_end() {
     let user_page = admin_user
         .get(&format!("/console/users/{DEVELOPER_ENC}"))
         .await;
-    assert!(user_page.body.contains("locked") && user_page.body.contains("stolen laptop"));
+    assert!(user_page.body.contains("disabled") && user_page.body.contains("stolen laptop"));
+    // The state filter: an admin's lock is "disabled by an admin", not by the IdP.
+    let disabled = admin_user.get("/console/users?state=disabled").await;
+    assert!(
+        disabled.body.contains(DEVELOPER) && disabled.body.contains("by an admin"),
+        "{}",
+        disabled.body
+    );
+    assert!(
+        admin_user
+            .get("/console/users?state=disabled_admin")
+            .await
+            .body
+            .contains(DEVELOPER)
+    );
+    assert!(
+        !admin_user
+            .get("/console/users?state=disabled_idp")
+            .await
+            .body
+            .contains(DEVELOPER),
+        "an admin's lock is not the IdP's"
+    );
+    assert!(
+        !admin_user
+            .get("/console/users?state=enabled")
+            .await
+            .body
+            .contains(DEVELOPER),
+        "a disabled person is not listed as enabled"
+    );
     let page = dev_user
         .get_once(&format!("{}/console/", dev_user.base))
         .await;
@@ -675,6 +714,84 @@ async fn console_end_to_end() {
         .await;
     assert_eq!(page.status, 303);
     assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
+
+    // ---- deleting: only a disabled person, and their history stays ---------------------
+    let csrf = Browser::csrf(
+        &admin_user
+            .get(&format!("/console/users/{DEVELOPER_ENC}"))
+            .await,
+    );
+    let refused = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/delete"),
+            &[("csrf", &csrf), ("reason", "tidy up")],
+        )
+        .await;
+    assert_eq!(
+        refused.status, 409,
+        "an enabled user can't be deleted: {}",
+        refused.body
+    );
+    assert!(refused.body.contains("Disable them first"));
+    let page = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/lock"),
+            &[("csrf", &csrf), ("reason", "left the company")],
+        )
+        .await;
+    assert_eq!(page.status, 303);
+    let gone = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/delete"),
+            &[("csrf", &csrf), ("reason", "left the company")],
+        )
+        .await;
+    assert_eq!(gone.status, 303, "{}", gone.body);
+    let users = admin_user.get("/console/users?state=enabled").await;
+    assert!(
+        !users.body.contains(DEVELOPER),
+        "the record is gone from the list"
+    );
+    let users = admin_user.get("/console/users").await;
+    assert!(
+        users.body.contains("Disabled, no user record") && users.body.contains(DEVELOPER),
+        "an admin's lock outlives the record, so a return is still refused: {}",
+        users.body
+    );
+    // Enable them again; a fresh sign-in makes a new record.
+    let page = admin_user
+        .post(
+            &format!("/console/users/{DEVELOPER_ENC}/unlock"),
+            &[("csrf", &csrf)],
+        )
+        .await;
+    assert_eq!(page.status, 303);
+    assert_eq!(dev_user.login(&d, DEVELOPER, &["ops"]).await.status, 200);
+
+    // The console lifts a lock the IdP check placed when the IdP vouches for them
+    // again, as the CLI does; an admin's lock it never lifts.
+    {
+        let pool = sqlx::PgPool::connect(&d.db_url).await.expect("db");
+        sqlx::query("INSERT INTO user_locks (id, username, reason, locked_by) VALUES ($1, $2, 'deactivated', 'system:idp-check')")
+            .bind(uuid::Uuid::now_v7())
+            .bind(DEVELOPER)
+            .execute(&pool)
+            .await
+            .expect("an IdP lock");
+        assert_eq!(
+            dev_user.login(&d, DEVELOPER, &["ops"]).await.status,
+            200,
+            "the IdP vouches for them: the lock lifts"
+        );
+        let active: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM user_locks WHERE username = $1 AND released_at IS NULL",
+        )
+        .bind(DEVELOPER)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+        assert_eq!(active, 0);
+    }
 
     // ---- a bot: a CI job's session, with the run behind it ----------------------------
     let bot_token = d.idp.workload_token(&WorkloadToken::github(
@@ -1083,50 +1200,51 @@ async fn console_end_to_end() {
     assert!(policy_page.body.contains("web-1") && policy_page.body.contains("ops"));
     assert!(policy_page.body.contains("host_key"), "the YAML behind it");
     let csrf = Browser::csrf(&policy_page);
-    let changed = "kind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [prod] } }\n      ssh: { logins: [ubuntu] }\n";
+    assert!(policy_page.body.contains("Preview impact"));
+    // Preview a new document: what saving it would do, nothing saved.
+    let extra = "kind: role\nversion: v1\nmetadata: { name: extra }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { env: [prod] } }\n      ssh: { logins: [ubuntu] }\n";
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
-            &[("csrf", &csrf), ("yaml", changed)],
+            "/console/policy/documents/preview",
+            &[("csrf", &csrf), ("yaml", extra)],
         )
         .await;
     assert_eq!(page.status, 200);
     assert!(
-        page.body.contains("Dry run: nothing was applied."),
+        page.body.contains("Preview only: nothing was saved."),
         "{}",
         page.body
-            .split("<h2>Result</h2>")
-            .nth(1)
-            .unwrap_or(&page.body)
     );
-    let result = page.body.split("<h2>Result</h2>").nth(1).expect("a result");
+    assert!(page.body.contains("What saving this would do"));
     assert!(
-        result.contains("web-1"),
-        "the removed resource is listed: {result}"
+        page.body.contains("extra"),
+        "the document is listed in the diff and kept in the form"
     );
+    let after = admin_user.get("/console/policy").await;
     assert!(
-        result.contains("ops"),
-        "the changed role is listed: {result}"
+        !after.body.contains("metadata: { name: extra }") && !after.body.contains("name: extra"),
+        "a preview saves nothing"
     );
+    // A refused document shows the reason.
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
+            "/console/policy/documents/preview",
             &[("csrf", &csrf), ("yaml", "kind: nonsense")],
         )
         .await;
     assert_eq!(page.status, 200);
-    assert!(page.body.contains("class=\"error\""));
+    assert!(page.body.contains("Not saved:"));
     assert_eq!(
         d.proxy().policy_version(),
         Some(applied.version),
-        "a dry run applies nothing"
+        "a preview applies nothing"
     );
 
     // ---- XSS: hostile text is escaped ---------------------------------------------------------
     let evil = "<script>alert(1)</script>";
     let page = admin_user
         .post(
-            "/console/policy/dry-run",
+            "/console/policy/documents/preview",
             &[("csrf", &csrf), ("yaml", evil)],
         )
         .await;
@@ -1405,6 +1523,34 @@ async fn the_console_edits_what_it_owns_and_decides_held_changes() {
         .await;
     let page = admin.get(&location(&saved)).await;
     assert!(page.body.contains("Applied"));
+    // Preview an edit: the form stays open with what was typed, the result
+    // sits under it, and nothing is saved.
+    let fresh = etag_of(&page.body, "console-viewers");
+    let typed = edited.replace("deploy", "deploy, auditor");
+    let previewed = admin
+        .post(
+            "/console/policy/documents/preview",
+            &[
+                ("csrf", &csrf),
+                ("yaml", &typed),
+                ("kind", "role"),
+                ("name", "console-viewers"),
+                ("etag", &fresh),
+            ],
+        )
+        .await;
+    assert_eq!(previewed.status, 200, "{}", previewed.body);
+    assert!(previewed.body.contains("Preview only: nothing was saved."));
+    assert!(previewed.body.contains("<details open>"));
+    assert!(
+        previewed.body.contains("deploy, auditor"),
+        "what was typed is kept"
+    );
+    assert_eq!(
+        etag_of(&admin.get("/console/policy").await.body, "console-viewers"),
+        fresh,
+        "the document was not changed"
+    );
     // A stale etag, a file's document, or two documents are refused, with
     // what was typed kept for a new one.
     let stale = admin

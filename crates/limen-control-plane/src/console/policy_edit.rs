@@ -210,6 +210,117 @@ pub async fn save_document(
     }
 }
 
+/// "Preview impact": what saving this form would do, with the same checks as
+/// the save and nothing written. Who would gain or lose access, the policy
+/// tests, and whether the write would wait for another admin.
+pub async fn preview_document(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Form(form): Form<SaveForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    let editing = !form.etag.is_empty();
+    let change = match one_document(&form.yaml) {
+        Err(e) => Err(e),
+        Ok(input) if editing && (input.kind != form.kind || input.name != form.name) => {
+            Err(format!(
+                "This edits {}/{}; the YAML is {}/{}. Renaming is a new document and a delete.",
+                form.kind, form.name, input.kind, input.name
+            ))
+        }
+        Ok(input) if editing => Ok(Change::Update {
+            owner: console_owner(),
+            input,
+            etag: form.etag.clone(),
+        }),
+        Ok(input) => Ok(Change::Create {
+            owner: console_owner(),
+            input,
+        }),
+    };
+    let outcome = match change {
+        Ok(change) => policy_store::write(
+            &state,
+            policy_store::Request {
+                actor: auth.username.clone(),
+                changes: vec![change],
+                dry_run: true,
+                require_tests: false,
+                keep_tests_passing: state.config.policy_tests == PolicyTests::Required,
+                source_ref: Some("console".into()),
+                expected_version: None,
+                guard: None,
+                hold: policy_changes::hold_for(None, state.config.widening_approval),
+                approval: None,
+            },
+        )
+        .await
+        .map_err(|e| store_message(&e)),
+        Err(e) => Err(e),
+    };
+    match outcome {
+        Ok(o) => {
+            let result = super::views::DryRun {
+                access: o
+                    .access
+                    .changes
+                    .iter()
+                    .map(|c| {
+                        (
+                            c.change == limen_policy::tooling::ChangeKind::Gain,
+                            c.text(),
+                        )
+                    })
+                    .collect(),
+                warnings: o.warnings.clone(),
+                tests: o
+                    .tests
+                    .results
+                    .iter()
+                    .map(|r| {
+                        (
+                            r.passed,
+                            if r.passed {
+                                format!("{}: {}", r.test, r.name)
+                            } else {
+                                format!(
+                                    "{}: {} (expected {}, got {} {})",
+                                    r.test, r.name, r.expected, r.got, r.detail
+                                )
+                            },
+                        )
+                    })
+                    .collect(),
+                no_changes: o.diff.is_empty(),
+                added: o.diff.added.clone(),
+                changed: o.diff.changed.clone(),
+                removed: o.diff.removed.clone(),
+                waits: o.held || !o.shadow_loosening.is_empty(),
+            };
+            let (kind, name) = if editing {
+                (form.kind, form.name)
+            } else {
+                (String::new(), String::new())
+            };
+            super::pages::policy_page_preview(&state, &auth, kind, name, form.yaml, result).await
+        }
+        Err(message) => {
+            let draft = if editing { String::new() } else { form.yaml };
+            super::pages::policy_page_with(&state, &auth, draft, Some(message)).await
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct DeleteForm {
     csrf: String,

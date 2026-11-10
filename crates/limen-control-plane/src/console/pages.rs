@@ -18,12 +18,12 @@ use uuid::Uuid;
 use super::query;
 use super::store::{self, SessionFilter};
 use super::views::{
-    self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, DryRun, EventView, HitView,
-    Home, KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup,
-    PolicyPage, ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView,
-    SessionPage, SessionView, SessionsPage, Simulation, StatementView, Stats, TokenPage, UserPage,
-    UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page, list_text,
-    path_segment, time_text,
+    self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, EventView, HitView, Home,
+    KindTab, KubePage, KubeView, LabelLink, PendingTokenView, PolicyDoc, PolicyGroup, PolicyPage,
+    ResourcePage, ResourceRow, ResourceView, ResourcesPage, RoleAccess, SearchView, SessionPage,
+    SessionView, SessionsPage, Simulation, SimulatorPage, StatementView, Stats, TokenPage,
+    UserPage, UserView, UsersPage, WebRequestView, WhoRow, WorkerMatch, Workers, error_page,
+    list_text, path_segment, time_text,
 };
 use super::{Auth, Console, html};
 use crate::db;
@@ -56,9 +56,9 @@ fn event_view(e: &store::EventRow) -> EventView {
         icon,
         kclass,
         tone: match e.kind.as_str() {
-            "auth.denied" | "user.lock" | "session.kill" | "component.revoke" | "idp.offboard"
-            | "idp.check_failed" => "bad",
-            "auth.login" | "user.unlock" | "worker.enroll" => "ok",
+            "auth.denied" | "user.lock" | "user.delete" | "session.kill" | "component.revoke"
+            | "idp.offboard" | "idp.check_failed" => "bad",
+            "auth.login" | "user.unlock" | "user.provision" | "worker.enroll" => "ok",
             _ => "",
         },
         kind: e.kind.clone(),
@@ -171,6 +171,7 @@ fn notice(code: Option<&str>) -> Option<&'static str> {
     Some(match code? {
         "locked" => "User locked. Their sessions end within about 11 seconds.",
         "unlocked" => "User unlocked.",
+        "deleted" => "User deleted. Their sessions and audit history stay.",
         "killed" => "The session will end within about 11 seconds.",
         "revoked" => "Revoked. Proxies drop its tunnels within about 10 seconds.",
         _ => return None,
@@ -1048,6 +1049,7 @@ pub struct UsersQuery {
     group: Option<String>,
     role: Option<String>,
     status: Option<String>,
+    state: Option<String>,
 }
 
 /// A filter value from the query string: bounded, and only what the menus offer
@@ -1087,18 +1089,10 @@ pub async fn users(
         group: filter_value(q.group.as_ref()),
         role: filter_value(q.role.as_ref()),
         status: filter_value(q.status.as_ref()),
+        state: filter_value(q.state.as_ref()),
     };
     let total = users.len();
-    let clear_href = if query.is_empty() {
-        "/console/users".to_owned()
-    } else {
-        format!(
-            "/console/users?{}",
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair("q", &query)
-                .finish()
-        )
-    };
+    let chips = user_chips(&query, &filter);
     let mut groups: Vec<String> = users.iter().flat_map(|u| u.groups.clone()).collect();
     let mut roles: Vec<String> = users.iter().flat_map(|u| u.roles.clone()).collect();
     for list in [&mut groups, &mut roles] {
@@ -1120,7 +1114,13 @@ pub async fn users(
         .filter(|l| !known.contains(&l.username))
         .map(|l| lock_only_view(&l.username, l))
         .filter(&wanted)
-        .filter(|_| filter.is_empty() || filter.status == "locked")
+        // Never signed in: no groups, roles or IdP check, but disabled all the same.
+        .filter(|_| {
+            filter.group.is_empty()
+                && filter.role.is_empty()
+                && (filter.status.is_empty() || filter.status == "locked")
+        })
+        .filter(|u| filter.admits_state(Some(u.locked_by.as_str())))
         .collect();
     html(
         UsersPage {
@@ -1129,12 +1129,12 @@ pub async fn users(
             users: users
                 .iter()
                 .filter(|u| filter.admits(u, u.lock_reason.is_some()))
-                .map(UserView::from)
+                .map(|u| with_pending(&state, u))
                 .filter(&wanted)
                 .collect(),
             query,
             orphan_locks,
-            clear_href,
+            chips,
             filter,
             groups,
             roles,
@@ -1142,6 +1142,60 @@ pub async fn users(
         }
         .render(),
     )
+}
+
+/// A removable chip for each applied filter on the users page; removing one
+/// keeps the rest (and the search text).
+fn user_chips(query: &str, f: &views::UserFilter) -> Vec<views::FilterChip> {
+    let state = match f.state.as_str() {
+        "enabled" => "Enabled",
+        "disabled" => "Disabled",
+        "disabled_idp" => "Disabled by the IdP",
+        "disabled_admin" => "Disabled by an admin",
+        other => other,
+    };
+    let status = match f.status.as_str() {
+        "ok" => "Checked",
+        "unchecked" => "Not checked",
+        "check_failed" => "IdP not reachable",
+        "groups_missing" => "IdP sent no groups",
+        "offboarded" => "Ended by the IdP",
+        "locked" => "Disabled",
+        other => other,
+    };
+    // (parameter, label, shown value, value)
+    let all = [
+        ("q", "Search", query, query),
+        ("state", "State", state, f.state.as_str()),
+        ("group", "Group", f.group.as_str(), f.group.as_str()),
+        ("role", "Role", f.role.as_str(), f.role.as_str()),
+        ("status", "IdP check", status, f.status.as_str()),
+    ];
+    all.iter()
+        .filter(|(_, _, _, v)| !v.is_empty())
+        .map(|(key, label, shown, _)| {
+            let rest: Vec<(&str, &str)> = all
+                .iter()
+                .filter(|(k, ..)| k != key)
+                .map(|(k, _, _, v)| (*k, *v))
+                .collect();
+            views::FilterChip {
+                label: format!("{label}: {shown}"),
+                remove: query::href("/console/users", &rest),
+            }
+        })
+        .collect()
+}
+
+/// A user's view, with the access their IdP groups would change at the next
+/// sign-in (roles are fixed at sign-in, so it is shown, not applied).
+fn with_pending(state: &AppState, u: &store::UserRow) -> UserView {
+    let mut view = UserView::from(u);
+    let (gained, lost) = crate::idp_check::pending_roles(state, &u.roles, u.idp_groups.as_deref());
+    let mut parts: Vec<String> = gained.iter().map(|r| format!("+{r}")).collect();
+    parts.extend(lost.iter().map(|r| format!("\u{2212}{r}")));
+    view.pending = parts.join(" ");
+    view
 }
 
 fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
@@ -1169,6 +1223,7 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         issuer: String::new(),
         idp: "—".into(),
         idp_tone: "",
+        pending: String::new(),
     }
 }
 
@@ -1285,7 +1340,7 @@ pub async fn user_detail(
         Err(e) => return db_error("reading a user", &e),
     };
     let view = match row {
-        Some(row) => UserView::from(&row),
+        Some(row) => with_pending(&state, &row),
         None => {
             // A lock can name someone who never signed in.
             let locks = db::active_locks(&state.db).await.unwrap_or_default();
@@ -1377,6 +1432,46 @@ pub async fn lock_user(
             ))
             .into_response()
         }
+        Err(s) => action_error(&s),
+    }
+}
+
+/// `POST /console/users/{name}/delete`: delete a disabled person's record.
+/// Enabled people can't be deleted, and their history stays (ADR-0047).
+pub async fn delete_user(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Form(form): Form<ReasonForm>,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    match ops::delete_disabled_user(&state, actor(&auth), &name, &form.reason).await {
+        Ok(Ok(())) => Redirect::to("/console/users?done=deleted").into_response(),
+        Ok(Err(ops::DeleteRefused::NotDisabled)) => error_page(
+            StatusCode::CONFLICT,
+            "Disable them first",
+            "Only a disabled user can be deleted. Disable the account, then delete it.",
+        ),
+        Ok(Err(ops::DeleteRefused::NoRecord)) => error_page(
+            StatusCode::CONFLICT,
+            "Nothing to delete",
+            "This person has no user record: they never signed in. Enable them to remove the lock.",
+        ),
+        Ok(Err(ops::DeleteRefused::Bot)) => error_page(
+            StatusCode::BAD_REQUEST,
+            "That is a bot",
+            "Bots are managed on the Bots page, not deleted here.",
+        ),
         Err(s) => action_error(&s),
     }
 }
@@ -1736,9 +1831,7 @@ async fn policy_groups(state: &AppState) -> Vec<PolicyGroup> {
 /// What the policy page shows besides the documents.
 #[derive(Default)]
 struct PolicyExtras {
-    pasted: String,
-    result: Option<DryRun>,
-    simulation: Option<Simulation>,
+    preview: Option<(String, String, String, views::DryRun)>,
     query: String,
     /// A new document being written, kept when the write was refused.
     draft: String,
@@ -1772,10 +1865,23 @@ async fn policy_page(state: &AppState, auth: &Auth, extras: PolicyExtras) -> Res
             created: time_text(loaded.created_at),
             groups,
             query,
-            pasted: extras.pasted,
-            result: extras.result,
-            simulation: extras.simulation,
             draft: extras.draft,
+            preview_kind: extras
+                .preview
+                .as_ref()
+                .map(|p| p.0.clone())
+                .unwrap_or_default(),
+            preview_name: extras
+                .preview
+                .as_ref()
+                .map(|p| p.1.clone())
+                .unwrap_or_default(),
+            preview_yaml: extras
+                .preview
+                .as_ref()
+                .map(|p| p.2.clone())
+                .unwrap_or_default(),
+            preview: extras.preview.map(|p| p.3),
             error: extras.error,
             notice: extras.notice,
         }
@@ -1803,6 +1909,26 @@ pub(super) async fn policy_page_with(
     .await
 }
 
+/// The policy page with what saving a document would do, from "Preview impact".
+pub(super) async fn policy_page_preview(
+    state: &AppState,
+    auth: &Auth,
+    kind: String,
+    name: String,
+    yaml: String,
+    result: views::DryRun,
+) -> Response {
+    policy_page(
+        state,
+        auth,
+        PolicyExtras {
+            preview: Some((kind, name, yaml, result)),
+            ..PolicyExtras::default()
+        },
+    )
+    .await
+}
+
 pub async fn policy(
     State(state): State<AppState>,
     auth: Auth,
@@ -1823,185 +1949,339 @@ pub async fn policy(
     .await
 }
 
-#[derive(Deserialize)]
-pub struct DryRunForm {
-    csrf: String,
-    yaml: String,
+/// How many people are offered as choices; the rest are found by searching.
+const PEOPLE_SHOWN: usize = 12;
+
+/// The simulator's address: `group` (any number), `person`, `bot` and `q`.
+fn parse_simulator_query(raw: Option<&str>) -> (Vec<String>, String, String, String) {
+    let (mut groups, mut person, mut bot, mut q) =
+        (Vec::new(), String::new(), String::new(), String::new());
+    for (k, v) in url::form_urlencoded::parse(raw.unwrap_or("").as_bytes()) {
+        let v = v.trim().to_owned();
+        if v.is_empty() {
+            continue;
+        }
+        match k.as_ref() {
+            "group" if groups.len() < 50 => groups.push(v),
+            "person" => person = v,
+            "bot" => bot = v,
+            "q" => q = v.chars().take(300).collect(),
+            _ => {}
+        }
+    }
+    (groups, person, bot, q)
 }
 
-/// What `limen admin apply --dry-run` would show. Never applies anything.
-pub async fn dry_run(
+/// Everything the simulator can look at: people (most recent sign-in first),
+/// bots in policy, and the IdP groups a mapping names or people carry.
+async fn simulator_sources(
+    state: &AppState,
+) -> (
+    Vec<store::UserRow>,
+    Vec<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let current = state.policy.current();
+    let mut users = store::list_users(&state.db).await.unwrap_or_default();
+    users.sort_by_key(|u| std::cmp::Reverse(u.last_login_at));
+    let bots: Vec<String> = current
+        .policy
+        .bots()
+        .map(|b| b.metadata.name.clone())
+        .collect();
+    let mut names: std::collections::BTreeSet<String> =
+        current.policy.mapped_groups().cloned().collect();
+    for u in &users {
+        names.extend(u.idp_groups.clone().unwrap_or_else(|| u.groups.clone()));
+    }
+    (users, bots, names)
+}
+
+#[derive(Deserialize)]
+pub struct SuggestQuery {
+    #[serde(default)]
+    q: String,
+}
+
+/// `GET /console/simulator/suggest?q=`: what to offer as the box is typed in,
+/// as JSON `[{name, kind, href}]`. People, bots and groups whose name contains
+/// the text, those that start with it first; nothing typed offers a few of each.
+pub async fn simulator_suggest(
     State(state): State<AppState>,
     auth: Auth,
-    headers: HeaderMap,
-    Form(form): Form<DryRunForm>,
+    Query(q): Query<SuggestQuery>,
 ) -> Response {
     if let Err(r) = auth.admin() {
         return r;
     }
-    let console = match console(&state) {
-        Ok(c) => c,
-        Err(r) => return r,
+    let (users, bots, names) = simulator_sources(&state).await;
+    let needle: String =
+        q.q.trim()
+            .chars()
+            .take(100)
+            .collect::<String>()
+            .to_lowercase();
+    let rank = |name: &str| -> Option<u8> {
+        let n = name.to_lowercase();
+        if needle.is_empty() || n.starts_with(&needle) {
+            Some(0)
+        } else {
+            n.contains(&needle).then_some(1)
+        }
     };
-    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+    let pick = |names: Vec<&str>, kind: &str, key: &str, limit: usize| -> Vec<serde_json::Value> {
+        let mut hits: Vec<(u8, &str)> = names
+            .into_iter()
+            .filter_map(|n| rank(n).map(|r| (r, n)))
+            .collect();
+        hits.sort_by_key(|(r, _)| *r);
+        hits.into_iter()
+            .take(limit)
+            .map(|(_, n)| {
+                serde_json::json!({
+                    "name": n,
+                    "kind": kind,
+                    "href": query::href("/console/simulator", &[(key, n)]),
+                })
+            })
+            .collect()
+    };
+    let (people_max, bots_max, groups_max) = if needle.is_empty() {
+        (4, 3, 5)
+    } else {
+        (6, 4, 6)
+    };
+    let mut out = pick(
+        users.iter().map(|u| u.username.as_str()).collect(),
+        "person",
+        "person",
+        people_max,
+    );
+    out.extend(pick(
+        bots.iter().map(String::as_str).collect(),
+        "bot",
+        "bot",
+        bots_max,
+    ));
+    out.extend(pick(
+        names.iter().map(String::as_str).collect(),
+        "group",
+        "group",
+        groups_max,
+    ));
+    (
+        [(CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::Value::Array(out)),
+    )
+        .into_response()
+}
+
+/// `GET /console/simulator`: a search box, clickable groups, bots and people,
+/// and, once someone is chosen, what they can reach and could ask for. A GET,
+/// since it changes nothing: the address can be bookmarked or linked
+/// (`?person=...`, `?bot=...`, `?group=a&group=b`).
+pub async fn simulator(
+    State(state): State<AppState>,
+    auth: Auth,
+    RawQuery(raw): RawQuery,
+) -> Response {
+    if let Err(r) = auth.admin() {
         return r;
     }
-    if form.yaml.len() > 1024 * 1024 {
-        return error_page(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "Too large",
-            "Policy YAML is limited to 1 MiB.",
-        );
-    }
-    let result = match limen_policy::Policy::parse_yaml([("pasted", form.yaml.as_str())]) {
-        Ok(next) => {
-            let base = state.policy.base();
-            let diff = base.policy.diff(&next);
-            let access = base.policy.access_diff(&next);
-            let report = next.run_tests();
-            DryRun {
-                access: access
-                    .changes
-                    .iter()
-                    .map(|c| {
-                        (
-                            c.change == limen_policy::tooling::ChangeKind::Gain,
-                            c.text(),
-                        )
-                    })
-                    .collect(),
-                warnings: next.warnings(),
-                tests: report
-                    .results
-                    .iter()
-                    .map(|r| {
-                        (
-                            r.passed,
-                            if r.passed {
-                                format!("{}: {}", r.test, r.name)
-                            } else {
-                                format!(
-                                    "{}: {} (expected {}, got {} {})",
-                                    r.test, r.name, r.expected, r.got, r.detail
-                                )
-                            },
-                        )
-                    })
-                    .collect(),
-                error: None,
-                no_changes: diff.is_empty(),
-                added: diff.added,
-                changed: diff.changed,
-                removed: diff.removed,
+    let (mut picked_groups, person, bot, q) = parse_simulator_query(raw.as_deref());
+    let (mut person, mut bot) = (person, bot);
+    let current = state.policy.current();
+    let (users, bots, mut names) = simulator_sources(&state).await;
+    // The search box names one thing, or several groups, separated by commas.
+    let mut not_found = None;
+    if !q.is_empty() {
+        let parts: Vec<&str> = q
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        let find = |mut list: std::slice::Iter<'_, String>, p: &str| -> Option<String> {
+            list.find(|x| x.eq_ignore_ascii_case(p)).cloned()
+        };
+        let people_names: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
+        let group_names: Vec<String> = names.iter().cloned().collect();
+        if let [one] = parts.as_slice() {
+            if let Some(n) = find(people_names.iter(), one) {
+                person = n;
+            } else if let Some(n) = find(bots.iter(), one) {
+                bot = n;
+            } else if let Some(n) = find(group_names.iter(), one) {
+                picked_groups.push(n);
+            } else {
+                not_found = Some(format!(
+                    "Nothing named {one}: try a person, a bot or an IdP group."
+                ));
+            }
+        } else {
+            for p in parts.iter().take(50) {
+                match find(group_names.iter(), p) {
+                    Some(n) => picked_groups.push(n),
+                    None => {
+                        not_found = Some(format!("{p} is not a known IdP group."));
+                        break;
+                    }
+                }
             }
         }
-        Err(e) => DryRun {
-            access: vec![],
-            warnings: vec![],
-            tests: vec![],
-            error: Some(e.to_string()),
-            no_changes: false,
-            added: vec![],
-            changed: vec![],
-            removed: vec![],
-        },
-    };
-    policy_page(
-        &state,
-        &auth,
-        PolicyExtras {
-            pasted: form.yaml,
-            result: Some(result),
-            ..PolicyExtras::default()
-        },
-    )
-    .await
-}
-
-#[derive(Deserialize)]
-pub struct SimulateForm {
-    csrf: String,
-    #[serde(default)]
-    groups: String,
-    #[serde(default)]
-    bot: String,
-}
-
-/// `POST /console/policy/simulate`: what groups or a bot can reach and could ask for.
-pub async fn simulate(
-    State(state): State<AppState>,
-    auth: Auth,
-    headers: HeaderMap,
-    Form(form): Form<SimulateForm>,
-) -> Response {
-    if let Err(r) = auth.admin() {
-        return r;
     }
-    let console = match console(&state) {
-        Ok(c) => c,
-        Err(r) => return r,
+    names.extend(picked_groups.iter().cloned());
+
+    // Choices. A group toggles in and out of the pick; a person or a bot
+    // replaces it.
+    let to =
+        |pairs: &[(&str, &str)]| format!("{}#simulated", query::href("/console/simulator", pairs));
+    let group_pick = |name: &str| {
+        let on = picked_groups.iter().any(|g| g == name);
+        let rest: Vec<(&str, &str)> = picked_groups
+            .iter()
+            .filter(|g| g.as_str() != name)
+            .map(|g| ("group", g.as_str()))
+            .chain((!on).then_some(("group", name)))
+            .collect();
+        let href = if rest.is_empty() {
+            "/console/simulator".to_owned()
+        } else {
+            format!(
+                "/console/simulator?{}",
+                rest.iter()
+                    .map(|(k, v)| format!("{k}={}", views::path_segment(v)))
+                    .collect::<Vec<_>>()
+                    .join("&")
+            )
+        };
+        views::Pick {
+            name: name.to_owned(),
+            href,
+            on,
+        }
     };
-    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
-        return r;
-    }
-    let groups: Vec<String> = form
-        .groups
-        .split(',')
-        .map(str::trim)
-        .filter(|g| !g.is_empty())
-        .take(50)
-        .map(str::to_owned)
+    let groups: Vec<views::Pick> = names.iter().map(|n| group_pick(n)).collect();
+    let bot_picks: Vec<views::Pick> = bots
+        .iter()
+        .map(|b| views::Pick {
+            name: b.clone(),
+            href: to(&[("bot", b)]),
+            on: bot.eq_ignore_ascii_case(b),
+        })
         .collect();
-    let bot = Some(form.bot.trim()).filter(|b| !b.is_empty());
-    let who = match (groups.is_empty(), bot) {
-        (false, _) => format!("Members of {}", groups.join(" and ")),
-        (true, Some(b)) => format!("The bot {b}"),
-        (true, None) => String::new(),
-    };
-    let current = state.policy.current();
-    let sim = if who.is_empty() {
-        Simulation {
-            who,
-            error: Some("Name at least one group, or a bot.".into()),
+    let people: Vec<views::Pick> = users
+        .iter()
+        .take(PEOPLE_SHOWN)
+        .map(|u| views::Pick {
+            name: u.username.clone(),
+            href: to(&[("person", &u.username)]),
+            on: person.eq_ignore_ascii_case(&u.username),
+        })
+        .collect();
+    // One kind of choice at a time.
+    let chosen = usize::from(!picked_groups.is_empty())
+        + usize::from(!person.is_empty())
+        + usize::from(!bot.is_empty());
+    let simulation = if let Some(e) = not_found {
+        Some(Simulation {
+            who: String::new(),
+            error: Some(e),
             standing: vec![],
             requestable: vec![],
-        }
+        })
     } else {
-        match current
-            .policy
-            .what_can(&groups, if groups.is_empty() { bot } else { None })
-        {
-            Ok(can) => Simulation {
-                who,
-                error: None,
-                standing: can
-                    .standing
-                    .into_iter()
-                    .map(|r| (r.name, r.kind.as_str().to_owned(), r.principals.join(", ")))
-                    .collect(),
-                requestable: can
-                    .requestable
-                    .into_iter()
-                    .map(|r| (r.name, r.kind.as_str().to_owned(), r.roles.join(", ")))
-                    .collect(),
-            },
-            Err(e) => Simulation {
-                who,
-                error: Some(e),
+        match chosen {
+            0 => None,
+            1 => Some(simulate(
+                &current.policy,
+                &users,
+                &picked_groups,
+                &person,
+                &bot,
+            )),
+            _ => Some(Simulation {
+                who: String::new(),
+                error: Some("Pick one: groups, a person or a bot.".into()),
                 standing: vec![],
                 requestable: vec![],
-            },
+            }),
         }
     };
-    policy_page(
-        &state,
-        &auth,
-        PolicyExtras {
-            simulation: Some(sim),
-            ..PolicyExtras::default()
-        },
+    html(
+        SimulatorPage {
+            chrome: chrome(&state, &auth, "simulator"),
+            simulation,
+            groups,
+            bots: bot_picks,
+            more_people: users.len().saturating_sub(PEOPLE_SHOWN),
+            people,
+            q,
+        }
+        .render(),
     )
-    .await
+}
+
+/// What one choice can reach: a person (the groups the IdP puts them in now),
+/// a bot, or groups.
+fn simulate(
+    policy: &limen_policy::Policy,
+    users: &[store::UserRow],
+    groups: &[String],
+    person: &str,
+    bot: &str,
+) -> Simulation {
+    let failed = |who: String, error: String| Simulation {
+        who,
+        error: Some(error),
+        standing: vec![],
+        requestable: vec![],
+    };
+    let (who, groups, bot) = if !person.is_empty() {
+        let Some(u) = users
+            .iter()
+            .find(|u| u.username.eq_ignore_ascii_case(person))
+        else {
+            return failed(
+                person.to_owned(),
+                format!("No person named {person} has signed in."),
+            );
+        };
+        let theirs = u.idp_groups.clone().unwrap_or_else(|| u.groups.clone());
+        (
+            if theirs.is_empty() {
+                format!("{} (in no groups)", u.username)
+            } else {
+                format!("{} (in {})", u.username, theirs.join(", "))
+            },
+            theirs,
+            None,
+        )
+    } else if !bot.is_empty() {
+        (format!("The bot {bot}"), Vec::new(), Some(bot))
+    } else {
+        (
+            format!("Members of {}", groups.join(" and ")),
+            groups.to_vec(),
+            None,
+        )
+    };
+    match policy.what_can(&groups, bot) {
+        Ok(can) => Simulation {
+            who,
+            error: None,
+            standing: can
+                .standing
+                .into_iter()
+                .map(|r| (r.name, r.kind.as_str().to_owned(), r.principals.join(", ")))
+                .collect(),
+            requestable: can
+                .requestable
+                .into_iter()
+                .map(|r| (r.name, r.kind.as_str().to_owned(), r.roles.join(", ")))
+                .collect(),
+        },
+        Err(e) => failed(who, e),
+    }
 }
 
 fn kube_view(r: &store::KubeRow) -> KubeView {

@@ -33,3 +33,4 @@ When the IdP deactivates a person, Limen ends their logins by itself within a fe
 - Sessions of every protocol end within about ten seconds of a lock: the proxy checks the lock every second against the policy snapshot it refreshes every 10 s, then tells the worker to close. A statement the database is already running may finish there.
 - Locking doesn't revoke credentials the user already holds on a target, such as a long-running process they started. Per-session certificates last about a minute.
 - Locking is by username. If the identity provider renames a user, lock the new name too.
+- A locked (disabled) user can be **deleted** from their page in the console. That removes the user record only: sessions, recordings and audit events stay. An admin's lock outlives the deletion. The IdP check deletes the people it disabled after `--idp-purge-after` (90 days by default); it never deletes someone an admin disabled.

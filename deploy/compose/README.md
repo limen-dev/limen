@@ -100,7 +100,7 @@ Limen is one stack, and everything it connects to or reports to is another: a co
 
 | Stack | File | Containers (names carry `-dev`) |
 |---|---|---|
-| limen | `docker-compose.yml` | `limen-postgres` (state), `limen-dex` (dev OIDC), `limen-s3` (SeaweedFS: audit batches and recordings), `limen-kms` (local KMS stand-in), `limen-control-plane`, `limen-proxy`, `limen-worker` |
+| limen | `docker-compose.yml` | `limen-postgres` (state), `limen-dex` (dev OIDC, on its own PostgreSQL, `limen-dex-db`) with logins checked against it every 15 seconds (`docs/guides/offboarding.md`), `limen-s3` (SeaweedFS: audit batches and recordings), `limen-kms` (local KMS stand-in), `limen-control-plane`, `limen-proxy`, `limen-worker` |
 | limen, scaled | `stacks/scale.yml` | the same ×3 as `limen-control-plane-{0,1,2}` etc. (ports 23xxx; replaces the line above) |
 | `ssh` | `stacks/ssh.yml` | `ssh-web-dev` (OpenSSH) |
 | `db` | `stacks/db.yml` | `postgres-orders-dev`, `mysql-orders-dev` (TLS, seeded `orders`); *once*: `db-tls`, `db-secrets-init`, `db-bootstrap` (profile `tools`; creates the roles the policy names) |

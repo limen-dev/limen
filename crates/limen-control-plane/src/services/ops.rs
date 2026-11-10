@@ -30,7 +30,7 @@ pub struct Actor<'a> {
 
 /// Audit an action that must not take effect without its event: the error
 /// says the change was not made (the caller rolls it back).
-async fn audit_first(
+pub(crate) async fn audit_first(
     state: &AppState,
     kind: EventKind,
     actor: Actor<'_>,
@@ -111,6 +111,104 @@ pub async fn lock_user(
         .await?;
     }
     Ok(locked)
+}
+
+/// Why a delete was refused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeleteRefused {
+    /// Only a disabled person can be deleted; enabled people are never touched.
+    NotDisabled,
+    /// Bots have their own lifecycle.
+    Bot,
+    /// A lock names them but there is no user record to delete.
+    NoRecord,
+}
+
+/// Delete a disabled person's record (the Users page, `users` row) and their
+/// stored IdP tokens. Sessions, recordings and audit events stay: they name the
+/// person and are the history. A lock the IdP check or SCIM placed is released, so the
+/// IdP decides if they come back; an admin's lock stays.
+///
+/// The audit event is written before the transaction commits (and the
+/// transaction is dropped if it cannot be), so a deletion never stands
+/// without it. Returns `Ok(Err(why))` when the person may not be deleted.
+pub async fn delete_disabled_user(
+    state: &AppState,
+    actor: Actor<'_>,
+    username: &str,
+    reason: &str,
+) -> Result<Result<(), DeleteRefused>, Status> {
+    let username = username.trim();
+    if username.is_empty() || username.len() > 256 {
+        return Err(Status::invalid_argument("username is required"));
+    }
+    if limen_core::identity::is_bot(username) {
+        return Ok(Err(DeleteRefused::Bot));
+    }
+    let reason = clean_reason(reason)?;
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("deleting user", e))?;
+    // Held until commit: a second replica skips this person.
+    let lock = sqlx::query(
+        "SELECT locked_by FROM user_locks WHERE lower(username) = lower($1) AND released_at IS NULL FOR UPDATE SKIP LOCKED",
+    )
+    .bind(username)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| internal("deleting user", e))?;
+    let Some(lock) = lock else {
+        return Ok(Err(DeleteRefused::NotDisabled));
+    };
+    let locked_by: String =
+        sqlx::Row::try_get(&lock, "locked_by").map_err(|e| internal("deleting user", e))?;
+    // Something to delete: a lock alone (a person who never signed in) is not a record.
+    let scim_id: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT scim_id FROM users WHERE lower(username) = lower($1) FOR UPDATE",
+    )
+    .bind(username)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| internal("deleting user", e))?;
+    let Some(scim_id) = scim_id else {
+        return Ok(Err(DeleteRefused::NoRecord));
+    };
+    audit_first(
+        state,
+        EventKind::UserDelete,
+        actor,
+        None,
+        json!({ "target_user": username, "reason": reason, "disabled_by": locked_by }),
+    )
+    .await?;
+    sqlx::query("DELETE FROM users WHERE lower(username) = lower($1)")
+        .bind(username)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("deleting user", e))?;
+    // And out of the groups SCIM pushed, which have no foreign key to users.
+    sqlx::query("DELETE FROM scim_group_members WHERE user_scim_id = $1")
+        .bind(scim_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("deleting user", e))?;
+    sqlx::query("DELETE FROM idp_logins WHERE lower(username) = lower($1)")
+        .bind(username)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("deleting user", e))?;
+    if crate::idp_check::placed_by_idp(&locked_by) {
+        db::unlock_user(&mut *tx, username, actor.username)
+            .await
+            .map_err(|e| internal("deleting user", e))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| internal("deleting user", e))?;
+    tracing::warn!(user = username, by = actor.username, via = actor.via, %reason, "user deleted");
+    Ok(Ok(()))
 }
 
 pub async fn unlock_user(

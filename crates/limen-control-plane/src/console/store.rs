@@ -21,9 +21,20 @@ pub async fn upsert_user(
     roles: &[String],
     groups: &[String],
 ) -> Result<(), sqlx::Error> {
+    // Provisioned by SCIM under another spelling of the name: take the
+    // spelling the IdP signs in with, so there is one person, not two.
+    sqlx::query(
+        "UPDATE users SET username = $1
+         WHERE lower(username) = lower($1) AND username <> $1
+           AND source = 'scim' AND login_count = 0",
+    )
+    .bind(username)
+    .execute(db)
+    .await?;
     sqlx::query(
         "INSERT INTO users (username, subject, roles, groups) VALUES ($1, $2, $3, $4)
          ON CONFLICT (username) DO UPDATE SET subject = $2, roles = $3, groups = $4,
+           first_login_at = CASE WHEN users.login_count = 0 THEN now() ELSE users.first_login_at END,
            last_login_at = now(), login_count = users.login_count + 1",
     )
     .bind(username)
@@ -83,6 +94,8 @@ pub struct UserRow {
     /// `unchecked`, `ok`, `check_failed` or `offboarded` (ADR-0047).
     pub idp_status: String,
     pub idp_checked_at: Option<OffsetDateTime>,
+    /// Groups the IdP last reported at a check; `None` if it has not.
+    pub idp_groups: Option<Vec<String>>,
 }
 
 fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
@@ -102,15 +115,40 @@ fn user_from_row(r: &sqlx::postgres::PgRow) -> Result<UserRow, sqlx::Error> {
         issuer: r.try_get("issuer")?,
         idp_status: r.try_get("idp_status")?,
         idp_checked_at: r.try_get("idp_checked_at")?,
+        idp_groups: r.try_get("idp_groups")?,
     })
 }
 
+/// The groups the IdP puts a person in *now*, for comparing with the roles of
+/// their last sign-in. Two sources, kept apart in the database: the groups a
+/// token showed (`users.idp_groups`, else `users.groups` at sign-in) and the
+/// groups SCIM pushes (`scim_group_members`). A group SCIM pushes is decided
+/// by SCIM alone, so a pushed name is taken out of the token's groups and the
+/// person's SCIM memberships put back; a group SCIM never pushes stays as the
+/// token showed it. NULL when neither source has anything to say about the
+/// person (no check yet, never touched by SCIM).
+macro_rules! effective_groups {
+    () => {
+        "CASE WHEN u.idp_groups IS NULL AND u.source <> 'scim'
+               AND NOT EXISTS (SELECT 1 FROM scim_group_members m WHERE m.user_scim_id = u.scim_id)
+              THEN NULL
+         ELSE COALESCE((SELECT array_agg(g ORDER BY g) FROM (
+              (SELECT unnest(COALESCE(u.idp_groups, u.groups)) AS g
+               EXCEPT SELECT display_name FROM scim_groups)
+              UNION
+              SELECT sg.display_name FROM scim_group_members m
+                JOIN scim_groups sg ON sg.id = m.group_id
+               WHERE m.user_scim_id = u.scim_id) x), '{}'::text[]) END"
+    };
+}
+pub(crate) use effective_groups;
+
 macro_rules! user_select {
     () => {
-        "SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
+        concat!("SELECT u.username, u.roles, u.groups, u.first_login_at, u.last_login_at, u.login_count,
         l.reason AS lock_reason, l.locked_by, l.locked_at, u.actor_type, u.last_ci,
-        u.source, u.issuer, u.idp_status, u.idp_checked_at
-     FROM users u LEFT JOIN user_locks l ON lower(l.username) = lower(u.username) AND l.released_at IS NULL"
+        u.source, u.issuer, u.idp_status, u.idp_checked_at, ", effective_groups!(), " AS idp_groups
+     FROM users u LEFT JOIN user_locks l ON lower(l.username) = lower(u.username) AND l.released_at IS NULL")
     };
 }
 

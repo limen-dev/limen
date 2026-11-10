@@ -538,7 +538,7 @@ async fn spawn_control_plane(
         format!("--audit-spool-dir={}", dir.join(spool).display()),
     ]);
     let config: limen_control_plane::Config = parse(&args);
-    let state = limen_control_plane::build_state(config)
+    let state = Box::pin(limen_control_plane::build_state(config))
         .await
         .expect("control plane state");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

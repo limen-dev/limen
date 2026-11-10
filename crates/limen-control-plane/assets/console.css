@@ -366,6 +366,25 @@ mark { background: var(--accent-soft, rgba(20, 184, 166, 0.22)); color: inherit;
 #watch { margin: 12px 0; }
 
 .chips.applied { margin: 0 0 12px; }
+/* Access simulator: choices on the left, the result beside them, so picking never scrolls */
+.sim { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.sim-pick { position: sticky; top: 16px; }
+.sim-result > h2:first-child { margin-top: 0; }
+.sim-search { margin: 0 0 18px; }
+.sim-search .search input { width: 100%; padding-left: 36px; }
+.typeahead { position: relative; }
+.ta-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 340px; overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+.ta-list a { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 14px; }
+.ta-list li.on a, .ta-list a:hover { background: var(--accent-soft); }
+.ta-kind { flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
+.picks { display: grid; gap: 16px; }
+.pick-row { display: grid; gap: 6px; }
+.pick-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.pick-label .hint { font-weight: 400; color: var(--text-3); font-size: 12px; margin-left: 6px; }
+@media (max-width: 980px) { .sim { grid-template-columns: 1fr; } .sim-pick { position: static; } }
+a.chip.pick { text-decoration: none; cursor: pointer; padding: 3px 10px; font-size: 13px; border-radius: 999px; }
+a.chip.pick:hover { border-color: var(--accent); color: var(--text); }
+a.chip.pick.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .chips.applied a.chip { text-decoration: none; }
 .filters a { align-self: center; }
 a.stat.drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -16,7 +16,7 @@ use limen_proto::v1::{
     RevokeAccessGrantRequest, SearchRequest,
 };
 use limen_testkit::ssh_target::SshTarget;
-use limen_testkit::users::{ADMIN, AUDITOR, DEVELOPER, ONCALL};
+use limen_testkit::users::{ADMIN, ADMIN_ENC, AUDITOR, DEVELOPER, ONCALL};
 use sqlx::Connection;
 
 fn policy(target_addr: &str, host_key: &str) -> Vec<PolicySource> {
@@ -1124,31 +1124,85 @@ async fn the_console_pages_for_the_workflows() {
 
     // ---- policy: simulator and the effective-access diff -------------------
     let page = admin.get("/console/policy").await;
-    assert!(page.body.contains("Access simulator"));
-    let sim = admin
-        .post(
-            "/console/policy/simulate",
-            &[
-                ("csrf", &csrf_of(&page)),
-                ("groups", "developers"),
-                ("bot", ""),
-            ],
-        )
-        .await;
+    assert!(
+        !page.body.contains("Simulate access") && !page.body.contains("Show what they can reach"),
+        "the simulator has its own page, not a section of the policy page"
+    );
+    let sim_page = admin.get("/console/simulator").await;
+    assert_eq!(sim_page.status, 200, "{}", sim_page.body);
+    assert!(sim_page.body.contains("Access simulator"));
+    // One search box, and the groups, bots and people as links to click.
+    assert!(
+        sim_page
+            .body
+            .contains("href=\"/console/simulator?group=developers\""),
+        "the groups a mapping names are links: {}",
+        sim_page.body
+    );
+    assert!(
+        sim_page
+            .body
+            .contains("data-typeahead=\"/console/simulator/suggest\"")
+    );
+    // As the box is typed in, the options come from the server.
+    let hints = admin.get("/console/simulator/suggest?q=dev").await;
+    assert_eq!(hints.status, 200, "{}", hints.body);
+    assert!(
+        hints.body.contains("\"name\":\"developers\"") && hints.body.contains("\"kind\":\"group\""),
+        "{}",
+        hints.body
+    );
+    let hints = admin.get("/console/simulator/suggest?q=zzz-nothing").await;
+    assert_eq!(hints.body.trim(), "[]");
+    let hints = admin.get("/console/simulator/suggest").await;
+    assert!(
+        hints.body.contains("\"kind\":\"person\"") || hints.body.contains("\"kind\":\"group\"")
+    );
+    let sim = admin.get("/console/simulator?group=developers").await;
     assert_eq!(sim.status, 200, "{}", sim.body);
     assert!(
-        sim.body.contains("could ask for") && sim.body.contains("web-prod"),
+        sim.body.contains("Could ask for") && sim.body.contains("web-prod"),
         "{}",
         sim.body
     );
-    let dry = admin
-        .post("/console/policy/dry-run", &[("csrf", &csrf_of(&page)), ("yaml", "kind: role\nversion: v1\nmetadata: { name: everything }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { \"*\": [\"*\"] } }\n      ssh: { logins: [ubuntu] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [everything] }\n")])
-        .await;
-    assert_eq!(dry.status, 200, "{}", dry.body);
     assert!(
-        dry.body.contains("Who gains or loses access") || dry.body.contains("No changes"),
+        sim.body.contains("chip pick on"),
+        "the clicked choice is marked"
+    );
+    // Typing a group in the search box does the same.
+    let typed = admin.get("/console/simulator?q=developers").await;
+    assert!(typed.body.contains("web-prod") && typed.body.contains("chip pick on"));
+    let person = admin
+        .get(&format!("/console/simulator?person={ADMIN_ENC}"))
+        .await;
+    assert_eq!(person.status, 200, "{}", person.body);
+    assert!(
+        person.body.contains("Can reach") && !person.body.contains("Nothing named"),
+        "someone who has signed in is found by name: {}",
+        person.body
+    );
+    let by_search = admin
+        .get(&format!("/console/simulator?q={ADMIN_ENC}"))
+        .await;
+    assert!(by_search.body.contains("Can reach"), "{}", by_search.body);
+    let nobody = admin.get("/console/simulator?q=nobody%40example.com").await;
+    assert!(nobody.body.contains("Nothing named nobody@example.com"));
+    let both = admin
+        .get("/console/simulator?group=developers&bot=anything")
+        .await;
+    assert!(both.body.contains("Pick one: groups, a person or a bot."));
+    let unknown = admin.get("/console/simulator?bot=no-such-bot").await;
+    assert!(unknown.body.contains("no bot named no-such-bot"));
+
+    let preview = admin
+        .post("/console/policy/documents/preview", &[("csrf", &csrf_of(&page)), ("yaml", "kind: role\nversion: v1\nmetadata: { name: everything }\nspec:\n  allow:\n    - resources: { kind: [ssh], labels: { \"*\": [\"*\"] } }\n      ssh: { logins: [ubuntu] }\n")])
+        .await;
+    assert_eq!(preview.status, 200, "{}", preview.body);
+    assert!(
+        preview.body.contains("What saving this would do")
+            && preview.body.contains("Preview only: nothing was saved."),
         "{}",
-        dry.body
+        preview.body
     );
 
     // ---- reviews and evidence ---------------------------------------------
