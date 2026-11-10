@@ -113,6 +113,13 @@ kind: bot\nversion: v1\nmetadata: {{ name: never-ran }}\nspec:\n  join:\n    met
         "there is no account to disable for it"
     );
 
+    let (status, _) = page("/console/users/system").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a prefix of a known name is not that name"
+    );
+
     let (status, _) = page("/console/users/nobody-at-all").await;
     assert_eq!(
         status,
