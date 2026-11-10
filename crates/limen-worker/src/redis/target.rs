@@ -258,7 +258,7 @@ pub async fn iam_token(target: &RedisTarget, user: &str) -> anyhow::Result<Secre
     let signing = Credentials {
         access_key: creds.access_key_id().to_owned(),
         secret_key: Secret::new(creds.secret_access_key().to_owned()),
-        session_token: creds.session_token().map(str::to_owned),
+        session_token: creds.session_token().map(|t| Secret::new(t.to_owned())),
     };
     Ok(Secret::new(presign_connect(
         &signing,
@@ -273,7 +273,8 @@ pub async fn iam_token(target: &RedisTarget, user: &str) -> anyhow::Result<Secre
 pub struct Credentials {
     pub access_key: String,
     pub secret_key: Secret<String>,
-    pub session_token: Option<String>,
+    /// An STS session token is as live a credential as the secret key.
+    pub session_token: Option<Secret<String>>,
 }
 
 /// The `SigV4` query-signed `connect` request `ElastiCache` takes as a password,
@@ -313,7 +314,7 @@ pub fn presign_connect(
         ("X-Amz-SignedHeaders".into(), "host".into()),
     ];
     if let Some(token) = &creds.session_token {
-        params.push(("X-Amz-Security-Token".into(), token.clone()));
+        params.push(("X-Amz-Security-Token".into(), token.expose().clone()));
     }
     let mut encoded: Vec<(String, String)> = params
         .iter()
@@ -384,7 +385,7 @@ mod tests {
         let creds = Credentials {
             access_key: "AKIDEXAMPLE".into(),
             secret_key: Secret::new("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".into()),
-            session_token: Some("TOKEN/abc+=".into()),
+            session_token: Some(Secret::new("TOKEN/abc+=".into())),
         };
         let now = time::macros::datetime!(2026-10-17 12:00:00 UTC);
         let token = presign_connect(&creds, "us-east-1", "my-group", "read", now);
@@ -392,6 +393,18 @@ mod tests {
             token,
             "my-group/?Action=connect&User=read&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261017%2Fus-east-1%2Felasticache%2Faws4_request&X-Amz-Date=20261017T120000Z&X-Amz-Expires=900&X-Amz-Security-Token=TOKEN%2Fabc%2B%3D&X-Amz-SignedHeaders=host&X-Amz-Signature=21dbecb55eecb27a1bcd4ddaba0eb3c502b309e5c2960eba6521fe47d807ac4f"
         );
+    }
+
+    #[test]
+    fn debug_output_hides_the_secret_key_and_session_token() {
+        let creds = Credentials {
+            access_key: "AKIDEXAMPLE".into(),
+            secret_key: Secret::new("the-secret-key".into()),
+            session_token: Some(Secret::new("the-session-token".into())),
+        };
+        let debug = format!("{creds:?}");
+        assert!(!debug.contains("the-secret-key"), "{debug}");
+        assert!(!debug.contains("the-session-token"), "{debug}");
     }
 
     #[test]
