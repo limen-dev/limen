@@ -350,7 +350,7 @@ fn a_writer_cant_reach_past_the_profile() {
 
 #[test]
 fn a_profile_is_refused_when_it_would_hand_out_too_much() {
-    let cases: [Case; 11] = [
+    let cases: [Case; 12] = [
         (
             &|p| {
                 p.replace(
@@ -409,6 +409,15 @@ fn a_profile_is_refused_when_it_would_hand_out_too_much() {
                 )
             },
             "delegated",
+        ),
+        (
+            &|p| {
+                p.replace(
+                    "    worker_selector:",
+                    "    honeytoken: { kind: ssh, principals: [a], exposed_to: [b] }\n    worker_selector:",
+                )
+            },
+            "honeytoken",
         ),
         (
             &|p| p.replace("allowed: { env: [dev, staging] }", "allowed: { team: [x] }"),

@@ -38,28 +38,31 @@ impl Resources for ResourcesService {
         let resources = reachable
             .into_iter()
             .map(|(r, grant_expires_at_unix)| {
-                let default_database = loaded
-                    .policy
-                    .resource(&r.name)
+                let doc = loaded.policy.resource(&r.name);
+                let default_database = doc
                     .and_then(|doc| {
                         let s = &doc.spec;
                         s.postgres
                             .as_ref()
                             .or(s.mysql.as_ref())
                             .or(s.redshift.as_ref())
+                            .and_then(|t| t.default_database.clone())
+                            .or_else(|| s.mongodb.as_ref()?.default_database.clone())
                     })
-                    .and_then(|t| t.default_database.clone())
+                    // A decoy has the database a real one would (ADR-0050),
+                    // so the CLI doesn't stop before it reaches the proxy.
                     .or_else(|| {
                         loaded
                             .policy
-                            .resource(&r.name)
-                            .and_then(|doc| doc.spec.mongodb.as_ref())
-                            .and_then(|t| t.default_database.clone())
+                            .honeytoken(&r.name)?
+                            .spec
+                            .honeytoken
+                            .as_ref()?
+                            .default_database
+                            .clone()
                     })
                     .unwrap_or_default();
-                let web_url = loaded
-                    .policy
-                    .resource(&r.name)
+                let web_url = doc
                     .and_then(|doc| doc.spec.web.as_ref())
                     .map(|target| web_url(&self.0, &target.host))
                     .unwrap_or_default();

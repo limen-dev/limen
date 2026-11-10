@@ -588,8 +588,16 @@ pub struct Honeytoken {
     pub kind: ResourceKind,
     /// The logins, roles or users `limen ls` shows for it (1 to 8).
     pub principals: Vec<String>,
-    /// Roles whose holders are shown it. Nobody else sees it.
+    /// Roles whose holders are shown it. Nobody else sees it. A role that
+    /// doesn't exist is a warning, not an error, so deleting a role never
+    /// says which decoys it was exposed to.
     pub exposed_to: Vec<String>,
+    /// The database `limen db connect` and `limen mongo connect` default to,
+    /// as a real database resource's `default_database`. Only for the
+    /// database kinds; without it those commands stop on the user's machine
+    /// before they reach the proxy, and the touch is never seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_database: Option<String>,
 }
 
 /// Marks a resource a bot writer completed from a profile. The worker refuses

@@ -110,7 +110,7 @@ pub const CATEGORIES: [Category; 10] = [
         label: "Sign-ins",
         icon: "key-round",
         kclass: "k-auth",
-        kinds: "auth.*",
+        kinds: "auth.*,detect.*",
     },
     Category {
         label: "Sessions",
@@ -1428,6 +1428,7 @@ mod category_tests {
     fn every_event_kind_has_a_service_category() {
         for (kind, label) in [
             ("auth.denied", "Sign-ins"),
+            ("detect.honeytoken", "Sign-ins"),
             ("session.start", "Sessions"),
             ("ssh.exec", "Sessions"),
             ("db.query.end", "SQL"),

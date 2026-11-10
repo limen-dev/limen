@@ -56,8 +56,8 @@ fn event_view(e: &store::EventRow) -> EventView {
         icon,
         kclass,
         tone: match e.kind.as_str() {
-            "auth.denied" | "user.lock" | "user.delete" | "session.kill" | "component.revoke"
-            | "idp.offboard" | "idp.check_failed" => "bad",
+            "auth.denied" | "detect.honeytoken" | "user.lock" | "user.delete" | "session.kill"
+            | "component.revoke" | "idp.offboard" | "idp.check_failed" => "bad",
             "auth.login" | "user.unlock" | "user.provision" | "worker.enroll" => "ok",
             _ => "",
         },
@@ -431,6 +431,11 @@ pub async fn resources(
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
+        // A decoy (ADR-0050) is not a resource: no worker serves it, nothing
+        // is reachable, and the policy page is where an admin sees it.
+        if r.spec.honeytoken.is_some() {
+            continue;
+        }
         let name = r.metadata.name.clone();
         let mine = accessible.iter().find(|a| a.name == name);
         if !auth.is_admin && mine.is_none() {
@@ -562,6 +567,19 @@ pub async fn resource_detail(
     };
     let loaded = state.policy.current();
     let Some(r) = loaded.policy.resource(&name) else {
+        // The page of a decoy reads as one that doesn't exist, and is a touch
+        // (ADR-0050) unless an admin is looking.
+        if !auth.is_admin && loaded.policy.honeytoken(&name).is_some() {
+            crate::access::report_honeytoken(
+                &state,
+                &auth.username,
+                &auth.roles,
+                "console",
+                &name,
+                None,
+            )
+            .await;
+        }
         return not_found();
     };
     let accessible = match reachable_for(&state, &auth).await {
@@ -1754,6 +1772,10 @@ fn summarize(doc: &Document) -> String {
             "{} · roles {}",
             b.spec.join.method.as_str(),
             b.spec.roles.join(", ")
+        ),
+        Document::Resource(r) if r.spec.honeytoken.is_some() => format!(
+            "honeytoken ({})",
+            r.spec.honeytoken.as_ref().map_or("", |h| h.kind.as_str())
         ),
         Document::Resource(r) => r
             .spec

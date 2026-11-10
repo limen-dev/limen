@@ -241,8 +241,15 @@
       "additionalProperties": false,
       "description": "A resource that looks real and is backed by nothing (ADR-0050). It is\nlisted for the principals holding a role in `exposed_to`, granted by no\nrole, and every attempt to use it is audited as `detect.honeytoken`.",
       "properties": {
+        "default_database": {
+          "description": "The database `limen db connect` and `limen mongo connect` default to,\nas a real database resource's `default_database`. Only for the\ndatabase kinds; without it those commands stop on the user's machine\nbefore they reach the proxy, and the touch is never seen.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "exposed_to": {
-          "description": "Roles whose holders are shown it. Nobody else sees it.",
+          "description": "Roles whose holders are shown it. Nobody else sees it. A role that\ndoesn't exist is a warning, not an error, so deleting a role never\nsays which decoys it was exposed to.",
           "items": {
             "type": "string"
           },

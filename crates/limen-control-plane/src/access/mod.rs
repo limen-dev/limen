@@ -165,16 +165,30 @@ pub async fn request_access(
     let loaded = state.policy.current();
     let policy = &loaded.policy;
 
+    let groups = store::user_groups(&state.db, who.username)
+        .await
+        .map_err(|e| internal("reading groups", e))?
+        .unwrap_or_default();
+    // A honeytoken is never requestable (ADR-0050): asking for one is a touch
+    // whatever else is true of the person, and gets the answer any
+    // unreachable name gets.
+    let decoy = policy.honeytoken(resource).is_some();
+    if decoy {
+        let roles: Vec<String> = policy
+            .roles_for_groups(
+                groups.iter().map(String::as_str),
+                &state.config.bootstrap_admin_groups,
+            )
+            .into_iter()
+            .collect();
+        report_honeytoken(state, who.username, &roles, "request", resource, None).await;
+    }
     if db::is_locked(&state.db, who.username)
         .await
         .map_err(|e| internal("checking locks", e))?
     {
         return Err(Status::permission_denied("user locked"));
     }
-    let groups = store::user_groups(&state.db, who.username)
-        .await
-        .map_err(|e| internal("reading groups", e))?
-        .unwrap_or_default();
     // One answer for a resource that doesn't exist and one nothing the person
     // may ask for reaches: asking must not reveal which resources exist.
     let nothing = || {
@@ -199,21 +213,7 @@ pub async fn request_access(
         candidates.retain(|r| *r == new.role);
     }
     let role_name = match candidates.as_slice() {
-        [] => {
-            // A honeytoken is never requestable (ADR-0050): asking for one
-            // gets the answer any unreachable name gets, and an alert.
-            if policy.honeytoken(resource).is_some() {
-                let roles: Vec<String> = policy
-                    .roles_for_groups(
-                        groups.iter().map(String::as_str),
-                        &state.config.bootstrap_admin_groups,
-                    )
-                    .into_iter()
-                    .collect();
-                report_honeytoken(state, who.username, &roles, "request", resource, None).await;
-            }
-            return Err(nothing());
-        }
+        [] => return Err(nothing()),
         [one] => one.clone(),
         many => {
             return Err(Status::invalid_argument(format!(

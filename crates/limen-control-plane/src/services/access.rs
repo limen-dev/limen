@@ -126,11 +126,6 @@ impl Access for AccessService {
         if admin_view {
             caller.admin()?;
         }
-        let principal = if r.principal.is_empty() {
-            None
-        } else {
-            Some(Principal::parse(&r.principal, &r.database).map_err(Status::invalid_argument)?)
-        };
         let (subject, roles) = if admin_view {
             let row = crate::console::store::user(&self.0.db, &r.user)
                 .await
@@ -141,27 +136,44 @@ impl Access for AccessService {
             (user.username.clone(), user.roles.clone())
         };
         let resource = r.resource.trim();
-        // Explaining a honeytoken is a touch (ADR-0050); an admin looking at
-        // another user's access is not. The answer is the same either way.
-        if !admin_view
-            && self
-                .0
-                .policy
-                .current()
-                .policy
-                .honeytoken(resource)
-                .is_some()
-        {
-            access::report_honeytoken(
-                &self.0,
-                &subject,
-                &roles,
-                "explain",
-                resource,
-                principal_text(&r.principal),
-            )
-            .await;
+        // Explaining a honeytoken is a touch (ADR-0050), before anything can
+        // fail on the request; an admin looking at another user's access is
+        // not. The answer is the one `limen ls` implies: a decoy shown to the
+        // caller reads as reachable.
+        if !admin_view {
+            let loaded = self.0.policy.current();
+            if loaded.policy.honeytoken(resource).is_some() {
+                access::report_honeytoken(
+                    &self.0,
+                    &subject,
+                    &roles,
+                    "explain",
+                    resource,
+                    principal_text(&r.principal),
+                )
+                .await;
+                if let Some(shown) = loaded
+                    .policy
+                    .exposed_honeytokens(&roles)
+                    .into_iter()
+                    .find(|d| d.name == resource)
+                {
+                    return Ok(Response::new(ExplainResponse {
+                        lines: vec![
+                            format!("You can reach `{resource}`."),
+                            format!("Principals you may use: {}.", shown.principals.join(", ")),
+                        ],
+                        full_trace: false,
+                        worker_connected: Some(true),
+                    }));
+                }
+            }
         }
+        let principal = if r.principal.is_empty() {
+            None
+        } else {
+            Some(Principal::parse(&r.principal, &r.database).map_err(Status::invalid_argument)?)
+        };
         let (lines, worker_connected) = explain(
             &self.0,
             &subject,

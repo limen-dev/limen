@@ -227,17 +227,30 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         .await
         .expect("explain")
         .into_inner();
-    let flat = |lines: &[String], name: &str| lines.join("\n").replace(name, "X");
+    // `ls` shows the decoy as reachable, so `explain` does too.
     assert_eq!(
-        flat(&explained_decoy.lines, "prod-backup-db"),
-        flat(&explained_nothing.lines, "no-such-db")
+        explained_decoy.lines,
+        [
+            "You can reach `prod-backup-db`.",
+            "Principals you may use: ubuntu."
+        ]
     );
-    assert_eq!(
-        explained_decoy.worker_connected,
-        explained_nothing.worker_connected
+    assert_eq!(explained_decoy.worker_connected, Some(true));
+    assert!(
+        explained_nothing.lines[0].contains("does not exist"),
+        "{:?}",
+        explained_nothing.lines
     );
+    // A malformed principal doesn't hide the touch.
+    let _ = access
+        .explain(ExplainRequest {
+            resource: "prod-backup-db".into(),
+            principal: "not a principal".into(),
+            ..Default::default()
+        })
+        .await;
     eventually(Duration::from_secs(15), "the other touches", || async {
-        events(&d, "detect.honeytoken").len() == 3
+        events(&d, "detect.honeytoken").len() == 4
     })
     .await;
     let actions: Vec<String> = events(&d, "detect.honeytoken")
@@ -258,5 +271,5 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
         })
         .await
         .expect("admin explain");
-    assert_eq!(events(&d, "detect.honeytoken").len(), 3);
+    assert_eq!(events(&d, "detect.honeytoken").len(), 4);
 }

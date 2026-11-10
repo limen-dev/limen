@@ -178,6 +178,12 @@ pub(crate) async fn handle(
                     tracing::error!(error = %e, "failed to audit a denied session");
                 }
             }
+            tracing::info!(user = %user.username, resource = %request.resource, login = %request.principal, reason = %denial.reason, "session refused");
+            // A policy refusal, not capacity or an outage: `explain` can say why.
+            let denied = denial.audit && denial.code.is_none();
+            let _ = respond(&mut tls, Err((denial.reason, denied))).await;
+            // After the answer, so a decoy's refusal isn't slower by one
+            // audit write than an unknown name's (ADR-0050).
             if denial.honeytoken {
                 report_honeytoken(
                     proxy,
@@ -189,10 +195,6 @@ pub(crate) async fn handle(
                 )
                 .await;
             }
-            tracing::info!(user = %user.username, resource = %request.resource, login = %request.principal, reason = %denial.reason, "session refused");
-            // A policy refusal, not capacity or an outage: `explain` can say why.
-            let denied = denial.audit && denial.code.is_none();
-            let _ = respond(&mut tls, Err((denial.reason, denied))).await;
         }
     }
 }

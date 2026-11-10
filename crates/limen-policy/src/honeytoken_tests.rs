@@ -193,14 +193,39 @@ fn a_decoy_must_be_visible_to_someone_and_plausible() {
     assert!(invalid_text(&[ROLES, &web]).contains("kind web"));
     let nobody = DECOY.replace("exposed_to: [bait]", "exposed_to: []");
     assert!(invalid_text(&[ROLES, &nobody]).contains("exposed_to"));
+    // A role that doesn't exist is a warning: refusing would tell whoever
+    // deletes a role which decoys it was exposed to.
     let unknown_role = DECOY.replace("exposed_to: [bait]", "exposed_to: [ghost]");
-    assert!(invalid_text(&[ROLES, &unknown_role]).contains("unknown role"));
+    let p = policy(&[ROLES, &unknown_role]).expect("valid");
+    assert!(p.warnings().iter().any(|w| w.contains("ghost")));
+    assert!(with_decoy().warnings().iter().all(|w| !w.contains("ghost")));
+    let db_name = DECOY.replace("principals:", "default_database: orders\n    principals:");
+    assert!(policy(&[ROLES, &db_name]).is_ok());
+    let ssh_db = db_name.replace("kind: postgres", "kind: ssh");
+    assert!(invalid_text(&[ROLES, &ssh_db]).contains("default_database"));
     let none = DECOY.replace("principals: [backup_admin, readonly]", "principals: []");
     assert!(invalid_text(&[ROLES, &none]).contains("principals"));
     let spaced = DECOY.replace("backup_admin", "'back up'");
     assert!(invalid_text(&[ROLES, &spaced]).contains("principal"));
     let many = DECOY.replace("[backup_admin, readonly]", "[a, b, c, d, e, f, g, h, i]");
     assert!(invalid_text(&[ROLES, &many]).contains("principals"));
+}
+
+#[test]
+fn a_decoys_principals_are_listed_as_a_real_resource_lists_them() {
+    let messy = DECOY.replace(
+        "[backup_admin, readonly]",
+        "[readonly, backup_admin, readonly]",
+    );
+    let p = policy(&[ROLES, &messy]).expect("valid");
+    let shown = p.exposed_honeytokens(&roles(&["bait"]));
+    assert_eq!(shown[0].principals, ["backup_admin", "readonly"]);
+    let tcp = DECOY.replace("kind: postgres", "kind: tcp");
+    let p = policy(&[ROLES, &tcp]).expect("valid");
+    assert_eq!(
+        p.exposed_honeytokens(&roles(&["bait"]))[0].principals,
+        ["access"]
+    );
 }
 
 #[test]

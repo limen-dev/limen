@@ -682,7 +682,18 @@ impl Policy {
                             .iter()
                             .map(|(k, v)| (k.to_owned(), v.to_owned()))
                             .collect(),
-                        principals: h.principals.clone(),
+                        // As a real resource lists them: sorted, once each, and
+                        // a TCP service has the one principal `access`.
+                        principals: if h.kind == ResourceKind::Tcp {
+                            vec!["access".to_owned()]
+                        } else {
+                            h.principals
+                                .iter()
+                                .cloned()
+                                .collect::<BTreeSet<_>>()
+                                .into_iter()
+                                .collect()
+                        },
                     })
             })
             .collect()
@@ -929,6 +940,15 @@ impl Policy {
     #[must_use]
     pub fn warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
+        for (name, decoy) in &self.honeytokens {
+            for role in decoy.spec.honeytoken.iter().flat_map(|h| &h.exposed_to) {
+                if !limen_core::identity::is_builtin_role(role) && !self.roles.contains_key(role) {
+                    out.push(format!(
+                        "resource {name}: honeytoken exposed to role {role:?}, which doesn't exist, so nobody sees it through that role"
+                    ));
+                }
+            }
+        }
         for role in self.roles.values() {
             let name = &role.metadata.name;
             if role.spec.is_shadow()
@@ -2025,28 +2045,16 @@ fn check_delegated(
     Ok(())
 }
 
-/// A decoy's name is free and the roles it is exposed to exist.
+/// A decoy's name is free. (Whether the roles it is exposed to exist is a
+/// warning, not an error: a refusal would tell whoever deletes a role which
+/// decoys it was exposed to.)
 fn check_honeytokens(policy: &Policy) -> Result<(), PolicyError> {
-    for (name, decoy) in &policy.honeytokens {
+    for name in policy.honeytokens.keys() {
         if policy.resources.contains_key(name) {
             return Err(PolicyError::Duplicate {
                 kind: "resource",
                 name: name.clone(),
             });
-        }
-        for role in decoy
-            .spec
-            .honeytoken
-            .iter()
-            .flat_map(|h| h.exposed_to.iter())
-        {
-            if !limen_core::identity::is_builtin_role(role) && !policy.roles.contains_key(role) {
-                return Err(invalid(
-                    "resource",
-                    name,
-                    format!("honeytoken.exposed_to names unknown role {role:?}"),
-                ));
-            }
         }
     }
     Ok(())
@@ -2097,6 +2105,24 @@ fn validate_honeytoken(resource: &ResourceDoc) -> Result<(), PolicyError> {
     }
     if h.exposed_to.iter().any(String::is_empty) {
         return Err(err("exposed_to can't hold an empty role name"));
+    }
+    let has_databases = matches!(
+        h.kind,
+        ResourceKind::Postgres
+            | ResourceKind::Mysql
+            | ResourceKind::Redshift
+            | ResourceKind::Mongodb
+    );
+    match &h.default_database {
+        Some(_) if !has_databases => {
+            return Err(err("default_database is for the database kinds only"));
+        }
+        Some(d) if d.is_empty() || d.len() > 128 || d.chars().any(char::is_control) => {
+            return Err(err(
+                "default_database must be 1 to 128 printable characters",
+            ));
+        }
+        _ => {}
     }
     Ok(())
 }

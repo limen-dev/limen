@@ -111,9 +111,10 @@ spec:
     kind: postgres               # what it pretends to be (not web)
     principals: [backup_admin]   # what `limen ls` shows (1 to 8)
     exposed_to: [developer]      # roles whose holders see it
+    default_database: orders     # postgres, mysql, redshift, mongodb only
 ```
 
-A decoy has no address, no `worker_selector` and no protocol section. `exposed_to` names existing roles. No role reaches a decoy, whatever its selectors say. Only people may write decoys: a bot writer can't set `honeytoken` in a resource or a profile. Add one only after every control plane, proxy and worker runs a version that knows the field.
+A decoy has no address, no `worker_selector` and no protocol section. `exposed_to` names the roles whose holders see it (a role that doesn't exist is a warning). No role reaches a decoy, whatever its selectors say. Only people may write decoys: a bot writer can't set `honeytoken` in a resource or a profile. Add one only after every control plane, proxy and worker runs a version that knows the field.
 
 ## `role_mapping`
 

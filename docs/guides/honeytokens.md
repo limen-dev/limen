@@ -17,10 +17,12 @@ spec:
     kind: postgres               # what it pretends to be
     principals: [backup_admin]   # the logins `limen ls` shows
     exposed_to: [developer]      # roles whose holders are shown it
+    default_database: orders     # database kinds only: see below
 ```
 
 - It has no address and no worker, so there is nothing to connect to. `kind: web` isn't offered, because a web app is reached by host name.
-- `exposed_to` names existing roles. A decoy nobody can see catches nothing, so it can't be empty.
+- `exposed_to` names the roles whose holders see it. A decoy nobody can see catches nothing, so it can't be empty. A role that doesn't exist is a warning at apply time, not an error, so deleting a role never says which decoys it was exposed to.
+- For `postgres`, `mysql`, `redshift` and `mongodb` decoys, set `default_database` as you would on a real resource. Without it `limen db connect` and `limen mongo connect` stop on the user's machine ("has no default database") before they reach the proxy, and the attempt is never seen. `principals` are shown sorted and once each, and a `tcp` decoy always shows `access`, as a real resource does.
 - Pick a name and labels that fit your estate, like the real ones next to it. The name `prod-backup-db` beside `orders-prod` is believable; `honeypot-1` is not.
 - Only people can create decoys. A bot writer can't set `honeytoken`, and can't read a decoy outside its namespace. Keep decoy names outside any writer's name patterns: a writer who picks the same name gets a "duplicate" error that gives it away.
 - **Upgrade every control plane, proxy and worker first.** An older component can't read the field, and an older control plane refuses `detect.honeytoken` along with the rest of the proxy's batch.
@@ -36,23 +38,23 @@ Using it is. Each of these is refused with the answer a name the person can't re
 | `limen ssh`, `limen db connect`, and the other session commands (SSH, databases, Redis, MongoDB, search, RabbitMQ, Kafka, TCP) | `access denied to <login>@<resource>` |
 | `kubectl` against the cluster | `access denied to <cluster>` |
 | `limen request <resource>` (and break-glass), which never creates a request | "there is nothing you can request that reaches …" |
-| `limen explain <resource>` for themselves | "No role you hold grants access to …, or it does not exist." |
+| `limen explain <resource>` for themselves | "You can reach …" with the listed principals, as `limen ls` implies |
 
 An admin running `limen explain --user` on someone else is not a touch.
 
 ## The alert
 
-Each touch writes one `detect.honeytoken` audit event beside the usual `auth.denied`:
+Each touch writes one `detect.honeytoken` audit event (at the proxy, beside the usual `auth.denied`; the control plane's `request`, `explain` and `console` touches write only this):
 
 | Field | Meaning |
 |---|---|
 | `user` | Who (a person, or `bot:<name>`) |
 | `data.resource` | The decoy's name |
-| `data.action` | `ssh`, `db`, `redis`, `mongo`, `search`, `mq`, `kafka`, `tcp`, `kube`, `request` or `explain` |
+| `data.action` | `ssh`, `db`, `redis`, `mongo`, `search`, `mq`, `kafka`, `tcp`, `kube`, `request`, `explain` or `console` (opening the decoy's page in the web console) |
 | `data.principal` | The login, role or user they tried, when the action names one |
-| `data.roles` | The roles on their certificate |
+| `data.roles` | The roles on their certificate (for `request`, the roles their groups map to) |
 | `data.client_addr` | Their address, where the proxy sees it (not for `request` and `explain`) |
-| `data.ci` | For a bot: the CI run (repository, workflow, commit) |
+| `data.bot`, `data.ci` | For a bot: `true`, and the CI run (repository, workflow, commit) |
 
 Where it goes: the S3 trail and Datadog like any event, and the [OCSF export](audit-ocsf.md) as a Base Event with severity High and status Failure. Ready-made rules:
 
@@ -66,4 +68,7 @@ If writing the event fails, the failure is logged and the refusal is unchanged. 
 - It doesn't lock anyone. Locking on first touch is [#109](https://github.com/limen-dev/limen/issues/109); this event is what that would act on.
 - It isn't a baseline or anomaly detector ([#107](https://github.com/limen-dev/limen/issues/107)).
 - A person who is shown a decoy and tries it out of curiosity raises the alarm too. Expose decoys to roles where that is rare, and tell people not to use resources they don't recognize.
-- The console doesn't show decoys at all, to anyone, and `limen policy who-can` treats a decoy's name as unknown.
+- The console's resource list never includes decoys; an admin sees them on the policy page as `honeytoken (<kind>)`. A user who opens a decoy's console page gets "no such resource" and that is a touch (`console`). `limen policy who-can` treats a decoy's name as unknown.
+- Some answers can still tell a decoy from a real resource, each only after the touch has been reported: a malformed Kafka request (or a database request with no database) to a decoy is refused as a denial where an unknown name gets a plain error; `limen explain` after the refusal repeats the contradiction with `ls`; and the CLI's automatic `explain` after a refusal writes a second event.
+- Mixed versions: a proxy that can't read the field keeps its last policy and then fails closed, and an older control plane refuses `detect.honeytoken`, so the proxy retries that batch. Upgrade everything before adding a decoy.
+- A discovered resource that was approved before a decoy took its name is skipped from then on: pick decoy names that no discovery matcher would produce.
