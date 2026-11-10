@@ -293,6 +293,17 @@ async fn a_name_change_and_an_unknown_person_are_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    // The self-test's name is reserved too (ADR-0051), in any letter case.
+    for name in ["selftest:probe", "SelfTest:Probe"] {
+        let (status, _) = scim(
+            &h,
+            "POST",
+            "/scim/v2/Users",
+            Some(json!({ "userName": name })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+    }
 }
 
 #[tokio::test]

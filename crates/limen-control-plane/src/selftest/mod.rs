@@ -389,7 +389,7 @@ pub async fn report(state: &AppState, id: Uuid) -> Result<(RunRow, Vec<u8>), Grp
 pub async fn publish_metrics(state: &AppState) {
     let Ok(rows) = sqlx::query(
         "SELECT status, extract(epoch FROM finished_at)::float8 AS at, passed, failed, skipped, report
-         FROM selftest_runs WHERE status IN ('passed', 'failed', 'error') ORDER BY started_at DESC LIMIT 1",
+         FROM selftest_runs WHERE status IN ('passed', 'failed', 'error', 'abandoned') ORDER BY started_at DESC LIMIT 1",
     )
     .fetch_all(&state.db)
     .await

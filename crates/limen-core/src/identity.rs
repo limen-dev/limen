@@ -48,6 +48,14 @@ pub fn is_selftest(username: &str) -> bool {
         .is_some_and(|p| p.eq_ignore_ascii_case(SELFTEST_PREFIX))
 }
 
+/// Names no person may sign in with: `bot:` (machine identities) and
+/// `selftest:` (the self-test). Every sign-in path refuses them with this one
+/// predicate.
+#[must_use]
+pub fn is_reserved(username: &str) -> bool {
+    is_bot(username) || is_selftest(username)
+}
+
 /// `user` or `bot`: the `actor_type` audit events carry, so people and
 /// automation can be told apart (and filtered) everywhere.
 #[must_use]
@@ -217,6 +225,12 @@ fn decode(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_person_may_sign_in_under_a_reserved_name() {
+        assert!(is_reserved("bot:x") && is_reserved("SelfTest:x"));
+        assert!(!is_reserved("alice@example.com"));
+    }
 
     #[test]
     fn the_self_test_namespace_is_reserved_in_any_case() {

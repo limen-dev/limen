@@ -11,7 +11,7 @@ A report that overstates what was tested is worse than none (ADR-0031, Risks). T
 ## Decision
 ### The test principal can never gain real access
 The self-test has no identity that any issuer will vouch for. This is enforced structurally, then tested:
-- **A reserved name.** Usernames starting with `selftest:` (compared ASCII case-insensitively) are reserved, like `bot:`. `limen_core::identity::is_selftest` is the one predicate. It is refused in four places, each with a test: the user CA (`issue_user`), the certificate verifier (`verify_user`, so a certificate that somehow carries the name is not an identity), OIDC login, and SCIM provisioning. No policy document names users, so policy needs no rule; a `role_mapping` maps IdP groups, not names.
+- **A reserved name.** Usernames starting with `selftest:` (compared ASCII case-insensitively) are reserved, like `bot:`. `limen_core::identity::is_selftest` is the one predicate. It is refused at six entry points: the user CA (`issue_user`), the certificate verifier (`verify_user`, so a certificate that somehow carries the name is not an identity), gRPC OIDC login, console sign-in, web-app sign-in, and SCIM provisioning. The three sign-in paths use one predicate, `limen_core::identity::is_reserved`; tests cover the CA, the verifier, the predicate, gRPC login and SCIM. Console and web-app sign-in are not exercised by a flow test (the repository has none for `bot:` there either). No policy document names users, so policy needs no rule; a `role_mapping` maps IdP groups, not names.
 - **No credential is ever minted for it.** Certificate checks use throwaway in-memory CAs created and dropped inside the run. The real user and internal CA keys sign nothing for the self-test, and nothing it produces is returned or stored except the verdict.
 - **No committed row.** The lock check inserts its probe row inside a transaction that is always rolled back, with a short statement timeout. Nothing is visible to other replicas, the console, or an evidence pack.
 - **No real resource.** Policy checks evaluate; they do not connect, issue a grant, or create a session.
@@ -47,7 +47,7 @@ The control plane signs the report with its own certificate, the same way it sig
 - **Bounded.** Each check has a timeout; the recording sample is at most five recordings and 128 MiB in all; the manifest tail is the last 20 batches per writer.
 
 ### Alerting
-- Metrics, published from the database by every replica so any one can serve them: `limen_selftest_last_run_timestamp_seconds`, `limen_selftest_last_run_ok` (1 passed, 0 failed or errored), `limen_selftest_checks{status}`, and `limen_selftest_check_ok{check}` (1 passed, 0 failed, NaN while skipped). An alert on staleness (no run for 2× the interval) and one on failure ship with the Grafana and Datadog assets.
+- Metrics, published from the database by every replica so any one can serve them: `limen_selftest_last_run_timestamp_seconds`, `limen_selftest_last_run_ok` (1 passed, 0 failed or errored), `limen_selftest_checks{status}`, and `limen_selftest_check_ok{check}` (1 passed, 0 failed, NaN while skipped). Prometheus rules for a failed run and for no run in two days ship in `deploy/prometheus/alerts.yml`. A Datadog monitor and a Grafana alert are not built.
 - A `selftest.run` event with `data.status` = `failed` or `error` is the audit-side signal for detections (issue #107).
 - A failing check is **not** an automatic lock or shutdown. It is a signal to a person; automatic action on a self-test result is issue #109's design to make.
 

@@ -23,7 +23,7 @@ Each check names the path it exercised and claims nothing wider. A check ends `p
 
 ## The test principal cannot gain access
 
-- Names starting with `selftest:` are reserved. The user CA will not issue a certificate for one, the verifier does not accept one, OIDC login and SCIM refuse them.
+- Names starting with `selftest:` are reserved. The user CA will not issue a certificate for one, the verifier does not accept one, every sign-in path (gRPC, console, web apps) and SCIM refuse them.
 - Certificate checks use throwaway CAs created and dropped inside the run. The real CA keys sign nothing for the test.
 - The lock check inserts its probe in a transaction that is always rolled back. No other replica, the console or an evidence pack ever sees it.
 - No check connects to a resource, issues a grant or starts a session.
@@ -61,7 +61,7 @@ Evidence packs (`limen admin evidence`) include a `controls` section listing the
 | `limen_selftest_checks{status}` | Checks by outcome in the last run |
 | `limen_selftest_check_ok{check}` | 1 passed, 0 failed, NaN while skipped or when the last run has no report |
 
-The Prometheus rules in `deploy/prometheus/alerts.yml` fire on a failed run and on no run for more than twice the interval. A run that could not finish (audit unavailable, no signing key) is an `error`, which counts as not OK. The audit event `selftest.run` carries `data.status` (`passed`, `failed`, `error`) for SIEM rules. A failing check does not lock anyone or stop anything; it is a signal to a person.
+The Prometheus rules in `deploy/prometheus/alerts.yml` fire on a failed run and on no run for more than twice the interval. A run that could not finish (audit unavailable, no signing key) is an `error`, and one whose control plane died is `abandoned`; both count as not OK. The audit event `selftest.run` carries `data.status` (`passed`, `failed`, `error`) for SIEM rules. A failing check does not lock anyone or stop anything; it is a signal to a person.
 
 ## Limits
 

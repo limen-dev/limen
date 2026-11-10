@@ -196,9 +196,7 @@ pub async fn login_callback(
             .await;
         }
     };
-    if limen_core::identity::is_bot(&identity.username)
-        || limen_core::identity::is_selftest(&identity.username)
-    {
+    if limen_core::identity::is_reserved(&identity.username) {
         return denied(
             &state,
             addr.0,

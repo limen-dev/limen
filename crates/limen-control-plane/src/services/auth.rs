@@ -307,7 +307,7 @@ async fn refuse_reserved_name(
     addr: Option<IpAddr>,
     username: &str,
 ) -> Result<(), Status> {
-    if limen_core::identity::is_bot(username) || limen_core::identity::is_selftest(username) {
+    if limen_core::identity::is_reserved(username) {
         return Err(deny(
             state.audit.clone(),
             addr,
