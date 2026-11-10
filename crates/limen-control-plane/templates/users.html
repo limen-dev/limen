@@ -36,7 +36,7 @@
       <td><div class="user-cell"><span class="avatar sm {{ u.av }}" aria-hidden="true">{{ u.initial }}</span><div><a class="cell-main" href="/console/users/{{ u.path }}">{{ u.name }}</a><div class="cell-sub" title="{{ u.issuer }}">{{ u.source }}</div></div></div></td>
       <td>{% if u.locked %}<span class="pill bad">disabled</span><div class="cell-sub" title="{{ u.lock_reason }}">by {{ u.disabled_by() }}</div>{% else %}<span class="pill ok">enabled</span>{% endif %}</td>
       <td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td>
-      <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td>
+      <td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div>{% if !u.pending.is_empty() %}<div class="cell-sub" title="Applies when they next sign in">next sign-in: {{ u.pending }}</div>{% endif %}</td>
       <td>{% if u.idp_tone.is_empty() %}<span class="cell-sub">{{ u.idp }}</span>{% else %}<span class="pill {{ u.idp_tone }}">{{ u.idp }}</span>{% endif %}</td>
       <td class="nowrap">{{ u.last_login }}<div class="cell-sub">{{ u.logins }} sign-in{% if u.logins != 1 %}s{% endif %}</div></td>
     </tr>

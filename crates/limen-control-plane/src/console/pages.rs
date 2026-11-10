@@ -1129,7 +1129,7 @@ pub async fn users(
             users: users
                 .iter()
                 .filter(|u| filter.admits(u, u.lock_reason.is_some()))
-                .map(UserView::from)
+                .map(|u| with_pending(&state, u))
                 .filter(&wanted)
                 .collect(),
             query,
@@ -1186,6 +1186,17 @@ fn user_chips(query: &str, f: &views::UserFilter) -> Vec<views::FilterChip> {
         .collect()
 }
 
+/// A user's view, with the access their IdP groups would change at the next
+/// sign-in (roles are fixed at sign-in, so it is shown, not applied).
+fn with_pending(state: &AppState, u: &store::UserRow) -> UserView {
+    let mut view = UserView::from(u);
+    let (gained, lost) = crate::idp_check::pending_roles(state, &u.roles, u.idp_groups.as_deref());
+    let mut parts: Vec<String> = gained.iter().map(|r| format!("+{r}")).collect();
+    parts.extend(lost.iter().map(|r| format!("\u{2212}{r}")));
+    view.pending = parts.join(" ");
+    view
+}
+
 fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
     UserView {
         name: name.to_owned(),
@@ -1211,6 +1222,7 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         issuer: String::new(),
         idp: "—".into(),
         idp_tone: "",
+        pending: String::new(),
     }
 }
 
@@ -1327,7 +1339,7 @@ pub async fn user_detail(
         Err(e) => return db_error("reading a user", &e),
     };
     let view = match row {
-        Some(row) => UserView::from(&row),
+        Some(row) => with_pending(&state, &row),
         None => {
             // A lock can name someone who never signed in.
             let locks = db::active_locks(&state.db).await.unwrap_or_default();

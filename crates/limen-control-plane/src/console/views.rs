@@ -558,6 +558,9 @@ pub struct UserView {
     pub idp: String,
     /// `ok`, `warn`, `bad` or empty: the pill's tone.
     pub idp_tone: &'static str,
+    /// Access the IdP's groups give or take away at the next sign-in, e.g.
+    /// "+ops −dba"; empty when nothing is pending.
+    pub pending: String,
 }
 
 impl UserView {
@@ -632,6 +635,7 @@ impl From<&UserRow> for UserView {
             issuer: issuer_host(u.issuer.as_deref()),
             idp: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").0,
             idp_tone: idp_check_text(&u.idp_status, u.idp_checked_at, u.actor_type == "bot").1,
+            pending: String::new(),
         }
     }
 }
@@ -1433,6 +1437,7 @@ mod user_filter_tests {
             issuer: None,
             idp_status: status.into(),
             idp_checked_at: None,
+            idp_groups: None,
         }
     }
 

@@ -197,6 +197,39 @@ pub async fn forget_login(db: &Db, login_id: &str) -> Result<(), sqlx::Error> {
     forget(db, login_id).await
 }
 
+/// Remember the groups the IdP reports for a person now, for the console to
+/// compare with what they had at their last sign-in.
+async fn note_groups(db: &Db, username: &str, groups: &[String]) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET idp_groups = $2, idp_groups_at = now()
+         WHERE lower(username) = lower($1) AND actor_type = 'user'",
+    )
+    .bind(username)
+    .bind(groups)
+    .execute(db)
+    .await
+    .map(|_| ())
+}
+
+/// Access the person's current groups would give or take away at their next
+/// sign-in, against the roles they had at their last: `(gained, lost)`.
+#[must_use]
+pub fn pending_roles(
+    state: &AppState,
+    roles_now: &[String],
+    idp_groups: Option<&[String]>,
+) -> (Vec<String>, Vec<String>) {
+    let Some(groups) = idp_groups else {
+        return (Vec::new(), Vec::new());
+    };
+    let will_have = roles_of(state, groups);
+    let have: BTreeSet<String> = roles_now.iter().cloned().collect();
+    (
+        will_have.difference(&have).cloned().collect(),
+        have.difference(&will_have).cloned().collect(),
+    )
+}
+
 /// Keep the refresh token the IdP just handed out in place of the one used.
 async fn store_rotated(db: &Db, login_id: &str, sealed: &[u8]) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE idp_logins SET refresh_token = $2 WHERE login_id = $1")
@@ -384,7 +417,7 @@ impl Idp {
 // ---- deciding -----------------------------------------------------------------
 
 /// The roles `groups` map to under the current policy.
-fn roles_of(state: &AppState, groups: &[String]) -> BTreeSet<String> {
+pub(crate) fn roles_of(state: &AppState, groups: &[String]) -> BTreeSet<String> {
     state
         .policy
         .current()
@@ -575,6 +608,9 @@ async fn check_one(state: &AppState, idp: &Idp, key: &[u8; 32], t: Tracked) {
                             return;
                         }
                         if !state.config.idp_ignore_groups {
+                            if let Err(e) = note_groups(&state.db, &t.username, &id.groups).await {
+                                tracing::warn!(error = %e, "recording the IdP's groups");
+                            }
                             let gone =
                                 lost(&roles_of(state, &t.groups), &roles_of(state, &id.groups));
                             if !gone.is_empty() {

@@ -96,6 +96,6 @@ Run `docker exec limen-dex-db psql -U dex -d dex -c 'select id, claims_email fro
 - **A refresh token is a credential that outlives the sign-in.** Anyone who can read the login request on the way to the control plane (a compromised proxy) or the database and the sealing key can redeem it at the IdP, and, through the device flow, which has no key binding, get Limen certificates until the token expires. Keep refresh token lifetimes short, and see the threat model (TB0, residual risk 11).
 
 - Reaction time is the check interval, not instant. For instant, lock the user.
-- Roles are still fixed at login; a *new* group applies at the next sign-in.
+- Roles are still fixed at login; a *new* group applies at the next sign-in. The IdP check sees the new group within one interval and the Users page shows it ("next sign-in: +ops", and "At next sign-in" on the user's page), so you can tell who needs to sign in again. Nothing is applied early: open sessions and certificates keep the roles they were issued with.
 - Bots and agents are not checked (they hold no refresh token).
 - SCIM and IdP event hooks are not built (ADR-0047, alternatives).

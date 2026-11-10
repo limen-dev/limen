@@ -422,6 +422,50 @@ async fn a_group_gained_and_lost_after_login_does_not_end_the_login() {
 
 const TWO_ROLES: &str = "kind: role\nversion: v1\nmetadata: { name: dev }\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n---\nkind: role\nversion: v1\nmetadata: { name: ops }\nspec:\n  allow:\n    - resources: { kind: [postgres] }\n      db: { roles: [limen_read] }\n---\nkind: role_mapping\nversion: v1\nmetadata: { name: m }\nspec:\n  - { idp_group: developers, roles: [dev] }\n  - { idp_group: sre, roles: [ops] }\n";
 
+/// A group gained after sign-in is seen at the next check and shown, but roles
+/// stay those of the login: nothing changes until the person signs in again.
+#[tokio::test]
+async fn a_gained_group_is_shown_but_not_applied_before_the_next_sign_in() {
+    let Some(h) = start(&[]).await else { return };
+    h.set_policy(&[("m.yaml", TWO_ROLES)]);
+    let (_, proxy) = h.enroll_proxy().await;
+    let refresh = h.idp.issue_refresh_token(ADMIN, &["developers"]);
+    let (_, cert) = h
+        .login_with_refresh(ADMIN, &["developers"], &refresh)
+        .await
+        .expect("login");
+
+    h.idp.set_groups(ADMIN, &["developers", "sre"]);
+    eventually("the new group to be seen", || async {
+        let seen: Option<Vec<String>> =
+            sqlx::query_scalar("SELECT idp_groups FROM users WHERE username = $1")
+                .bind(ADMIN)
+                .fetch_one(&h.state.db)
+                .await
+                .expect("row");
+        seen.is_some_and(|g| g.iter().any(|x| x == "sre"))
+    })
+    .await;
+    let (roles, groups): (Vec<String>, Vec<String>) =
+        sqlx::query_as("SELECT roles, groups FROM users WHERE username = $1")
+            .bind(ADMIN)
+            .fetch_one(&h.state.db)
+            .await
+            .expect("row");
+    assert_eq!(roles, ["dev"], "roles are those of the sign-in");
+    assert_eq!(groups, ["developers"]);
+    let seen = vec!["developers".to_owned(), "sre".to_owned()];
+    let (gained, lost) =
+        limen_control_plane::idp_check::pending_roles(&h.state, &roles, Some(&seen));
+    assert_eq!(gained, ["ops"]);
+    assert_eq!(lost.len(), 0);
+    assert!(alive(&h, &proxy, &cert).await, "the login is not disturbed");
+
+    // At the next sign-in it applies.
+    let (resp, _) = h.login(ADMIN, &["developers", "sre"]).await.expect("login");
+    assert_eq!(resp.roles, ["dev", "ops"]);
+}
+
 /// Onboarding is the IdP's: nobody is created in Limen, and the roles a person
 /// gets follow the groups the IdP puts in their ID token.
 #[tokio::test]

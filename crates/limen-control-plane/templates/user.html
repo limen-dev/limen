@@ -33,6 +33,7 @@
 {% endif %}
 <div class="card facts-card"><table class="facts">
   <tr><th>Roles</th><td><div class="chips">{% for r in u.role_list %}<span class="chip c{{ r.c }}">{{ r.text }}</span>{% endfor %}</div></td></tr>
+  {% if !u.pending.is_empty() %}<tr><th>At next sign-in</th><td>{{ u.pending }} <span class="cell-sub">Their IdP groups have changed. Roles are fixed at sign-in, so this applies when they sign in again.</span></td></tr>{% endif %}
   <tr><th>IdP groups</th><td><div class="chips">{% for g in u.group_list %}<span class="chip c{{ g.c }}">{{ g.text }}</span>{% endfor %}</div></td></tr>
   <tr><th>Source</th><td>{{ u.source }}{% if !u.issuer.is_empty() %} · {{ u.issuer }}{% endif %}</td></tr>
   <tr><th>IdP check</th><td>{{ u.idp }}</td></tr>
