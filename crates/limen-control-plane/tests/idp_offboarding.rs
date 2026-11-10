@@ -390,7 +390,7 @@ async fn a_person_inherits_the_roles_of_their_idp_groups_without_any_setup() {
 
 // ---- purge and delete (ADR-0047) -------------------------------------------------
 
-async fn person(h: &Harness, name: &str, locked_by: Option<&str>, days: i64) {
+async fn person(h: &Harness, name: &str, locked_by: Option<&str>, days: i32) {
     sqlx::query("INSERT INTO users (username, subject) VALUES ($1, $1)")
         .bind(name)
         .execute(&h.state.db)
@@ -408,7 +408,7 @@ async fn person(h: &Harness, name: &str, locked_by: Option<&str>, days: i64) {
             .expect("lock");
         sqlx::query("UPDATE user_locks SET locked_at = now() - make_interval(days => $2) WHERE username = $1")
             .bind(name)
-            .bind(days as i32)
+            .bind(days)
             .execute(&h.state.db)
             .await
             .expect("backdate");
@@ -433,8 +433,10 @@ async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
     person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
     person(&h, "enabled@example.com", None, 0).await;
 
-    let deleted = limen_control_plane::idp_check::purge_disabled(&h.state).await;
-    assert_eq!(deleted, 1);
+    assert_eq!(
+        limen_control_plane::idp_check::purge_disabled(&h.state).await,
+        1
+    );
     assert!(!exists(&h, "old.idp@example.com").await);
     assert!(exists(&h, "recent.idp@example.com").await, "89 days: kept");
     assert!(
