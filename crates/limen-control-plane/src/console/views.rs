@@ -558,6 +558,9 @@ pub struct UserView {
     pub locked_by: String,
     pub locked_at: String,
     pub is_bot: bool,
+    /// False for a name that only appears in the audit trail (such as `system:idp-check`):
+    /// there is no account to disable and no roles to show.
+    pub manageable: bool,
     pub ci: Vec<Fact>,
     pub run_url: Option<String>,
     /// Where the account came from, in words ("IdP sign-in", "CI bot").
@@ -648,6 +651,7 @@ impl From<&UserRow> for UserView {
             locked_by: u.locked_by.clone().unwrap_or_default(),
             locked_at: time_text(u.locked_at),
             is_bot: u.actor_type == "bot",
+            manageable: true,
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
             source: match u.source.as_str() {

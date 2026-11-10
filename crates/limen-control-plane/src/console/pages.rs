@@ -1219,6 +1219,7 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         locked_by: l.locked_by.clone(),
         locked_at: time_text(Some(l.locked_at)),
         is_bot: limen_core::identity::is_bot(name),
+        manageable: true,
         ci: Vec::new(),
         run_url: None,
         source: "never signed in".into(),
@@ -1255,6 +1256,7 @@ fn policy_bot_view(name: &str, roles: &[String]) -> UserView {
         locked_by: String::new(),
         locked_at: String::new(),
         is_bot: true,
+        manageable: true,
         ci: Vec::new(),
         run_url: None,
         source: "CI bot, defined in policy".into(),
@@ -1262,6 +1264,18 @@ fn policy_bot_view(name: &str, roles: &[String]) -> UserView {
         idp: "not applicable".into(),
         idp_tone: "",
         pending: String::new(),
+    }
+}
+
+/// A name that appears in the audit trail but is neither an account nor a policy bot,
+/// such as the actor the IdP check or SCIM records. Its page shows the activity only.
+fn audit_only_view(name: &str) -> UserView {
+    UserView {
+        manageable: false,
+        is_bot: false,
+        source: "Not an account: it only appears in the audit trail".into(),
+        idp: "not applicable".into(),
+        ..policy_bot_view(name, &[])
     }
 }
 
@@ -1389,11 +1403,21 @@ pub async fn user_detail(
                 // A bot in policy that has not logged in yet: the Bots page links here.
                 (None, Some(b)) => policy_bot_view(&name, &b.spec.roles),
                 (None, None) => {
-                    return error_page(
-                        StatusCode::NOT_FOUND,
-                        "Not found",
-                        "There is no such user.",
-                    );
+                    let named = store::EventFilter {
+                        username: Some(name.clone()),
+                        ..store::EventFilter::default()
+                    };
+                    match store::list_events(&state.db, &named, 1, 0).await {
+                        Ok(rows) if !rows.is_empty() => audit_only_view(&name),
+                        Ok(_) => {
+                            return error_page(
+                                StatusCode::NOT_FOUND,
+                                "Not found",
+                                "There is no such user.",
+                            );
+                        }
+                        Err(e) => return db_error("reading a user's activity", &e),
+                    }
                 }
             }
         }
