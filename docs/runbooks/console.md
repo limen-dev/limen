@@ -39,7 +39,7 @@ The Resources page shows whether something is reachable. A red "none" in the Wor
 
 ## Checking phones and other browsers
 
-After changing `crates/limen-control-plane/src/console/assets/` or `templates/`, run `deploy/compose/scripts/console-matrix.mjs`. It signs in through the identity provider, opens every page (and each list's first detail page) in each engine and size, and reports sideways scrolling, JavaScript errors, axe-core violations (WCAG 2.1 AA) and touch targets under 32px. Run it in both themes.
+After changing `crates/limen-control-plane/assets/` or `templates/`, run `deploy/compose/scripts/console-matrix.mjs`. It signs in through the identity provider, opens every page (and each list's first detail page) in each engine and size, and reports sideways scrolling, JavaScript errors, axe-core violations (WCAG 2.1 AA) and touch targets under 32px. Run it in both themes.
 
 ```sh
 mkdir /tmp/matrix && cd /tmp/matrix && npm init -y && npm i playwright-core axe-core

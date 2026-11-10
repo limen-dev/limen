@@ -223,6 +223,15 @@ async function check() {
     { engine: 'webkit', name: 'webkit-ipad', ctx: devices['iPad (gen 7)'], mobile: true },
     { engine: 'firefox', name: 'firefox-desktop-1440', ctx: desktop(1440, 900) },
     { engine: 'firefox', name: 'firefox-360', ctx: { viewport: { width: 360, height: 740 }, hasTouch: false }, mobile: true },
+    // A browser window dragged to any width: both sides of the 900px breakpoint, a small laptop, a
+    // wide monitor and a short window. Touch profiles (<= 480px) keep the 44px target bar.
+    ...[320, 480, 600, 768, 899, 901, 1280, 1920].flatMap((w) => [
+      { engine: 'chromium', name: `chromium-w${w}`, ctx: { viewport: { width: w, height: 800 }, hasTouch: w <= 480 }, mobile: w <= 480 },
+    ]),
+    { engine: 'chromium', name: 'chromium-1280x600', ctx: desktop(1280, 600) },
+    { engine: 'webkit', name: 'webkit-w320', ctx: { viewport: { width: 320, height: 640 }, hasTouch: true }, mobile: true },
+    { engine: 'webkit', name: 'webkit-w768', ctx: desktop(768, 900) },
+    { engine: 'webkit', name: 'webkit-w1024', ctx: desktop(1024, 768) },
   ].filter((p) => wanted.includes(p.engine));
 
   const server = await serve(dir);
