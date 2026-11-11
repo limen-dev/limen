@@ -193,7 +193,6 @@ fn reload_once(
     key_file: &Path,
 ) -> anyhow::Result<Option<i64>> {
     let (loaded, not_after) = load(cert_file, key_file)?;
-    record_expiry(not_after);
     // Swapping one lapsed certificate for another helps nobody; keep what is serving.
     anyhow::ensure!(
         not_after > now(),
@@ -206,6 +205,9 @@ fn reload_once(
         return Ok(None);
     }
     public.set(Arc::new(loaded));
+    // The gauge describes the certificate that is serving, so it moves only with the swap: a
+    // refused file must not make a good certificate look expired.
+    record_expiry(not_after);
     Ok(Some(not_after))
 }
 

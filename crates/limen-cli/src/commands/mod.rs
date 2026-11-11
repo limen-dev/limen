@@ -115,7 +115,7 @@ pub fn status(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
     anstream::println!(
         "{}",
         ui::key_values(&[
-            ("Proxy", profile.meta.proxy.clone()),
+            ("Server", profile.meta.proxy.clone()),
             ("User", ui::bold(&profile.meta.username)),
             ("Roles", roles.join(", ")),
             ("Expires", ui::expiry(remaining)),

@@ -32,8 +32,10 @@ pub fn normalize_server(input: &str) -> anyhow::Result<String> {
         match s.matches(':').count() {
             0 => format!("{s}:{DEFAULT_PORT}"),
             1 => s.to_owned(),
-            // An IPv6 address without brackets can't carry a port.
-            _ => format!("[{s}]:{DEFAULT_PORT}"),
+            // An IPv6 address without brackets can't carry a port. Anything else with two
+            // colons ("host:443:x") is a typo, not an address.
+            _ if s.parse::<std::net::Ipv6Addr>().is_ok() => format!("[{s}]:{DEFAULT_PORT}"),
+            _ => bail!("{input:?} is not a server name; use limen.example.com or host:port"),
         }
     };
     server_name(&with_port)?;
@@ -197,6 +199,7 @@ mod tests {
             "user@host",
             "https://h/path",
             ":443",
+            "host:443:x",
         ] {
             assert!(super::normalize_server(bad).is_err(), "{bad}");
         }

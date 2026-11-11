@@ -101,6 +101,10 @@ proxyDefaults:
   controlPlaneAddr: ""
   # -- Secret with this group's join token. Empty uses existingSecrets.proxyJoin.
   joinSecret: ""
+  # -- Name of a `kubernetes.io/tls` Secret (keys tls.crt and tls.key) holding a certificate from
+  # a public CA, which the CLI and browsers then see instead of the internal one, so users need no
+  # CA file (ADR-0043). Empty: users keep needing the internal CA. Upgrade workers first.
+  publicCertSecret: ""
   service:
     # -- Service type.
     type: LoadBalancer

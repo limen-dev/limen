@@ -102,6 +102,7 @@ Users should not need a CA file. Give each proxy a certificate from a public CA 
 
 Either flag needs the other. Without them nothing changes.
 
+- **Helm.** Set `proxies.<key>.publicCertSecret` to a `kubernetes.io/tls` Secret (keys `tls.crt` and `tls.key`; cert-manager writes this shape). The chart mounts it and sets both flags for that group. Renewal updates the mounted files and the proxy picks them up within a minute.
 - **Terminate TLS at the proxy, not at a load balancer.** Users present client certificates, so the load balancer must pass TCP through; an ACM certificate attached to a load balancer will not work.
 - **Names.** The certificate must cover the name users type, and the console and web app hosts (a wildcard such as `*.apps.example.com` for apps).
 - **Who sees which certificate.** The CLI and browsers get the public one. Workers and peer proxies keep getting the one the internal CA issued, and still pin the internal CA, so they need nothing. Upgrade workers before you switch this on: a worker from before ADR-0043 cannot be told from the CLI.
@@ -112,6 +113,6 @@ Either flag needs the other. Without them nothing changes.
 
 ## Not covered yet
 
-- **Provisioning the proxy's public TLS certificate.** The proxy takes a PEM chain and key from a public CA (`--public-cert-file`, `--public-key-file`; [ADR-0043](../adr/0043-public-proxy-certificate.md)), but nothing here issues or mounts one yet. Until you do, the CLI and browsers need the internal CA (`limen login --ca-file`). See [the public certificate](#the-proxys-public-certificate) below for what to mount and how it renews.
+- **Provisioning the proxy's public TLS certificate.** The proxy takes a PEM chain and key from a public CA (`--public-cert-file`, `--public-key-file`; [ADR-0043](../adr/0043-public-proxy-certificate.md)), but only the Helm chart can mount one so far (`proxies.<key>.publicCertSecret`); the ECS/EC2 Terraform example and the plain Kubernetes manifests do not, and nothing issues the certificate. Until one is mounted, the CLI and browsers need the internal CA (`limen login --ca-file`). See [the public certificate](#the-proxys-public-certificate) below for what to mount and how it renews.
 - **Audit durability of control planes on ECS and EC2.** They run with `spool_mode = "ephemeral"`, because neither keeps its disk: a replica that dies before it hands over its spool loses the events not yet in S3 (up to `LIMEN_AUDIT_S3_FLUSH`, 60 s by default). The verifier reports them as gaps. For no loss, use the Kubernetes chart, whose StatefulSet keeps a volume (`durable`). See [running Limen at scale](scale-out.md).
 - **First admin.** Set `LIMEN_BOOTSTRAP_ADMIN_GROUPS` (extra environment) so the first admin can log in and apply policy. The [Okta guide](okta.md) shows the identity provider side.
