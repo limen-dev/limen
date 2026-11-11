@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Policy replay demo (ADR-0049): recorded sessions replayed through a policy
+# Policy replay demo (ADR-0050): recorded sessions replayed through a policy
 # change. Sessions are written into a real control plane's database, then a
 # dry-run apply with a replay window says which would have been refused: the
 # person and the bot lose production SSH; replaying the policy against itself

@@ -1,4 +1,4 @@
-//! Replay of recorded sessions (ADR-0049).
+//! Replay of recorded sessions (ADR-0050).
 
 use std::collections::BTreeSet;
 

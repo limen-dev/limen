@@ -1,4 +1,4 @@
-//! Replay recorded sessions against a proposed policy (ADR-0049).
+//! Replay recorded sessions against a proposed policy (ADR-0050).
 //!
 //! Reads the `sessions` projection, `users` and `access_grants`, turns each
 //! group of sessions into a [`ReplayRecord`] and hands them to

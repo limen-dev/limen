@@ -1,4 +1,4 @@
-//! Replay recorded sessions against a policy change (ADR-0049).
+//! Replay recorded sessions against a policy change (ADR-0050).
 //!
 //! The same decision code as enforcement: every record is turned into an
 //! [`AccessRequest`] and answered by [`Policy::evaluate_eligible`] under the
@@ -91,7 +91,7 @@ pub struct Affected {
     /// What the proposed policy says instead of "allowed".
     pub now: Outcome,
     /// The resource's labels changed inside the window, so the answer rests
-    /// on today's labels (ADR-0049, option A).
+    /// on today's labels (ADR-0050, option A).
     pub labels_changed: bool,
 }
 

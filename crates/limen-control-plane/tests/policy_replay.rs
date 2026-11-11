@@ -1,4 +1,4 @@
-//! Replay of recorded sessions against a policy change (ADR-0049). Set
+//! Replay of recorded sessions against a policy change (ADR-0050). Set
 //! `LIMEN_TEST_DATABASE_URL` to run them.
 
 mod common;

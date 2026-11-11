@@ -61,7 +61,7 @@ limen policy diff active --new policy/ --fail-on-widening
 
 The diff compares *effective access*, not YAML: "group `sre` gains ssh access to `web-prod` as ubuntu", "role `deployer` loses ...", "group `developers` gains ... (after a request is approved)". `--fail-on-widening` exits non-zero when anyone gains **standing** access, so CI can ask for a closer look. `limen admin apply` and the console print the same lines.
 
-### Replay recorded sessions (ADR-0049)
+### Replay recorded sessions (ADR-0050)
 
 ```sh
 limen policy diff active --new policy/ --replay          # last 30 days

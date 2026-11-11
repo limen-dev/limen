@@ -1238,7 +1238,7 @@ async fn console_end_to_end() {
         !after.body.contains("metadata: { name: extra }") && !after.body.contains("name: extra"),
         "a preview saves nothing"
     );
-    // The same preview, replayed against recorded sessions (ADR-0049).
+    // The same preview, replayed against recorded sessions (ADR-0050).
     let page = admin_user
         .post(
             "/console/policy/documents/preview",
