@@ -658,3 +658,6 @@ details.start > summary::before { display: none; }
 
 /* The disable box and the facts card under it don't touch. */
 .danger-zone + .card { margin-top: 14px; }
+
+/* A button after labelled fields lines up with the inputs, not with the label-and-input block. */
+.row > label ~ button, .row > label ~ .button { align-self: flex-end; }
