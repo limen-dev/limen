@@ -661,3 +661,38 @@ details.start > summary::before { display: none; }
 
 /* A button after labelled fields lines up with the inputs, not with the label-and-input block. */
 .row > label ~ button, .row > label ~ .button { align-self: flex-end; }
+
+/* The signed-in name is an inline span: give it a width so a long address ends in an ellipsis
+   instead of running under the sign-out button. */
+.me-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+
+/* A role chip in a table stays on one line; the table scrolls if it has to. */
+table:not(.facts) td .chip { white-space: nowrap; overflow-wrap: normal; }
+
+/* A link inside a notice is a real target, and a button in it sits at the end. */
+.notice a { display: inline-block; padding: 3px 2px; }
+.notice .button { margin-left: auto; padding: 6px 12px; flex: none; }
+form.stack label.check { min-height: 24px; padding-block: 2px; }
+
+.stats + .hint + .progress.wide, .stats + .progress.wide { margin-top: 14px; }
+@media (pointer: coarse) { .notice a:not(.button) { padding-block: 13px; } }
+
+/* A warning notice is amber all through, not a green box with an orange edge. */
+.notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
+/* Workers on a phone: one card per component, with each value labelled, so Revoke is on the screen
+   instead of past the right edge of a table. */
+@media (max-width: 600px) {
+  table.workers, table.workers tbody, table.workers tr, table.workers td { display: block; }
+  table.workers thead { display: none; }
+  table.workers tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  table.workers tr:last-child { border-bottom: 0; }
+  table.workers td { padding: 4px 0; border: 0; text-align: left; }
+  table.workers td[data-label] { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  table.workers td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  table.workers td.num { text-align: left; }
+  table.workers td.actions { padding-top: 10px; white-space: normal; }
+  table.workers td.actions form.inline { flex-wrap: wrap; gap: 8px; }
+  table.workers td.actions form.inline input[type=text] { flex: 1 1 140px; width: auto; }
+}
+@media (max-width: 600px) { table.workers td[data-label="Labels"]:has(> .chips:empty) { display: none; } }
