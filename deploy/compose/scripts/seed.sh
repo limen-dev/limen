@@ -6,7 +6,13 @@
 seed_db() {
   wait_for "postgres-target" "${compose[@]}" exec -T postgres-target pg_isready -U postgres
   wait_for "mysql-target" "${compose[@]}" exec -T mysql-target mysqladmin ping -h 127.0.0.1 -uroot -pmysql-target-dev-only --silent
-  "${compose[@]}" run --rm db-bootstrap --db-bootstrap-once >/dev/null 2>&1 || fail "db bootstrap failed"
+  # A throwaway volume over the worker data dir: the bootstrap is a one-shot, so a saved identity
+  # only goes stale (worker certificates last 24 hours) and fails the next day's run.
+  local out
+  out="$("${compose[@]}" run --rm -v /var/lib/limen/worker db-bootstrap --db-bootstrap-once 2>&1)" || {
+    printf '%s\n' "$out" | tail -n 20 >&2
+    fail "db bootstrap failed (its output is above)"
+  }
 }
 
 seed_redis() {
