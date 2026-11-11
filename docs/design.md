@@ -90,7 +90,7 @@ The proxy still owns session start and end and the authorization decision.
 
 - **One public endpoint.** An NLB on TCP 443 passes traffic straight through to the proxies. Proxies route by TLS ALPN (`limen-tunnel/1`, `limen-peer/1`, `limen-db/1`, `limen-redis/1`, `limen-search/1`, `limen-ssh/1`, `h2` and `http/1.1`). HTTP traffic is then routed by path: `/v1/...` is the CLI API, which is relayed to the control plane, and `/k8s/<cluster>/...` is the Kubernetes API. Path routing for kube avoids wildcard certificates. kubectl supports a server URL with a path prefix.
 - The **control plane is private**. Only proxies (and admins over a bastion or VPN) reach it. Workers and the CLI talk to it through the proxy. The proxy **forwards the client's verified certificate** and the control plane **verifies it again** itself. That way a compromised proxy can't make up identities. The residual risk is replaying a cert it observed, which is bounded by the cert's TTL (1 hour by default, shorter per role; see the threat model).
-- **The proxy's public certificate** is publicly trusted. Options are ACM exportable public certificates or an operator-supplied cert in Secrets Manager; *this is an assumption to verify in Phase 15*. In dev, the CLI is pointed at the Limen CA with `--ca-file`. Every other TLS hop uses the Limen internal CA with mTLS.
+- **The proxy's public certificate** is publicly trusted and operator-supplied (`--public-cert-file`, `--public-key-file`; for example from Secrets Manager, or an exported ACM certificate), as decided in [ADR-0043](adr/0043-public-proxy-certificate.md). The proxy shows it to the CLI and browsers and keeps showing the internal CA's certificate to workers and peer proxies, chosen by ALPN. With none pinned the CLI verifies it against the system trust store, so users pass no CA. In dev the certificate comes from the internal CA and the CLI is pointed at it with `--ca-file`. Every other TLS hop uses the Limen internal CA with mTLS.
 - **Workers need egress only**, to the proxy NLB on port 443. They don't need any route to the control plane, S3, or Datadog. Audit data and recordings go through the proxy to the control plane.
 
 ## 4. Identity and credentials (ADR-0006, ADR-0007)
@@ -410,7 +410,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
   - Offboarding (ADR-0047, #111): refresh token issuance, `invalid_grant` for a deactivated user, and groups in refreshed ID tokens are tested against Dex (PostgreSQL storage; `demos/demo-idp-offboarding.sh`) and a stand-in IdP; verify against Okta with #64.
   - OCSF export (ADR-0049): tested against SeaweedFS only. No SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema.
   - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
-- **Deferred to Phase 15:** the IAM join method for components; verifying the ACM exportable public certificate for the proxy listener (the fallback is an operator-supplied cert).
+- **Deferred to Phase 15:** the IAM join method for components; verifying an exported ACM certificate as the source of the proxy's public certificate (ADR-0043 takes operator-supplied files; ACM export is one way to make them).
 - **Deferred and not yet scheduled in §13:**
   - Port forwarding through Limen (from Phase 2).
   - Phase 6: listed in the [databases guide](guides/databases.md#limits).
