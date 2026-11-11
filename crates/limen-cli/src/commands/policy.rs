@@ -73,6 +73,7 @@ pub enum PolicyCommand {
             long,
             value_name = "DAYS",
             num_args = 0..=1,
+            require_equals = true,
             default_missing_value = "30",
             value_parser = clap::value_parser!(u32).range(1..=30)
         )]
@@ -404,21 +405,20 @@ async fn diff(
         bail!("standing access widens (--fail-on-widening)");
     }
     if let (Some((_, true)), Some(r)) = (replay, &replayed) {
-        // An incomplete replay is not an all-clear for a CI gate.
-        if r.affected_sessions == 0 && (r.truncated || (r.examined == 0 && r.skipped_total() > 0)) {
+        if r.affected_sessions > 0 {
+            bail!(
+                "{} recorded sessions would have been refused (--fail-on-affected)",
+                r.affected_sessions
+            );
+        }
+        // An incomplete replay is not an all-clear for a CI gate: partial, or
+        // most of the recorded sessions could not be replayed.
+        if r.truncated || r.skipped_total() > r.examined {
             bail!(
                 "the replay was incomplete ({}); it cannot show that nothing would be refused (--fail-on-affected)",
                 r.headline()
             );
         }
-    }
-    if let (Some((_, true)), Some(r)) = (replay, &replayed)
-        && r.affected_sessions > 0
-    {
-        bail!(
-            "{} recorded sessions would have been refused (--fail-on-affected)",
-            r.affected_sessions
-        );
     }
     Ok(())
 }

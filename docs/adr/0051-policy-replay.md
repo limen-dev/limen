@@ -48,6 +48,7 @@ Differences from, and additions to, the decisions above:
 - **Bounds.** 30-day window, 20,000 groups (newest kept, `truncated` set), `SET LOCAL statement_timeout = '10s'` on the scan, and at most 500 affected rows in the answer (`affected_omitted` carries the rest; totals stay exact).
 - **Audit.** `policy.replay` has three phases: `start` (before any read, fail closed), `done` (counts, best effort) and `failed` (when a run errors after it started).
 - **No false all-clear.** `--fail-on-affected` also fails when the replay was truncated, or when nothing could be replayed but sessions were skipped. Session rows without a user or resource are counted as skipped.
+- **Incomplete gate, refined.** `--fail-on-affected` also fails when more sessions were skipped than replayed. `--replay` takes its days as `--replay=N` (a bare `--replay` means 30), so it cannot swallow the `active` argument. The who-count covers every affected group, not only the 500 listed.
 - **Output hygiene.** Terminal and Markdown output strip control and bidi characters and escape Markdown and mention characters; the console relies on template autoescaping.
 - **Known limits.** The CLI replay uses the default policy source only. Access-review denies are not replayed. Roles use the latest login's groups. Sessions before migration 0030 have no recorded database and are skipped.
 - **Numbering.** Migration is 0030 and this ADR is 0051 after rebasing onto upstream.

@@ -464,6 +464,36 @@ fn a_huge_answer_is_cut_to_the_largest_groups_with_the_totals_intact() {
     assert_eq!(report.affected_sessions, (1..=600).sum::<u64>());
     assert_eq!(report.affected[0].sessions, 600, "largest first");
     assert!(report.render_text().contains("100 more groups"));
+    // The who-count covers the omitted groups too.
+    assert_eq!(report.affected_people, 600);
+    assert!(
+        report.headline().contains("600 people"),
+        "{}",
+        report.headline()
+    );
+}
+
+#[test]
+fn a_rule_name_cannot_break_out_of_its_code_span_or_line() {
+    let mut report = crate::replay::ReplayReport::default();
+    report.shadow.push(crate::replay::ShadowHit {
+        rule: "r/x`\n@team \u{202e}evil".into(),
+        sessions: 1,
+    });
+    let md = report.render_markdown();
+    let line = md
+        .lines()
+        .find(|l| l.contains("shadow rule"))
+        .expect("a shadow line");
+    assert!(
+        !line.contains('\u{202e}') && !line.contains('\n'),
+        "{line:?}"
+    );
+    assert_eq!(line.matches('`').count(), 2, "{line}");
+    assert!(
+        line.contains("1 session\n") || line.ends_with("1 session"),
+        "{line}"
+    );
 }
 
 #[test]

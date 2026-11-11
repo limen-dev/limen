@@ -118,6 +118,12 @@ pub struct ReplayReport {
     /// Affected groups left out of `affected` to bound the answer.
     #[serde(default)]
     pub affected_omitted: u64,
+    /// People and bots with an affected session, counted over every
+    /// affected group (not only the listed ones).
+    #[serde(default)]
+    pub affected_people: u64,
+    #[serde(default)]
+    pub affected_bots: u64,
     pub shadow: Vec<ShadowHit>,
     /// Sessions that could not be replayed, by reason.
     pub skipped: BTreeMap<String, u64>,
@@ -129,6 +135,12 @@ impl ReplayReport {
     /// People and bots with at least one affected session.
     #[must_use]
     pub fn affected_users(&self) -> (usize, usize) {
+        if self.affected_people + self.affected_bots > 0 {
+            return (
+                usize::try_from(self.affected_people).unwrap_or(usize::MAX),
+                usize::try_from(self.affected_bots).unwrap_or(usize::MAX),
+            );
+        }
         let people: BTreeSet<&str> = self
             .affected
             .iter()
@@ -219,19 +231,25 @@ impl ReplayReport {
         }
         for s in &self.shadow {
             out.push(format!(
-                "  shadow rule {} would have fired for {} sessions",
+                "  shadow rule {} would have fired for {} {}",
                 plain(&s.rule),
-                s.sessions
+                s.sessions,
+                plural(s.sessions, "session", "sessions")
             ));
         }
         if self.already_refused > 0 {
             out.push(format!(
-                "{} sessions are refused by the active policy today already (groups or roles changed since): not caused by this change.",
-                self.already_refused
+                "{} {} refused by the active policy today already (groups or roles changed since): not caused by this change.",
+                self.already_refused,
+                plural(self.already_refused, "session is", "sessions are")
             ));
         }
         for (reason, n) in &self.skipped {
-            out.push(format!("{n} sessions not replayed: {reason}"));
+            out.push(format!(
+                "{n} {} not replayed: {}",
+                plural(*n, "session", "sessions"),
+                plain(reason)
+            ));
         }
         out.push(CAVEAT.into());
         out.join("\n")
@@ -275,20 +293,27 @@ impl ReplayReport {
         for s in &self.shadow {
             let _ = writeln!(
                 out,
-                "- shadow rule `{}` would have fired for {} sessions",
-                s.rule.replace('`', "'"),
-                s.sessions
+                "- shadow rule `{}` would have fired for {} {}",
+                code(&s.rule),
+                s.sessions,
+                plural(s.sessions, "session", "sessions")
             );
         }
         if self.already_refused > 0 {
             let _ = writeln!(
                 out,
-                "- {} sessions are already refused by the active policy (not caused by this change)",
-                self.already_refused
+                "- {} {} already refused by the active policy (not caused by this change)",
+                self.already_refused,
+                plural(self.already_refused, "session is", "sessions are")
             );
         }
         for (reason, n) in &self.skipped {
-            let _ = writeln!(out, "- {n} sessions not replayed: {}", md(reason));
+            let _ = writeln!(
+                out,
+                "- {n} {} not replayed: {}",
+                plural(*n, "session", "sessions"),
+                md(reason)
+            );
         }
         let _ = writeln!(out, "\n_{CAVEAT}_");
         out
@@ -323,6 +348,17 @@ fn md(text: &str) -> String {
             }
             c if c.is_control() || is_bidi(c) => " ".to_owned(),
             c => c.to_string(),
+        })
+        .collect()
+}
+
+/// Text for an inline code span: no backticks, controls or bidi characters.
+fn code(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '`' => '\'',
+            c if c.is_control() || is_bidi(c) => ' ',
+            c => c,
         })
         .collect()
 }
@@ -485,6 +521,18 @@ impl Policy {
                 labels_changed: relabeled.contains(&record.resource),
             });
         }
+        let count = |bot: bool| {
+            report
+                .affected
+                .iter()
+                .filter(|a| a.bot == bot)
+                .map(|a| a.user.as_str())
+                .collect::<BTreeSet<_>>()
+                .len() as u64
+        };
+        let (people, bots) = (count(false), count(true));
+        report.affected_people = people;
+        report.affected_bots = bots;
         report.affected.sort_by(|a, b| {
             b.sessions
                 .cmp(&a.sessions)

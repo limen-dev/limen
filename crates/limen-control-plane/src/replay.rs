@@ -135,15 +135,25 @@ async fn run(
     };
     // Rows without a user or a resource (a session.end that arrived first,
     // say) can't be replayed; they are counted, not dropped.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| internal("reading sessions to replay", e))?;
+    sqlx::query("SET LOCAL statement_timeout = '10s'")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("reading sessions to replay", e))?;
     let unattributed: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM sessions
          WHERE started_at >= now() - make_interval(days => $1)
            AND (username IS NULL OR resource IS NULL)",
     )
     .bind(i32::try_from(days).unwrap_or(i32::MAX))
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| internal("reading sessions to replay", e))?;
+    drop(tx);
     report.skip(
         "session rows without a recorded user or resource",
         u64::try_from(unattributed).unwrap_or(0),
@@ -225,6 +235,9 @@ async fn run(
     report.already_refused = replayed.already_refused;
     report.affected_sessions = replayed.affected_sessions;
     report.affected = replayed.affected;
+    report.affected_omitted = replayed.affected_omitted;
+    report.affected_people = replayed.affected_people;
+    report.affected_bots = replayed.affected_bots;
     report.shadow = replayed.shadow;
     Ok((report, found))
 }

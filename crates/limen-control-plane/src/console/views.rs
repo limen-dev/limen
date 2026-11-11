@@ -1248,6 +1248,12 @@ impl ReplayView {
                 s.rule, s.sessions
             ));
         }
+        if r.affected_omitted > 0 {
+            notes.push(format!(
+                "{} more groups are not listed; the totals count them.",
+                r.affected_omitted
+            ));
+        }
         if r.already_refused > 0 {
             notes.push(format!(
                 "{} sessions are refused by the active policy today already (groups or roles changed since): not caused by this change.",
