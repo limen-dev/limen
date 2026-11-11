@@ -114,6 +114,7 @@ export default defineConfig({
         {
           label: 'Operate',
           items: [
+            { slug: 'docs/guides/rollout' },
             { slug: 'docs/guides/deploy' },
             {
               label: 'Deploy reference',
