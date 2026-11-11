@@ -117,7 +117,16 @@ pub fn authenticated(flag: Option<&str>) -> anyhow::Result<(Profile, Channel)> {
 pub fn tls_hint(message: &str) -> Option<&'static str> {
     // Only an unknown or wrong issuer: a name mismatch or an expired
     // certificate has another cause, and re-pinning the CA wouldn't fix it.
-    (message.contains("UnknownIssuer") || message.contains("BadSignature")).then_some(
+    // rustls says `UnknownIssuer`; the operating system's verifier (used when no CA is
+    // pinned) words it its own way: macOS "certificate is not trusted: -67843", Windows
+    // "untrusted root".
+    let lower = message.to_ascii_lowercase();
+    (message.contains("UnknownIssuer")
+        || message.contains("BadSignature")
+        || lower.contains("is not trusted")
+        || lower.contains("untrusted root")
+        || lower.contains("untrustedroot"))
+    .then_some(
         "the server's certificate isn't trusted. A server with its own CA needs \
          `limen login --ca-file <ca.pem>`, again if its CA changed (for example, the dev stack \
          was reset). A public deployment needs a certificate from a public CA",
@@ -150,6 +159,14 @@ mod tests {
                 .to_string()
                 .contains("--ca-file")
         );
+        // The same problem as the operating system words it, when no CA is pinned.
+        assert!(
+            super::tls_hint(
+                "invalid peer certificate: Other(OtherError(\"\u{201c}Limen Internal CA\u{201d} certificate is not trusted: -67843\"))"
+            )
+            .is_some()
+        );
+        assert!(super::tls_hint("invalid peer certificate: CertUntrustedRoot").is_some());
         assert!(super::tls_hint("connection refused").is_none());
         assert!(super::tls_hint("invalid peer certificate: NotValidForName").is_none());
         assert!(super::tls_hint("invalid peer certificate: Expired").is_none());
