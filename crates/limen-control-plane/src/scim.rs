@@ -146,6 +146,13 @@ fn token_matches(given: &str, wanted: &str) -> bool {
     Sha256::digest(given.as_bytes()) == Sha256::digest(wanted.as_bytes())
 }
 
+/// The credentials of a `Bearer` authorization header. The scheme is
+/// case-insensitive (RFC 7235 §2.1).
+fn bearer_token(header: &str) -> Option<&str> {
+    let (scheme, token) = header.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then_some(token)
+}
+
 async fn authenticate(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let Some(wanted) = &state.config.scim_token else {
         return not_found("resource");
@@ -154,7 +161,7 @@ async fn authenticate(State(state): State<AppState>, req: Request, next: Next) -
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(bearer_token)
         .unwrap_or("");
     if !token_matches(given.trim(), wanted.expose().trim()) {
         metrics::counter!("limen_scim_requests_total", "outcome" => "unauthorized").increment(1);
@@ -1039,10 +1046,19 @@ fn plan_patch(v: &Value) -> Result<(Option<String>, Vec<Step>), Response> {
                 }
                 if let Some(m) = obj.get("members") {
                     let ids = member_ids(m)?;
-                    steps.push(if kind == "add" {
-                        Step::Add(ids)
-                    } else {
-                        Step::Replace(ids)
+                    // RFC 7644 §3.5.2.2: a remove needs a path. Reading it (or
+                    // an unknown op) as a replace would drop every other member.
+                    steps.push(match kind.as_str() {
+                        "add" => Step::Add(ids),
+                        "replace" => Step::Replace(ids),
+                        "remove" => {
+                            return Err(error(
+                                StatusCode::BAD_REQUEST,
+                                Some("noTarget"),
+                                "a remove of members needs a path",
+                            ));
+                        }
+                        _ => return Err(bad_request("unsupported members operation")),
                     });
                 }
             }
@@ -1158,6 +1174,29 @@ mod tests {
             json!({ "Operations": [{ "op": "replace", "path": "name.givenName", "value": "x" }] });
         assert_eq!(patched_active(&other).ok(), Some(None));
         assert!(patched_active(&json!({})).is_err());
+    }
+
+    #[test]
+    fn a_pathless_members_patch_needs_a_known_op() {
+        let m = json!({ "members": [{ "value": "00000000-0000-0000-0000-000000000001" }] });
+        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("a uuid");
+        let plan = |op: &str| plan_patch(&json!({ "Operations": [{ "op": op, "value": m }] }));
+        assert!(matches!(&plan("Add").expect("plans").1[..], [Step::Add(v)] if v == &[id]));
+        assert!(matches!(&plan("replace").expect("plans").1[..], [Step::Replace(v)] if v == &[id]));
+        // A remove without a path must not replace the members with its value.
+        for op in ["remove", "Remove", "bogus", ""] {
+            assert!(plan(op).is_err(), "{op}");
+        }
+    }
+
+    #[test]
+    fn the_bearer_scheme_is_case_insensitive() {
+        assert_eq!(bearer_token("Bearer abc"), Some("abc"));
+        assert_eq!(bearer_token("bearer abc"), Some("abc"));
+        assert_eq!(bearer_token("BEARER abc"), Some("abc"));
+        assert_eq!(bearer_token("Basic abc"), None);
+        assert_eq!(bearer_token("Bearerabc"), None);
+        assert_eq!(bearer_token(""), None);
     }
 
     #[test]
