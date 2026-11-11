@@ -127,9 +127,10 @@ pub fn tls_hint(message: &str) -> Option<&'static str> {
         || lower.contains("untrusted root")
         || lower.contains("untrustedroot"))
     .then_some(
-        "the server's certificate isn't trusted. A server with its own CA needs \
-         `limen login --ca-file <ca.pem>`, again if its CA changed (for example, the dev stack \
-         was reset). A public deployment needs a certificate from a public CA",
+        "the server's certificate isn't trusted. If the server has its own CA (the dev stack, a \
+         private deployment), run `limen login --ca-file <ca.pem>`, again if its CA changed. If \
+         it now has a certificate from a public CA and you pinned the old CA, run \
+         `limen login --system-roots` to stop pinning it",
     )
 }
 
@@ -158,6 +159,12 @@ mod tests {
             super::status_error(&status)
                 .to_string()
                 .contains("--ca-file")
+        );
+        // A stale pin is the other way to get here: the way out is named too.
+        assert!(
+            super::status_error(&status)
+                .to_string()
+                .contains("--system-roots")
         );
         // The same problem as the operating system words it, when no CA is pinned.
         assert!(

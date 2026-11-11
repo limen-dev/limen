@@ -177,13 +177,27 @@ async fn diagnose(
 }
 
 fn check_proxy(report: &mut Report, flag: Option<&str>) -> Option<String> {
-    let Ok(proxy) = api::resolve_server(flag) else {
-        report.fail(
-            "server",
-            "no server selected",
-            "`limen login --server limen.example.com`, or set LIMEN_SERVER",
-        );
-        return None;
+    let proxy = match api::resolve_server(flag) {
+        Ok(proxy) => proxy,
+        Err(e) if flag.is_some() => {
+            report.fail(
+                "server",
+                format!(
+                    "{:?} is not a valid server address: {e}",
+                    flag.unwrap_or_default()
+                ),
+                "use a host name, for example `--server limen.example.com`",
+            );
+            return None;
+        }
+        Err(_) => {
+            report.fail(
+                "server",
+                "no server selected",
+                "`limen login --server limen.example.com`, or set LIMEN_SERVER",
+            );
+            return None;
+        }
     };
     if let Err(e) = api::server_name(&proxy) {
         report.fail(

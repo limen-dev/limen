@@ -107,6 +107,10 @@ enum Command {
         /// from a public CA (the dev stack, a private deployment). Pinned for later commands.
         #[arg(long)]
         ca_file: Option<PathBuf>,
+        /// Forget a CA pinned by an earlier `--ca-file` and trust the system's certificate
+        /// store, for a server that now has a certificate from a public CA.
+        #[arg(long, conflicts_with = "ca_file")]
+        system_roots: bool,
         /// Log in as a bot with this CI platform's identity token, instead of
         /// as a person. In GitHub Actions the token is requested for you.
         #[arg(long, value_enum, value_name = "METHOD", conflicts_with_all = ["device", "no_browser"])]
@@ -681,6 +685,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             token_file,
             audience,
             ca_file,
+            system_roots,
             ..
         } => {
             commands::bot::run(commands::bot::BotLogin {
@@ -690,7 +695,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 token_env: token_env.as_deref(),
                 token_file: token_file.as_deref(),
                 audience: audience.as_deref(),
-                ca_file: ca_file.as_deref(),
+                ca: commands::login::CaChoice::from_flags(ca_file.as_deref(), system_roots),
             })
             .await
         }
@@ -698,10 +703,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             device,
             no_browser,
             ca_file,
+            system_roots,
             ..
         } => {
             ui::banner();
-            commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await
+            let ca = commands::login::CaChoice::from_flags(ca_file.as_deref(), system_roots);
+            commands::login::run(proxy, device, !no_browser, ca).await
         }
         Command::Logout => commands::logout(proxy).await,
         Command::Doctor { resource, json } => {

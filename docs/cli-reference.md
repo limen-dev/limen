@@ -31,6 +31,7 @@ Options:
 - `--device`: Use the device code flow, for machines without a browser.
 - `--no-browser`: Print the login URL instead of opening a browser.
 - `--ca-file <CA_FILE>`: CA certificate to trust for the server, for a server whose certificate does not come from a public CA (the dev stack, a private deployment). Pinned for later commands.
+- `--system-roots`: Forget a CA pinned by an earlier `--ca-file` and trust the system's certificate store, for a server that now has a certificate from a public CA.
 - `--bot <METHOD>`: Log in as a bot with this CI platform's identity token, instead of as a person. In GitHub Actions the token is requested for you. Values: github_actions, gitlab, oidc.
 - `--bot-name <NAME>`: Which bot, if more than one could match the token.
 - `--token-env <VAR>`: Read the token from this environment variable (default for gitlab and oidc: LIMEN_ID_TOKEN).
