@@ -110,6 +110,7 @@ async fn tcp_is_fixed_destination_policy_checked_and_audited() {
             sources: policy(&target),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply policy")

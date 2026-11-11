@@ -9,7 +9,7 @@ use clap::Subcommand;
 use limen_policy::tooling::{ChangeKind, Via};
 use limen_policy::{Document, Policy};
 use limen_proto::v1::admin_client::AdminClient;
-use limen_proto::v1::{GetPolicyDocumentsRequest, SuggestPolicyRequest};
+use limen_proto::v1::{ApplyPolicyRequest, GetPolicyDocumentsRequest, SuggestPolicyRequest};
 
 use super::admin::collect_sources;
 use crate::{api, ui};
@@ -65,6 +65,22 @@ pub enum PolicyCommand {
         /// Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
         #[arg(long)]
         fail_on_widening: bool,
+        /// Also replay the last DAYS (1 to 30, default 30) of recorded sessions through
+        /// the active and the new policy and say who would have been refused (needs
+        /// limen:admin; the old side must be `active`; the new files are read as
+        /// `limen admin apply` reads them).
+        #[arg(
+            long,
+            value_name = "DAYS",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "30",
+            value_parser = clap::value_parser!(u32).range(1..=30)
+        )]
+        replay: Option<u32>,
+        /// With --replay: exit non-zero if any recorded session would have been refused.
+        #[arg(long, requires = "replay")]
+        fail_on_affected: bool,
     },
     /// Propose a tighter policy from what people used: access a role grants that nobody used.
     ///
@@ -149,7 +165,19 @@ pub async fn run(proxy: Option<&str>, command: PolicyCommand) -> anyhow::Result<
             new,
             format,
             fail_on_widening,
-        } => diff(proxy, &old, &new, &format, fail_on_widening).await,
+            replay,
+            fail_on_affected,
+        } => {
+            diff(
+                proxy,
+                &old,
+                &new,
+                &format,
+                fail_on_widening,
+                replay.map(|days| (days, fail_on_affected)),
+            )
+            .await
+        }
         PolicyCommand::Suggest {
             window_days,
             output,
@@ -326,7 +354,11 @@ async fn diff(
     new: &[PathBuf],
     format: &str,
     fail_on_widening: bool,
+    replay: Option<(u32, bool)>,
 ) -> anyhow::Result<()> {
+    if replay.is_some() && !(old.is_empty() || old == ["active"]) {
+        bail!("--replay compares against the running policy: use `active` as the old policy");
+    }
     let old_policy = if old.is_empty() || old == ["active"] {
         active(proxy).await?
     } else {
@@ -334,9 +366,22 @@ async fn diff(
     };
     let new_policy = from_paths(new)?;
     let result = old_policy.access_diff(&new_policy);
-    match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&result)?),
-        "markdown" => print!("{}", result.render_markdown()),
+    let replayed = match replay {
+        Some((days, _)) => Some(replay_report(proxy, new, days).await?),
+        None => None,
+    };
+    match (format, &replayed) {
+        ("json", None) => println!("{}", serde_json::to_string_pretty(&result)?),
+        ("json", Some(r)) => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "access": result, "replay": r }))?
+        ),
+        ("markdown", _) => {
+            print!("{}", result.render_markdown());
+            if let Some(r) = &replayed {
+                print!("\n{}", r.render_markdown());
+            }
+        }
         _ => {
             for c in &result.changes {
                 let line = match c.change {
@@ -348,6 +393,9 @@ async fn diff(
             if result.changes.is_empty() {
                 ui::success("No change in effective access.");
             }
+            if let Some(r) = &replayed {
+                println!("\n{}", r.render_text());
+            }
         }
     }
     for w in new_policy.warnings() {
@@ -355,6 +403,22 @@ async fn diff(
     }
     if fail_on_widening && result.widens_standing() {
         bail!("standing access widens (--fail-on-widening)");
+    }
+    if let (Some((_, true)), Some(r)) = (replay, &replayed) {
+        if r.affected_sessions > 0 {
+            bail!(
+                "{} recorded sessions would have been refused (--fail-on-affected)",
+                r.affected_sessions
+            );
+        }
+        // An incomplete replay is not an all-clear for a CI gate: partial, or
+        // most of the recorded sessions could not be replayed.
+        if r.truncated || r.skipped_total() > r.examined {
+            bail!(
+                "the replay was incomplete ({}); it cannot show that nothing would be refused (--fail-on-affected)",
+                r.headline()
+            );
+        }
     }
     Ok(())
 }
@@ -415,4 +479,27 @@ async fn suggest(
         ));
     }
     Ok(())
+}
+
+/// Ask the control plane to replay recorded sessions through the running
+/// policy and the one these files would make (a dry-run apply).
+async fn replay_report(
+    proxy: Option<&str>,
+    new: &[PathBuf],
+    days: u32,
+) -> anyhow::Result<limen_policy::replay::ReplayReport> {
+    let sources = collect_sources(new)?;
+    let (_, channel) = api::authenticated(proxy)?;
+    let resp = AdminClient::new(channel)
+        .apply_policy(ApplyPolicyRequest {
+            sources,
+            dry_run: true,
+            replay_days: days,
+            ..Default::default()
+        })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner();
+    serde_json::from_str(&resp.replay_json)
+        .context("the control plane did not return a replay (is it an older version?)")
 }

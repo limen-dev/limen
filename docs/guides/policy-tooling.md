@@ -61,6 +61,23 @@ limen policy diff active --new policy/ --fail-on-widening
 
 The diff compares *effective access*, not YAML: "group `sre` gains ssh access to `web-prod` as ubuntu", "role `deployer` loses ...", "group `developers` gains ... (after a request is approved)". `--fail-on-widening` exits non-zero when anyone gains **standing** access, so CI can ask for a closer look. `limen admin apply` and the console print the same lines.
 
+### Replay recorded sessions (ADR-0051)
+
+```sh
+limen policy diff active --new policy/ --replay          # last 30 days
+limen policy diff active --new policy/ --replay=7 --fail-on-affected
+```
+
+The diff above reasons about people in the abstract. `--replay` asks the control plane to take the sessions it recorded in the last N days (1 to 30) and run each one through the **active** policy and through the policy these files would make, with the same decision code as enforcement. It reports who would have been refused: "would have refused 14 sessions by 3 people and 1 bot", with the user, upstream login or role, resource, session count and first and last time. It needs `limen:admin`; the old side must be `active`; the files are read as `limen admin apply` reads them (other sources' documents stay). The console's **Check a change** has the same option.
+
+What to know before trusting an empty result:
+
+- **It shows narrowing.** Only allowed sessions are recorded. `policy diff` still shows widening.
+- **It is approximate.** A session records no roles, groups or labels. Roles come from each person's latest IdP groups (bots: the bot document, access requests: the approved grant), and resource labels are today's. A resource relabelled inside the window is marked. Sessions the active policy already refuses today are counted apart ("not caused by this change").
+- **Not everything is replayed.** Kubernetes, per-request checks inside a session (`deny_commands`, web path rules), sessions from before the database was recorded, and people Limen no longer knows are listed under "not replayed" with counts. A result never says "nothing" without the number of sessions replayed and skipped.
+- **Shadow rules** in the new policy are counted too ("shadow rule `role/rule` would have fired for N sessions").
+- **It is audited.** Every replay writes a `policy.replay` event (who, window, policy digests, counts, never sessions) before it runs, and is refused if the audit trail is unavailable. It is rate limited per person.
+
 Warnings (valid, probably not meant): a group that can both request and approve a role, a requestable role a group already holds, a role that selects on a label copied from a cloud tag.
 
 ## Why was I refused

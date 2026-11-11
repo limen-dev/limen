@@ -722,8 +722,8 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
         match e.kind {
             EventKind::SessionStart => {
                 sqlx::query(
-                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group, request_ids)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    "INSERT INTO sessions (session_id, username, kind, resource, login, worker_id, proxy_id, client_addr, started_at, actor_type, ci, conn_group, request_ids, database)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                      ON CONFLICT (session_id) DO UPDATE SET
                        username = COALESCE(sessions.username, EXCLUDED.username),
                        kind = COALESCE(sessions.kind, EXCLUDED.kind),
@@ -734,7 +734,8 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                        client_addr = COALESCE(sessions.client_addr, EXCLUDED.client_addr),
                        started_at = EXCLUDED.started_at,
                        actor_type = EXCLUDED.actor_type, ci = EXCLUDED.ci,
-                       conn_group = EXCLUDED.conn_group, request_ids = EXCLUDED.request_ids",
+                       conn_group = EXCLUDED.conn_group, request_ids = EXCLUDED.request_ids,
+                       database = COALESCE(sessions.database, EXCLUDED.database)",
                 )
                 .bind(session_id)
                 .bind(&e.user)
@@ -753,6 +754,7 @@ pub async fn project_events(db: &Db, events: &[limen_audit::Event]) -> Result<()
                 .bind(e.data.get("ci").filter(|c| c.is_object()))
                 .bind(text(&e.data, "group"))
                 .bind(request_ids(&e.data))
+                .bind(text(&e.data, "database").filter(|d| !d.is_empty()))
                 .execute(&mut *tx)
                 .await?;
             }

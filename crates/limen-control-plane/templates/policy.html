@@ -36,6 +36,9 @@
     <div class="row">
       <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>Save</button>
       <button type="submit" class="secondary" formaction="/console/policy/documents/preview#preview"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Preview impact</button>
+      <label class="inline"><span>Replay recorded sessions</span> <select name="replay_days" aria-label="With Preview impact, also replay recorded sessions through this change">
+        <option value="0">No</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option>
+      </select></label>
     </div>
   </form>
   {% if preview.is_some() && preview_kind.as_str() == d.kind && preview_name == d.name %}{% include "policy_preview.html" %}{% endif %}
@@ -63,6 +66,9 @@
   <div class="row">
     <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plus"/></svg>Create</button>
     <button type="submit" class="secondary" formaction="/console/policy/documents/preview#preview"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Preview impact</button>
+    <label class="inline"><span>Replay recorded sessions</span> <select name="replay_days" aria-label="With Preview impact, also replay recorded sessions through this change">
+      <option value="0">No</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option>
+    </select></label>
   </div>
 </form>
 {% if preview.is_some() && preview_kind.is_empty() && preview_name.is_empty() %}{% include "policy_preview.html" %}{% endif %}

@@ -129,6 +129,7 @@ impl Rig {
                 limen_proto::v1::ApplyPolicyRequest {
                     source: String::new(),
                     require_tests: false,
+                    replay_days: 0,
                     sources: vec![limen_proto::v1::PolicySource {
                         name: "p.yaml".into(),
                         content: yaml.into(),

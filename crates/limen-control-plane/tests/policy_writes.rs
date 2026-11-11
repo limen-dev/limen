@@ -62,6 +62,7 @@ async fn apply(
                 dry_run: false,
                 source_ref: String::new(),
                 require_tests: false,
+                replay_days: 0,
             },
             Some(admin),
         ))
@@ -185,6 +186,7 @@ async fn apply_as(
                 dry_run: false,
                 source_ref: String::new(),
                 require_tests: false,
+                replay_days: 0,
             },
             Some(admin),
         ))

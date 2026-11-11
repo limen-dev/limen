@@ -157,6 +157,10 @@ pub struct SaveForm {
     name: String,
     #[serde(default)]
     etag: String,
+    /// "Preview impact" only: also replay the last N days of recorded
+    /// sessions (ADR-0051). Empty or 0 is no replay.
+    #[serde(default)]
+    replay_days: String,
 }
 
 /// Create a document the console will own, or replace one it owns.
@@ -270,7 +274,28 @@ pub async fn preview_document(
     };
     match outcome {
         Ok(o) => {
+            let replay = match form.replay_days.trim().parse::<u32>() {
+                Ok(days) if days > 0 => Some(
+                    match crate::replay::replay(
+                        &state,
+                        crate::replay::Asker {
+                            username: &auth.username,
+                            via: "console",
+                        },
+                        &state.policy.current().policy,
+                        &state.policy.with_overlay(&o.policy),
+                        days,
+                    )
+                    .await
+                    {
+                        Ok(r) => super::views::ReplayView::new(&r),
+                        Err(e) => super::views::ReplayView::failed(e.message()),
+                    },
+                ),
+                _ => None,
+            };
             let result = super::views::DryRun {
+                replay,
                 access: o
                     .access
                     .changes

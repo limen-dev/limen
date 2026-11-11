@@ -96,6 +96,7 @@ async fn tcp_deployment_ready(deployment: &Deployment) -> limen_e2e::RunningWork
             sources: policy(&target),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply policy")

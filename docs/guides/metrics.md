@@ -29,6 +29,7 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_policy_shadow_rules`, `limen_policy_shadow_days_left` | gauge | | control plane |
 | `limen_policy_shadow_denies_total` | counter | `role`, `rule` | proxy |
 | `limen_policy_shadow_events_dropped_total` | counter | | proxy |
+| `limen_policy_replays_total` | counter | | control plane |
 | `limen_recordings_pending` | gauge | | worker |
 
 `limen_policy_shadow_days_left` is the days until the first shadow rule runs out, or `+Inf` with none; alert before it reaches 0, because after that policy changes are refused until the rule is enforced or renewed (ADR-0046). `limen_policy_shadow_events_dropped_total` counts shadow denies whose audit event could not be written; the request is never refused for it.

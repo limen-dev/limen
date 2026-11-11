@@ -272,6 +272,7 @@ spec:
 ### 7.2 Evaluation
 - **Deny by default.** An explicit `deny` match wins. Otherwise the request is allowed only if at least one `allow` rule matches the resource kind, **every** label selector key matches (values within a key are ORed), and the requested principal (login, DB role, kube group) appears in that rule. With wildcards, only the explicit `"*"` form is accepted.
 - **Shadow mode (ADR-0046).** A `deny` rule or role marked `mode: shadow` is reported (`policy.shadow_deny`) when it would have refused a request that was allowed, and never enforced. A shadow role's `allow` rules grant nothing.
+- **Replay (ADR-0051).** `Policy::replay` runs recorded sessions through the active and a proposed policy with `evaluate_eligible`, the enforcement decision code, and reports the sessions the change would have refused. The control plane feeds it from the `sessions` projection; roles and labels are reconstructed from current state, and the report says so.
 - `Decision` has a reserved `RequiresApproval` variant. Every enforcement point treats it as a deny. This is where JIT and approvals plug in later.
 
 ### 7.3 Distribution
@@ -409,6 +410,7 @@ What each phase built is in its guide and ADR; this section holds only what is u
   - Policy suggest (ADR-0050, #114): tested with the pure library (random policies and usage: the result never gains access, and settles), against PostgreSQL with seeded `sessions` rows, and by `demos/demo-policy-suggest.sh`. Which `sessions` rows each protocol writes (the login as the principal) is read from the proxy code, and is checked end to end for SSH only. Kubernetes, search and web-app rules are not assessed.
   - Offboarding (ADR-0047, #111): refresh token issuance, `invalid_grant` for a deactivated user, and groups in refreshed ID tokens are tested against Dex (PostgreSQL storage; `demos/demo-idp-offboarding.sh`) and a stand-in IdP; verify against Okta with #64.
   - OCSF export (ADR-0049): tested against SeaweedFS only. No SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema.
+  - Replay (ADR-0051, #115): tested against a real PostgreSQL and a real control plane with sessions written into the `sessions` table, not with sessions opened through a proxy and worker, and not on the console pages in a browser (the saved pages in `tests/console-pages/` were not regenerated). Roles use each person's latest groups, and Kubernetes sessions and per-request checks are not replayed.
   - Elsewhere: KMS `Sign` latency and throttling, EKS, Athena, and the Datadog intake.
 - **Deferred to Phase 15:** the IAM join method for components; verifying an exported ACM certificate as the source of the proxy's public certificate (ADR-0043 takes operator-supplied files; ACM export is one way to make them).
 - **Deferred and not yet scheduled in §13:**

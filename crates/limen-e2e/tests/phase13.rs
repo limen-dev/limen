@@ -131,6 +131,7 @@ async fn rig_with(worker_args: &[&str], console: bool) -> Option<Rig> {
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply with its own tests passing")
@@ -603,6 +604,7 @@ spec:
             }],
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

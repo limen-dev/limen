@@ -1211,6 +1211,92 @@ pub struct DryRun {
     pub removed: Vec<String>,
     /// Saving it would wait for another admin's approval.
     pub waits: bool,
+    /// Recorded sessions replayed through the change (ADR-0051), when asked.
+    pub replay: Option<ReplayView>,
+}
+
+/// The replay of recorded sessions, ready to show. Every string is escaped
+/// by the template.
+pub struct ReplayView {
+    pub headline: String,
+    pub partial: bool,
+    pub affected: Vec<ReplayRow>,
+    /// Shadow rules that would have fired, sessions already refused, and what
+    /// was not replayed, one line each.
+    pub notes: Vec<String>,
+    pub caveat: &'static str,
+    pub error: Option<String>,
+}
+
+pub struct ReplayRow {
+    pub who: String,
+    pub bot: bool,
+    pub principal: String,
+    pub resource: String,
+    pub sessions: u64,
+    pub now: &'static str,
+    pub labels_changed: bool,
+}
+
+impl ReplayView {
+    #[must_use]
+    pub fn new(r: &limen_policy::replay::ReplayReport) -> Self {
+        let mut notes = Vec::new();
+        for s in &r.shadow {
+            notes.push(format!(
+                "Shadow rule {} would have fired for {} sessions.",
+                s.rule, s.sessions
+            ));
+        }
+        if r.affected_omitted > 0 {
+            notes.push(format!(
+                "{} more groups are not listed; the totals count them.",
+                r.affected_omitted
+            ));
+        }
+        if r.already_refused > 0 {
+            notes.push(format!(
+                "{} sessions are refused by the active policy today already (groups or roles changed since): not caused by this change.",
+                r.already_refused
+            ));
+        }
+        for (reason, n) in &r.skipped {
+            notes.push(format!("{n} sessions not replayed: {reason}."));
+        }
+        Self {
+            headline: r.headline(),
+            partial: r.truncated,
+            affected: r
+                .affected
+                .iter()
+                .map(|a| ReplayRow {
+                    who: a.user.clone(),
+                    bot: a.bot,
+                    principal: a.principal.clone(),
+                    resource: a.resource.clone(),
+                    sessions: a.sessions,
+                    now: a.now.text(),
+                    labels_changed: a.labels_changed,
+                })
+                .collect(),
+            notes,
+            caveat: limen_policy::replay::CAVEAT,
+            error: None,
+        }
+    }
+
+    /// A replay that could not run, with the reason.
+    #[must_use]
+    pub fn failed(message: &str) -> Self {
+        Self {
+            headline: String::new(),
+            partial: false,
+            affected: Vec::new(),
+            notes: Vec::new(),
+            caveat: limen_policy::replay::CAVEAT,
+            error: Some(message.to_owned()),
+        }
+    }
 }
 
 #[derive(Template)]

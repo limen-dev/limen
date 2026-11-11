@@ -114,6 +114,7 @@ async fn postgres_through_limen() {
             sources: policy(&target, secrets.to_str().expect("utf8")),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")
@@ -384,6 +385,7 @@ spec:
             }],
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

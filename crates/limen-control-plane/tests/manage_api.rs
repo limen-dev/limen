@@ -109,6 +109,7 @@ impl Fixture {
                     dry_run: false,
                     source_ref: String::new(),
                     require_tests: false,
+                    replay_days: 0,
                 },
                 Some(&self.admin),
             ))
@@ -619,7 +620,7 @@ async fn a_bot_writer_is_refused_outside_its_grant_and_audited() {
                 ],
                 dry_run: false,
                 source_ref: String::new(),
-                require_tests: false,
+                require_tests: false, replay_days: 0,
             },
             Some(&f.admin),
         ))
@@ -1005,7 +1006,7 @@ async fn required_tests_refuse_writes_that_break_them() {
                 }],
                 dry_run: false,
                 source_ref: String::new(),
-                require_tests: false,
+                require_tests: false, replay_days: 0,
             },
             Some(&f.admin),
         ))
@@ -1057,6 +1058,7 @@ async fn a_held_apply_never_undoes_a_newer_one() {
                     dry_run: false,
                     source_ref: String::new(),
                     require_tests: false,
+                    replay_days: 0,
                 },
                 Some(&f.admin),
             ))

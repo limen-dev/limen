@@ -70,6 +70,7 @@ async fn a_revoked_proxys_grants_are_refused() {
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

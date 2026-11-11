@@ -103,6 +103,7 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

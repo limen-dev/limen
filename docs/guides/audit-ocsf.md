@@ -74,6 +74,7 @@ An *Other* activity carries a readable `activity_name` (for example `access appr
 | `policy.change` | Entity Management (3004) | Update (3) | Informational |
 | `policy.suggest` | API Activity (6003) | Read (2) | Informational |
 | `policy.shadow_deny` | Base Event (0) | shadow deny (99) | Medium |
+| `policy.replay` | Base Event (0) | policy replay (99) | Informational |
 | `policy.write_denied` | Base Event (0) | policy write denied (99) | Low |
 | `policy.ownership_transfer` | Entity Management (3004) | Move (5) | Informational |
 | `policy.change_pending` | Entity Management (3004) | policy change review (99) | Informational |

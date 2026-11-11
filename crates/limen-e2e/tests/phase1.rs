@@ -75,6 +75,7 @@ async fn login_policy_enrollment_tunnels_and_proxy_restart() {
             sources,
             dry_run: false,
             source_ref: "e2e".into(),
+            replay_days: 0,
         })
         .await
         .expect("apply policy")
