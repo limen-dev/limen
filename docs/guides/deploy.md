@@ -1,5 +1,7 @@
 # Deploying Limen on AWS
 
+New here? [Roll out Limen to your organisation](rollout.md) gives the whole sequence, from the identity provider to developers logging in, and links back to this page for the infrastructure.
+
 **Unverified.** The Terraform modules and the Helm chart pass `terraform validate`, `helm lint` and `helm template`. Nobody has applied them to AWS or installed the chart on a cluster (issues #80, #85). Expect to fix things on the first real run, and tell us what.
 
 ## What a deployment needs
@@ -15,7 +17,7 @@
 | VPC, load balancers, services | `examples/complete` creates | |
 | Identity provider client (OIDC issuer, client id) | | create it; pass issuer and client id |
 | Public DNS name of each proxy | | point it at the load balancer |
-| A TLS certificate the proxy serves publicly | | **not wired yet**, see below |
+| A TLS certificate the proxy serves publicly | | get one for the proxy's name; only the Helm chart can mount it so far, see [the public certificate](#the-proxys-public-certificate) |
 | EKS cluster | | bring your own |
 
 Generated secrets (database password, join tokens) are in Terraform state. Use an encrypted remote backend with restricted access.
@@ -113,6 +115,6 @@ Either flag needs the other. Without them nothing changes.
 
 ## Not covered yet
 
-- **Provisioning the proxy's public TLS certificate.** The proxy takes a PEM chain and key from a public CA (`--public-cert-file`, `--public-key-file`; [ADR-0043](../adr/0043-public-proxy-certificate.md)), but only the Helm chart can mount one so far (`proxies.<key>.publicCertSecret`); the ECS/EC2 Terraform example and the plain Kubernetes manifests do not, and nothing issues the certificate. Until one is mounted, the CLI and browsers need the internal CA (`limen login --ca-file`). See [the public certificate](#the-proxys-public-certificate) below for what to mount and how it renews.
+- **Provisioning the proxy's public TLS certificate.** The proxy takes a PEM chain and key from a public CA (`--public-cert-file`, `--public-key-file`; [ADR-0043](../adr/0043-public-proxy-certificate.md)), but only the Helm chart can mount one so far (`proxies.<key>.publicCertSecret`); the ECS/EC2 Terraform example and the plain Kubernetes manifests do not, and nothing issues the certificate. Until one is mounted, the CLI and browsers need the internal CA (`limen login --ca-file`). See [the public certificate](#the-proxys-public-certificate) above for what to mount and how it renews.
 - **Audit durability of control planes on ECS and EC2.** They run with `spool_mode = "ephemeral"`, because neither keeps its disk: a replica that dies before it hands over its spool loses the events not yet in S3 (up to `LIMEN_AUDIT_S3_FLUSH`, 60 s by default). The verifier reports them as gaps. For no loss, use the Kubernetes chart, whose StatefulSet keeps a volume (`durable`). See [running Limen at scale](scale-out.md).
 - **First admin.** Set `LIMEN_BOOTSTRAP_ADMIN_GROUPS` (extra environment) so the first admin can log in and apply policy. The [Okta guide](okta.md) shows the identity provider side.

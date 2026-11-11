@@ -26,6 +26,7 @@ const SHORT = {
   'guides/tcp': 'Raw TCP',
   'guides/bots': 'CI bots',
   'guides/management-api': 'Management API',
+  'guides/rollout': 'Roll out to your organisation',
   'guides/deploy': 'Deploy on AWS or Kubernetes',
   'guides/terraform': 'Terraform and OpenTofu',
   'guides/policy-tooling': 'Policy tests and explain',
