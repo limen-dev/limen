@@ -299,6 +299,8 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
         K::PolicyShadowDeny => Mapped::new(BASE, OTHER)
             .detail("shadow deny")
             .severity(MEDIUM),
+        // An admin read recorded sessions to preview a change; nothing changed.
+        K::PolicyReplay => Mapped::new(BASE, OTHER).detail("policy replay"),
         K::PolicyWriteDenied => Mapped::new(BASE, OTHER)
             .detail("policy write denied")
             .severity(LOW)
@@ -635,6 +637,7 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::PolicyChange,
     EventKind::PolicySuggest,
     EventKind::PolicyShadowDeny,
+    EventKind::PolicyReplay,
     EventKind::PolicyWriteDenied,
     EventKind::PolicyOwnershipTransfer,
     EventKind::PolicyChangePending,
