@@ -102,7 +102,7 @@ step "No pinned CA, with the CA in the system trust store: connects"
 img="limen-cli:$LIMEN_IMAGE_TAG"
 envval() { sed -n "s/^$1=//p" "$here/.env"; }
 docker build -q -f "$root/deploy/docker/Dockerfile" --target cli -t "$img" \
-  --build-arg "RUST_IMAGE=$(envval RUST_IMAGE)" --build-arg "DISTROLESS_IMAGE=$(envval DISTROLESS_IMAGE)" \
+  --build-arg RUST_IMAGE="$(envval RUST_IMAGE)" --build-arg DISTROLESS_IMAGE="$(envval DISTROLESS_IMAGE)" \
   "$root" >/dev/null || fail "building the CLI image"
 net="${LIMEN_PROJECT}_default"
 run_cli() { # run_cli [docker args...] -- cli args...
