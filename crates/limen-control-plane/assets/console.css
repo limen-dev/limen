@@ -316,7 +316,7 @@ td.empty { text-align: center; }
 .cmd.soon code { text-decoration: none; }
 
 /* Bots (ADR-0019) */
-.pill.bot { background: rgba(139, 92, 246, .14); color: #7c3aed; border-color: transparent; }
+.pill.bot { background: rgba(139, 92, 246, .14); color: #6d28d9; border-color: transparent; }
 :root[data-theme="dark"] .pill.bot { color: #c4b5fd; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.bot { color: #c4b5fd; } }
 .bot-card { padding: 18px 20px; margin-bottom: 14px; }
@@ -643,3 +643,18 @@ details > summary .pill { white-space: normal; text-align: left; }
 .chip { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 .chip { align-items: baseline; }
 .chip b { flex: none; }
+
+/* "Start a review" is a button that opens a form, not a card with a button in it. */
+details.start { background: none; border: 0; box-shadow: none; border-radius: 0; margin: 0 0 22px; }
+details.start > summary::before { display: none; }
+
+/* Overview numbers on a phone: two to a row instead of five full-height cards. */
+@media (max-width: 600px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat { padding: 12px; gap: 10px; }
+  .stat span:not(.stat-icon) { white-space: normal; }
+  .stats > .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* The disable box and the facts card under it don't touch. */
+.danger-zone + .card { margin-top: 14px; }

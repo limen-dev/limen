@@ -1273,7 +1273,7 @@ fn audit_only_view(name: &str) -> UserView {
     UserView {
         manageable: false,
         is_bot: false,
-        source: "Not an account: it only appears in the audit trail".into(),
+        source: "No account: the name only appears in the audit trail".into(),
         idp: "not applicable".into(),
         ..policy_bot_view(name, &[])
     }
@@ -1453,7 +1453,8 @@ pub async fn user_detail(
     let role_names: Vec<String> = view.role_list.iter().map(|r| r.text.clone()).collect();
     html(
         UserPage {
-            chrome: chrome(&state, &auth, "users"),
+            // A bot is reached from the Bots page, so that is the entry to highlight.
+            chrome: chrome(&state, &auth, if view.is_bot { "bots" } else { "users" }),
             notice: notice(q.done.as_deref()),
             access: access_for(&loaded.policy, &role_names),
             policy_version: loaded.version,
