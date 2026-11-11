@@ -2937,10 +2937,12 @@ dependencies = [
  "metrics",
  "prost",
  "rand 0.10.3",
+ "rcgen",
  "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tokio-rustls",
@@ -2950,6 +2952,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]
