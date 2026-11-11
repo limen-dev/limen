@@ -103,7 +103,7 @@ pub enum EventKind {
     #[serde(rename = "policy.shadow_deny")]
     PolicyShadowDeny,
     /// An admin replayed recorded sessions against a proposed policy
-    /// (ADR-0050). Holds who, the window, the policy digests and counts,
+    /// (ADR-0051). Holds who, the window, the policy digests and counts,
     /// never the sessions replayed.
     #[serde(rename = "policy.replay")]
     PolicyReplay,

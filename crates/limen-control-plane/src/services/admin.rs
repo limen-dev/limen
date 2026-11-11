@@ -48,7 +48,7 @@ pub fn parse_labels<S: std::hash::BuildHasher>(
     Labels::try_from(sorted).map_err(|e| Status::invalid_argument(e.to_string()))
 }
 
-/// ADR-0050: the recorded sessions of the last `days` days, through the
+/// ADR-0051: the recorded sessions of the last `days` days, through the
 /// active policy and the one a dry run would apply, as JSON. Empty for 0.
 async fn replay_json(
     state: &AppState,

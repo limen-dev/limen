@@ -270,7 +270,7 @@ pub struct Limits {
     /// Searches of the audit trail, per person (ADR-0026): search is also a
     /// way to read a lot at once.
     pub search: DefaultKeyedRateLimiter<String>,
-    /// Replays of recorded sessions against a policy change (ADR-0050), per person.
+    /// Replays of recorded sessions against a policy change (ADR-0051), per person.
     pub replay: DefaultKeyedRateLimiter<String>,
     /// Policy writes through the management API, per principal (ADR-0042 §10).
     pub policy_writes: DefaultKeyedRateLimiter<String>,

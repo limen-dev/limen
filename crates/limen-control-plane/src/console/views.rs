@@ -1211,7 +1211,7 @@ pub struct DryRun {
     pub removed: Vec<String>,
     /// Saving it would wait for another admin's approval.
     pub waits: bool,
-    /// Recorded sessions replayed through the change (ADR-0050), when asked.
+    /// Recorded sessions replayed through the change (ADR-0051), when asked.
     pub replay: Option<ReplayView>,
 }
 

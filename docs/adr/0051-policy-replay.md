@@ -1,4 +1,4 @@
-# ADR-0050: Replay recorded sessions against a policy change
+# ADR-0051: Replay recorded sessions against a policy change
 
 - Status: Accepted (issue #115, epic #117; the owner approved it on 2026-11-09). Labels are reconstructed from the current policy (option A) by the owner's decision; everything else is a default for review.
 - Date: 2026-11-09
@@ -50,4 +50,4 @@ Differences from, and additions to, the decisions above:
 - **No false all-clear.** `--fail-on-affected` also fails when the replay was truncated, or when nothing could be replayed but sessions were skipped. Session rows without a user or resource are counted as skipped.
 - **Output hygiene.** Terminal and Markdown output strip control and bidi characters and escape Markdown and mention characters; the console relies on template autoescaping.
 - **Known limits.** The CLI replay uses the default policy source only. Access-review denies are not replayed. Roles use the latest login's groups. Sessions before migration 0030 have no recorded database and are skipped.
-- **Numbering.** Migration is 0030 and this ADR is 0050 after rebasing onto upstream.
+- **Numbering.** Migration is 0030 and this ADR is 0051 after rebasing onto upstream.

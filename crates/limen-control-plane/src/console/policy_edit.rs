@@ -158,7 +158,7 @@ pub struct SaveForm {
     #[serde(default)]
     etag: String,
     /// "Preview impact" only: also replay the last N days of recorded
-    /// sessions (ADR-0050). Empty or 0 is no replay.
+    /// sessions (ADR-0051). Empty or 0 is no replay.
     #[serde(default)]
     replay_days: String,
 }
