@@ -43,15 +43,23 @@ impl PublicCert {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(key);
     }
 
-    /// Read the configured files, if any. Failing here stops the proxy from starting: serving the
-    /// internal certificate to browsers when the operator asked for a public one would be a
-    /// silent downgrade.
+    /// Read the configured files, if any. Files that are missing, not PEM, or whose key does not
+    /// belong to the certificate stop the proxy from starting: serving the internal certificate to
+    /// browsers when the operator asked for a public one would be a silent downgrade.
+    ///
+    /// A certificate that has *expired* does not. The proxy is also how workers and peers reach
+    /// each other, so a lapsed public certificate must not take them down with it: it starts,
+    /// logs an error, and the expiry alert is already firing.
     pub fn from_config(config: &Config) -> anyhow::Result<Arc<Self>> {
         let public = Arc::new(Self::default());
         if let (Some(cert), Some(key)) = (&config.public_cert_file, &config.public_key_file) {
             let (loaded, not_after) = load(cert, key)?;
             record_expiry(not_after);
-            tracing::info!(cert = %cert.display(), expires = not_after, "public certificate loaded");
+            if not_after <= now() {
+                tracing::error!(cert = %cert.display(), expired = not_after, "the public certificate has expired; the CLI and browsers will refuse it until it is replaced");
+            } else {
+                tracing::info!(cert = %cert.display(), expires = not_after, "public certificate loaded");
+            }
             public.set(Arc::new(loaded));
         }
         Ok(public)
@@ -94,9 +102,14 @@ impl ResolvesServerCert for Selector {
     }
 }
 
+fn now() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
 /// Read a PEM chain and key. Returns the certificate and the leaf's expiry (unix seconds).
 ///
 /// Fails if the chain is empty, the key is unreadable, or the key does not belong to the leaf.
+/// Does not look at the expiry: what to do about an expired certificate depends on the caller.
 pub fn load(cert_file: &Path, key_file: &Path) -> anyhow::Result<(CertifiedKey, i64)> {
     let cert_pem = std::fs::read_to_string(cert_file)
         .with_context(|| format!("reading {}", cert_file.display()))?;
@@ -115,11 +128,6 @@ pub fn load(cert_file: &Path, key_file: &Path) -> anyhow::Result<(CertifiedKey, 
     let (_, parsed) = x509_parser::parse_x509_certificate(leaf.as_ref())
         .map_err(|e| anyhow::anyhow!("the first certificate is not valid X.509: {e}"))?;
     let not_after = parsed.validity().not_after.timestamp();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    anyhow::ensure!(
-        not_after > now,
-        "the public certificate has expired (it ended at unix time {not_after})"
-    );
     let certified = CertifiedKey::from_der(chain, key, &limen_tunnel::tls::provider())
         .context("the public key file does not match the certificate")?;
     Ok((certified, not_after))
@@ -186,6 +194,11 @@ fn reload_once(
 ) -> anyhow::Result<Option<i64>> {
     let (loaded, not_after) = load(cert_file, key_file)?;
     record_expiry(not_after);
+    // Swapping one lapsed certificate for another helps nobody; keep what is serving.
+    anyhow::ensure!(
+        not_after > now(),
+        "the replacement certificate has expired (it ended at unix time {not_after})"
+    );
     if public
         .get()
         .is_some_and(|current| current.cert == loaded.cert)
@@ -388,6 +401,22 @@ mod tests {
         write(dir.path(), "k.pem", &other_key);
         assert!(reload_once(&public, &c, &k).expect("renewed").is_some());
         assert!(!Arc::ptr_eq(&first, &public.get().expect("new")));
+    }
+
+    #[test]
+    fn an_expired_certificate_starts_but_is_never_swapped_in() {
+        let ca = test_ca();
+        let dir = tempfile::tempdir().expect("dir");
+        let (cert, key) = leaf(&ca, -Span::hours(1));
+        let (c, k) = (
+            write(dir.path(), "c.pem", &cert),
+            write(dir.path(), "k.pem", &key),
+        );
+        // Start-up reads it (and logs an error): the proxy is also the workers' way in.
+        let (_, not_after) = load(&c, &k).expect("an expired certificate still loads");
+        assert!(not_after <= now());
+        // A reload refuses it.
+        assert!(reload_once(&PublicCert::default(), &c, &k).is_err());
     }
 
     #[test]
