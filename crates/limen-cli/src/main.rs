@@ -1033,6 +1033,32 @@ mod tests {
     }
 
     #[test]
+    fn request_commands_parse_in_new_and_old_forms() {
+        for args in [
+            &["request", "db", "--for", "30m"][..],
+            &["requests"],
+            &["requests", "--approvals"],
+            &["requests", "--all", "--status", "pending", "--json"],
+            &["requests", "ls", "--all"],
+            &["requests", "approve", "id1", "-m", "ok"],
+            &["requests", "deny", "id1", "-m", "no"],
+            &["requests", "cancel", "id1"],
+            // The old top-level forms stay for one release.
+            &["approve", "id1", "-m", "ok"],
+            &["deny", "id1"],
+            &["cancel", "id1"],
+            &["manage", "changes", "deny", "id1", "--note", "n"],
+            &["manage", "changes", "reject", "id1", "--note", "n"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        // Flags of the list do not mix with a subcommand.
+        assert!(Cli::try_parse_from(["limen", "requests", "--all", "approve", "id1"]).is_err());
+    }
+
+    #[test]
     fn kube_commands_parse() {
         for args in [
             &["kube", "login", "c"][..],
