@@ -412,6 +412,135 @@ mod tests {
         );
     }
 
+    /// Only one user and one login: if a second could follow, which one wins
+    /// would decide who the holder is. Anything that isn't a user SAN, or a
+    /// missing login, is refused too: the issuer never writes those.
+    #[test]
+    fn the_user_parser_refuses_repeats_foreign_sans_and_missing_parts() {
+        let now = OffsetDateTime::now_utc();
+        let login = "limen://login/0192f1d2-0000-7000-8000-000000000000";
+        let ok = user_identity(
+            uris(&["limen://user/alice", login, "limen://role/dev"]),
+            now,
+        )
+        .expect("valid");
+        assert_eq!(
+            (ok.username.as_str(), ok.roles.as_slice()),
+            ("alice", &["dev".to_owned()][..])
+        );
+        let refused = |parts: &[&str]| match user_identity(uris(parts), now) {
+            Err(VerifyError::Identity(m)) => m,
+            other => panic!("{parts:?} must be refused, got {other:?}"),
+        };
+        let m = refused(&["limen://user/alice", "limen://user/limen:admin", login]);
+        assert!(m.starts_with("unexpected SAN in user cert"), "{m}");
+        let m = refused(&["limen://user/alice", login, "limen://login/other"]);
+        assert!(m.starts_with("unexpected SAN in user cert"), "{m}");
+        // A component or label SAN has no place in a user certificate.
+        let m = refused(&["limen://user/alice", login, "limen://component/proxy/p1"]);
+        assert!(m.starts_with("unexpected SAN in user cert"), "{m}");
+        let m = refused(&["limen://user/alice", login, "limen://label/pool/a"]);
+        assert!(m.starts_with("unexpected SAN in user cert"), "{m}");
+        assert_eq!(refused(&[login, "limen://role/dev"]), "missing user");
+        assert_eq!(refused(&["limen://user/alice"]), "missing login id");
+        // A bot username needs the marker, and the marker needs a bot username.
+        let m = refused(&["limen://user/bot:deploy", login]);
+        assert!(m.contains("must agree"), "{m}");
+        let m = refused(&["limen://user/alice", login, "limen://actor/bot"]);
+        assert!(m.contains("must agree"), "{m}");
+    }
+
+    /// A self-signed certificate with these URI SANs, for the SAN parser (the
+    /// chain is checked separately).
+    fn cert_with_uris(uris: &[&str]) -> CertificateDer<'static> {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let mut params = CertificateParams::default();
+        params.subject_alt_names = uris
+            .iter()
+            .map(|u| rcgen::SanType::URI(rcgen::string::Ia5String::try_from(*u).expect("ia5")))
+            .collect();
+        params.self_signed(&key).expect("cert").der().clone()
+    }
+
+    /// The first component SAN names the component; a second one, or a user,
+    /// role or login SAN, means the certificate is not one the internal CA
+    /// wrote, so it is refused rather than read as the first kind.
+    #[test]
+    fn the_component_parser_refuses_repeats_foreign_and_malformed_sans() {
+        let id = component_identity(&cert_with_uris(&[
+            "limen://component/worker/w1",
+            "limen://label/pool/payments",
+            "https://example.com/ignored",
+        ]))
+        .expect("valid");
+        assert_eq!((id.kind, id.id.as_str()), (ComponentKind::Worker, "w1"));
+        assert_eq!(id.labels["pool"], "payments");
+
+        let refused = |uris: &[&str]| match component_identity(&cert_with_uris(uris)) {
+            Err(VerifyError::Identity(m)) => m,
+            other => panic!("{uris:?} must be refused, got {other:?}"),
+        };
+        for foreign in [
+            "limen://component/control_plane/cp1",
+            "limen://user/alice",
+            "limen://role/limen:admin",
+            "limen://login/x",
+            "limen://actor/bot",
+        ] {
+            let m = refused(&["limen://component/worker/w1", foreign]);
+            assert!(
+                m.starts_with("unexpected SAN in component cert"),
+                "{foreign}: {m}"
+            );
+        }
+        assert_eq!(
+            refused(&["limen://label/pool/payments"]),
+            "missing component"
+        );
+        assert_eq!(refused(&[]), "no subject alternative names");
+        // A Limen URI that doesn't parse is an error, not skipped like a foreign one.
+        let m = refused(&["limen://component/worker/w1", "limen://component/root/x"]);
+        assert!(m.starts_with("malformed identity URI"), "{m}");
+    }
+
+    /// A component certificate judged as of a time before 1970 is refused
+    /// rather than wrapped into a valid-looking time.
+    #[tokio::test]
+    async fn verify_component_at_refuses_times_before_the_epoch() {
+        let internal = ca(CaPurpose::Internal).await;
+        let issued = internal
+            .issue_component(ComponentCertRequest {
+                csr_der: csr().1,
+                kind: ComponentKind::ControlPlane,
+                id: "cp1".into(),
+                dns_names: vec![],
+                labels: std::collections::BTreeMap::new(),
+                ttl: Duration::from_secs(600),
+            })
+            .await
+            .expect("issue");
+        let now = OffsetDateTime::now_utc();
+        verify_component_at(&issued.der, internal.cert_der(), false, now).expect("valid now");
+        assert!(matches!(
+            verify_component_at(
+                &issued.der,
+                internal.cert_der(),
+                false,
+                now + time::Duration::hours(1)
+            ),
+            Err(VerifyError::Chain(_))
+        ));
+        assert!(matches!(
+            verify_component_at(
+                &issued.der,
+                internal.cert_der(),
+                false,
+                OffsetDateTime::UNIX_EPOCH - time::Duration::seconds(1)
+            ),
+            Err(VerifyError::Chain(m)) if m == "a time before 1970"
+        ));
+    }
+
     #[tokio::test]
     async fn empty_ci_values_are_refused_at_issuance() {
         let user_ca = ca(CaPurpose::UserX509).await;
