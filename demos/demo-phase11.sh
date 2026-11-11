@@ -66,7 +66,7 @@ sleep 11   # proxy and worker pick up the new policy within their 10s refresh
 pass "stack up, policy applied"
 
 step "Kafka: topics, ACLs, SCRAM users"
-wait_for "rabbitmq" "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping
+wait_for "rabbitmq" "${compose[@]}" exec -T -u rabbitmq rabbitmq-target rabbitmq-diagnostics -q ping
 "$here/config/targets/messaging/provision.sh" "kafka-1-messaging-$LIMEN_ENV" >/dev/null
 pass "orders.new (6 partitions, RF 3) and payments exist; ACLs and SCRAM users set"
 
