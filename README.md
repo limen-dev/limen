@@ -190,7 +190,7 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
         <li><b><code>limen config ssh --install</code></b> lets plain <code>ssh</code>, <code>scp</code>, <code>rsync</code> and <code>git</code> work through Limen</li>
         <li><b><code>limen doctor</code></b> says why access doesn't work, and how to fix it</li>
         <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
-        <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen approve</code></b> and <b><code>deny</code></b> answer one</li>
+        <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen requests approve</code></b> and <b><code>deny</code></b> answer one</li>
         <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>
         <li><b><code>limen admin</code></b> applies policy, locks users, ends sessions and manages workers</li>
       </ul>

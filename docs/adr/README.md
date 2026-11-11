@@ -56,5 +56,6 @@ Each ADR's status line gives its approval date.
 | [0049](0049-ocsf-audit-export.md) | OCSF audit export for SIEMs: a projection sink with one exhaustive event mapping, a bucket and key of its own, the native hash chain staying the source of truth, and a bounded lag so a dead SIEM cannot fill the spool | Proposed (built in PR #294) |
 | [0050](0050-policy-suggest.md) | Policy suggest: removals-only proposals from real sessions (unused rules and logins), a coverage check, exempt roles, an audited admin call; output is YAML and a diff, never applied | Accepted |
 | [0051](0051-policy-replay.md) | Replay recorded sessions against a policy change: active versus proposed on the same reconstructed requests, one decision engine, aggregates only, audited and admin-only | Accepted |
+| [0052](0052-requests-command-group.md) | One `limen requests` group for listing, approving, denying and cancelling access requests; old top-level verbs kept as hidden aliases | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.
