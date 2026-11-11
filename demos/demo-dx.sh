@@ -64,9 +64,10 @@ pass "stack up on $LIMEN_SERVER"
 step "doctor before any login: says what is missing, and how to fix it"
 out="$(limen doctor 2>&1)" && fail "doctor passed with no login"
 echo "$out"
-grep -q "no CA is pinned" <<<"$out" || fail "the missing CA isn't named"
+grep -q "system trust store" <<<"$out" || fail "doctor should say that, with no CA pinned, it uses the system trust store"
+grep -q -- "--ca-file" <<<"$out" || fail "the fix for an untrusted dev CA isn't named"
 grep -q "skipped" <<<"$out" || fail "dependent checks aren't skipped"
-pass "no CA, no login: doctor fails with fixes"
+pass "no CA pinned, no login: doctor fails with fixes"
 
 step "doctor on a proxy that isn't there"
 limen login --server localhost:1 --ca-file "$LIMEN_DEV_CA" >/dev/null 2>&1 || true
@@ -107,7 +108,7 @@ import json, pathlib, sys
 report = json.load(open(sys.argv[1]))
 assert report["ok"] is True, report
 names = [c["name"] for c in report["checks"]]
-assert names[:7] == ["proxy", "ca", "network", "tls", "clock", "login", "session"], names
+assert names[:7] == ["server", "ca", "network", "tls", "clock", "login", "session"], names
 text = open(sys.argv[1]).read()
 key = next(pathlib.Path(sys.argv[2]).glob("profiles/*/key.pem")).read_text()
 cert = next(pathlib.Path(sys.argv[2]).glob("profiles/*/cert.pem")).read_text()

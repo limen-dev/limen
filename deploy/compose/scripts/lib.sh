@@ -14,7 +14,7 @@
 # stacks/scale.yml (3 control planes, 3 proxies, 3 workers).
 # Stacks (each a compose file and a profile of the same name):
 STACK_NAMES=(ssh db redis mongo search messaging observability tracing bots kube tcp web)
-compose=() STACK_FLAGS=() # set by stack_setup
+compose=() STACK_FLAGS=() STACK_PUBLIC_CA="" # set by stack_setup
 POLICY_FILES=()
 
 # Select shared policy and the examples for each enabled resource stack.
@@ -26,7 +26,7 @@ stack_policy_files() {
     case "$s" in
       db) kind=database ;;
       ssh|redis|mongo|search|messaging|bots|kube|tcp|web) kind="$s" ;;
-      observability|tracing) continue ;;
+      observability|tracing|public-cert) continue ;;
       *) echo "unknown stack '$s' (choose from: ${STACK_NAMES[*]})" >&2; return 2 ;;
     esac
     case "$selected" in *" $kind "*) continue ;; esac
@@ -113,6 +113,13 @@ stack_setup() {
             export LIMEN_KUBE_DIR="$STACK_STATE/kube"
             export LIMEN_EXTRA_JOIN_TOKENS=",worker:dev-only-kube-worker-join-token-9d4b7e1a6c3f2058:pool=kube" ;;
       tcp) files+=(-f "$here/stacks/tcp.yml") ;;
+      public-cert)
+        # Not in STACK_NAMES: it changes how every client trusts the proxy, so it is only on when named.
+        if $scale; then echo "public-cert is not available with --scale" >&2; return 2; fi
+        export LIMEN_PUBLIC_CERT_DIR="$STACK_STATE/public-cert"
+        STACK_PUBLIC_CA="$LIMEN_PUBLIC_CERT_DIR/ca.pem"
+        "$here/scripts/gen-public-cert.sh" "$LIMEN_PUBLIC_CERT_DIR" || return 1
+        files+=(-f "$here/stacks/public-cert.yml") ;;
       web)
         files+=(-f "$here/stacks/web.yml")
         if $scale; then files+=(-f "$here/stacks/web-scale.yml")
@@ -152,6 +159,7 @@ stack_describe() {
     bots) echo "a fake CI identity issuer, to log in as a bot" ;;
     kube) echo "a Kubernetes cluster (k3s) and a worker that serves it (limen kube login)" ;;
     tcp) echo "a raw TCP echo target (limen tcp)" ;;
+    public-cert) echo "a stand-in public certificate on the proxy (ADR-0043); only when named, never by --yes" ;;
     web) echo "an HTTP app target for browser SSO and request auditing" ;;
   esac
 }
@@ -419,7 +427,7 @@ stack_endpoints() {
   for s in "$@"; do
     case "$s" in ssh) has_ssh=true ;; db) has_db=true ;; redis) has_redis=true ;; mongo) has_mongo=true ;; search) has_search=true ;; messaging) has_messaging=true ;; observability) has_obs=true ;; tracing) has_tracing=true ;; bots) has_bots=true ;; kube) has_kube=true ;; tcp) has_tcp=true ;; web) has_web=true ;; esac
   done
-  local ca="$STACK_STATE/internal-ca.pem" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
+  local ca="${STACK_PUBLIC_CA:-$STACK_STATE/internal-ca.pem}" kc="$STACK_STATE/kubeconfig.json" row="  ${C_CYAN}%-12s${C_RESET} %s\n"
   if $has_ssh || $has_db || $has_redis || $has_mongo || $has_search || $has_messaging || $has_kube || $has_tcp || $has_web; then
     ui_section "Resources"
     $has_ssh && printf "$row" "SSH" "limen ssh web-staging-1"

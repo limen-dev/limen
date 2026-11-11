@@ -1,0 +1,14 @@
+# The proxy shows a "publicly trusted" certificate to the CLI and browsers (ADR-0043), so they need
+# no CA file for the internal CA. Workers and peer proxies still get the internal one.
+#
+# Dev only: the certificate comes from a throwaway CA that scripts/gen-public-cert.sh makes, so
+# `limen login --ca-file <state>/public-cert/ca.pem` still has a CA to pin. A real deployment
+# mounts a certificate from a public CA and passes nothing at login.
+# Not for the scaled stack. Start it with: setup.sh --stacks public-cert
+services:
+  proxy:
+    environment:
+      LIMEN_PUBLIC_CERT_FILE: /etc/limen/public/cert.pem
+      LIMEN_PUBLIC_KEY_FILE: /etc/limen/public/key.pem
+    volumes:
+      - ${LIMEN_PUBLIC_CERT_DIR:?set by setup.sh}:/etc/limen/public:ro

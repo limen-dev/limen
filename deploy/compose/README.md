@@ -293,6 +293,12 @@ demos/demo-phase11.sh         # pika and librdkafka: refusals, a consumer group 
 
 The demo runs project `limen-messaging` on ports 39xxx and needs `python3` (it installs `pika` and `confluent-kafka` into a virtualenv under `.state/`). The first image build takes several minutes, and it isn't run in CI. Amazon MQ, Amazon MSK and `AWS_MSK_IAM` are **unverified**.
 
+## A public certificate on the proxy
+
+`deploy/compose/setup.sh --stacks public-cert` (`stacks/public-cert.yml`) gives the proxy a certificate from a throwaway CA that stands in for a public one ([ADR-0043](../../docs/adr/0043-public-proxy-certificate.md)): the CLI and browsers see it, workers and peers still see the internal CA's. It is never part of `--yes`, because it changes what every client has to trust, and it does not work with `--scale`.
+
+The stand-in CA is `.state/public-cert/ca.pem`: that is what `limen login --ca-file` must pin here (setup does it for you). On a real deployment you pin nothing. `scripts/gen-public-cert.sh <dir> --renew` makes a new certificate from the same CA; send the proxy `SIGHUP` (or wait a minute) to load it. `demos/demo-public-cert.sh` checks all of this.
+
 ## Kubernetes
 
 `deploy/compose/setup.sh --stacks kube` adds a k3s cluster and a Kubernetes worker (`stacks/kube.yml`) and prints how to use `kubectl` through Limen. See the [Kubernetes guide](../../docs/guides/kubernetes.md).
