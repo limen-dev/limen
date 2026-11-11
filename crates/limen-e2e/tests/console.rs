@@ -832,6 +832,18 @@ async fn console_end_to_end() {
             .body
             .contains("https://github.com/acme/infra/actions/runs/424242")
     );
+    // Every bot the Bots page links to has a page, including one that has not logged in.
+    let bot_links: Vec<&str> = bots_page
+        .body
+        .split("href=\"/console/users/")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    assert!(!bot_links.is_empty(), "the Bots page links to its bots");
+    for link in bot_links {
+        let page = admin_user.get(&format!("/console/users/{link}")).await;
+        assert_eq!(page.status, 200, "bot link /console/users/{link} resolves");
+    }
     // A user's page lists what their roles reach.
     let detail = admin_user
         .get(&format!("/console/users/{DEVELOPER_ENC}"))

@@ -5,6 +5,7 @@
 <div class="card card-pad">
   <pre class="secret">{{ token }}</pre>
   <p class="hint">Give it to the {{ kind }} as <code>LIMEN_JOIN_TOKEN</code>.</p>
+  <button type="button" class="secondary" data-copy="{{ token }}" title="Copy token" aria-label="Copy token"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg>Copy token</button>
   <a class="button secondary" href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>Back to workers</a>
 </div>
 {% endblock %}

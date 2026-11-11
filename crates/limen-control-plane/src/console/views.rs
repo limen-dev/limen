@@ -305,6 +305,10 @@ pub struct SessionView {
     pub id: String,
     pub user: String,
     pub user_path: String,
+    /// Set only when the session names a user, so a link never points at nothing.
+    pub user_known: bool,
+    /// Set only when the session names a resource.
+    pub resource_path: Option<String>,
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
@@ -360,6 +364,12 @@ impl From<&SessionRow> for SessionView {
             id: s.session_id.to_string(),
             user: dash(s.username.as_deref()),
             user_path: path_segment(s.username.as_deref().unwrap_or_default()),
+            user_known: s.username.as_deref().is_some_and(|u| !u.is_empty()),
+            resource_path: s
+                .resource
+                .as_deref()
+                .filter(|r| !r.is_empty())
+                .map(path_segment),
             kind: dash(s.kind.as_deref()),
             icon: kind_icon(s.kind.as_deref().unwrap_or_default()).0,
             kclass: kind_icon(s.kind.as_deref().unwrap_or_default()).1,
@@ -548,6 +558,9 @@ pub struct UserView {
     pub locked_by: String,
     pub locked_at: String,
     pub is_bot: bool,
+    /// False for a name that only appears in the audit trail (such as `system:idp-check`):
+    /// there is no account to disable and no roles to show.
+    pub manageable: bool,
     pub ci: Vec<Fact>,
     pub run_url: Option<String>,
     /// Where the account came from, in words ("IdP sign-in", "CI bot").
@@ -638,6 +651,7 @@ impl From<&UserRow> for UserView {
             locked_by: u.locked_by.clone().unwrap_or_default(),
             locked_at: time_text(u.locked_at),
             is_bot: u.actor_type == "bot",
+            manageable: true,
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
             source: match u.source.as_str() {
@@ -664,6 +678,7 @@ pub struct Stats {
 
 pub struct ResourceView {
     pub name: String,
+    pub path: String,
     pub connect: Connect,
     pub kind: String,
     pub icon: &'static str,

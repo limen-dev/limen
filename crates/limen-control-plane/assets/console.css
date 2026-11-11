@@ -316,7 +316,7 @@ td.empty { text-align: center; }
 .cmd.soon code { text-decoration: none; }
 
 /* Bots (ADR-0019) */
-.pill.bot { background: rgba(139, 92, 246, .14); color: #7c3aed; border-color: transparent; }
+.pill.bot { background: rgba(139, 92, 246, .14); color: #6d28d9; border-color: transparent; }
 :root[data-theme="dark"] .pill.bot { color: #c4b5fd; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill.bot { color: #c4b5fd; } }
 .bot-card { padding: 18px 20px; margin-bottom: 14px; }
@@ -622,3 +622,77 @@ details > summary .pill { white-space: normal; text-align: left; }
   .card h2 a { display: inline-flex; align-items: center; min-height: 44px; }
   summary { box-sizing: border-box; min-height: 44px; align-content: center; }
 }
+
+/* A paragraph introducing a table sits clear of it. */
+.sub + .table-wrap, .sub + .card { margin-top: 12px; }
+
+/* Filters on a phone: two fields to a row instead of one narrow column, so the list
+   starts on the first screen instead of below a page of inputs. */
+@media (max-width: 600px) {
+  .filters { gap: 10px; }
+  .filters label { flex: 1 1 calc(50% - 10px); min-width: 0; }
+  .filters input, .filters select, .filters .dp input, .filters input[type=datetime-local] { width: 100%; }
+  .filters .grow { flex-basis: 100%; }
+}
+
+/* The audit trail's search box has a long example in it: give it the room. */
+.search.wide-search { max-width: 760px; margin: 0 0 8px; }
+.search.wide-search input { width: 100%; }
+
+/* A rule chip (`sub  system:serviceaccount:…`) keeps its key whole and wraps only the value. */
+.chip { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.chip { align-items: baseline; }
+.chip b { flex: none; }
+
+/* "Start a review" is a button that opens a form, not a card with a button in it. */
+details.start { background: none; border: 0; box-shadow: none; border-radius: 0; margin: 0 0 22px; }
+details.start > summary::before { display: none; }
+
+/* Overview numbers on a phone: two to a row instead of five full-height cards. */
+@media (max-width: 600px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat { padding: 12px; gap: 10px; }
+  .stat span:not(.stat-icon) { white-space: normal; }
+  .stats > .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* The disable box and the facts card under it don't touch. */
+.danger-zone + .card { margin-top: 14px; }
+
+/* A button after labelled fields lines up with the inputs, not with the label-and-input block. */
+.row > label ~ button, .row > label ~ .button { align-self: flex-end; }
+
+/* The signed-in name is an inline span: give it a width so a long address ends in an ellipsis
+   instead of running under the sign-out button. */
+.me-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+
+/* A role chip in a table stays on one line; the table scrolls if it has to. */
+table:not(.facts) td .chip { white-space: nowrap; overflow-wrap: normal; }
+
+/* A link inside a notice is a real target, and a button in it sits at the end. */
+.notice a { display: inline-block; padding: 3px 2px; }
+.notice .button { margin-left: auto; padding: 6px 12px; flex: none; }
+form.stack label.check { min-height: 24px; padding-block: 2px; }
+
+.stats + .hint + .progress.wide, .stats + .progress.wide { margin-top: 14px; }
+@media (pointer: coarse) { .notice a:not(.button) { padding-block: 13px; } }
+
+/* A warning notice is amber all through, not a green box with an orange edge. */
+.notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
+/* Workers on a phone: one card per component, with each value labelled, so Revoke is on the screen
+   instead of past the right edge of a table. */
+@media (max-width: 600px) {
+  table.workers, table.workers tbody, table.workers tr, table.workers td { display: block; }
+  table.workers thead { display: none; }
+  table.workers tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  table.workers tr:last-child { border-bottom: 0; }
+  table.workers td { padding: 4px 0; border: 0; text-align: left; }
+  table.workers td[data-label] { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  table.workers td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  table.workers td.num { text-align: left; }
+  table.workers td.actions { padding-top: 10px; white-space: normal; }
+  table.workers td.actions form.inline { flex-wrap: wrap; gap: 8px; }
+  table.workers td.actions form.inline input[type=text] { flex: 1 1 140px; width: auto; }
+}
+@media (max-width: 600px) { table.workers td[data-label="Labels"]:has(> .chips:empty) { display: none; } }

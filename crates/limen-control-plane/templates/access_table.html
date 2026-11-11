@@ -1,11 +1,11 @@
 <div class="table-wrap"><table>
-  <thead><tr><th>Request</th><th>Who</th><th>Resource</th><th>For</th><th>Why</th><th>State</th></tr></thead>
+  <thead><tr><th>Resource</th>{% if who %}<th>Who</th>{% endif %}<th>Asked</th><th>For</th><th>Why</th><th>State</th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr>
-    <td class="nowrap"><a href="/console/access/{{ r.id }}">{{ r.created }}</a></td>
-    <td>{{ r.requester }}</td>
-    <td><a class="mono" href="/console/resources/{{ r.resource_path }}">{{ r.resource }}</a> <span class="chip c{{ r.role.c }}">{{ r.role.text }}</span></td>
+    <td><a class="cell-main" href="/console/access/{{ r.id }}">{{ r.resource }}</a><div class="cell-sub"><span class="chip c{{ r.role.c }}">{{ r.role.text }}</span></div></td>
+    {% if who %}<td>{{ r.requester }}</td>{% endif %}
+    <td class="nowrap">{{ r.created }}</td>
     <td class="nowrap">{{ r.duration }}</td>
     <td>{{ r.reason }}{% if r.break_glass %} <span class="pill bad">break-glass</span>{% endif %}</td>
     <td class="nowrap"><span class="pill {{ r.tone }}">{{ r.status }}</span>

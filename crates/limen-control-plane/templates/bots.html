@@ -22,7 +22,7 @@
     <span class="avatar {{ b.av }}" aria-hidden="true"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#bot"/></svg></span>
     <div>
       <h2><a href="/console/users/{{ b.path }}">{{ b.name }}</a>
-        {% if b.locked %}<span class="pill bad v-mid">locked</span>{% else if b.seen %}<span class="pill ok v-mid">active</span>{% else %}<span class="pill v-mid">never logged in</span>{% endif %}
+        {% if b.locked %}<span class="pill bad v-mid">disabled</span>{% else if b.seen %}<span class="pill ok v-mid">enabled</span>{% else %}<span class="pill v-mid">never logged in</span>{% endif %}
       </h2>
       {% if !b.description.is_empty() %}<p class="sub">{{ b.description }}</p>{% endif %}
     </div>
@@ -36,7 +36,7 @@
     {% if !b.last_run.is_empty() %}
     <tr><th>Last run</th><td><div class="chips">{% for f in b.last_run %}<span class="chip"><b>{{ f.key }}</b>&nbsp;{{ f.value }}</span>{% endfor %}</div>{% if let Some(u) = b.run_url %}<a href="{{ u }}" target="_blank" rel="noopener noreferrer">Open the run</a>{% endif %}</td></tr>
     {% endif %}
-    {% if b.locked %}<tr><th>Lock</th><td>{{ b.lock_reason }}</td></tr>{% endif %}
+    {% if b.locked %}<tr><th>Disabled because</th><td>{{ b.lock_reason }}</td></tr>{% endif %}
   </table>
 </div>
 {% endfor %}

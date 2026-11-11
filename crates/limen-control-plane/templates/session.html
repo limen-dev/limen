@@ -13,7 +13,7 @@
 
 
 {% if can_watch && s.active && s.kind == "ssh" %}
-<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#eye"/></svg><span>This session is live. <a href="/console/sessions/{{ s.id }}/watch">Watch it</a>, read-only. Your watching is recorded in the audit trail.</span></div>
+<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#eye"/></svg><span>This session is live. Watching is read-only, and it is recorded in the audit trail.</span><a class="button" href="/console/sessions/{{ s.id }}/watch">Watch it live</a></div>
 {% endif %}
 {% if !allowed_by.is_empty() %}
 <div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg><span>Allowed by an approved access request:{% for id in allowed_by %} <a class="mono" href="/console/access/{{ id }}">{{ id }}</a>{% endfor %}. The reason and the approvers are on the request.</span></div>
@@ -162,7 +162,7 @@
 
 <h2>Details</h2>
 <div class="card facts-card"><table class="facts">
-  <tr><th>User</th><td>{% if chrome.is_admin %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>
+  <tr><th>User</th><td>{% if chrome.is_admin && s.user_known %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% else %}{{ s.user }}{% endif %}</td></tr>
   <tr><th>Resource</th><td>{{ s.resource }} <span class="muted">({{ s.kind }})</span></td></tr>
   <tr><th>Login</th><td class="mono">{{ s.login }}</td></tr>
   <tr><th>Outcome</th><td>{% if s.reason.is_empty() %}<span class="muted">—</span>{% else %}{{ s.reason }}{% endif %}</td></tr>
