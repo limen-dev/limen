@@ -619,7 +619,9 @@ async fn main() {
         ColorWhen::Never => anstream::ColorChoice::Never,
     });
     // Logs go to stderr and default to warnings, so command output stays clean.
-    telemetry::init_with_default(LogFormat::Text, "warn");
+    // The platform verifier logs every failed certificate check as an error; the command reports
+    // the failure itself, with the fix, so the raw line is only noise unless RUST_LOG asks for it.
+    telemetry::init_with_default(LogFormat::Text, "warn,rustls_platform_verifier=off");
     if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
         tokio::spawn(commands::conns::watch_expiry(id, cli.server.clone()));
     }
