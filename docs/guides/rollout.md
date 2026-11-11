@@ -8,7 +8,7 @@ This is the order to do things in when you deploy Limen for a team: from an empt
 
 - A control plane, one or more proxies behind a public name, and workers next to the things people need to reach.
 - Developers who install the CLI and run one command. No certificate files, no keys, no VPN.
-- Short-lived access: every login is a certificate that lasts an hour or less, and every session is in the audit trail.
+- Short-lived access: every login is a certificate that lasts an hour by default (an operator can set a lower or higher ceiling with `--max-cert-ttl`), and every session is in the audit trail.
 
 ## Decide four things first
 
@@ -46,7 +46,7 @@ Then decide how users will trust the proxy. The CLI checks the proxy's certifica
 |---|---|---|---|
 | **A. A certificate from a public CA** | Get a certificate for the name (Let's Encrypt, a commercial CA, or an exported ACM certificate) and give it to the proxy | Nothing | You can get a public certificate for the name. **The best default.** |
 | **B. A certificate from your company CA** | The same, using your internal CA | Nothing, if IT already puts the company root CA on laptops (the CLI uses the operating system's trust store) | You have a company CA that is already on every laptop |
-| **C. No certificate of yours** | Send developers the internal CA file (`internal-ca.pem`) | `limen login --server limen.example.com --ca-file internal-ca.pem`, once | You cannot get a certificate yet, or you are on the ECS/EC2 example |
+| **C. No certificate of yours** | Send developers the internal CA file, `internal-ca.pem` (public information, not a secret). On Kubernetes it is the file you published into the `limen-internal-ca` ConfigMap in the [deploy steps](deploy.md#on-kubernetes); on ECS and EC2 it is in the `.../internal-ca` Secrets Manager secret that Terraform fills | `limen login --server limen.example.com --ca-file internal-ca.pem`, once | You cannot get a certificate yet, or you are on the ECS/EC2 example |
 
 Limen never trusts a server automatically the first time it sees it, because that would let anyone on the network in the middle of a first login capture the identity-provider token.
 
@@ -123,7 +123,18 @@ Then declare the resources and guide each team through theirs: [SSH](../runbooks
 
 ## 6. Onboard developers
 
-Install the CLI (`scripts/install-cli.sh` puts `limen` in `~/.local/bin`) and send them this:
+Developers need the `limen` binary. Releases publish it as a tarball for each platform, `limen-vX.Y.Z-<target>.tar.gz`, with a `SHA256SUMS` file; the targets are Linux (x86_64 and arm64) and macOS (Apple Silicon and Intel). There is no Windows build, no Homebrew tap and no hosted install script yet ([ADR-0024](../adr/0024-release-strategy.md)). Until there is, give them these steps (or put the binary on your own package mirror or device-management system):
+
+```sh
+gh release download vX.Y.Z --repo limen-dev/limen --pattern 'limen-*-aarch64-apple-darwin.tar.gz' --pattern SHA256SUMS
+shasum -a 256 --check --ignore-missing SHA256SUMS
+tar -xzf limen-vX.Y.Z-aarch64-apple-darwin.tar.gz
+install limen-vX.Y.Z-aarch64-apple-darwin/limen ~/.local/bin/    # or anywhere on PATH
+```
+
+(`scripts/install-cli.sh` builds the CLI from a checkout and needs a Rust toolchain; it is for contributors, not for your developers. The download commands above are untested here, and they need access to the repository while it is private.)
+
+Then send them this:
 
 > ```sh
 > limen login --server limen.example.com    # a browser opens on our identity provider
@@ -133,7 +144,7 @@ Install the CLI (`scripts/install-cli.sh` puts `limen` in `~/.local/bin`) and se
 
 With certificate option C, add `--ca-file internal-ca.pem` to the login and attach the file.
 
-A developer needs nothing else: no keys to create, no certificate files, no extra tools for SSH (`limen config ssh --install` lets plain `ssh`, `scp`, `rsync` and `git` work). The [CLI guide](cli.md) has the rest.
+A developer needs nothing else: no keys to create, no certificate files (with option A or B), no extra tools for SSH (`limen config ssh --install` lets plain `ssh`, `scp`, `rsync` and `git` work). The [CLI guide](cli.md) has the rest.
 
 ## 7. Run it
 
