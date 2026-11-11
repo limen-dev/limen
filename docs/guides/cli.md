@@ -50,7 +50,7 @@ Admin commands need the `limen:admin` role and are audited like everything else.
 
 `limen logout` ends the login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and deletes local credentials. If the proxy is unreachable the credentials are still deleted, and the certificate stays valid until it expires. Your other logins are unaffected.
 
-Signing in to a real deployment is `limen login --server limen.example.com`: the CLI checks the server's certificate against your operating system's trust store, like a browser. `--ca-file` is only for a server whose certificate does not come from a public CA (the dev stack, a private deployment); it pins that CA for later commands. `limen audit verify` is the exception: it checks signatures against Limen's own CA and always needs `--ca-file`.
+Signing in to a real deployment is `limen login --server limen.example.com`: the CLI checks the server's certificate against your operating system's trust store, like a browser. `--ca-file` is only for a server whose certificate does not come from a public CA (the dev stack, a private deployment); it pins that CA for later commands. A CA stays pinned across `limen logout`. If the server later gets a public certificate, run `limen login --server limen.example.com --system-roots` once to forget the pin. `limen audit verify` is the exception: it checks signatures against Limen's own CA and always needs `--ca-file`.
 
 Global options: `--server HOST[:PORT]` (or `LIMEN_SERVER`; port 443 unless you give one; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 

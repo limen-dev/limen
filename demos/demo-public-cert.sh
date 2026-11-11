@@ -44,6 +44,8 @@ presented() { # presented <field: issuer|serial> <alpn list>
   { openssl s_client -connect "localhost:$LIMEN_PORT_PROXY" -servername localhost -alpn "$2" </dev/null 2>/dev/null || true; } \
     | openssl x509 -noout "-$1" | sed 's/^[^=]*= *//'
 }
+# Fail instead of waiting forever (macOS has no `timeout`).
+within() { local secs="$1"; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
 subject_of() { openssl x509 -in "$1" -noout -subject | sed 's/^[^=]*= *//'; }
 
 step "Build the CLI and start the stack with a stand-in public certificate"
@@ -116,6 +118,34 @@ grep -q "✔ clock" <<<"$out" || fail "an API call over that connection should w
 out="$(run_cli -- --server proxy:3443 doctor)" && fail "doctor passed without the CA in the roots"
 grep -q "isn't trusted" <<<"$out" || fail "without the CA the certificate must be untrusted: $out"
 pass "the CLI trusted the proxy by system roots alone, and not without them"
+
+step "Every existing user has the internal CA pinned: refused, with the way out"
+# The old CLI would not connect without a CA, so everyone has one pinned, and a pinned CA wins.
+stale="$state/home-stale"
+rm -rf "$stale"
+out="$(LIMEN_HOME="$stale" limen login --no-browser --ca-file "$internal_ca" 2>&1)" && fail "login should be refused: the pinned internal CA did not issue the public certificate"
+grep -q "isn't trusted" <<<"$out" || fail "the refusal should say the certificate isn't trusted: $out"
+grep -q -- "--system-roots" <<<"$out" || fail "the way out isn't named: $out"
+pass "a pinned internal CA is refused, and the message names --system-roots"
+# Now as that user would be after upgrading: an old pin on disk, the system trusting the public CA.
+home="$state/home-container"
+rm -rf "$home"
+mkdir -p "$home/profiles/proxy_3443"
+cp "$internal_ca" "$home/profiles/proxy_3443/proxy-ca.pem"
+chmod -R a+rwX "$home"
+stale_cli() { run_cli -u "$(id -u):$(id -g)" -v "$home:/stale-home" -e LIMEN_HOME=/stale-home -v "$pub/ca.pem:/etc/test-roots.pem:ro" -e SSL_CERT_FILE=/etc/test-roots.pem -- "$@"; }
+out="$(stale_cli --server proxy:3443 doctor)" && fail "doctor passed with a stale pin"
+grep -q "✖ tls" <<<"$out" || fail "the stale pin should fail the TLS check: $out"
+grep -q -- "--system-roots" <<<"$out" || fail "doctor should name the way out: $out"
+# The login itself fails afterwards (this container cannot reach the identity provider); what counts
+# is that the pin is dropped and the server is reached.
+out="$(within 90 docker run --rm --network "$net" --tmpfs /tmp -u "$(id -u):$(id -g)" -v "$home:/stale-home" -e LIMEN_HOME=/stale-home -v "$pub/ca.pem:/etc/test-roots.pem:ro" -e SSL_CERT_FILE=/etc/test-roots.pem "$img" --server proxy:3443 login --device --system-roots 2>&1)" || true
+grep -q "Forgot the CA pinned" <<<"$out" || fail "--system-roots should say it dropped the pin: $out"
+grep -q "isn't trusted" <<<"$out" && fail "the server should be trusted after --system-roots: $out"
+[ ! -e "$home/profiles/proxy_3443/proxy-ca.pem" ] || fail "the old pin is still on disk"
+out="$(stale_cli --server proxy:3443 doctor)" || true
+grep -q "✔ tls" <<<"$out" || fail "after --system-roots the CLI should trust the server: $out"
+pass "login --system-roots dropped the old pin; the same CLI now trusts the server by system roots"
 
 step "Renewal: a new certificate is picked up on SIGHUP, with no restart"
 before="$(presented serial h2)"
