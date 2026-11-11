@@ -1,4 +1,4 @@
-//! Honeytoken resources (ADR-0050): a decoy is listed for the roles it is
+//! Honeytoken resources (ADR-0052): a decoy is listed for the roles it is
 //! exposed to and reachable by nothing, whatever a role's selectors say.
 
 #![allow(clippy::assert_is_empty)]

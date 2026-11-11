@@ -147,7 +147,7 @@ pub async fn detach(proxy: Option<&str>) -> anyhow::Result<()> {
     use std::os::unix::fs::OpenOptionsExt as _;
     use std::os::unix::process::CommandExt as _;
 
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let profile = Profile::load(&proxy)?
         .filter(|p| !p.is_expired())
         .context("not logged in; run `limen login`")?;
@@ -240,7 +240,7 @@ fn write_state(conn: &Conn) -> anyhow::Result<()> {
 
 /// Inside the detached process: end when the certificate expires.
 pub async fn watch_expiry(id: String, proxy: Option<String>) {
-    let Ok(proxy) = api::resolve_proxy(proxy.as_deref()) else {
+    let Ok(proxy) = api::resolve_server(proxy.as_deref()) else {
         return;
     };
     let Ok(Some(profile)) = Profile::load(&proxy) else {
@@ -321,7 +321,7 @@ pub fn stop_all(proxy: &str) -> usize {
 }
 
 pub fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy).ok();
+    let proxy = api::resolve_server(proxy).ok();
     let conns = list(proxy.as_deref())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&conns)?);
@@ -355,7 +355,7 @@ pub fn ls(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
 
 pub fn stop_command(proxy: Option<&str>, ids: &[String], all: bool) -> anyhow::Result<()> {
     let targets: Vec<String> = if all {
-        let proxy = api::resolve_proxy(proxy).ok();
+        let proxy = api::resolve_server(proxy).ok();
         list(proxy.as_deref())?.into_iter().map(|c| c.id).collect()
     } else {
         ids.to_vec()

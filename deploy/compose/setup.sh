@@ -23,6 +23,8 @@
 # kube     a Kubernetes cluster (k3s) and a worker serving it   stacks/kube.yml
 # tcp      a raw TCP echo target for `limen tcp`                 stacks/tcp.yml
 # web      an HTTP app target for browser SSO                    stacks/web.yml
+# public-cert  a stand-in public certificate on the proxy        stacks/public-cert.yml
+#          (only when named: --stacks public-cert; --yes does not enable it)
 #
 # `--stacks none` starts Limen alone. After starting it pins the CA, signs in as
 # the admin, applies shared policy plus the selected stack policies, and
@@ -134,7 +136,9 @@ start_stack() {
   locked=true
   state="$STACK_STATE"
   export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-  export LIMEN_PROXY="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
+  export LIMEN_SERVER="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
+  # With the public-cert stack the proxy no longer shows the internal CA's certificate to the CLI.
+  [ -n "${STACK_PUBLIC_CA:-}" ] && export LIMEN_DEV_CA="$STACK_PUBLIC_CA"
   export LIMEN_HOME="$state/home-admin"
 
   step "Build and start"

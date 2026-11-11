@@ -15,7 +15,7 @@ Usage: limen [OPTIONS] <COMMAND>
 Options:
 
 - `--color <WHEN>`: When to use colour: auto, always, or never. Values: auto, always, never. Default: `auto`.
-- `--proxy <PROXY>`: Proxy address, for example `limen.example.com:443`. Defaults to the last one used. Environment: `LIMEN_PROXY`.
+- `--server <SERVER>`: The Limen server, for example `limen.example.com` (port 443 unless you add one, as in `localhost:3443`). Defaults to the last one used. Environment: `LIMEN_SERVER`.
 - `-d, --detach`: Run a `connect` command in the background and return once it is listening.
 
 ### `limen login`
@@ -30,7 +30,8 @@ Options:
 
 - `--device`: Use the device code flow, for machines without a browser.
 - `--no-browser`: Print the login URL instead of opening a browser.
-- `--ca-file <CA_FILE>`: CA certificate to trust for the proxy. Pinned for later commands.
+- `--ca-file <CA_FILE>`: CA certificate to trust for the server, for a server whose certificate does not come from a public CA (the dev stack, a private deployment). Pinned for later commands.
+- `--system-roots`: Forget a CA pinned by an earlier `--ca-file` and trust the system's certificate store, for a server that now has a certificate from a public CA.
 - `--bot <METHOD>`: Log in as a bot with this CI platform's identity token, instead of as a person. In GitHub Actions the token is requested for you. Values: github_actions, gitlab, oidc.
 - `--bot-name <NAME>`: Which bot, if more than one could match the token.
 - `--token-env <VAR>`: Read the token from this environment variable (default for gitlab and oidc: LIMEN_ID_TOKEN).
@@ -428,6 +429,25 @@ Options:
 - `--new <NEW>`: The new policy: files or directories (after `--new`).
 - `--format <FORMAT>`: text, json, or markdown (for a pull request comment). Values: text, json, markdown. Default: `text`.
 - `--fail-on-widening`: Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
+- `--replay <DAYS>`: Also replay the last DAYS (1 to 30, default 30) of recorded sessions through the active and the new policy and say who would have been refused (needs limen:admin; the old side must be `active`; the new files are read as `limen admin apply` reads them).
+- `--fail-on-affected`: With --replay: exit non-zero if any recorded session would have been refused.
+
+#### `limen policy suggest`
+
+Propose a tighter policy from what people used: access a role grants that nobody used.
+
+Needs limen:admin. It only proposes removals and never applies them. The history must be at least as long as the window.
+
+```text
+Usage: limen policy suggest [OPTIONS]
+```
+
+Options:
+
+- `--window-days <WINDOW_DAYS>`: Days of sessions to judge by (7 to 365). A quarterly job needs 120 or more. Default: `90`.
+- `-o, --output <FILE>`: Write the changed roles, as policy YAML, to this new file.
+- `--yaml`: Print only the YAML, for a pipe.
+- `--json`: Print the full result as JSON.
 
 ### `limen connect`
 

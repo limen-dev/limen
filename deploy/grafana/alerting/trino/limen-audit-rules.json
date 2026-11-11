@@ -71,7 +71,7 @@
         },
         {
           "annotations": {
-            "summary": "Someone tried to use a honeytoken (ADR-0050). Nobody has a reason to: check the detect.honeytoken events for the user, address and what they tried."
+            "summary": "Someone tried to use a honeytoken (ADR-0052). Nobody has a reason to: check the detect.honeytoken events for the user, address and what they tried."
           },
           "condition": "C",
           "data": [

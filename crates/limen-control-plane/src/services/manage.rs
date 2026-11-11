@@ -502,7 +502,7 @@ fn check_content(kind: &str, value: &Value) -> Result<(), StoreError> {
                 return Err(denied("field", "a writer's role can't be break-glass"));
             }
         }
-        // A decoy (ADR-0050) is a person's: a writer that could make one
+        // A decoy (ADR-0052) is a person's: a writer that could make one
         // could also learn which names are traps, or set a few off.
         "resource" => {
             if spec

@@ -46,8 +46,8 @@ Keys, passwords and tokens tend to outlive the reason they were handed out. Lime
 ## What using it looks like
 
 ```sh
-$ limen login --proxy limen.example.com:443   # a browser opens on your identity provider
-$ limen ls                                    # what am I allowed to reach?
+$ limen login --server limen.example.com   # a browser opens on your identity provider
+$ limen ls                                 # what am I allowed to reach?
 NAME             KIND        ACCESS AS                LABELS
 bastion-staging  ● ssh       ec2-user, ubuntu         env=staging tier=bastion
 orders-staging   ● postgres  limen_read, limen_write  env=staging team=payments
@@ -78,7 +78,7 @@ deploy/compose/setup.sh
 scripts/install-cli.sh
 
 # 3. Sign in. A browser opens; use admin@example.com with the password "password".
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 
 # 4. Connect
 limen ls

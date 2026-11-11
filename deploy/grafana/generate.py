@@ -212,7 +212,7 @@ ALERTS = [
         "title": "Limen: honeytoken touched",
         "sql": "SELECT count(DISTINCT event_id) AS value FROM {T} WHERE kind = 'detect.honeytoken' AND from_iso8601_timestamp(\"time\") > current_timestamp - INTERVAL '15' MINUTE AND dt >= format_datetime(current_timestamp - INTERVAL '1' DAY, 'yyyy-MM-dd')",
         "threshold": 0,
-        "summary": "Someone tried to use a honeytoken (ADR-0050). Nobody has a reason to: check the detect.honeytoken events for the user, address and what they tried.",
+        "summary": "Someone tried to use a honeytoken (ADR-0052). Nobody has a reason to: check the detect.honeytoken events for the user, address and what they tried.",
     },
     {
         "uid": "limen-sequence-gaps",

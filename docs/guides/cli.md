@@ -39,7 +39,7 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | Open a web app or a raw TCP target | `web open`, `tcp` | [Web apps](web-apps.md), [TCP](tcp.md) |
 | Let an AI agent see what you can reach (read-only) | `mcp`, `config mcp` | [AI agents](ai-agents.md) |
 | Ask for, approve or revoke access | `request`, `requests`, `approve`, `deny`, `cancel`, `admin grants` | [Access requests](access-requests.md) |
-| Test and question policy | `policy test`, `who-can`, `what-can`, `diff`, `explain` | [Policy tooling](policy-tooling.md) |
+| Test and question policy | `policy test`, `who-can`, `what-can`, `diff`, `explain`, `suggest` | [Policy tooling](policy-tooling.md) |
 | Search the audit trail | `audit search` | [Audit search](audit-search.md) |
 | Review access, export evidence | `review …`, `admin evidence` | [Access reviews](access-reviews.md) |
 | Review discovered resources | `admin discovery` | [Discovery](discovery.md) |
@@ -50,7 +50,9 @@ Admin commands need the `limen:admin` role and are audited like everything else.
 
 `limen logout` ends the login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and deletes local credentials. If the proxy is unreachable the credentials are still deleted, and the certificate stays valid until it expires. Your other logins are unaffected.
 
-Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
+Signing in to a real deployment is `limen login --server limen.example.com`: the CLI checks the server's certificate against your operating system's trust store, like a browser. `--ca-file` is only for a server whose certificate does not come from a public CA (the dev stack, a private deployment); it pins that CA for later commands. A CA stays pinned across `limen logout`. If the server later gets a public certificate, run `limen login --server limen.example.com --system-roots` once to forget the pin. `limen audit verify` is the exception: it checks signatures against Limen's own CA and always needs `--ca-file`.
+
+Global options: `--server HOST[:PORT]` (or `LIMEN_SERVER`; port 443 unless you give one; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 
 ## Local listeners
 

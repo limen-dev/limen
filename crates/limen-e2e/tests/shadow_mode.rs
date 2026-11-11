@@ -79,6 +79,7 @@ async fn a_shadow_deny_is_reported_and_an_enforced_one_refuses() {
             sources: policy(&target.addr.to_string(), &target.host_key, &shadow),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")
@@ -144,6 +145,7 @@ async fn a_shadow_deny_is_reported_and_an_enforced_one_refuses() {
             sources: policy(&target.addr.to_string(), &target.host_key, ""),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

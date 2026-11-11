@@ -21,7 +21,7 @@ state="$here/.state"
 source "$here/scripts/lib.sh"
 stack_setup ssh observability bots
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:3443
+export LIMEN_SERVER=localhost:3443
 base=https://localhost:3443
 issuer_url=http://localhost:8130
 as_admin() { LIMEN_HOME="$state/home-admin" "$LIMEN_BIN" "$@"; }
@@ -48,7 +48,7 @@ mint() {
 # bot_login <token file> [extra limen args]
 bot_login() {
   local file="$1"; shift
-  as_bot --proxy "$LIMEN_PROXY" login --bot github_actions --token-file "$file" --ca-file "$ca" "$@"
+  as_bot --server "$LIMEN_SERVER" login --bot github_actions --token-file "$file" --ca-file "$ca" "$@"
 }
 
 step "Build and start the stack"
@@ -120,7 +120,7 @@ step "The right CI job logs in with its identity token, and gets a bot credentia
 mint acme/infra refs/heads/main staging > "$state/phase4/token-1.jwt"
 echo "  token: $(wc -c < "$state/phase4/token-1.jwt" | tr -d ' ') bytes, never printed"
 bot_login "$state/phase4/token-1.jwt"
-as_bot --proxy "$LIMEN_PROXY" status | grep -q 'bot:demo-deploy' || fail "status doesn't show the bot"
+as_bot --server "$LIMEN_SERVER" status | grep -q 'bot:demo-deploy' || fail "status doesn't show the bot"
 pass "signed in as bot:demo-deploy, no secret configured anywhere"
 
 step "The bot opens an SSH session, recorded and audited like anyone's"

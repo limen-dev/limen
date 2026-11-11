@@ -305,6 +305,10 @@ pub struct SessionView {
     pub id: String,
     pub user: String,
     pub user_path: String,
+    /// Set only when the session names a user, so a link never points at nothing.
+    pub user_known: bool,
+    /// Set only when the session names a resource.
+    pub resource_path: Option<String>,
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
@@ -360,6 +364,12 @@ impl From<&SessionRow> for SessionView {
             id: s.session_id.to_string(),
             user: dash(s.username.as_deref()),
             user_path: path_segment(s.username.as_deref().unwrap_or_default()),
+            user_known: s.username.as_deref().is_some_and(|u| !u.is_empty()),
+            resource_path: s
+                .resource
+                .as_deref()
+                .filter(|r| !r.is_empty())
+                .map(path_segment),
             kind: dash(s.kind.as_deref()),
             icon: kind_icon(s.kind.as_deref().unwrap_or_default()).0,
             kclass: kind_icon(s.kind.as_deref().unwrap_or_default()).1,
@@ -548,6 +558,9 @@ pub struct UserView {
     pub locked_by: String,
     pub locked_at: String,
     pub is_bot: bool,
+    /// False for a name that only appears in the audit trail (such as `system:idp-check`):
+    /// there is no account to disable and no roles to show.
+    pub manageable: bool,
     pub ci: Vec<Fact>,
     pub run_url: Option<String>,
     /// Where the account came from, in words ("IdP sign-in", "CI bot").
@@ -638,6 +651,7 @@ impl From<&UserRow> for UserView {
             locked_by: u.locked_by.clone().unwrap_or_default(),
             locked_at: time_text(u.locked_at),
             is_bot: u.actor_type == "bot",
+            manageable: true,
             ci: ci_facts(u.last_ci.as_ref()),
             run_url: run_url(u.last_ci.as_ref()),
             source: match u.source.as_str() {
@@ -664,6 +678,7 @@ pub struct Stats {
 
 pub struct ResourceView {
     pub name: String,
+    pub path: String,
     pub connect: Connect,
     pub kind: String,
     pub icon: &'static str,
@@ -1196,6 +1211,92 @@ pub struct DryRun {
     pub removed: Vec<String>,
     /// Saving it would wait for another admin's approval.
     pub waits: bool,
+    /// Recorded sessions replayed through the change (ADR-0051), when asked.
+    pub replay: Option<ReplayView>,
+}
+
+/// The replay of recorded sessions, ready to show. Every string is escaped
+/// by the template.
+pub struct ReplayView {
+    pub headline: String,
+    pub partial: bool,
+    pub affected: Vec<ReplayRow>,
+    /// Shadow rules that would have fired, sessions already refused, and what
+    /// was not replayed, one line each.
+    pub notes: Vec<String>,
+    pub caveat: &'static str,
+    pub error: Option<String>,
+}
+
+pub struct ReplayRow {
+    pub who: String,
+    pub bot: bool,
+    pub principal: String,
+    pub resource: String,
+    pub sessions: u64,
+    pub now: &'static str,
+    pub labels_changed: bool,
+}
+
+impl ReplayView {
+    #[must_use]
+    pub fn new(r: &limen_policy::replay::ReplayReport) -> Self {
+        let mut notes = Vec::new();
+        for s in &r.shadow {
+            notes.push(format!(
+                "Shadow rule {} would have fired for {} sessions.",
+                s.rule, s.sessions
+            ));
+        }
+        if r.affected_omitted > 0 {
+            notes.push(format!(
+                "{} more groups are not listed; the totals count them.",
+                r.affected_omitted
+            ));
+        }
+        if r.already_refused > 0 {
+            notes.push(format!(
+                "{} sessions are refused by the active policy today already (groups or roles changed since): not caused by this change.",
+                r.already_refused
+            ));
+        }
+        for (reason, n) in &r.skipped {
+            notes.push(format!("{n} sessions not replayed: {reason}."));
+        }
+        Self {
+            headline: r.headline(),
+            partial: r.truncated,
+            affected: r
+                .affected
+                .iter()
+                .map(|a| ReplayRow {
+                    who: a.user.clone(),
+                    bot: a.bot,
+                    principal: a.principal.clone(),
+                    resource: a.resource.clone(),
+                    sessions: a.sessions,
+                    now: a.now.text(),
+                    labels_changed: a.labels_changed,
+                })
+                .collect(),
+            notes,
+            caveat: limen_policy::replay::CAVEAT,
+            error: None,
+        }
+    }
+
+    /// A replay that could not run, with the reason.
+    #[must_use]
+    pub fn failed(message: &str) -> Self {
+        Self {
+            headline: String::new(),
+            partial: false,
+            affected: Vec::new(),
+            notes: Vec::new(),
+            caveat: limen_policy::replay::CAVEAT,
+            error: Some(message.to_owned()),
+        }
+    }
 }
 
 #[derive(Template)]

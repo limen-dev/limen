@@ -23,7 +23,7 @@ state="$here/.state"
 source "$here/scripts/lib.sh"
 stack_setup ssh observability bots
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:3443
+export LIMEN_SERVER=localhost:3443
 base=https://localhost:3443
 # Each person has their own CLI profile directory.
 as_admin() { LIMEN_HOME="$state/home-admin" "$LIMEN_BIN" "$@"; }
@@ -96,7 +96,7 @@ step "developer has a live SSH session"
 login developer
 as_developer ssh web-staging-1 -- 'echo started; for i in $(seq 1 120); do echo tick $i; sleep 1; done' > "$state/developer-session.log" 2>&1 &
 ssh_pid=$!
-wait_for "developer's session to appear in the console" sh -c "curl -s --cacert '$ca' -b '$alice_jar' '$base/console/sessions?filter=active' | grep -q '$DEVELOPER'"
+wait_for "developer's session to appear in the console" sh -c "curl -s --cacert '$ca' -b '$alice_jar' '$base/console/sessions?filter=active' | grep -q 'href=\"/console/sessions/[0-9a-f-]\{36\}\"'"
 active="$(page "$alice_jar" '/console/sessions?filter=active')"
 session_id="$(echo "$active" | grep -o '/console/sessions/[0-9a-f-]\{36\}' | head -1 | sed 's|.*/||')"
 [ -n "$session_id" ] || fail "no session id in the console"

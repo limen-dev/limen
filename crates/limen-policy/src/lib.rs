@@ -6,8 +6,10 @@ pub mod delegation;
 pub mod discovery;
 pub mod duration;
 pub mod model;
+pub mod replay;
 pub mod schema;
 pub mod shadow;
+pub mod suggest;
 pub mod testing;
 pub mod tooling;
 pub mod trace;
@@ -195,7 +197,7 @@ pub struct Policy {
     group_roles: BTreeMap<String, BTreeSet<String>>,
     mapping_docs: BTreeMap<String, model::RoleMappingDoc>,
     resources: BTreeMap<String, ResourceDoc>,
-    /// Decoys (ADR-0050), kept apart from `resources` on purpose: everything
+    /// Decoys (ADR-0052), kept apart from `resources` on purpose: everything
     /// that routes, grants, bootstraps or connects reads `resources`, so a
     /// decoy is absent from all of it. Only the code that lists or alerts
     /// reads this map.
@@ -647,7 +649,7 @@ impl Policy {
         self.resources.len()
     }
 
-    /// The decoy called `name` (ADR-0050), if there is one. Enforcement and
+    /// The decoy called `name` (ADR-0052), if there is one. Enforcement and
     /// listing code asks this where a person names a resource; nothing that
     /// grants access reads decoys.
     #[must_use]
@@ -2288,7 +2290,11 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
 #[cfg(test)]
 mod honeytoken_tests;
 #[cfg(test)]
+mod replay_tests;
+#[cfg(test)]
 mod shadow_tests;
+#[cfg(test)]
+mod suggest_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

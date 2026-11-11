@@ -65,7 +65,7 @@ fn may_send(kind: ComponentKind, event: EventKind) -> bool {
         // `PolicyShadowDeny` (ADR-0046) is the proxy's report of a deny rule
         // that only reports; it changes no decision, so forging one only
         // adds noise to a log the control plane's own events outrank.
-        // `DetectHoneytoken` (ADR-0050): the proxy sees the attempt before
+        // `DetectHoneytoken` (ADR-0052): the proxy sees the attempt before
         // any worker does. A forged one is a false alarm, never an access.
         ComponentKind::Proxy => matches!(
             event,

@@ -118,6 +118,7 @@ fn access_for(policy: &limen_policy::Policy, roles: &[String]) -> Vec<ResourceVi
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
+            path: path_segment(&r.name),
             name: r.name,
             kind: r.kind.as_str().to_owned(),
             icon: views::kind_icon(r.kind.as_str()).0,
@@ -238,6 +239,7 @@ pub async fn home(
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
+            path: path_segment(&r.name),
             name: r.name,
             kind: r.kind.as_str().to_owned(),
             icon: views::kind_icon(r.kind.as_str()).0,
@@ -431,7 +433,7 @@ pub async fn resources(
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
-        // A decoy (ADR-0050) is not a resource: no worker serves it, nothing
+        // A decoy (ADR-0052) is not a resource: no worker serves it, nothing
         // is reachable, and the policy page is where an admin sees it.
         if r.spec.honeytoken.is_some() {
             continue;
@@ -1222,6 +1224,7 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         locked_by: l.locked_by.clone(),
         locked_at: time_text(Some(l.locked_at)),
         is_bot: limen_core::identity::is_bot(name),
+        manageable: true,
         ci: Vec::new(),
         run_url: None,
         source: "never signed in".into(),
@@ -1229,6 +1232,55 @@ fn lock_only_view(name: &str, l: &db::LockRow) -> UserView {
         idp: "—".into(),
         idp_tone: "",
         pending: String::new(),
+    }
+}
+
+/// A bot that policy defines but that has not logged in: no user row exists yet.
+fn policy_bot_view(name: &str, roles: &[String]) -> UserView {
+    UserView {
+        name: name.to_owned(),
+        path: path_segment(name),
+        role_list: roles
+            .iter()
+            .map(|r| views::Chip {
+                text: r.clone(),
+                c: views::chip_color(r),
+            })
+            .collect(),
+        group_list: Vec::new(),
+        av: views::avatar_class(name),
+        initial: name
+            .chars()
+            .next()
+            .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect()),
+        first_login: "never".into(),
+        last_login: "never".into(),
+        logins: 0,
+        locked: false,
+        lock_reason: String::new(),
+        locked_by: String::new(),
+        locked_at: String::new(),
+        is_bot: true,
+        manageable: true,
+        ci: Vec::new(),
+        run_url: None,
+        source: "CI bot, defined in policy".into(),
+        issuer: String::new(),
+        idp: "not applicable".into(),
+        idp_tone: "",
+        pending: String::new(),
+    }
+}
+
+/// A name that appears in the audit trail but is neither an account nor a policy bot,
+/// such as the actor the IdP check or SCIM records. Its page shows the activity only.
+fn audit_only_view(name: &str) -> UserView {
+    UserView {
+        manageable: false,
+        is_bot: false,
+        source: "No account: the name only appears in the audit trail".into(),
+        idp: "not applicable".into(),
+        ..policy_bot_view(name, &[])
     }
 }
 
@@ -1349,14 +1401,28 @@ pub async fn user_detail(
         None => {
             // A lock can name someone who never signed in.
             let locks = db::active_locks(&state.db).await.unwrap_or_default();
-            match locks.iter().find(|l| l.username == name) {
-                Some(l) => lock_only_view(&name, l),
-                None => {
-                    return error_page(
-                        StatusCode::NOT_FOUND,
-                        "Not found",
-                        "There is no such user.",
-                    );
+            let loaded = state.policy.current();
+            let defined_bot = loaded.policy.bots().find(|b| b.username() == name);
+            match (locks.iter().find(|l| l.username == name), defined_bot) {
+                (Some(l), _) => lock_only_view(&name, l),
+                // A bot in policy that has not logged in yet: the Bots page links here.
+                (None, Some(b)) => policy_bot_view(&name, &b.spec.roles),
+                (None, None) => {
+                    let named = store::EventFilter {
+                        username: Some(name.clone()),
+                        ..store::EventFilter::default()
+                    };
+                    match store::list_events(&state.db, &named, 1, 0).await {
+                        Ok(rows) if !rows.is_empty() => audit_only_view(&name),
+                        Ok(_) => {
+                            return error_page(
+                                StatusCode::NOT_FOUND,
+                                "Not found",
+                                "There is no such user.",
+                            );
+                        }
+                        Err(e) => return db_error("reading a user's activity", &e),
+                    }
                 }
             }
         }
@@ -1392,7 +1458,8 @@ pub async fn user_detail(
     let role_names: Vec<String> = view.role_list.iter().map(|r| r.text.clone()).collect();
     html(
         UserPage {
-            chrome: chrome(&state, &auth, "users"),
+            // A bot is reached from the Bots page, so that is the entry to highlight.
+            chrome: chrome(&state, &auth, if view.is_bot { "bots" } else { "users" }),
             notice: notice(q.done.as_deref()),
             access: access_for(&loaded.policy, &role_names),
             policy_version: loaded.version,

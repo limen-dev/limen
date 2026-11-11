@@ -239,6 +239,7 @@ async fn console_end_to_end() {
             sources: policy(&target.addr.to_string(), &target.host_key, &d.idp.issuer),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")
@@ -832,6 +833,18 @@ async fn console_end_to_end() {
             .body
             .contains("https://github.com/acme/infra/actions/runs/424242")
     );
+    // Every bot the Bots page links to has a page, including one that has not logged in.
+    let bot_links: Vec<&str> = bots_page
+        .body
+        .split("href=\"/console/users/")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    assert!(!bot_links.is_empty(), "the Bots page links to its bots");
+    for link in bot_links {
+        let page = admin_user.get(&format!("/console/users/{link}")).await;
+        assert_eq!(page.status, 200, "bot link /console/users/{link} resolves");
+    }
     // A user's page lists what their roles reach.
     let detail = admin_user
         .get(&format!("/console/users/{DEVELOPER_ENC}"))
@@ -1225,6 +1238,28 @@ async fn console_end_to_end() {
         !after.body.contains("metadata: { name: extra }") && !after.body.contains("name: extra"),
         "a preview saves nothing"
     );
+    // The same preview, replayed against recorded sessions (ADR-0051).
+    let page = admin_user
+        .post(
+            "/console/policy/documents/preview",
+            &[("csrf", &csrf), ("yaml", extra), ("replay_days", "7")],
+        )
+        .await;
+    assert_eq!(page.status, 200);
+    assert!(
+        page.body.contains("What this would have changed")
+            && page.body.contains("sessions replayed"),
+        "{}",
+        page.body
+    );
+    // A window outside the allowed range is said, not run.
+    let page = admin_user
+        .post(
+            "/console/policy/documents/preview",
+            &[("csrf", &csrf), ("yaml", extra), ("replay_days", "400")],
+        )
+        .await;
+    assert!(page.body.contains("the replay window is 1 to 30 days"));
     // A refused document shows the reason.
     let page = admin_user
         .post(
@@ -1441,6 +1476,7 @@ async fn the_console_edits_what_it_owns_and_decides_held_changes() {
             ),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

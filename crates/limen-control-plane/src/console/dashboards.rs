@@ -726,7 +726,7 @@ const RANKINGS: [Spec; 25] = [
         windowed: true,
         sql: "SELECT kind, count(*) FROM audit_events WHERE at >= $1 AND kind IN
               ('user.lock', 'user.unlock', 'user.delete', 'user.provision', 'user.groups_change', 'idp.offboard', 'session.kill', 'component.revoke', 'join_token.create', 'policy.change',
-               'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export')
+               'access.revoke', 'access.deny_override', 'resource.review', 'evidence.export', 'policy.suggest')
               GROUP BY 1 ORDER BY 2 DESC, 1",
     },
     Spec {

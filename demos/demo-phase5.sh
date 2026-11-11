@@ -33,7 +33,7 @@ source "$here/scripts/lib.sh"
 stack_setup --scale ssh
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:23443
+export LIMEN_SERVER=localhost:23443
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 export LIMEN_DEX_URL=http://localhost:25556
 s3=http://localhost:28333/limen-audit

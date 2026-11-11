@@ -32,6 +32,12 @@ locals {
       critical = 0
       message  = "The CA failed to sign {{kind.name}} certificates. Logins and new sessions fail while signing is down. With KMS, check the key, its policy and AWS availability."
     }
+    public_cert_reload = {
+      name     = "Limen: proxy cannot load its new public certificate (${var.environment})"
+      query    = "sum(last_30m):sum:${var.metrics_namespace}.limen_proxy_public_cert_reload_failures_total.count{env:${var.environment}} by {host}.as_count() > 0"
+      critical = 0
+      message  = "{{host.name}} refused the replacement public certificate (not PEM, expired, or a key that does not match). It keeps serving the last good one; check the proxy log before it expires. Expiry itself is the Prometheus alert LimenPublicCertExpiring on limen_proxy_public_cert_expiry_timestamp_seconds."
+    }
     worker_disconnected = {
       name     = "Limen: worker without a tunnel (${var.environment})"
       query    = "max(last_5m):max:${var.metrics_namespace}.limen_worker_tunnels_up{env:${var.environment}} by {host} < 1"
@@ -62,7 +68,7 @@ resource "datadog_monitor" "honeytoken" {
   name    = "Limen: honeytoken touched (${var.environment})"
   type    = "log alert"
   query   = "logs(\"${local.logs} event_kind:detect.honeytoken\").index(\"*\").rollup(\"count\").last(\"5m\") > 0"
-  message = "{{log.attributes.user}} tried to use the honeytoken {{log.attributes.data.resource}} (ADR-0050). No one has a reason to: treat it as a stolen credential, a scan, or someone looking around. ${local.notify}"
+  message = "{{log.attributes.user}} tried to use the honeytoken {{log.attributes.data.resource}} (ADR-0052). No one has a reason to: treat it as a stolen credential, a scan, or someone looking around. ${local.notify}"
   monitor_thresholds {
     critical = 0
   }

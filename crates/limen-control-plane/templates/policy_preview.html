@@ -23,6 +23,20 @@
     {% for n in r.removed %}<li class="del">- {{ n }}</li>{% endfor %}
   </ul>
 {% endif %}
+{% if let Some(rp) = r.replay %}
+<h4>What this would have changed</h4>
+{% if let Some(e) = rp.error %}<pre class="error">{{ e }}</pre>{% else %}
+<p>{{ rp.headline }}</p>
+{% if rp.partial %}<div class="notice warn"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-alert"/></svg>Partial: more session groups matched than were replayed.</div>{% endif %}
+{% if !rp.affected.is_empty() %}
+<div class="table-wrap"><table><thead><tr><th>Who</th><th>As</th><th>Resource</th><th>Sessions</th><th>Now</th></tr></thead><tbody>
+{% for a in rp.affected %}<tr><td>{{ a.who }}{% if a.bot %} <span class="pill">bot</span>{% endif %}</td><td>{{ a.principal }}</td><td>{{ a.resource }}</td><td>{{ a.sessions }}</td><td>{{ a.now }}{% if a.labels_changed %} <span class="pill warn">labels changed</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endif %}
+{% if !rp.notes.is_empty() %}<ul class="plain">{% for n in rp.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+<p class="hint">{{ rp.caveat }}</p>
+{% endif %}
+{% endif %}
 <p class="hint">Preview only: nothing was saved.</p>
 </div>
 {% endif %}

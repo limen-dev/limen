@@ -169,7 +169,7 @@ pub async fn request_access(
         .await
         .map_err(|e| internal("reading groups", e))?
         .unwrap_or_default();
-    // A honeytoken is never requestable (ADR-0050): asking for one is a touch
+    // A honeytoken is never requestable (ADR-0052): asking for one is a touch
     // whatever else is true of the person, and gets the answer any
     // unreachable name gets.
     let decoy = policy.honeytoken(resource).is_some();

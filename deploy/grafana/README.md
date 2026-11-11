@@ -37,7 +37,7 @@ Delivery is at least once, so every count uses `count(DISTINCT event_id)` rather
 | Rule | Fires when |
 |---|---|
 | Spike in denied access | More than 20 `auth.denied` events in 10 minutes |
-| Honeytoken touched | Any `detect.honeytoken` event in 15 minutes (ADR-0050) |
+| Honeytoken touched | Any `detect.honeytoken` event in 15 minutes (ADR-0052) |
 | Audit events missing | Any producer's sequence has a gap |
 | Audit ingestion stalled | No event has arrived in over an hour |
 

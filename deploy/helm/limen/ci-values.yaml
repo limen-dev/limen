@@ -11,7 +11,7 @@ controlPlanes:
 
 proxyDefaults: { namePrefix: prod }
 proxies:
-  public: { dnsNames: limen.example.com }
+  public: { dnsNames: limen.example.com, publicCertSecret: limen-public-tls }
   partner: { dnsNames: partner.example.com, replicas: 2, joinSecret: partner-proxy-join }
 
 workerDefaults: { namePrefix: prod }

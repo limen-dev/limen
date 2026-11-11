@@ -94,6 +94,9 @@ pub struct Shape {
 pub struct Named {
     pub all: bool,
     pub names: BTreeSet<String>,
+    /// An `_msearch` header asks for hidden indices (`expand_wildcards`),
+    /// which the query string's check can't see.
+    pub hidden_wildcards: bool,
 }
 
 impl Named {
@@ -882,6 +885,16 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
                 if !listed {
                     named.add_scope(&shape.scope);
                 }
+                // Each header may carry its own `expand_wildcards`.
+                if let Some(v) = h.get("expand_wildcards") {
+                    named.hidden_wildcards |= token_names(v, "an _msearch expand_wildcards")?
+                        .iter()
+                        .flat_map(|x| x.split(','))
+                        .any(|x| {
+                            let x = x.trim().to_ascii_lowercase();
+                            x == "all" || x == "hidden"
+                        });
+                }
                 if shape.body == BodyKind::MsearchTemplate {
                     walk_template(&parse_json(search)?, &mut named)?;
                 } else {
@@ -1036,7 +1049,7 @@ fn grant_allows(
     if restricted && shape.source_param {
         return Err("the source query parameter isn't allowed with index-restricted access; send the query as the body".into());
     }
-    if shape.hidden_wildcards && !g.indices.iter().any(|p| hidden(p)) {
+    if (shape.hidden_wildcards || named.hidden_wildcards) && !g.indices.iter().any(|p| hidden(p)) {
         return Err("expand_wildcards for hidden indices isn't allowed".into());
     }
     if named.all {
@@ -1378,6 +1391,43 @@ mod tests {
                 b"{}"
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn msearch_headers_cannot_ask_for_hidden_indices() {
+        let plain = grant(&[Read], &["logs-*"]);
+        let body = |h: &str| format!("{h}\n{{}}\n").into_bytes();
+        assert!(allowed(&plain, "POST", "/_msearch", &body(r#"{"index":"logs-*"}"#)).is_ok());
+        for h in [
+            r#"{"index":"logs-*","expand_wildcards":"all"}"#,
+            r#"{"index":"logs-*","expand_wildcards":"open,Hidden"}"#,
+            r#"{"index":"logs-*","expand_wildcards":["open","hidden"]}"#,
+        ] {
+            assert!(
+                allowed(&plain, "POST", "/_msearch", &body(h)).is_err(),
+                "{h}"
+            );
+        }
+        assert!(
+            allowed(
+                &plain,
+                "POST",
+                "/_msearch",
+                &body(r#"{"index":"logs-*","expand_wildcards":"open"}"#)
+            )
+            .is_ok()
+        );
+        // A grant that names hidden indices may expand to them, as with the query string.
+        let dot = grant(&[Read], &["logs-*", ".kibana*"]);
+        assert!(
+            allowed(
+                &dot,
+                "POST",
+                "/_msearch",
+                &body(r#"{"index":"logs-*","expand_wildcards":"hidden"}"#)
+            )
+            .is_ok()
         );
     }
 

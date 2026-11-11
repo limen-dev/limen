@@ -93,18 +93,27 @@ pub enum EventKind {
     WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// An admin asked for a tighter policy proposed from real use (ADR-0050).
+    /// `data` has the window, the policy version, and counts, never names.
+    #[serde(rename = "policy.suggest")]
+    PolicySuggest,
     /// A request was allowed that a shadow deny rule would have refused
     /// (ADR-0046). `data.role`, `rule`, `resource`, and the principal; the
     /// request itself went ahead.
     #[serde(rename = "policy.shadow_deny")]
     PolicyShadowDeny,
-    /// Someone touched a honeytoken (ADR-0050): a decoy resource that looks
+    /// Someone touched a honeytoken (ADR-0052): a decoy resource that looks
     /// real, is granted by no role and is backed by nothing. Every attempt to
     /// use one is a high-signal alert. `data.resource`, `action` (`ssh`, `db`,
     /// `kube`, `request`, `explain`, …), `principal`, `roles`, `client_addr`,
     /// and for a bot the CI run (`ci`). Written beside the ordinary refusal.
     #[serde(rename = "detect.honeytoken")]
     DetectHoneytoken,
+    /// An admin replayed recorded sessions against a proposed policy
+    /// (ADR-0051). Holds who, the window, the policy digests and counts,
+    /// never the sessions replayed.
+    #[serde(rename = "policy.replay")]
+    PolicyReplay,
     /// A bot writer's write was refused by its grant or the escalation rules
     /// (ADR-0042 §11), dry runs included. A pipeline probing its limits is a
     /// detection signal.
@@ -264,7 +273,7 @@ fn clipped(s: &str) -> String {
     s.chars().take(TOUCH_FIELD_MAX).collect()
 }
 
-/// Who touched a honeytoken (ADR-0050), for [`touch_data`].
+/// Who touched a honeytoken (ADR-0052), for [`touch_data`].
 #[derive(Debug, Clone, Copy)]
 pub struct Touch<'a> {
     /// The decoy's name, as the caller typed it.

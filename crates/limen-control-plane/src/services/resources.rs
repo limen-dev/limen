@@ -22,7 +22,7 @@ impl Resources for ResourcesService {
         let mut reachable = crate::access::reachable(&self.0, &user.username, &user.roles)
             .await
             .map_err(|e| crate::state::internal("reading access grants", e))?;
-        // Honeytokens (ADR-0050) are listed like any resource, in name order,
+        // Honeytokens (ADR-0052) are listed like any resource, in name order,
         // for the roles the admin exposed them to. They grant nothing.
         reachable.extend(
             loaded
@@ -49,7 +49,7 @@ impl Resources for ResourcesService {
                             .and_then(|t| t.default_database.clone())
                             .or_else(|| s.mongodb.as_ref()?.default_database.clone())
                     })
-                    // A decoy has the database a real one would (ADR-0050),
+                    // A decoy has the database a real one would (ADR-0052),
                     // so the CLI doesn't stop before it reaches the proxy.
                     .or_else(|| {
                         loaded

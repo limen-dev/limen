@@ -15,11 +15,11 @@ pub async fn run(
     proxy: Option<&str>,
     device: bool,
     open_browser: bool,
-    ca_file: Option<&Path>,
+    ca: CaChoice<'_>,
 ) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     api::server_name(&proxy)?;
-    pin_ca_file(&proxy, ca_file)?;
+    apply_ca_choice(&proxy, ca)?;
 
     let channel = api::connect(&proxy, None)?;
     let mut auth = AuthClient::new(channel);
@@ -96,14 +96,46 @@ pub async fn finish(proxy: &str, key: &KeyPair, resp: LoginResponse) -> anyhow::
     commands::status(Some(proxy), false)
 }
 
-/// Pin the CA the user named, once, for this proxy.
-pub fn pin_ca_file(proxy: &str, ca_file: Option<&Path>) -> anyhow::Result<()> {
-    if let Some(path) = ca_file {
-        let pem =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        limen_tunnel::tls::certs_from_pem(&pem)
-            .context("--ca-file must contain a PEM certificate")?;
-        profile::pin_ca(proxy, &pem)?;
+/// What `limen login` does about the CA it trusts the server with.
+#[derive(Debug, Clone, Copy)]
+pub enum CaChoice<'a> {
+    /// Leave things as they are: the CA pinned before, or the system trust store if none.
+    Keep,
+    /// `--ca-file`: trust this CA for the server from now on.
+    Pin(&'a Path),
+    /// `--system-roots`: drop any pinned CA and trust the system's, which is what a server with
+    /// a certificate from a public CA needs (ADR-0043).
+    SystemRoots,
+}
+
+impl<'a> CaChoice<'a> {
+    pub fn from_flags(ca_file: Option<&'a Path>, system_roots: bool) -> Self {
+        match (ca_file, system_roots) {
+            (Some(path), _) => Self::Pin(path),
+            (None, true) => Self::SystemRoots,
+            (None, false) => Self::Keep,
+        }
+    }
+}
+
+/// Pin or drop the CA the user asked for, before the first connection to the server.
+pub fn apply_ca_choice(proxy: &str, choice: CaChoice<'_>) -> anyhow::Result<()> {
+    match choice {
+        CaChoice::Keep => {}
+        CaChoice::Pin(path) => {
+            let pem = std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            limen_tunnel::tls::certs_from_pem(&pem)
+                .context("--ca-file must contain a PEM certificate")?;
+            profile::pin_ca(proxy, &pem)?;
+        }
+        CaChoice::SystemRoots => {
+            if profile::unpin_ca(proxy)? {
+                ui::info(&format!(
+                    "Forgot the CA pinned for {proxy}; its certificate is now checked against the system trust store."
+                ));
+            }
+        }
     }
     Ok(())
 }

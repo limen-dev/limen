@@ -13,7 +13,6 @@ use anyhow::{Context as _, bail};
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{ListResourcesRequest, SessionRequest, SessionResponse};
 use limen_tunnel::framing::{read_message, write_message};
-use limen_tunnel::tls::client_config;
 
 use crate::api;
 use crate::profile::{self, Profile};
@@ -82,7 +81,7 @@ fn pick_login(principals: &[String], resource: &str) -> anyhow::Result<String> {
 /// The OpenSSH options `limen ssh` and `limen config ssh` use.
 pub(crate) fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<String> {
     let proxy_command = format!(
-        "{} --proxy {} ssh-proxy %r %h",
+        "{} --server {} ssh-proxy %r %h",
         shell_quote(&exe.display().to_string()),
         shell_quote(proxy)
     );
@@ -129,7 +128,7 @@ fn known_hosts_path(proxy: &str) -> anyhow::Result<PathBuf> {
 
 /// `limen ssh [login@]resource [command...]`: replace this process with OpenSSH.
 pub async fn ssh(proxy: Option<&str>, target: &str, command: &[String]) -> anyhow::Result<()> {
-    let proxy_addr = api::resolve_proxy(proxy)?;
+    let proxy_addr = api::resolve_server(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
     profile.identity()?; // fail early on expired credentials
@@ -188,16 +187,10 @@ pub(crate) async fn open_session_in(
 ) -> anyhow::Result<
     impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static + use<>,
 > {
-    let proxy_addr = api::resolve_proxy(proxy)?;
+    let proxy_addr = api::resolve_server(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
-    let ca = profile::trusted_ca(&proxy_addr)?
-        .with_context(|| format!("no CA pinned for {proxy_addr}"))?;
-    let tls_config = client_config(
-        &limen_tunnel::tls::certs_from_pem(&ca)?,
-        Some(profile.identity()?),
-        &[alpn],
-    )?;
+    let tls_config = api::tls_config(&proxy_addr, Some(profile.identity()?), &[alpn])?;
     let mut tls = limen_tunnel::connect::dial(
         &proxy_addr,
         api::server_name(&proxy_addr)?,
@@ -265,7 +258,7 @@ pub async fn ssh_proxy(proxy: Option<&str>, login: &str, host: &str) -> anyhow::
 /// `limen config ssh`: an `ssh_config` block so plain `ssh <resource>.limen` works.
 /// `--install` (in `tools`) keeps one up to date in `~/.ssh/config` instead.
 pub fn config(proxy: Option<&str>) -> anyhow::Result<()> {
-    let proxy_addr = api::resolve_proxy(proxy)?;
+    let proxy_addr = api::resolve_server(proxy)?;
     let exe = std::env::current_exe().context("locating the limen executable")?;
     println!("# Limen: add this to ~/.ssh/config, then `ssh <login>@<resource>.limen`.");
     println!("# Or run `limen config ssh --install` to keep it there and `ssh <resource>` work.");
@@ -320,7 +313,7 @@ mod tests {
             assert!(opts.iter().any(|o| o == must), "{must}");
         }
         assert!(opts.iter().any(|o| o.starts_with(
-            "ProxyCommand=/usr/local/bin/limen --proxy limen.example.com:443 ssh-proxy %r %h"
+            "ProxyCommand=/usr/local/bin/limen --server limen.example.com:443 ssh-proxy %r %h"
         )));
     }
 

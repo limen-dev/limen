@@ -10,11 +10,10 @@ use anyhow::{Context as _, bail};
 use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{ListResourcesRequest, SessionRequest, SessionResponse};
 use limen_tunnel::framing::{read_message, write_message};
-use limen_tunnel::tls::client_config;
 use tokio::net::TcpListener;
 
 use crate::api;
-use crate::profile::{self, Profile};
+use crate::profile::Profile;
 
 /// Stop listening after this long with no connection (threat model).
 const IDLE: Duration = Duration::from_hours(1);
@@ -97,7 +96,7 @@ pub async fn connect(
     listen: Option<&str>,
     socket: Option<&str>,
 ) -> anyhow::Result<()> {
-    let proxy_addr = api::resolve_proxy(proxy)?;
+    let proxy_addr = api::resolve_server(proxy)?;
     let profile = Profile::load(&proxy_addr)?
         .with_context(|| format!("not logged in to {proxy_addr}; run `limen login`"))?;
     profile.identity()?; // fail early on expired credentials
@@ -110,10 +109,8 @@ pub async fn connect(
             "{resource} has no default database; name one: limen db connect {resource} --database <name>"
         );
     }
-    let ca = profile::trusted_ca(&proxy_addr)?
-        .with_context(|| format!("no CA pinned for {proxy_addr}"))?;
-    let tls = Arc::new(client_config(
-        &limen_tunnel::tls::certs_from_pem(&ca)?,
+    let tls = Arc::new(api::tls_config(
+        &proxy_addr,
         Some(profile.identity()?),
         &[limen_tunnel::alpn::DB],
     )?);

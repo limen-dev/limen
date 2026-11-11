@@ -66,7 +66,7 @@ impl SelfRunner {
     async fn spawn(&self, argv: &[String]) -> std::io::Result<ToolOutput> {
         let mut cmd = tokio::process::Command::new(std::env::current_exe()?);
         if let Some(proxy) = &self.proxy {
-            cmd.arg("--proxy").arg(proxy);
+            cmd.arg("--server").arg(proxy);
         }
         // Never colour: output is for a program. (No tool here can prompt or open a browser.)
         cmd.args(["--color", "never"]).args(argv);
@@ -166,7 +166,7 @@ fn on_path_same_file(
 fn config_text(exe: &str, proxy: Option<&str>) -> String {
     let mut args = Vec::new();
     if let Some(proxy) = proxy {
-        args.extend(["--proxy", proxy]);
+        args.extend(["--server", proxy]);
     }
     args.push("mcp");
     let json = serde_json::to_string_pretty(&json!({
@@ -836,7 +836,7 @@ mod tests {
     fn config_text_is_valid_json_and_quotes_awkward_paths() {
         let text = config_text("/opt/my tools/limen", Some("limen.example.com:443"));
         assert!(text.contains(
-            "claude mcp add --scope user limen -- '/opt/my tools/limen' --proxy limen.example.com:443 mcp"
+            "claude mcp add --scope user limen -- '/opt/my tools/limen' --server limen.example.com:443 mcp"
         ));
         let start = text.find('{').unwrap();
         let end = text.rfind('}').unwrap();
@@ -847,12 +847,12 @@ mod tests {
         );
         assert_eq!(
             parsed["mcpServers"]["limen"]["args"],
-            json!(["--proxy", "limen.example.com:443", "mcp"])
+            json!(["--server", "limen.example.com:443", "mcp"])
         );
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
         let plain = config_text("/usr/bin/limen", None);
         assert!(plain.contains("claude mcp add --scope user limen -- /usr/bin/limen mcp\n"));
-        assert!(!plain.contains("--proxy"));
+        assert!(!plain.contains("--server"));
     }
 
     #[cfg(unix)]

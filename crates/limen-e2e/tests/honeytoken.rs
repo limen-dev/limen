@@ -1,4 +1,4 @@
-//! Honeytoken resources end to end (ADR-0050): a decoy is listed for the
+//! Honeytoken resources end to end (ADR-0052): a decoy is listed for the
 //! role it is exposed to, every attempt to use it is refused like any other
 //! name and audited as `detect.honeytoken`, and nothing a wildcard role says
 //! reaches it.
@@ -88,6 +88,7 @@ async fn a_decoy_is_listed_refused_like_any_name_and_reported() {
             sources: policy(&target.addr.to_string(), &target.host_key),
             dry_run: false,
             source_ref: String::new(),
+            replay_days: 0,
         })
         .await
         .expect("apply")

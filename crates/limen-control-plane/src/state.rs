@@ -172,6 +172,23 @@ impl PolicyStore {
         )
     }
 
+    /// `policy` plus the accepted discovered resources, as [`PolicyStore::current`]
+    /// is for the applied policy: for deciding from a policy not yet applied.
+    #[must_use]
+    pub fn with_overlay(&self, policy: &Policy) -> Policy {
+        let overlay = Arc::clone(
+            &self
+                .0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .overlay,
+        );
+        if overlay.is_empty() {
+            return policy.clone();
+        }
+        policy.with_discovered(overlay.iter().cloned()).0
+    }
+
     /// The policy as applied, without discovered resources. What versions,
     /// diffs, and `limen admin apply` are about.
     #[must_use]
@@ -253,6 +270,8 @@ pub struct Limits {
     /// Searches of the audit trail, per person (ADR-0026): search is also a
     /// way to read a lot at once.
     pub search: DefaultKeyedRateLimiter<String>,
+    /// Replays of recorded sessions against a policy change (ADR-0051), per person.
+    pub replay: DefaultKeyedRateLimiter<String>,
     /// Policy writes through the management API, per principal (ADR-0042 §10).
     pub policy_writes: DefaultKeyedRateLimiter<String>,
     /// Dry runs: more of them (a plan checks every resource), still bounded,
@@ -282,6 +301,7 @@ impl Limits {
             console_login: RateLimiter::keyed(console),
             // Thirty a minute, bursts of ten, whatever the sign-in limits are.
             search: RateLimiter::keyed(Quota::per_minute(nz(30)).allow_burst(nz(10))),
+            replay: RateLimiter::keyed(Quota::per_minute(nz(6)).allow_burst(nz(3))),
             // Sixty a minute, bursts of twenty: a Terraform apply of a few
             // dozen resources goes through; a loop doesn't.
             policy_writes: RateLimiter::keyed(Quota::per_minute(nz(60)).allow_burst(nz(20))),
@@ -311,6 +331,12 @@ impl Limits {
             .map_err(|_| Status::resource_exhausted("too many searches; slow down"))
     }
 
+    pub fn check_replay(&self, username: &str) -> Result<(), Status> {
+        self.replay
+            .check_key(&username.to_owned())
+            .map_err(|_| Status::resource_exhausted("too many replays; slow down"))
+    }
+
     /// Whether `principal` may write policy now.
     #[must_use]
     pub fn allow_policy_write(&self, principal: &str, dry_run: bool) -> bool {
@@ -327,6 +353,7 @@ impl Limits {
         self.policy_writes.retain_recent();
         self.policy_dry_runs.retain_recent();
         self.search.retain_recent();
+        self.replay.retain_recent();
         self.unauthenticated.retain_recent();
         self.console_login.retain_recent();
     }

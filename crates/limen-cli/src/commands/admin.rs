@@ -195,6 +195,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                     source_ref: source_ref.unwrap_or_default(),
                     require_tests,
                     source,
+                    replay_days: 0,
                 })
                 .await
                 .map_err(|s| api::status_error(&s))?

@@ -491,7 +491,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
 <pre id="install-code" tabindex="0"><span class="p">$</span> git clone https://github.com/limen-dev/limen &amp;&amp; cd limen
 <span class="p">$</span> deploy/compose/setup.sh
 <span class="p">$</span> scripts/install-cli.sh
-<span class="p">$</span> limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+<span class="p">$</span> limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 <span class="p">$</span> limen ssh web-staging-1</pre>
           </div>
           <p class="fineprint">Needs Docker and the tools in <code>mise.toml</code>. The first build takes several minutes. This is a local stack with test users and passwords, not for production.</p>

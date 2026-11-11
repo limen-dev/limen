@@ -100,7 +100,7 @@ spec:
 
 ## Honeytokens
 
-A `resource` with a `honeytoken` block instead of a protocol section is a decoy (ADR-0050, [guide](guides/honeytokens.md)): it looks like a resource in `limen ls` for the roles it is exposed to, no role grants it, nothing backs it, and every attempt to use it is audited as `detect.honeytoken`.
+A `resource` with a `honeytoken` block instead of a protocol section is a decoy (ADR-0052, [guide](guides/honeytokens.md)): it looks like a resource in `limen ls` for the roles it is exposed to, no role grants it, nothing backs it, and every attempt to use it is audited as `detect.honeytoken`.
 
 ```yaml
 kind: resource
@@ -326,3 +326,6 @@ A writer of `role`, `role_mapping`, or `policy_test` writes them in its namespac
 Two writers in one namespace can change each other's documents; `limen apply` warns about it.
 
 **Upgrading:** finish upgrading every proxy and worker before anyone writes a resource from a profile. Such a resource carries the `delegated` field. A component from before Phase 14 parses snapshots strictly, so it refuses the whole snapshot, and after the grace period it stops serving every resource, not just that one. Profiles and writer grants themselves never leave the control plane, so writing them is safe at any point.
+
+## Keeping a role out of `policy suggest`
+A role labelled `suggest: keep` is never proposed for tightening by `limen policy suggest` ([guide](guides/policy-tooling.md#right-size-roles-from-real-use)). Use it for access that is rare but needed, such as a quarterly job.

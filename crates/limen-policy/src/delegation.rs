@@ -208,7 +208,7 @@ pub(crate) fn validate_profile(doc: &ResourceProfileDoc) -> Result<(), PolicyErr
     let spec = &doc.spec;
     if spec.template.contains_key("honeytoken") {
         return Err(err(
-            "template can't set honeytoken: decoys are written by people (ADR-0050)".into(),
+            "template can't set honeytoken: decoys are written by people (ADR-0052)".into(),
         ));
     }
     if spec.template.contains_key("delegated") {

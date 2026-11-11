@@ -1,6 +1,6 @@
 # ADR-0043: A publicly trusted certificate for the proxy's public listener
 
-- Status: **Proposed**, for the owner's decision. Nothing here is built. Tracks the "ACM or operator-supplied proxy certificate" item of #16 and the open assumption in design §4 ("verify in Phase 15").
+- Status: **Accepted** by the owner on 2026-11-11, with the amendments marked *Amended* below. Tracks the "ACM or operator-supplied proxy certificate" item of #16 and the open assumption in design §4 ("verify in Phase 15").
 - Date: 2026-11-04
 
 ## Context
@@ -18,11 +18,17 @@ Constraints that rule out the simple answers:
 - **TLS can't end at a load balancer.** Users present client certificates (mTLS) and the design requires TCP passthrough. An ALB or an ACM certificate attached to a load balancer is not an option; only a certificate the proxy itself holds works.
 - **Swapping the certificate for everyone breaks workers and peers**, which verify the proxy against the internal CA.
 
-## Decision (proposed)
+## Decision
 1. **Operator-supplied certificate first.** The proxy takes `--public-cert-file` and `--public-key-file` (`LIMEN_PUBLIC_CERT_FILE`, `LIMEN_PUBLIC_KEY_FILE`): a PEM chain and key, for example from Secrets Manager mounted by the platform, or an exported ACM certificate (ACM can export a public certificate and its key under a passphrase; the operator decrypts it into the mount). ACM export is a way to *produce* the files, not a separate code path.
-2. **Pick the certificate per connection by ALPN.** A `ResolvesServerCert` returns the internal-CA certificate when the client offers only `limen-tunnel` or `limen-peer`, and the public certificate otherwise. Workers and peers see no change. If the flags are not set, nothing changes at all.
-3. **Reload without a restart.** The files are re-read every minute (and on `SIGHUP`); a file that fails to parse or whose key doesn't match is rejected and the last good certificate stays in use, with a warning and a metric. Public certificates renew every 60-90 days, so a restart-only design would be an outage generator.
-4. **The CLI trusts the system roots when no CA is pinned.** `--ca-file` keeps working and wins when present (the dev stack and private deployments are unchanged). With no pinned CA the CLI verifies the proxy against the platform's trust store, with normal host-name checking. There is no trust-on-first-use.
+2. **Pick the certificate per connection by ALPN.** A `ResolvesServerCert` returns the internal-CA certificate when the client offers any protocol only Limen's own components speak (`limen-tunnel/1`, `limen-peer/1`, `limen-worker-api/1`), and the public certificate otherwise. If the flags are not set, nothing changes at all.
+   - *Amended.* The first draft keyed on `limen-tunnel` and `limen-peer` alone. Reading the workers showed that was not enough: a worker's enrollment, renewal and relayed control-plane calls are plain `h2` to the proxy, pinned to the internal CA, so they would have been handed the public certificate and failed. Workers now offer `limen-worker-api/1, h2` for those calls. The proxy serves that protocol exactly like `h2`. Offering `h2` as well keeps a new worker working against a proxy from before this change (it negotiates `h2`). The CLI and browsers never offer the internal protocols.
+   - *Checked and unaffected:* the control plane's replica-to-replica audit hand-off (`handoff_client`) also pins the internal CA and offers `h2`, but it dials each peer replica's own `ingest_url` (control-plane port), never a proxy's public listener.
+   - *Rollout order.* A worker from before this change offers only `h2` and cannot be told from the CLI, so once a proxy has a public certificate it would get the public one and refuse it. Upgrade the workers first, then set the flags.
+3. **Reload without a restart.** The files are re-read every minute (and on `SIGHUP`); a file that fails to parse, has expired, or whose key doesn't match is rejected and the last good certificate stays in use, with a warning and a metric. *Amended:* at start-up the same faults stop the proxy, except expiry, which only logs an error: the proxy is also the workers' and peers' way in, and the expiry alert is already firing. Public certificates renew every 60-90 days, so a restart-only design would be an outage generator.
+4. **The CLI trusts the system roots when no CA is pinned.** `--ca-file` keeps working and wins when present (the dev stack and private deployments are unchanged). With no pinned CA the CLI verifies the proxy against the platform's trust store (`rustls-platform-verifier`), with normal host-name checking. There is no trust-on-first-use.
+   - *Amended.* The CLI's flag for the address is now `--server` (`LIMEN_SERVER`), with port 443 by default, so `limen login --server limen.example.com` is the whole command for a deployment with a public certificate. `--proxy` is removed.
+   - *Amended: pins outlive the switch.* Everyone who has logged in before has the internal CA pinned (the old CLI would not connect otherwise), `logout` keeps the pin, and a pin wins, so the day an operator enables a public certificate every existing user would be refused. `limen login --system-roots` forgets the pin (and conflicts with `--ca-file`); the "not trusted" hints name it. It is a deliberate command, not an automatic fallback from a failed pin to the system roots, which would defeat pinning.
+   - `limen audit verify` is unchanged in kind: it checks signatures against Limen's own CA, which is not a TLS question, so it never falls back to system roots. A login that pinned no CA has none to use, and the command says to pass `--ca-file`.
 5. **The private key is a secret.** It is held as `Secret`, never logged, read from a file the operator mounts read-only with mode 0600, and the threat model gets a row for it (a new secret on the proxy host, and the effect of its loss: impersonating the proxy to browsers and the CLI, but not to workers, which pin the internal CA).
 
 Not in this ADR: ACME inside the proxy (needs port 80 or DNS credentials in a component we want to keep small), and certificates per name (one certificate may carry several names).
@@ -37,10 +43,16 @@ Not in this ADR: ACME inside the proxy (needs port 80 or DNS credentials in a co
 - \+ Browsers and the CLI work with no CA distribution for a deployment that has a normal public certificate.
 - \+ Workers and peers are unaffected, and the change is off unless both flags are set.
 - − Two certificates to know about; the proxy's certificate list is a new thing to monitor (expiry of the public certificate should be a metric and an alert).
-- − The CLI gains a dependency on the platform trust store (for example `rustls-platform-verifier`); it needs an ADR-0012 row after a maintenance and advisory check.
-- − Six CLI call sites build TLS configs from the pinned CA today (`api.rs`, `kube.rs`, `ssh.rs`, `tools.rs`, `doctor.rs`, `db.rs`); they need one shared helper.
+- − The CLI gains a dependency on the platform trust store (`rustls-platform-verifier`, ADR-0012 row added).
+- − The CLI's TLS call sites (`api.rs`, `ssh.rs`, `db.rs`, `doctor.rs`) now share one helper, `api::tls_config`. `kube.rs` and `tools.rs` only write the CA into a kubeconfig and already left it out when none is pinned.
+- − Workers must be upgraded before a public certificate is switched on (see decision 2).
 
 ## What it needs to be accepted
-- Owner decision: operator-supplied first (this ADR) versus anything else.
+- Owner decision: operator-supplied first (this ADR) versus anything else. **Done, 2026-11-11.**
 - Tests: a test CA stands in for the public CA; the CLI connects with no pinned CA by pointing its trust store at it; workers still enroll and tunnel through the same listener; reload with a valid, an invalid, and a mismatched key.
 - Not verifiable without a real domain and a real public CA: browser trust, ACM export, and the platform verifier on each OS. Those would be labelled `unverified`.
+
+## What was verified
+Run in this change, against a throwaway CA standing in for the public one (`demos/demo-public-cert.sh`, `stacks/public-cert.yml`): the certificate each ALPN set receives, on the wire; a worker enrolling and tunnelling through the same listener; the CLI pinned to the stand-in CA; an old pin of the internal CA refused with the hint, then `login --system-roots` and a connection; the CLI in a Linux container trusting only `SSL_CERT_FILE`, and refused without it; reload on `SIGHUP`; a broken key refused with the last certificate kept. On macOS the system verifier refused the stand-in CA's chain, in its own wording, which the hint now recognises (found by `demos/demo-dx.sh`). Unit tests cover the resolver with real handshakes, and valid, garbage, mismatched, expired and empty files.
+
+`unverified`: the macOS Keychain or Windows store *accepting* a certificate from a real public CA; a certificate from a real public CA or an exported ACM one; browsers; `kubectl`, web apps and the console through the public certificate (the demo has no kube or web stack on it); the Windows verifier's error wording.

@@ -1,6 +1,6 @@
 # Honeytokens: decoy resources that raise an alarm
 
-A honeytoken is a resource that looks real, is granted by no role and is backed by nothing. Nobody has a reason to use it, so any attempt is worth a look: a stolen credential feeling around, a scanner, or someone browsing where they shouldn't. It needs no baseline and no tuning. Design and decisions: [ADR-0050](../adr/0050-honeytoken-resources.md).
+A honeytoken is a resource that looks real, is granted by no role and is backed by nothing. Nobody has a reason to use it, so any attempt is worth a look: a stolen credential feeling around, a scanner, or someone browsing where they shouldn't. It needs no baseline and no tuning. Design and decisions: [ADR-0052](../adr/0052-honeytoken-resources.md).
 
 *Tested against local stand-ins (an end-to-end test with a real control plane, proxy and worker, and unit tests). Not run against a SIEM, Datadog or Grafana.*
 

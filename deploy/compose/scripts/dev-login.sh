@@ -9,7 +9,7 @@ set -euo pipefail
 email="${1:?usage: dev-login.sh <email> [password]}"
 password="${2:-password}"
 limen="${LIMEN_BIN:-limen}"
-proxy="${LIMEN_PROXY:-localhost:3443}"
+proxy="${LIMEN_SERVER:-localhost:3443}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 ca="${LIMEN_DEV_CA:-$here/.state/internal-ca.pem}"
 # Where the browser reaches Dex (the scale stack publishes it on another port).
@@ -18,7 +18,7 @@ dex="${LIMEN_DEX_URL:-http://localhost:5556}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-"$limen" --proxy "$proxy" login --no-browser --ca-file "$ca" >"$work/out" 2>&1 &
+"$limen" --server "$proxy" login --no-browser --ca-file "$ca" >"$work/out" 2>&1 &
 pid=$!
 
 url=""

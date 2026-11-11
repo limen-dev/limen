@@ -25,7 +25,7 @@ export LIMEN_PORT_POSTGRES="${LIMEN_PORT_POSTGRES:-35432}" LIMEN_PORT_S3="${LIME
 export LIMEN_PORT_KMS="${LIMEN_PORT_KMS:-38099}"
 state="$LIMEN_STATE_DIR"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_PORT_PROXY" LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
+export LIMEN_SERVER="localhost:$LIMEN_PORT_PROXY" LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 export LIMEN_HOME="$state/home"
 unset KUBECONFIG
@@ -59,18 +59,19 @@ else
   "$here/setup.sh" --yes --stacks ssh,kube || fail "setup.sh"
 fi
 rm -rf "$LIMEN_HOME"
-pass "stack up on $LIMEN_PROXY"
+pass "stack up on $LIMEN_SERVER"
 
 step "doctor before any login: says what is missing, and how to fix it"
 out="$(limen doctor 2>&1)" && fail "doctor passed with no login"
 echo "$out"
-grep -q "no CA is pinned" <<<"$out" || fail "the missing CA isn't named"
+grep -q "system trust store" <<<"$out" || fail "doctor should say that, with no CA pinned, it uses the system trust store"
+grep -q -- "--ca-file" <<<"$out" || fail "the fix for an untrusted dev CA isn't named"
 grep -q "skipped" <<<"$out" || fail "dependent checks aren't skipped"
-pass "no CA, no login: doctor fails with fixes"
+pass "no CA pinned, no login: doctor fails with fixes"
 
 step "doctor on a proxy that isn't there"
-limen login --proxy localhost:1 --ca-file "$LIMEN_DEV_CA" >/dev/null 2>&1 || true
-out="$(limen --proxy localhost:1 doctor 2>&1)" && fail "doctor passed for a dead proxy"
+limen login --server localhost:1 --ca-file "$LIMEN_DEV_CA" >/dev/null 2>&1 || true
+out="$(limen --server localhost:1 doctor 2>&1)" && fail "doctor passed for a dead proxy"
 grep -q "✖ network" <<<"$out" || fail "unreachable proxy not reported: $out"
 grep -q "– tls" <<<"$out" || fail "tls should be skipped: $out"
 pass "unreachable proxy reported as a network problem; TLS skipped"
@@ -107,7 +108,7 @@ import json, pathlib, sys
 report = json.load(open(sys.argv[1]))
 assert report["ok"] is True, report
 names = [c["name"] for c in report["checks"]]
-assert names[:7] == ["proxy", "ca", "network", "tls", "clock", "login", "session"], names
+assert names[:7] == ["server", "ca", "network", "tls", "clock", "login", "session"], names
 text = open(sys.argv[1]).read()
 key = next(pathlib.Path(sys.argv[2]).glob("profiles/*/key.pem")).read_text()
 cert = next(pathlib.Path(sys.argv[2]).glob("profiles/*/cert.pem")).read_text()

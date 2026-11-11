@@ -13,7 +13,7 @@ use limen_proto::v1::{
     ListComponentsRequest, ListComponentsResponse, ListDiscoveredRequest, ListDiscoveredResponse,
     ListLocksRequest, ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff,
     PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
-    TunnelInfo, UnlockUserRequest, UnlockUserResponse,
+    SuggestPolicyRequest, SuggestPolicyResponse, TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
 use prost::Message as _;
 use tonic::{Request, Response, Status};
@@ -48,6 +48,31 @@ pub fn parse_labels<S: std::hash::BuildHasher>(
     Labels::try_from(sorted).map_err(|e| Status::invalid_argument(e.to_string()))
 }
 
+/// ADR-0051: the recorded sessions of the last `days` days, through the
+/// active policy and the one a dry run would apply, as JSON. Empty for 0.
+async fn replay_json(
+    state: &AppState,
+    username: &str,
+    days: u32,
+    would_apply: &Policy,
+) -> Result<String, Status> {
+    if days == 0 {
+        return Ok(String::new());
+    }
+    let report = crate::replay::replay(
+        state,
+        crate::replay::Asker {
+            username,
+            via: "api",
+        },
+        &state.policy.current().policy,
+        &state.policy.with_overlay(would_apply),
+        days,
+    )
+    .await?;
+    serde_json::to_string(&report).map_err(|e| internal("encoding the replay", e))
+}
+
 #[tonic::async_trait]
 impl Admin for AdminService {
     async fn apply_policy(
@@ -61,6 +86,17 @@ impl Admin for AdminService {
         if total > MAX_POLICY_BYTES {
             return Err(Status::invalid_argument(format!(
                 "policy exceeds {MAX_POLICY_BYTES} bytes"
+            )));
+        }
+        if req.replay_days > 0 && !req.dry_run {
+            return Err(Status::invalid_argument(
+                "replay_days needs dry_run: a replay shows what a change would do before it is applied",
+            ));
+        }
+        if req.replay_days > crate::replay::MAX_DAYS {
+            return Err(Status::invalid_argument(format!(
+                "the replay window is 1 to {} days",
+                crate::replay::MAX_DAYS
             )));
         }
         let documents = Policy::parse_yaml_documents(
@@ -108,6 +144,8 @@ impl Admin for AdminService {
         )
         .await
         .map_err(|e| store_status(&e))?;
+        let replay_json =
+            replay_json(&self.0, &admin.username, req.replay_days, &outcome.policy).await?;
         let mut warnings = outcome.warnings.clone();
         if outcome.held && req.dry_run {
             warnings.push(policy_changes::WOULD_BE_HELD.to_owned());
@@ -181,6 +219,7 @@ impl Admin for AdminService {
                 })
                 .collect(),
             pending_change_id,
+            replay_json,
         }))
     }
 
@@ -229,6 +268,22 @@ impl Admin for AdminService {
             version: loaded.version,
             documents_json,
         }))
+    }
+
+    async fn suggest_policy(
+        &self,
+        request: Request<SuggestPolicyRequest>,
+    ) -> Result<Response<SuggestPolicyResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        let user = caller.admin()?;
+        // It shows who used what: a person with the admin role, never a bot.
+        if user.bot {
+            return Err(Status::permission_denied("bots cannot ask for suggestions"));
+        }
+        let who = user.username.clone();
+        crate::policy_suggest::run(&self.0, &who, request.into_inner().window_days)
+            .await
+            .map(Response::new)
     }
 
     async fn get_policy(

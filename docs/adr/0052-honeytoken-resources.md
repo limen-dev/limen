@@ -1,4 +1,4 @@
-# ADR-0050: Honeytoken resources
+# ADR-0052: Honeytoken resources
 
 - Status: Proposed (issue #108, `needs: design`, part of the detection epic #110). Built at the owner's request with the defaults below; the owner has not yet approved the decisions listed under Open for review, and the status stays Proposed until they do.
 - Date: 2026-11-10

@@ -21,6 +21,10 @@
 </nav>
 
 {% if tab == "mine" %}
+{% if approvals.len() > 0 %}<div class="notice warn"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-alert"/></svg><span>{{ approvals.len() }} request{% if approvals.len() != 1 %}s are{% else %} is{% endif %} waiting for your decision.</span><a class="button secondary" href="/console/access?tab=approvals">Review {% if approvals.len() != 1 %}them{% else %}it{% endif %}</a></div>{% endif %}
+{% if requestable.is_empty() && mine.is_empty() %}
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg><div>There is nothing you can ask for, and you have not asked for anything. Roles can be made requestable in policy.</div></div>
+{% else %}
 <h2>Ask for access</h2>
 {% if requestable.is_empty() %}
 <div class="card empty"><div>There is nothing you can ask for. Roles can be made requestable in policy.</div></div>
@@ -33,10 +37,10 @@
       {% for r in requestable %}<option value="{{ r.name }}"{% if r.name == prefill %} selected{% endif %}>{{ r.name }} ({{ r.kind }}), through {{ r.roles.join(", ") }}</option>{% endfor %}
     </select>
   </label>
-  <label><span>How long</span> <input type="text" name="duration" placeholder="30m (the role sets the limit)" maxlength="10" class="w-360"></label>
+  <label><span>How long</span> <input type="text" name="duration" placeholder="e.g. 30m or 2h; the role sets the longest" maxlength="10" class="w-360"></label>
   <label><span>Why</span> <input type="text" name="reason" placeholder="INC-123: orders table is locked" maxlength="500" class="w-360"></label>
   <label class="check"><input type="checkbox" name="break_glass" value="1"> <span><b>Break-glass</b>: for an emergency. Granted at once, limited to an hour, announced, and reviewed afterwards.</span></label>
-  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg>Ask</button></div>
+  <div><button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg>Request access</button></div>
 </form>
 </div>
 {% endif %}
@@ -45,7 +49,9 @@
 <div class="card empty"><div>You haven't asked for anything yet.</div></div>
 {% else %}
 {% let rows = mine %}
+{% let who = false %}
 {% include "access_table.html" %}
+{% endif %}
 {% endif %}
 {% else if tab == "approvals" %}
 <h2>Waiting for you to decide</h2>
@@ -53,6 +59,7 @@
 <div class="card empty"><div>Nothing is waiting for you.</div></div>
 {% else %}
 {% let rows = approvals %}
+{% let who = true %}
 {% include "access_table.html" %}
 {% endif %}
 {% else if tab == "grants" %}
@@ -66,7 +73,7 @@
   {% for g in grants %}
   <tr>
     <td>{{ g.user }}{% if g.break_glass %} <span class="pill bad">break-glass</span>{% endif %}</td>
-    <td class="mono">{{ g.resource }}</td>
+    <td class="mono nowrap">{{ g.resource }}</td>
     <td><span class="chip c{{ g.role.c }}">{{ g.role.text }}</span></td>
     <td>{{ g.reason }}</td>
     <td>{{ g.approvers }}</td>
@@ -90,6 +97,7 @@
 <div class="card empty"><div>No requests.</div></div>
 {% else %}
 {% let rows = all %}
+{% let who = true %}
 {% include "access_table.html" %}
 {% endif %}
 {% endif %}

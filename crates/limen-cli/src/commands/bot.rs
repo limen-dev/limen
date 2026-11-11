@@ -9,7 +9,7 @@ use limen_proto::v1::auth_client::AuthClient;
 use limen_proto::v1::{BotLoginRequest, GetAuthConfigRequest};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 
-use super::login::{finish, pin_ca_file};
+use super::login::{CaChoice, apply_ca_choice, finish};
 use crate::api;
 
 /// How the token is found.
@@ -32,7 +32,7 @@ pub struct BotLogin<'a> {
     pub token_env: Option<&'a str>,
     pub token_file: Option<&'a Path>,
     pub audience: Option<&'a str>,
-    pub ca_file: Option<&'a Path>,
+    pub ca: CaChoice<'a>,
 }
 
 /// Where this method's token comes from, given what the user passed.
@@ -139,9 +139,9 @@ fn read_token(source: &TokenSource) -> anyhow::Result<String> {
 }
 
 pub async fn run(args: BotLogin<'_>) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(args.proxy)?;
+    let proxy = api::resolve_server(args.proxy)?;
     api::server_name(&proxy)?;
-    pin_ca_file(&proxy, args.ca_file)?;
+    apply_ca_choice(&proxy, args.ca)?;
 
     let mut auth = AuthClient::new(api::connect(&proxy, None)?);
     let config = auth
