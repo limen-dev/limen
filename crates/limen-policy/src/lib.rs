@@ -8,6 +8,7 @@ pub mod duration;
 pub mod model;
 pub mod schema;
 pub mod shadow;
+pub mod suggest;
 pub mod testing;
 pub mod tooling;
 pub mod trace;
@@ -2119,6 +2120,8 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
 
 #[cfg(test)]
 mod shadow_tests;
+#[cfg(test)]
+mod suggest_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

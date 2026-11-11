@@ -429,6 +429,23 @@ Options:
 - `--format <FORMAT>`: text, json, or markdown (for a pull request comment). Values: text, json, markdown. Default: `text`.
 - `--fail-on-widening`: Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
 
+#### `limen policy suggest`
+
+Propose a tighter policy from what people used: access a role grants that nobody used.
+
+Needs limen:admin. It only proposes removals and never applies them. The history must be at least as long as the window.
+
+```text
+Usage: limen policy suggest [OPTIONS]
+```
+
+Options:
+
+- `--window-days <WINDOW_DAYS>`: Days of sessions to judge by (7 to 365). A quarterly job needs 120 or more. Default: `90`.
+- `-o, --output <FILE>`: Write the changed roles, as policy YAML, to this new file.
+- `--yaml`: Print only the YAML, for a pipe.
+- `--json`: Print the full result as JSON.
+
 ### `limen connect`
 
 Open any resource by name: picks `ssh`, `db connect`, `redis connect`, ... from its type

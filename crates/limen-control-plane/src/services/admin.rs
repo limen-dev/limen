@@ -13,7 +13,7 @@ use limen_proto::v1::{
     ListComponentsRequest, ListComponentsResponse, ListDiscoveredRequest, ListDiscoveredResponse,
     ListLocksRequest, ListLocksResponse, Lock, LockUserRequest, LockUserResponse, PolicyDiff,
     PolicyTestResult, ReviewDiscoveredRequest, RevokeComponentRequest, RevokeComponentResponse,
-    TunnelInfo, UnlockUserRequest, UnlockUserResponse,
+    SuggestPolicyRequest, SuggestPolicyResponse, TunnelInfo, UnlockUserRequest, UnlockUserResponse,
 };
 use prost::Message as _;
 use tonic::{Request, Response, Status};
@@ -229,6 +229,22 @@ impl Admin for AdminService {
             version: loaded.version,
             documents_json,
         }))
+    }
+
+    async fn suggest_policy(
+        &self,
+        request: Request<SuggestPolicyRequest>,
+    ) -> Result<Response<SuggestPolicyResponse>, Status> {
+        let caller = caller::resolve_current(&request, &self.0).await?;
+        let user = caller.admin()?;
+        // It shows who used what: a person with the admin role, never a bot.
+        if user.bot {
+            return Err(Status::permission_denied("bots cannot ask for suggestions"));
+        }
+        let who = user.username.clone();
+        crate::policy_suggest::run(&self.0, &who, request.into_inner().window_days)
+            .await
+            .map(Response::new)
     }
 
     async fn get_policy(

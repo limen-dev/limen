@@ -72,6 +72,37 @@ limen explain orders-prod --user alice@example.com        # admins: the full tra
 
 A user's answer describes only **their own roles**, in words that name nothing about resources they cannot see, and a resource that exists but is hidden reads *exactly* like one that does not exist. If they could ask for it, it says how. Admins get the full trace: which rule matched, or why each did not ("needs env in [staging], the resource has env=prod"), plus locks and grants.
 
+## Right-size roles from real use
+
+Roles grow because adding access is easy and nobody removes it. Limen sees every session, so it can say which access nobody used ([ADR-0050](../adr/0050-policy-suggest.md)).
+
+```sh
+limen policy suggest                         # the last 90 days; needs limen:admin
+limen policy suggest --window-days 180 -o suggested-roles.yaml
+limen policy suggest --json                  # for scripts
+```
+
+It prints a report and the effective-access diff (only losses), and with `-o` writes the changed roles as policy YAML to a **new** file. **Limen never applies it.** Copy the roles into your policy repository, run `limen policy diff active --new policy/` and `limen policy test`, and open the pull request as for any change.
+
+What it suggests, on standing `allow` rules only:
+
+- **An unused rule:** nothing it reaches was used in the window. A role left with no rule is listed as *unused*: remove the role and its group mappings together.
+- **An unused login, database role, user or Mongo role** inside a rule that was used. At least one entry always stays.
+- **People holding roles they did not use,** as a report. Roles come from IdP groups, which Limen cannot change, so this is a list of people to ask.
+
+How it stays safe:
+
+- **Removals only.** The result is rebuilt and checked with the effective-access diff before it is returned; the call fails if anyone would gain access.
+- **Use is counted generously.** A session records the resource and the login, not the role that allowed it, so it counts as use of every rule that could have allowed it. Overlapping roles can only hide a suggestion.
+- **Not enough history is refused.** If Limen has been watching for less than the window, there is no answer, and the error says how long it can honour. For a quarterly job, use `--window-days 120` or more.
+- **Never suggested:** break-glass and requestable roles, shadow roles, roles labelled `suggest: keep`, roles changed inside the window, and rules that reach a resource created inside the window.
+- **Results appear once roles are old enough.** A role's age is the last time its document changed, so right after an upgrade, or a change, a role is left alone until it has been unchanged for the window. A resource found by discovery counts as new, so rules that reach one are not judged yet.
+- **Not assessed:** Kubernetes, search and web-app rules (their use is recorded per request, without a login). They are left as they are and listed.
+
+To keep a role out of it, give the role the label `suggest: keep` (for example a quarterly job's role). A label, not a new field, so older components still read the policy.
+
+Every call writes a `policy.suggest` audit event (window, policy version, counts, no names), and fails if audit is unavailable.
+
 ## In CI
 
 `examples/ci/policy-check.yml` is a GitHub Actions workflow that runs the tests, posts the effective-access diff as a pull request comment (`scripts/policy-pr-comment.sh`), and fails when standing access widens without a label. Copy it into your policy repository.

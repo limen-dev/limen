@@ -93,6 +93,10 @@ pub enum EventKind {
     WebSocket,
     #[serde(rename = "policy.change")]
     PolicyChange,
+    /// An admin asked for a tighter policy proposed from real use (ADR-0050).
+    /// `data` has the window, the policy version, and counts, never names.
+    #[serde(rename = "policy.suggest")]
+    PolicySuggest,
     /// A request was allowed that a shadow deny rule would have refused
     /// (ADR-0046). `data.role`, `rule`, `resource`, and the principal; the
     /// request itself went ahead.

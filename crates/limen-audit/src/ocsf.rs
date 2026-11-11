@@ -342,7 +342,9 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
             Mapped::new(ENTITY_MANAGEMENT, OTHER).detail("access review")
         }
 
-        K::AuditSearch | K::AuditVerifyAccess => Mapped::new(API_ACTIVITY, act(2, "Read")),
+        K::AuditSearch | K::AuditVerifyAccess | K::PolicySuggest => {
+            Mapped::new(API_ACTIVITY, act(2, "Read"))
+        }
         K::EvidenceExport => Mapped::new(API_ACTIVITY, act(1, "Create")),
     }
 }
@@ -631,6 +633,7 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::WebResponse,
     EventKind::WebSocket,
     EventKind::PolicyChange,
+    EventKind::PolicySuggest,
     EventKind::PolicyShadowDeny,
     EventKind::PolicyWriteDenied,
     EventKind::PolicyOwnershipTransfer,
@@ -713,7 +716,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 61);
+        assert_eq!(before, 62);
     }
 
     #[test]

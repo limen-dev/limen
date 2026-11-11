@@ -8,8 +8,8 @@ use anyhow::{Context as _, bail};
 use clap::Subcommand;
 use limen_policy::tooling::{ChangeKind, Via};
 use limen_policy::{Document, Policy};
-use limen_proto::v1::GetPolicyDocumentsRequest;
 use limen_proto::v1::admin_client::AdminClient;
+use limen_proto::v1::{GetPolicyDocumentsRequest, SuggestPolicyRequest};
 
 use super::admin::collect_sources;
 use crate::{api, ui};
@@ -65,6 +65,24 @@ pub enum PolicyCommand {
         /// Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
         #[arg(long)]
         fail_on_widening: bool,
+    },
+    /// Propose a tighter policy from what people used: access a role grants that nobody used.
+    ///
+    /// Needs limen:admin. It only proposes removals and never applies them. The
+    /// history must be at least as long as the window.
+    Suggest {
+        /// Days of sessions to judge by (7 to 365). A quarterly job needs 120 or more.
+        #[arg(long, default_value_t = 90, value_parser = clap::value_parser!(u32).range(7..=365))]
+        window_days: u32,
+        /// Write the changed roles, as policy YAML, to this new file.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Print only the YAML, for a pipe.
+        #[arg(long, conflicts_with_all = ["json", "output"])]
+        yaml: bool,
+        /// Print the full result as JSON.
+        #[arg(long, conflicts_with = "yaml")]
+        json: bool,
     },
 }
 
@@ -132,6 +150,12 @@ pub async fn run(proxy: Option<&str>, command: PolicyCommand) -> anyhow::Result<
             format,
             fail_on_widening,
         } => diff(proxy, &old, &new, &format, fail_on_widening).await,
+        PolicyCommand::Suggest {
+            window_days,
+            output,
+            yaml,
+            json,
+        } => suggest(proxy, window_days, output.as_deref(), yaml, json).await,
     }
 }
 
@@ -331,6 +355,64 @@ async fn diff(
     }
     if fail_on_widening && result.widens_standing() {
         bail!("standing access widens (--fail-on-widening)");
+    }
+    Ok(())
+}
+
+async fn suggest(
+    proxy: Option<&str>,
+    window_days: u32,
+    output: Option<&std::path::Path>,
+    yaml: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    // Before the question is asked (and audited): a new file, or nothing.
+    if let Some(path) = output
+        && path.exists()
+    {
+        bail!(
+            "{} already exists; --output writes a new file only",
+            path.display()
+        );
+    }
+    let (_, channel) = api::authenticated(proxy)?;
+    let resp = AdminClient::new(channel)
+        .suggest_policy(SuggestPolicyRequest { window_days })
+        .await
+        .map_err(|s| api::status_error(&s))?
+        .into_inner();
+    if yaml {
+        print!("{}", resp.yaml);
+        return Ok(());
+    }
+    if let Some(path) = output {
+        use std::io::Write as _;
+        // A new file only: a suggestion must not replace a policy by accident.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .with_context(|| format!("{} must be a new file", path.display()))?;
+        file.write_all(resp.yaml.as_bytes())?;
+    }
+    if json {
+        println!("{}", resp.report_json);
+        return Ok(());
+    }
+    print!("{}", resp.text);
+    if !resp.diff.is_empty() {
+        anstream::println!("\n{}", ui::bold("Effective access after the changes"));
+        for line in resp.diff.lines() {
+            anstream::println!("{}", ui::green(line));
+        }
+    }
+    if let Some(path) = output {
+        ui::success(&format!(
+            "Wrote the changed roles to {} (from policy version {}). Nothing was applied: \
+             put them in your policy repository, then run `limen policy diff active --new <policy>` and `limen policy test`.",
+            path.display(),
+            resp.policy_version
+        ));
     }
     Ok(())
 }
