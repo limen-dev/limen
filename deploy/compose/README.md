@@ -26,7 +26,7 @@ It asks whether to scale Limen and which stacks to enable, starts everything, ap
 
 ```sh
 deploy/compose/setup.sh --stacks tcp,web
-export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443
+export PATH="$PWD/target/release:$PATH" LIMEN_SERVER=localhost:3443
 limen login --ca-file deploy/compose/.state/internal-ca.pem
 limen ls
 limen tcp tcp-echo                       # prints a local port: nc 127.0.0.1 <port>
@@ -49,7 +49,7 @@ mkdir -p deploy/compose/.state
 docker compose -f deploy/compose/docker-compose.yml cp \
   control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
 
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 # A browser opens on Dex. Log in as admin@example.com / password.
 
 limen admin apply examples/policy      # admin is a bootstrap admin (group limen-admins)
@@ -240,7 +240,7 @@ Host ports (127.0.0.1): proxies `23443` / `23453` / `23463` (admin `23444` / `23
 
 ```sh
 docker compose -p limen-scale cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/scale/internal-ca.pem
-LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca.pem \
+LIMEN_SERVER=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca.pem \
   LIMEN_DEX_URL=http://localhost:25556 deploy/compose/scripts/dev-login.sh developer@example.com
 ```
 
@@ -292,6 +292,12 @@ demos/demo-phase11.sh         # pika and librdkafka: refusals, a consumer group 
 ```
 
 The demo runs project `limen-messaging` on ports 39xxx and needs `python3` (it installs `pika` and `confluent-kafka` into a virtualenv under `.state/`). The first image build takes several minutes, and it isn't run in CI. Amazon MQ, Amazon MSK and `AWS_MSK_IAM` are **unverified**.
+
+## A public certificate on the proxy
+
+`deploy/compose/setup.sh --stacks public-cert` (`stacks/public-cert.yml`) gives the proxy a certificate from a throwaway CA that stands in for a public one ([ADR-0043](../../docs/adr/0043-public-proxy-certificate.md)): the CLI and browsers see it, workers and peers still see the internal CA's. It is never part of `--yes`, because it changes what every client has to trust, and it does not work with `--scale`.
+
+The stand-in CA is `.state/public-cert/ca.pem`: that is what `limen login --ca-file` must pin here (setup does it for you). On a real deployment you pin nothing. `scripts/gen-public-cert.sh <dir> --renew` makes a new certificate from the same CA; send the proxy `SIGHUP` (or wait a minute) to load it. `demos/demo-public-cert.sh` checks all of this.
 
 ## Kubernetes
 

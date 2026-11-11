@@ -82,6 +82,20 @@ pub fn pin_ca(proxy: &str, pem: &str) -> anyhow::Result<()> {
     write_file(&dir_for(proxy)?.join("proxy-ca.pem"), pem, false)
 }
 
+/// Forget the CA pinned for `proxy`, so its certificate is checked against the system trust
+/// store again. True if there was one. Logout keeps the pin; this is the only way to drop it.
+pub fn unpin_ca(proxy: &str) -> anyhow::Result<bool> {
+    remove_if_present(&dir_for(proxy)?.join("proxy-ca.pem"))
+}
+
+fn remove_if_present(path: &Path) -> anyhow::Result<bool> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl Profile {
     pub fn save(
         dir: &Path,
@@ -263,7 +277,17 @@ mod tests {
 
 #[cfg(test)]
 mod dir_for_tests {
-    use super::dir_for;
+    use super::{dir_for, remove_if_present};
+
+    #[test]
+    fn forgetting_a_pin_that_is_not_there_is_not_an_error() {
+        let dir = tempfile::tempdir().expect("dir");
+        let pin = dir.path().join("proxy-ca.pem");
+        assert!(!remove_if_present(&pin).expect("absent"));
+        std::fs::write(&pin, "pem").expect("write");
+        assert!(remove_if_present(&pin).expect("present"));
+        assert!(!pin.exists());
+    }
 
     #[test]
     fn dir_for_never_names_a_parent_directory() {

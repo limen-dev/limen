@@ -47,7 +47,7 @@ Each ADR's status line gives its approval date.
 | [0040](0040-trace-export.md) | Trace export over OTLP | Accepted |
 | [0041](0041-client-tool-integration-and-doctor.md) | Tools you already use (`ssh_config`, kubeconfig) and `limen doctor` | Proposed |
 | [0042](0042-management-api.md) | One management API for the CLI, the console, and infrastructure as code (Phase 14): the `limen.manage.v1` contract, one owner per document, scoped bot writers that complete resource profiles, server-side guardrails | Accepted |
-| [0043](0043-public-proxy-certificate.md) | A publicly trusted certificate for the proxy's public listener: operator-supplied, chosen per connection by ALPN, reloaded without a restart; the CLI trusts the system roots when no CA is pinned | Proposed |
+| [0043](0043-public-proxy-certificate.md) | A publicly trusted certificate for the proxy's public listener: operator-supplied, chosen per connection by ALPN, reloaded without a restart; the CLI trusts the system roots when no CA is pinned | Accepted |
 | [0044](0044-aws-iam-join.md) | Joining with an AWS IAM identity (components and bots): a signed `GetCallerIdentity` the control plane rebuilds and forwards itself, with a per-attempt challenge and fixed hosts | Proposed |
 | [0045](0045-upgrade-gate.md) | Proxies and workers wait for an upgraded control plane, so one rollout orders itself | Accepted |
 | [0046](0046-policy-shadow-mode.md) | Shadow mode for policy rules: deny rules and roles evaluated and reported but not enforced, with a mandatory expiry that enforces | Accepted |

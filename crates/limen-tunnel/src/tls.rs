@@ -103,6 +103,32 @@ pub fn server_config(
     Ok(config)
 }
 
+/// Like [`server_config`], with the certificate chosen per connection by `resolver`.
+pub fn server_config_with_resolver(
+    resolver: Arc<dyn rustls::server::ResolvesServerCert>,
+    client_roots: &[CertificateDer<'static>],
+    client_auth: ClientAuth,
+    alpn: &[&[u8]],
+) -> Result<ServerConfig, TransportError> {
+    let provider = provider();
+    let verifier = WebPkiClientVerifier::builder_with_provider(
+        root_store(client_roots)?,
+        Arc::clone(&provider),
+    );
+    let verifier = match client_auth {
+        ClientAuth::Required => verifier.build(),
+        ClientAuth::Optional => verifier.allow_unauthenticated().build(),
+    }
+    .map_err(|e| TransportError::Tls(e.to_string()))?;
+    let mut config = ServerConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| TransportError::Tls(e.to_string()))?
+        .with_client_cert_verifier(verifier)
+        .with_cert_resolver(resolver);
+    config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
+    Ok(config)
+}
+
 /// Client config trusting only `roots`, optionally presenting `identity`.
 pub fn client_config(
     roots: &[CertificateDer<'static>],

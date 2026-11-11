@@ -26,5 +26,6 @@ running one: they build the CLI and start containers.
 | `demo-policy-suggest.sh` | `limen policy suggest`: removals proposed from real sessions (ADR-0050) |
 | `demo-idp-offboarding.sh` | IdP-driven onboarding (groups become roles) and offboarding against a real Dex (ADR-0047) |
 | `demo-ocsf.sh` | OCSF export of the audit trail for SIEMs (ADR-0049) |
+| `demo-public-cert.sh` | A public certificate on the proxy: the CLI needs no CA file, workers are unaffected, reload on SIGHUP (ADR-0043) |
 | `demo-dx.sh` | First five minutes: `limen doctor`, ssh, scp, rsync, git, `limen kube config` |
 | `demo-website.sh` | Builds and checks the documentation site |

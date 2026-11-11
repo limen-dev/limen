@@ -5,6 +5,7 @@
 pub mod config;
 mod kube;
 mod peer;
+pub mod public_cert;
 pub mod relay;
 mod sessions;
 mod shadow;
@@ -33,7 +34,7 @@ use limen_proto::v1::{PingRequest, ReportTunnelsRequest, TunnelReport};
 use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel, retry_if_went_away};
 use limen_tunnel::serve::{H2Settings, serve_h2};
-use limen_tunnel::tls::{ClientAuth, client_config, server_config};
+use limen_tunnel::tls::{ClientAuth, client_config, server_config_with_resolver};
 use limen_tunnel::tunnel::TunnelChannel;
 use limen_tunnel::{PeerInfo, alpn};
 use rustls::ServerConfig;
@@ -62,6 +63,8 @@ pub struct Proxy {
     pub config: Arc<Config>,
     creds: watch::Receiver<Arc<ComponentCredentials>>,
     tls: Arc<RwLock<Arc<ServerConfig>>>,
+    /// The publicly trusted certificate for the CLI and browsers, if one is configured (ADR-0043).
+    public_cert: Arc<public_cert::PublicCert>,
     cp: Arc<RwLock<Channel>>,
     pub tunnels: Tunnels,
     accept_limiter: Arc<DefaultKeyedRateLimiter<IpAddr>>,
@@ -112,7 +115,11 @@ impl Proxy {
             build_cp_channel(&config, &creds)
         })
         .await;
-        let tls = Arc::new(RwLock::new(Arc::new(build_server_config(&creds)?)));
+        let public_cert = public_cert::PublicCert::from_config(&config)?;
+        let tls = Arc::new(RwLock::new(Arc::new(build_server_config(
+            &creds,
+            &public_cert,
+        )?)));
         let cp = Arc::new(RwLock::new(build_cp_channel(&config, &creds)?));
         let signer = Arc::new(RwLock::new(Arc::new(build_signer(&creds)?)));
         let policy = limen_session::snapshot::PolicyCache::new(
@@ -137,6 +144,7 @@ impl Proxy {
                 config: Arc::new(config),
                 creds: rx,
                 tls,
+                public_cert,
                 cp,
                 tunnels: Tunnels::default(),
                 accept_limiter: Arc::new(RateLimiter::keyed(quota)),
@@ -203,18 +211,30 @@ impl Proxy {
     }
 }
 
-fn build_server_config(creds: &ComponentCredentials) -> anyhow::Result<ServerConfig> {
+fn build_server_config(
+    creds: &ComponentCredentials,
+    public: &Arc<public_cert::PublicCert>,
+) -> anyhow::Result<ServerConfig> {
     let chain = format!("{}{}", creds.cert_pem, creds.internal_ca_pem);
     let identity = limen_tunnel::tls::Identity::from_pem(&chain, creds.key_pem.expose())?;
+    let internal = rustls::sign::CertifiedKey::from_der(
+        identity.certs,
+        identity.key,
+        &limen_tunnel::tls::provider(),
+    )?;
+    // Workers and peers get the internal certificate; the CLI and browsers get the public one
+    // when there is one (ADR-0043).
+    let resolver = public_cert::Selector::new(Arc::new(internal), Arc::clone(public));
     // Users present user-CA certs, workers internal-CA certs. Anonymous
     // clients (login, enrollment) present none. Each route checks which it got.
-    Ok(server_config(
-        identity,
+    Ok(server_config_with_resolver(
+        Arc::new(resolver),
         &[creds.user_ca()?, creds.internal_ca()?],
         ClientAuth::Optional,
         &[
             alpn::TUNNEL,
             alpn::PEER,
+            alpn::WORKER_API,
             alpn::SSH,
             alpn::DB,
             alpn::REDIS,
@@ -273,6 +293,17 @@ pub async fn run(
         creds_tx,
         move |creds| build_cp_channel(&renew_proxy.config, creds),
     ));
+    if let (Some(cert), Some(key)) = (
+        proxy.config.public_cert_file.clone(),
+        proxy.config.public_key_file.clone(),
+    ) {
+        background.spawn(public_cert::reload_loop(
+            Arc::clone(&proxy.public_cert),
+            cert,
+            key,
+            shutdown.clone(),
+        ));
+    }
     background.spawn(report_tunnels(proxy.clone(), shutdown.clone()));
     background.spawn(policy_refresh(proxy.clone(), shutdown.clone()));
     // Sessions go on writing audit events (their `session.end`) until the
@@ -432,7 +463,7 @@ async fn handle_connection(
             sessions::handle(proxy, tls, peer, sessions::Protocol::Tcp).await;
         }
         Some(p) if p == alpn::PEER => peer::serve(proxy, tls, peer).await,
-        Some(p) if p == alpn::H2 => {
+        Some(p) if p == alpn::H2 || p == alpn::WORKER_API => {
             let mut shutdown = shutdown;
             let drain = Duration::from_secs(proxy.config.drain_timeout_secs);
             let anonymous = peer.leaf().is_none();
@@ -589,7 +620,7 @@ async fn apply_renewals(proxy: Proxy) {
     while rx.changed().await.is_ok() {
         let creds = Arc::clone(&rx.borrow_and_update());
         match (
-            build_server_config(&creds),
+            build_server_config(&creds, &proxy.public_cert),
             build_cp_channel(&proxy.config, &creds),
             build_signer(&creds),
         ) {

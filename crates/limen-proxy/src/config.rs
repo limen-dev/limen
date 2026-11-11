@@ -53,6 +53,16 @@ pub struct Config {
     )]
     pub dns_names: Vec<String>,
 
+    /// PEM certificate chain (leaf first) from a public CA, shown to the CLI and browsers
+    /// instead of the internal certificate, so they need no CA file (ADR-0043). Workers and
+    /// peer proxies still get the internal one. Read again every minute and on SIGHUP.
+    #[arg(long, env = "LIMEN_PUBLIC_CERT_FILE", requires = "public_key_file")]
+    pub public_cert_file: Option<PathBuf>,
+
+    /// PEM private key for `--public-cert-file`. Mount it read-only, readable by the proxy only.
+    #[arg(long, env = "LIMEN_PUBLIC_KEY_FILE", requires = "public_cert_file")]
+    pub public_key_file: Option<PathBuf>,
+
     /// Address other proxies use to reach this one for peering (ADR-0004).
     #[arg(long, env = "LIMEN_PEER_ADDRESS")]
     pub peer_address: Option<String>,
@@ -155,6 +165,15 @@ mod tests {
         let mut argv = vec!["limen-proxy", "--control-plane-addr=cp:3080"];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).map(|c| c.config)
+    }
+
+    #[test]
+    fn the_public_certificate_and_its_key_come_together() {
+        assert!(parse_with(&[]).expect("none").public_cert_file.is_none());
+        assert!(parse_with(&["--public-cert-file=c.pem"]).is_err());
+        assert!(parse_with(&["--public-key-file=k.pem"]).is_err());
+        let c = parse_with(&["--public-cert-file=c.pem", "--public-key-file=k.pem"]).expect("both");
+        assert!(c.public_cert_file.is_some() && c.public_key_file.is_some());
     }
 
     #[test]

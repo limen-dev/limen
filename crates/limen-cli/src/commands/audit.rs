@@ -179,13 +179,21 @@ fn trusted_ca(
     let pem = if let Some(path) = ca_file {
         std::fs::read_to_string(path)?
     } else {
-        let pinned = match api::resolve_proxy(proxy) {
-            Ok(p) => profile::trusted_ca(&p)?,
-            Err(_) => None,
+        let server = api::resolve_server(proxy).ok();
+        let pinned = match &server {
+            Some(p) => profile::trusted_ca(p)?,
+            None => None,
         };
         pinned.ok_or_else(|| {
             if offline {
                 anyhow::anyhow!("give the Limen internal CA certificate with --ca-file")
+            } else if server.is_some() {
+                // Signatures are checked against Limen's own CA, never the system's
+                // trust store. A login to a server with a public certificate pins none.
+                anyhow::anyhow!(
+                    "give the Limen internal CA certificate with --ca-file: this login trusts the \
+                     server through the system's certificate store, so no CA was pinned"
+                )
             } else {
                 anyhow::anyhow!("not logged in; run `limen login`")
             }

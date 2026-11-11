@@ -86,6 +86,7 @@ Values without a default fail the install with a message naming them: the OIDC i
 | proxyDefaults.controlPlane | string | `""` | Key of the control plane group to dial. Empty uses the first. |
 | proxyDefaults.controlPlaneAddr | string | `""` | Overrides controlPlane, e.g. "cp.other-cluster.example.com:3080". |
 | proxyDefaults.joinSecret | string | `""` | Secret with this group's join token. Empty uses existingSecrets.proxyJoin. |
+| proxyDefaults.publicCertSecret | string | `""` | Name of a `kubernetes.io/tls` Secret (keys tls.crt and tls.key) holding a certificate from a public CA, which the CLI and browsers then see instead of the internal one, so users need no CA file (ADR-0043). Empty: users keep needing the internal CA. Upgrade workers first. |
 | proxyDefaults.service.type | string | `"LoadBalancer"` | Service type. |
 | proxyDefaults.service.port | int | `443` | Service port. |
 | proxyDefaults.service.annotations | object | `{"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type":"ip","service.beta.kubernetes.io/aws-load-balancer-type":"external"}` | Service annotations. The defaults ask AWS for a Network Load Balancer in TCP mode; TLS is end to end (ADR-0005). |

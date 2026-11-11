@@ -27,8 +27,10 @@ The script checks your tools, asks which stacks to enable (an SSH host, database
 
 ```sh
 scripts/install-cli.sh
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 ```
+
+`--ca-file` is only for this local stack, whose certificate comes from its own CA. Against a deployment with a public certificate you run `limen login --server limen.example.com` and nothing else.
 
 A browser opens on Dex. Sign in as `admin@example.com` with password `password`. On a machine without a browser, use `limen login --device`.
 

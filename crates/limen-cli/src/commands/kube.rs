@@ -109,7 +109,7 @@ pub(crate) fn exec_entry(proxy: &str, exe: &Path, home: Option<&Path>) -> serde_
     let mut exec = json!({
         "apiVersion": "client.authentication.k8s.io/v1",
         "command": exe.display().to_string(),
-        "args": ["--proxy", proxy, "kube", "credentials"],
+        "args": ["--server", proxy, "kube", "credentials"],
         "interactiveMode": "Never",
         "provideClusterInfo": false,
     });
@@ -123,7 +123,7 @@ pub(crate) fn exec_entry(proxy: &str, exe: &Path, home: Option<&Path>) -> serde_
 /// standard output, and nothing else there.
 #[allow(clippy::print_stdout)]
 pub fn credentials(proxy: Option<&str>) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let profile = Profile::load(&proxy)?
         .with_context(|| format!("not logged in to {proxy}; run `limen login`"))?;
     println!("{}", exec_credential(&profile)?);

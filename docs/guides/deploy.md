@@ -92,8 +92,27 @@ Workers can find EC2 instances, databases, caches and clusters ([discovery guide
 - **Metrics.** Every component serves `/metrics` on its admin port (3081, 3444, 3090), unauthenticated, so keep it private. On ECS and EC2 open it to your scraper or load balancer with `admin_ingress_cidrs` on the service or group; in the chart set `podAnnotations` on a group (`prometheus.io/scrape`, `/port`, `/path`).
 - **Register what you build** from Terraform or OpenTofu with the [Limen provider](terraform.md). That is separate from the modules here, which deploy Limen itself. The provider is unreleased and unverified against a real control plane.
 
+## The proxy's public certificate
+Users should not need a CA file. Give each proxy a certificate from a public CA (Let's Encrypt, a commercial CA, or an exported ACM certificate) and users run `limen login --server limen.example.com` with nothing else.
+
+| Flag | Environment | |
+|---|---|---|
+| `--public-cert-file` | `LIMEN_PUBLIC_CERT_FILE` | PEM chain, leaf first |
+| `--public-key-file` | `LIMEN_PUBLIC_KEY_FILE` | PEM private key. Mount it read-only, readable by the proxy only |
+
+Either flag needs the other. Without them nothing changes.
+
+- **Helm.** Set `proxies.<key>.publicCertSecret` to a `kubernetes.io/tls` Secret (keys `tls.crt` and `tls.key`; cert-manager writes this shape). The chart mounts it and sets both flags for that group. Renewal updates the mounted files and the proxy picks them up within a minute.
+- **Terminate TLS at the proxy, not at a load balancer.** Users present client certificates, so the load balancer must pass TCP through; an ACM certificate attached to a load balancer will not work.
+- **Names.** The certificate must cover the name users type, and the console and web app hosts (a wildcard such as `*.apps.example.com` for apps).
+- **Who sees which certificate.** The CLI and browsers get the public one. Workers and peer proxies keep getting the one the internal CA issued, and still pin the internal CA, so they need nothing. Upgrade workers before you switch this on: a worker from before ADR-0043 cannot be told from the CLI.
+- **Renewal.** The proxy reads both files again every minute and on `SIGHUP`. A file that does not parse, has expired, or whose key does not match the certificate is refused, and the last good certificate stays in use with a warning in the log and `limen_proxy_public_cert_reload_failures_total` counting up. Files that are missing, not PEM, or whose key does not match stop the proxy at start-up rather than serve the wrong certificate. An *expired* certificate does not: the proxy is also how workers and peers reach each other, so it starts, logs an error, and the expiry alert is already firing.
+- **Watch the expiry.** `limen_proxy_public_cert_expiry_timestamp_seconds` is the leaf's `notAfter`. Alert when `expiry - time()` drops under about 14 days: the proxy keeps serving an expired certificate it cannot replace, and users then get a trust error.
+- **Existing users must drop their pinned CA.** Before this, the CLI refused to connect without a CA, so everyone who has logged in has the internal CA pinned, and a pinned CA wins. `limen logout` keeps it on purpose. Once you switch the certificate on, their commands fail with "the server's certificate isn't trusted". Tell them to run `limen login --server limen.example.com --system-roots` once; it forgets the old pin and checks the system trust store from then on. New users and new CI machines need nothing. Servers that keep their own CA are unaffected.
+- **Audit verification still needs the internal CA.** `limen audit verify` checks signatures against Limen's own CA, not the system's: pass `--ca-file`.
+
 ## Not covered yet
 
-- **The proxy's public TLS certificate.** Design §91 leaves it open (ACM exportable certificate or one supplied from Secrets Manager). The load balancers pass TCP through, as the design requires, and nothing here provisions the certificate. This blocks real browser and CLI trust until it is decided.
+- **Provisioning the proxy's public TLS certificate.** The proxy takes a PEM chain and key from a public CA (`--public-cert-file`, `--public-key-file`; [ADR-0043](../adr/0043-public-proxy-certificate.md)), but only the Helm chart can mount one so far (`proxies.<key>.publicCertSecret`); the ECS/EC2 Terraform example and the plain Kubernetes manifests do not, and nothing issues the certificate. Until one is mounted, the CLI and browsers need the internal CA (`limen login --ca-file`). See [the public certificate](#the-proxys-public-certificate) below for what to mount and how it renews.
 - **Audit durability of control planes on ECS and EC2.** They run with `spool_mode = "ephemeral"`, because neither keeps its disk: a replica that dies before it hands over its spool loses the events not yet in S3 (up to `LIMEN_AUDIT_S3_FLUSH`, 60 s by default). The verifier reports them as gaps. For no loss, use the Kubernetes chart, whose StatefulSet keeps a volume (`durable`). See [running Limen at scale](scale-out.md).
 - **First admin.** Set `LIMEN_BOOTSTRAP_ADMIN_GROUPS` (extra environment) so the first admin can log in and apply policy. The [Okta guide](okta.md) shows the identity provider side.
