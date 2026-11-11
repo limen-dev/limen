@@ -117,10 +117,11 @@ Options:
 
 ### `limen requests`
 
-Your access requests. `--approvals` shows the ones waiting for you
+Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours
 
 ```text
 Usage: limen requests [OPTIONS]
+       limen requests <COMMAND>
 ```
 
 Options:
@@ -130,12 +131,27 @@ Options:
 - `--status <STATUS>`: pending, approved, denied, expired, cancelled, or revoked.
 - `--json`
 
-### `limen approve`
+#### `limen requests ls`
+
+List requests: yours, or with a flag the ones waiting for you. The default
+
+```text
+Usage: limen requests ls [OPTIONS]
+```
+
+Options:
+
+- `--approvals`: Requests you may approve or deny.
+- `--all`: Every request (limen:admin or limen:auditor).
+- `--status <STATUS>`: pending, approved, denied, expired, cancelled, or revoked.
+- `--json`
+
+#### `limen requests approve`
 
 Approve an access request. Never your own
 
 ```text
-Usage: limen approve [OPTIONS] <ID>
+Usage: limen requests approve [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -146,12 +162,12 @@ Options:
 
 - `-m, --comment <COMMENT>`
 
-### `limen deny`
+#### `limen requests deny`
 
 Deny an access request
 
 ```text
-Usage: limen deny [OPTIONS] <ID>
+Usage: limen requests deny [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -162,12 +178,12 @@ Options:
 
 - `-m, --comment <COMMENT>`
 
-### `limen cancel`
+#### `limen requests cancel`
 
 Withdraw an access request of yours that is still waiting
 
 ```text
-Usage: limen cancel [OPTIONS] <ID>
+Usage: limen requests cancel [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -1101,7 +1117,7 @@ Options:
 
 #### `limen admin review`
 
-Access reviews and the roles they withhold (ADR-0029)
+Access reviews and the roles they withhold
 
 ```text
 Usage: limen admin review [OPTIONS] <COMMAND>
@@ -1229,7 +1245,7 @@ Options:
 
 #### `limen admin discovery`
 
-Resources workers found in a cloud account, waiting for you (ADR-0027)
+Resources workers found in a cloud account, waiting for you
 
 ```text
 Usage: limen admin discovery [OPTIONS] <COMMAND>
@@ -1327,7 +1343,7 @@ Options:
 
 ### `limen manage`
 
-The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant (ADR-0042)
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant
 
 ```text
 Usage: limen manage [OPTIONS] <COMMAND>
@@ -1522,12 +1538,12 @@ Options:
 
 - `--note <NOTE>`
 
-##### `limen manage changes reject`
+##### `limen manage changes deny`
 
 Refuse a change
 
 ```text
-Usage: limen manage changes reject [OPTIONS] --note <NOTE> <ID>
+Usage: limen manage changes deny [OPTIONS] --note <NOTE> <ID>
 ```
 
 Arguments:

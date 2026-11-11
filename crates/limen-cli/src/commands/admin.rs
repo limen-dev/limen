@@ -65,7 +65,7 @@ pub enum AdminCommand {
         #[arg(long)]
         reason: String,
     },
-    /// Access reviews and the roles they withhold (ADR-0029).
+    /// Access reviews and the roles they withhold.
     Review {
         #[command(subcommand)]
         command: super::review::ReviewCommand,
@@ -81,7 +81,7 @@ pub enum AdminCommand {
         #[arg(long, default_value = "limen-evidence.json")]
         out: PathBuf,
     },
-    /// Resources workers found in a cloud account, waiting for you (ADR-0027).
+    /// Resources workers found in a cloud account, waiting for you.
     Discovery {
         #[command(subcommand)]
         command: DiscoveryCommand,
@@ -101,20 +101,6 @@ pub enum AdminCommand {
         /// Why. Recorded in the audit trail.
         #[arg(long)]
         reason: String,
-    },
-    /// Approve an access request (the same as `limen approve`).
-    #[command(hide = true)]
-    Approve {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
-    },
-    /// Deny an access request (the same as `limen deny`).
-    #[command(hide = true)]
-    Deny {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
     },
     /// End one live session.
     KillSession {
@@ -365,12 +351,6 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
         AdminCommand::RevokeGrant { request_id, reason } => {
             super::access::revoke_grant(proxy, &request_id, &reason).await?;
         }
-        AdminCommand::Approve { id, comment } => {
-            super::access::decide(proxy, &id, true, comment.as_deref()).await?;
-        }
-        AdminCommand::Deny { id, comment } => {
-            super::access::decide(proxy, &id, false, comment.as_deref()).await?;
-        }
         lock_command @ (AdminCommand::Lock { .. }
         | AdminCommand::Unlock { .. }
         | AdminCommand::Locks
@@ -380,7 +360,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
     Ok(())
 }
 
-/// Discovered resources (ADR-0027).
+/// Discovered resources.
 async fn discovery(
     admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
     command: DiscoveryCommand,
