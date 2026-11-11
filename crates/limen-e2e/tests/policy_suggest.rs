@@ -62,6 +62,7 @@ async fn an_ssh_session_is_the_use_that_keeps_its_login() {
             source: String::new(),
             require_tests: false,
             sources: policy(&target.addr.to_string(), &target.host_key),
+            replay_days: 0,
             dry_run: false,
             source_ref: String::new(),
         })

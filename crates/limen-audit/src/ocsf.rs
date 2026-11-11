@@ -719,7 +719,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 62);
+        assert_eq!(before, 63);
     }
 
     #[test]
