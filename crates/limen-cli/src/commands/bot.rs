@@ -139,7 +139,7 @@ fn read_token(source: &TokenSource) -> anyhow::Result<String> {
 }
 
 pub async fn run(args: BotLogin<'_>) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(args.proxy)?;
+    let proxy = api::resolve_server(args.proxy)?;
     api::server_name(&proxy)?;
     pin_ca_file(&proxy, args.ca_file)?;
 

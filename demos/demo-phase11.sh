@@ -36,7 +36,7 @@ export LIMEN_PORT_POSTGRES="${LIMEN_MESSAGING_PG_PORT:-39432}" LIMEN_PORT_KMS="$
 source "$here/scripts/lib.sh"
 stack_setup messaging
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_MESSAGING_PROXY_PORT" LIMEN_DEX_URL="http://localhost:$LIMEN_MESSAGING_DEX_PORT"
+export LIMEN_SERVER="localhost:$LIMEN_MESSAGING_PROXY_PORT" LIMEN_DEX_URL="http://localhost:$LIMEN_MESSAGING_DEX_PORT"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }

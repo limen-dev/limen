@@ -26,7 +26,7 @@ It asks whether to scale Limen and which stacks to enable, starts everything, ap
 
 ```sh
 deploy/compose/setup.sh --stacks tcp,web
-export PATH="$PWD/target/release:$PATH" LIMEN_PROXY=localhost:3443
+export PATH="$PWD/target/release:$PATH" LIMEN_SERVER=localhost:3443
 limen login --ca-file deploy/compose/.state/internal-ca.pem
 limen ls
 limen tcp tcp-echo                       # prints a local port: nc 127.0.0.1 <port>
@@ -49,7 +49,7 @@ mkdir -p deploy/compose/.state
 docker compose -f deploy/compose/docker-compose.yml cp \
   control-plane:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/internal-ca.pem
 
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem
 # A browser opens on Dex. Log in as admin@example.com / password.
 
 limen admin apply examples/policy      # admin is a bootstrap admin (group limen-admins)
@@ -240,7 +240,7 @@ Host ports (127.0.0.1): proxies `23443` / `23453` / `23463` (admin `23444` / `23
 
 ```sh
 docker compose -p limen-scale cp control-plane-0:/var/lib/limen/ca-public/internal-ca.pem deploy/compose/.state/scale/internal-ca.pem
-LIMEN_PROXY=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca.pem \
+LIMEN_SERVER=localhost:23443 LIMEN_DEV_CA=deploy/compose/.state/scale/internal-ca.pem \
   LIMEN_DEX_URL=http://localhost:25556 deploy/compose/scripts/dev-login.sh developer@example.com
 ```
 

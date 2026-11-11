@@ -34,7 +34,7 @@ use crate::{api, ui};
 /// If the proxy can't be reached the local credentials still go, and the
 /// message says the certificate stays valid until it expires.
 pub async fn logout(proxy: Option<&str>) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let Some(profile) = Profile::load(&proxy)? else {
         ui::info(&format!("Not logged in to {proxy}."));
         return Ok(());
@@ -80,7 +80,7 @@ async fn end_login(proxy: &str, profile: &Profile) -> anyhow::Result<()> {
 }
 
 pub fn status(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let Some(profile) = Profile::load(&proxy)? else {
         if json {
             println!(

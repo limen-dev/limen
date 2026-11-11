@@ -25,7 +25,7 @@ export LIMEN_PORT_POSTGRES="${LIMEN_PORT_POSTGRES:-35432}" LIMEN_PORT_S3="${LIME
 export LIMEN_PORT_KMS="${LIMEN_PORT_KMS:-38099}"
 state="$LIMEN_STATE_DIR"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_PORT_PROXY" LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
+export LIMEN_SERVER="localhost:$LIMEN_PORT_PROXY" LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 export LIMEN_HOME="$state/home"
 unset KUBECONFIG
@@ -59,7 +59,7 @@ else
   "$here/setup.sh" --yes --stacks ssh,kube || fail "setup.sh"
 fi
 rm -rf "$LIMEN_HOME"
-pass "stack up on $LIMEN_PROXY"
+pass "stack up on $LIMEN_SERVER"
 
 step "doctor before any login: says what is missing, and how to fix it"
 out="$(limen doctor 2>&1)" && fail "doctor passed with no login"
@@ -69,8 +69,8 @@ grep -q "skipped" <<<"$out" || fail "dependent checks aren't skipped"
 pass "no CA, no login: doctor fails with fixes"
 
 step "doctor on a proxy that isn't there"
-limen login --proxy localhost:1 --ca-file "$LIMEN_DEV_CA" >/dev/null 2>&1 || true
-out="$(limen --proxy localhost:1 doctor 2>&1)" && fail "doctor passed for a dead proxy"
+limen login --server localhost:1 --ca-file "$LIMEN_DEV_CA" >/dev/null 2>&1 || true
+out="$(limen --server localhost:1 doctor 2>&1)" && fail "doctor passed for a dead proxy"
 grep -q "✖ network" <<<"$out" || fail "unreachable proxy not reported: $out"
 grep -q "– tls" <<<"$out" || fail "tls should be skipped: $out"
 pass "unreachable proxy reported as a network problem; TLS skipped"

@@ -134,7 +134,7 @@ start_stack() {
   locked=true
   state="$STACK_STATE"
   export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-  export LIMEN_PROXY="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
+  export LIMEN_SERVER="$STACK_PROXY" LIMEN_DEX_URL="$STACK_DEX" LIMEN_DEV_CA="$state/internal-ca.pem"
   export LIMEN_HOME="$state/home-admin"
 
   step "Build and start"

@@ -28,7 +28,7 @@ source "$here/scripts/lib.sh"
 stack_setup tcp web
 
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_PORT_PROXY"
+export LIMEN_SERVER="localhost:$LIMEN_PORT_PROXY"
 export LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 app_host=app.apps.test

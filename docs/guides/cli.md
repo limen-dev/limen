@@ -50,7 +50,7 @@ Admin commands need the `limen:admin` role and are audited like everything else.
 
 `limen logout` ends the login at the proxy (it and its open sessions stop within about 10 seconds, wherever a copy of the certificate is) and deletes local credentials. If the proxy is unreachable the credentials are still deleted, and the certificate stays valid until it expires. Your other logins are unaffected.
 
-Global options: `--proxy HOST:PORT` (or `LIMEN_PROXY`; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
+Global options: `--server HOST[:PORT]` (or `LIMEN_SERVER`; port 443 unless you give one; remembered after the first login), `--color auto|always|never`, `--help`, `--version`.
 
 ## Local listeners
 

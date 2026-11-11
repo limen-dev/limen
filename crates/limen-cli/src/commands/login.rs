@@ -17,7 +17,7 @@ pub async fn run(
     open_browser: bool,
     ca_file: Option<&Path>,
 ) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     api::server_name(&proxy)?;
     pin_ca_file(&proxy, ca_file)?;
 

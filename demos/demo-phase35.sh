@@ -23,7 +23,7 @@ state="$here/.state"
 source "$here/scripts/lib.sh"
 stack_setup ssh observability bots
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:3443
+export LIMEN_SERVER=localhost:3443
 base=https://localhost:3443
 # Each person has their own CLI profile directory.
 as_admin() { LIMEN_HOME="$state/home-admin" "$LIMEN_BIN" "$@"; }

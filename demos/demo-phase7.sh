@@ -53,7 +53,7 @@ source "$here/scripts/lib.sh"
 stack_setup redis
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_REDIS_PROXY_PORT"
+export LIMEN_SERVER="localhost:$LIMEN_REDIS_PROXY_PORT"
 export LIMEN_DEX_URL="http://localhost:$LIMEN_REDIS_DEX_PORT"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 limen() { "$LIMEN_BIN" "$@"; }

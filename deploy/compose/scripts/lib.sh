@@ -439,7 +439,7 @@ stack_endpoints() {
     $has_bots && printf "$row" "CI issuer" "http://localhost:8130"
   fi
   ui_section "Connect"
-  printf "$row" "CLI" "limen --proxy $STACK_PROXY login --ca-file $ca" "" "limen ls"
+  printf "$row" "CLI" "limen --server $STACK_PROXY login --ca-file $ca" "" "limen ls"
   printf "$row" "Console" "https://$STACK_PROXY/console/" "Sign in" "admin@example.com / password"
   $has_web && ui_note "For web-demo, resolve app.apps.test to 127.0.0.1; its certificate uses the local dev CA."
   ui_note "Browsers warn about the dev CA; that is expected. Stop it with: deploy/compose/setup.sh${scale[*]:+ --scale} down"

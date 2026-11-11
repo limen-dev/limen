@@ -144,7 +144,7 @@ pub fn render_error(err: &anyhow::Error) -> String {
             Some("Run `limen login` to sign in again.")
         } else if text.contains("untrusted") || text.contains("certificate") && text.contains("CA")
         {
-            Some("Pin the proxy's CA with `limen login --ca-file <ca.pem>`.")
+            Some("Pin the server's CA with `limen login --ca-file <ca.pem>`.")
         } else if text.contains("control plane unreachable") || text.contains("unavailable") {
             Some("The service may be restarting. Try again in a few seconds.")
         } else {
