@@ -42,6 +42,9 @@ pub struct ControlsPage {
     pub error: Option<String>,
     pub runs: Vec<RunView>,
     pub latest: Option<RunView>,
+    /// The newest run, when it ended without a report (an error or an
+    /// abandoned run) and so is not the result shown below.
+    pub newest_without_report: Option<RunView>,
     pub checks: Vec<CheckView>,
     pub attestation: String,
     pub interval: String,
@@ -134,6 +137,10 @@ pub async fn page(
             notice,
             error: q.err.map(|e| e.chars().take(300).collect()),
             runs: runs.iter().map(run_view).collect(),
+            newest_without_report: runs
+                .first()
+                .filter(|r| r.manifest_sha256.is_none() && r.status != "running")
+                .map(run_view),
             latest: latest.map(run_view),
             checks,
             attestation,

@@ -257,6 +257,12 @@ pub fn verify_report(
             problems.push(format!("check {} appears twice", c.id));
         }
     }
+    // Checks every report must carry, whatever it says it expected.
+    for id in NEVER_SKIPPED {
+        if !seen.contains(id) {
+            problems.push(format!("check {id} is required and absent"));
+        }
+    }
     // Checks that have no reason to be skipped: a report that skips one
     // didn't test what it claims to (ADR-0051).
     for c in &checks {

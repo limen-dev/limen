@@ -13,7 +13,6 @@ use limen_ca::{CaPurpose, CertificateAuthority, FileSigner, UserCertRequest};
 use limen_policy::{AccessRequest, Decision, DenyReason, Policy, Principal};
 use limen_verify::controls::{CheckResult, Status};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
-use sha2::{Digest as _, Sha256};
 use sqlx::Row as _;
 use time::OffsetDateTime;
 
@@ -580,13 +579,13 @@ async fn recording_integrity(state: &AppState) -> Verdict {
             Ok(bytes) => {
                 read += bytes.len();
                 checked += 1;
-                if hex(&Sha256::digest(&bytes)) != expected {
+                if limen_verify::pack::sha(&bytes) != expected {
                     bad.push(format!("{id}: does not match its recorded hash"));
                 }
             }
             // The store refuses what it would not play (over its size cap):
             // a limit of this check, not a damaged recording.
-            Err(e) if e.to_string().contains("too large") => oversized += 1,
+            Err(e) if e.downcast_ref::<crate::pipeline::TooLarge>().is_some() => oversized += 1,
             Err(_) => bad.push(format!("{id}: could not be read from storage")),
         }
     }
@@ -606,14 +605,6 @@ async fn recording_integrity(state: &AppState) -> Verdict {
     } else {
         fail(bad.join("; "))
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    })
 }
 
 #[cfg(test)]

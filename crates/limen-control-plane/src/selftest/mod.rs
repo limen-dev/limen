@@ -29,9 +29,9 @@ pub const SCHEDULER: &str = "selftest:scheduler";
 /// A manual run may start at most this often.
 const MANUAL_GAP_SECS: f64 = 60.0;
 /// A run still `running` after this long belonged to a replica that died.
-const ABANDON_AFTER_MINS: i64 = 15;
+const ABANDON_AFTER_MINS: i32 = 15;
 /// Runs are kept as long as the longest evidence-pack period.
-const RETENTION_DAYS: i64 = 400;
+const RETENTION_DAYS: i32 = 400;
 /// The most a run waits after startup before the first scheduled run.
 const STARTUP_GRACE: Duration = Duration::from_secs(300);
 
@@ -115,7 +115,7 @@ pub async fn claim(
                 error = 'the control plane running it stopped before it finished'
          WHERE status = 'running' AND started_at < now() - make_interval(mins => $1)",
     )
-    .bind(i32::try_from(ABANDON_AFTER_MINS).unwrap_or(15))
+    .bind(ABANDON_AFTER_MINS)
     .execute(db)
     .await
     .map_err(|e| internal("abandoning stale self-test runs", e))?;
@@ -214,7 +214,14 @@ async fn execute(
     trigger: Trigger,
     requested_by: &str,
 ) -> Result<(), String> {
-    let outcome = build_and_store(state, id, started_at, trigger, requested_by).await;
+    // Its own task: a panic anywhere in the run ends it as an error, never as
+    // a row stuck in `running`.
+    let outcome = {
+        let (state, who) = (state.clone(), requested_by.to_owned());
+        tokio::spawn(async move { build_and_store(&state, id, started_at, trigger, &who).await })
+            .await
+            .unwrap_or_else(|_| Err("the self-test stopped unexpectedly".into()))
+    };
     if let Err(why) = &outcome {
         // No report, no verdict: an `error` run alerts like a failed one.
         let _ = sqlx::query(
@@ -279,24 +286,6 @@ async fn build_and_store(
         .map(|c| c.id.as_str())
         .collect();
 
-    // Anchored in the audit trail before the report exists: no event, no report.
-    state
-        .audit
-        .emit(
-            EventKind::SelftestRun,
-            Context {
-                user: Some(requested_by.to_owned()),
-                session_id: None,
-            },
-            json!({
-                "run_id": id, "trigger": trigger.as_str(), "status": counts.verdict(),
-                "passed": counts.passed, "failed": counts.failed, "skipped": counts.skipped,
-                "failed_checks": failing, "manifest_sha256": manifest_sha256,
-            }),
-        )
-        .await
-        .map_err(|e| format!("audit unavailable: {e}"))?;
-
     let signer = state
         .snapshot_signer
         .read()
@@ -314,7 +303,27 @@ async fn build_and_store(
             checked.problems().join("; ")
         ));
     }
-    sqlx::query(
+    // Anchored in the audit trail before the report is stored or handed to
+    // anyone: no event, no report. (It is signed and checked first, so the
+    // event is only written for a report that verifies.)
+    state
+        .audit
+        .emit(
+            EventKind::SelftestRun,
+            Context {
+                user: Some(requested_by.to_owned()),
+                session_id: None,
+            },
+            json!({
+                "run_id": id, "trigger": trigger.as_str(), "status": counts.verdict(),
+                "passed": counts.passed, "failed": counts.failed, "skipped": counts.skipped,
+                "failed_checks": failing, "manifest_sha256": manifest_sha256,
+            }),
+        )
+        .await
+        .map_err(|e| format!("audit unavailable: {e}"))?;
+
+    let saved = sqlx::query(
         "UPDATE selftest_runs SET status = $2, finished_at = now(), passed = $3, failed = $4, skipped = $5,
                 manifest_sha256 = $6, report = $7
          WHERE id = $1 AND status = 'running'",
@@ -328,7 +337,11 @@ async fn build_and_store(
     .bind(&report)
     .execute(&state.db)
     .await
-    .map_err(|e| format!("saving: {e}"))?;
+    .map_err(|e| format!("saving: {e}"))?
+    .rows_affected();
+    if saved == 0 {
+        return Err("the run was abandoned before it finished".into());
+    }
     if counts.failed > 0 {
         tracing::error!(run = %id, failed = ?failing, "the self-test found a control that is not working");
     } else {
@@ -435,7 +448,7 @@ pub async fn prune(state: &AppState) {
     if let Err(e) = sqlx::query(
         "DELETE FROM selftest_runs WHERE started_at < now() - make_interval(days => $1) AND status <> 'running'",
     )
-    .bind(i32::try_from(RETENTION_DAYS).unwrap_or(400))
+    .bind(RETENTION_DAYS)
     .execute(&state.db)
     .await
     {
@@ -447,6 +460,15 @@ pub async fn prune(state: &AppState) {
 /// to the schedule when the interval is zero; the metrics still publish.
 pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let interval = state.config.selftest_interval;
+    // A run this control plane started before it stopped will never finish.
+    let _ = sqlx::query(
+        "UPDATE selftest_runs SET status = 'abandoned', finished_at = now(),
+                error = 'the control plane running it restarted'
+         WHERE status = 'running' AND control_plane = $1",
+    )
+    .bind(&state.config.id)
+    .execute(&state.db)
+    .await;
     // Let a fresh process settle before it judges itself, but never wait
     // longer than half an interval.
     let grace = STARTUP_GRACE.min(interval / 2);

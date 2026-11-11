@@ -26,6 +26,12 @@ pub const CONSOLE: &str = "console";
 /// Largest recording the console will load into memory to play.
 pub const MAX_PLAYBACK_BYTES: usize = 64 * 1024 * 1024;
 
+/// A recording is over [`MAX_PLAYBACK_BYTES`]: it is not read into memory.
+/// A typed error, so a caller can tell this from a storage failure.
+#[derive(Debug, thiserror::Error)]
+#[error("recording is too large to play in the browser ({0} bytes)")]
+pub struct TooLarge(pub u64);
+
 /// Where recordings are stored.
 #[derive(Debug, Clone)]
 pub enum RecordingStore {
@@ -65,10 +71,9 @@ impl RecordingStore {
                 let path = tokio::fs::canonicalize(path).await?;
                 anyhow::ensure!(path.starts_with(&root), "recording is outside the store");
                 let len = tokio::fs::metadata(&path).await?.len();
-                anyhow::ensure!(
-                    usize::try_from(len).is_ok_and(|n| n <= MAX_PLAYBACK_BYTES),
-                    "recording is too large to play in the browser ({len} bytes)"
-                );
+                if usize::try_from(len).map_or(true, |n| n > MAX_PLAYBACK_BYTES) {
+                    return Err(TooLarge(len).into());
+                }
                 Ok(tokio::fs::read(path).await?)
             }
             RecordingStore::S3(sink) => {
@@ -93,10 +98,9 @@ impl RecordingStore {
                         anyhow::anyhow!("{}", aws_sdk_s3::error::DisplayErrorContext(&e))
                     })?;
                 let len = out.content_length().unwrap_or(0);
-                anyhow::ensure!(
-                    usize::try_from(len).is_ok_and(|n| n <= MAX_PLAYBACK_BYTES),
-                    "recording is too large to play in the browser ({len} bytes)"
-                );
+                if usize::try_from(len).map_or(true, |n| n > MAX_PLAYBACK_BYTES) {
+                    return Err(TooLarge(u64::try_from(len).unwrap_or(0)).into());
+                }
                 Ok(out.body.collect().await?.into_bytes().to_vec())
             }
         }
@@ -382,15 +386,15 @@ impl Pipeline {
             .push(task);
     }
 
-    /// Pause (or resume) shipping to S3. Set when this replica can no longer
-    /// confirm that it owns its id: another process may be about to write the
-    /// same manifest chain.
     /// The S3 audit sink, if one is configured.
     #[must_use]
     pub fn s3_sink(&self) -> Option<&S3Sink> {
         self.s3.as_ref()
     }
 
+    /// Pause (or resume) shipping to S3. Set when this replica can no longer
+    /// confirm that it owns its id: another process may be about to write the
+    /// same manifest chain.
     pub fn set_fenced(&self, fenced: bool) {
         self.fenced
             .store(fenced, std::sync::atomic::Ordering::SeqCst);

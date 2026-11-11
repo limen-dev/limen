@@ -17,7 +17,10 @@
 </form>
 {% endif %}
 
-<h2>Latest result</h2>
+{% if let Some(n) = newest_without_report %}
+<div class="card"><span class="pill {{ n.tone }}">{{ n.status }}</span> The newest self-test ({{ n.when }}, {{ n.trigger }}) ended without a report, so it is not the result below. It counts as not OK for the alerts. Run another, and check the control plane's logs.</div>
+{% endif %}
+<h2>Latest result with a report</h2>
 {% if let Some(l) = latest %}
 <p><span class="pill {{ l.tone }}">{{ l.status }}</span> {{ l.summary }}. Started {{ l.when }}, {{ l.trigger }}. <a href="/console/controls/{{ l.id }}/report">Download the signed report</a></p>
 <div class="table-wrap"><table>
