@@ -41,3 +41,13 @@ The issue (#115) assumed events carry the policy digest and labels of the time. 
 - Whether to record the login's groups on the session projection so the people's roles are exact (today: latest login).
 - Whether to replay Kubernetes once the worker records the group.
 - Whether to extend to denied attempts (`auth.denied`) to also show widening against real attempts.
+
+## As built
+Differences from, and additions to, the decisions above:
+- **Console location.** The upstream paste-a-policy check was replaced by a per-document "Preview impact" while this was in review; the replay select lives there and in the save form, not in "Check a change".
+- **Bounds.** 30-day window, 20,000 groups (newest kept, `truncated` set), `SET LOCAL statement_timeout = '10s'` on the scan, and at most 500 affected rows in the answer (`affected_omitted` carries the rest; totals stay exact).
+- **Audit.** `policy.replay` has three phases: `start` (before any read, fail closed), `done` (counts, best effort) and `failed` (when a run errors after it started).
+- **No false all-clear.** `--fail-on-affected` also fails when the replay was truncated, or when nothing could be replayed but sessions were skipped. Session rows without a user or resource are counted as skipped.
+- **Output hygiene.** Terminal and Markdown output strip control and bidi characters and escape Markdown and mention characters; the console relies on template autoescaping.
+- **Known limits.** The CLI replay uses the default policy source only. Access-review denies are not replayed. Roles use the latest login's groups. Sessions before migration 0030 have no recorded database and are skipped.
+- **Numbering.** Migration is 0030 and this ADR is 0049 after rebasing onto upstream.
