@@ -551,7 +551,7 @@ pub(crate) async fn open_web_stream(
         ..Default::default()
     };
     let span = session_span();
-    let (session_id, worker, inbound, outbound, _slot, resolved) = establish(
+    let (session_id, worker, inbound, outbound, slot, resolved) = establish(
         proxy,
         user,
         user_cert_der,
@@ -565,6 +565,9 @@ pub(crate) async fn open_web_stream(
     let proxy = proxy.clone();
     let user = user.clone();
     tokio::spawn(async move {
+        // The worker's load slot lasts as long as the stream (a WebSocket can
+        // run for hours), not just until the stream is handed back.
+        let _slot = slot;
         relay(
             &proxy,
             relay_io,
