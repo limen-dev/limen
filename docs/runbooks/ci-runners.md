@@ -6,7 +6,7 @@ CI for `limen-dev/limen` runs on GitHub-hosted runners. Workflows (`.github/work
 
 **Draft pull requests run nothing.** Open pull requests as drafts; CI starts when you mark one ready for review, and again on every push after. Pushes to `main`, releases and manual runs are unaffected.
 
-Each workflow has a `paths:` filter. `rust.yml` lists what to leave out; the others list the files they check, so add a path when a check starts reading a new file. A workflow that doesn't start reports nothing (there's no combined `ci` check, and branch protection requires none).
+Each of `rust.yml`, `audit.yml`, `infra.yml`, `workflows.yml` and `website.yml` has a `paths:` filter under `push`. `rust.yml` lists what to leave out; the others list the files they check, so add a path when a check starts reading a new file. On a pull request, `ci.yml` applies those same lists (`scripts/ci-changes.py`), calls the workflows that match and reports one check, `ci-ok`: it passes when every area that applied passed, and an area that didn't apply is skipped. Require `ci-ok` (and the gitleaks job) in the ruleset, not the individual jobs: a job in a workflow that didn't start would never report.
 
 | Workflow | Starts when these change | Jobs |
 |---|---|---|

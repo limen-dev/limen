@@ -38,6 +38,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test the path matcher
+        run: python3 scripts/ci-changes.py --self-test
+
       - name: Decide which workflows apply
         id: filter
         env:
