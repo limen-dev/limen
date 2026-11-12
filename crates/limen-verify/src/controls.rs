@@ -1,4 +1,4 @@
-//! The controls report (ADR-0051): what the scheduled self-test found, in the
+//! The controls report (ADR-0053): what the scheduled self-test found, in the
 //! same signed envelope as an evidence pack (`pack.rs`), under its own format
 //! string and signature label.
 //!
@@ -264,7 +264,7 @@ pub fn verify_report(
         }
     }
     // Checks that have no reason to be skipped: a report that skips one
-    // didn't test what it claims to (ADR-0051).
+    // didn't test what it claims to (ADR-0053).
     for c in &checks {
         if c.status == Status::Skipped && NEVER_SKIPPED.contains(&c.id.as_str()) {
             problems.push(format!("check {} was skipped but is never skippable", c.id));
@@ -355,14 +355,22 @@ mod tests {
                 policy_digest: "abc".into(),
                 build: "test".into(),
                 interval_secs: 86_400,
-                expected_checks: vec!["a".into(), "b".into(), "c".into()],
+                expected_checks: ["a", "b", "c"]
+                    .iter()
+                    .chain(NEVER_SKIPPED)
+                    .map(|id| (*id).to_owned())
+                    .collect(),
                 attestation: ATTESTATION.into(),
             },
-            checks: vec![
+            // The checks every report must carry passed; a, b and c vary.
+            checks: [
                 check("a", Status::Passed),
                 check("b", Status::Failed),
                 check("c", Status::Skipped),
-            ],
+            ]
+            .into_iter()
+            .chain(NEVER_SKIPPED.iter().map(|id| check(id, Status::Passed)))
+            .collect(),
         }
     }
 
@@ -401,7 +409,7 @@ mod tests {
         assert_eq!(
             counts,
             Counts {
-                passed: 1,
+                passed: 1 + u32::try_from(NEVER_SKIPPED.len()).unwrap(),
                 failed: 1,
                 skipped: 1
             }
@@ -564,8 +572,11 @@ mod tests {
     async fn a_check_that_may_never_be_skipped_is_a_problem_when_it_is() {
         let (signer, ca) = signer().await;
         let mut r = run();
-        r.meta.expected_checks.push("lock.refused".into());
-        r.checks.push(check("lock.refused", Status::Skipped));
+        for c in &mut r.checks {
+            if c.id == "lock.refused" {
+                c.status = Status::Skipped;
+            }
+        }
         let bytes = Prepared::new(&r, "x").unwrap().sign(&signer).unwrap();
         assert!(
             problems(&bytes, &ca)

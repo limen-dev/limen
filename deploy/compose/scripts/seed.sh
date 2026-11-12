@@ -6,7 +6,13 @@
 seed_db() {
   wait_for "postgres-target" "${compose[@]}" exec -T postgres-target pg_isready -U postgres
   wait_for "mysql-target" "${compose[@]}" exec -T mysql-target mysqladmin ping -h 127.0.0.1 -uroot -pmysql-target-dev-only --silent
-  "${compose[@]}" run --rm db-bootstrap --db-bootstrap-once >/dev/null 2>&1 || fail "db bootstrap failed"
+  # A throwaway volume over the worker data dir: the bootstrap is a one-shot, so a saved identity
+  # only goes stale (worker certificates last 24 hours) and fails the next day's run.
+  local out
+  out="$("${compose[@]}" run --rm -v /var/lib/limen/worker db-bootstrap --db-bootstrap-once 2>&1)" || {
+    printf '%s\n' "$out" | tail -n 20 >&2
+    fail "db bootstrap failed (its output is above)"
+  }
 }
 
 seed_redis() {
@@ -34,7 +40,7 @@ seed_messaging() {
   # container would otherwise just run out the two-minute timeout.
   local up=false
   for _ in $(seq 1 240); do
-    if "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping >/dev/null 2>&1; then up=true; break; fi
+    if "${compose[@]}" exec -T -u rabbitmq rabbitmq-target rabbitmq-diagnostics -q ping >/dev/null 2>&1; then up=true; break; fi
     if [ -n "$("${compose[@]}" ps -q --status exited rabbitmq-target 2>/dev/null)" ]; then
       "${compose[@]}" logs --tail 20 rabbitmq-target >&2 || true
       fail "rabbitmq exited at start (its log is above)"

@@ -32,7 +32,7 @@ source "$here/scripts/lib.sh"
 stack_setup mongo
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_MONGO_PROXY_PORT"
+export LIMEN_SERVER="localhost:$LIMEN_MONGO_PROXY_PORT"
 export LIMEN_DEX_URL="http://localhost:$LIMEN_MONGO_DEX_PORT"
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 limen() { "$LIMEN_BIN" "$@"; }

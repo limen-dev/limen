@@ -15,7 +15,7 @@ Usage: limen [OPTIONS] <COMMAND>
 Options:
 
 - `--color <WHEN>`: When to use colour: auto, always, or never. Values: auto, always, never. Default: `auto`.
-- `--proxy <PROXY>`: Proxy address, for example `limen.example.com:443`. Defaults to the last one used. Environment: `LIMEN_PROXY`.
+- `--server <SERVER>`: The Limen server, for example `limen.example.com` (port 443 unless you add one, as in `localhost:3443`). Defaults to the last one used. Environment: `LIMEN_SERVER`.
 - `-d, --detach`: Run a `connect` command in the background and return once it is listening.
 
 ### `limen login`
@@ -30,7 +30,8 @@ Options:
 
 - `--device`: Use the device code flow, for machines without a browser.
 - `--no-browser`: Print the login URL instead of opening a browser.
-- `--ca-file <CA_FILE>`: CA certificate to trust for the proxy. Pinned for later commands.
+- `--ca-file <CA_FILE>`: CA certificate to trust for the server, for a server whose certificate does not come from a public CA (the dev stack, a private deployment). Pinned for later commands.
+- `--system-roots`: Forget a CA pinned by an earlier `--ca-file` and trust the system's certificate store, for a server that now has a certificate from a public CA.
 - `--bot <METHOD>`: Log in as a bot with this CI platform's identity token, instead of as a person. In GitHub Actions the token is requested for you. Values: github_actions, gitlab, oidc.
 - `--bot-name <NAME>`: Which bot, if more than one could match the token.
 - `--token-env <VAR>`: Read the token from this environment variable (default for gitlab and oidc: LIMEN_ID_TOKEN).
@@ -116,10 +117,11 @@ Options:
 
 ### `limen requests`
 
-Your access requests. `--approvals` shows the ones waiting for you
+Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours
 
 ```text
 Usage: limen requests [OPTIONS]
+       limen requests <COMMAND>
 ```
 
 Options:
@@ -129,12 +131,27 @@ Options:
 - `--status <STATUS>`: pending, approved, denied, expired, cancelled, or revoked.
 - `--json`
 
-### `limen approve`
+#### `limen requests ls`
+
+List requests: yours, or with a flag the ones waiting for you. The default
+
+```text
+Usage: limen requests ls [OPTIONS]
+```
+
+Options:
+
+- `--approvals`: Requests you may approve or deny.
+- `--all`: Every request (limen:admin or limen:auditor).
+- `--status <STATUS>`: pending, approved, denied, expired, cancelled, or revoked.
+- `--json`
+
+#### `limen requests approve`
 
 Approve an access request. Never your own
 
 ```text
-Usage: limen approve [OPTIONS] <ID>
+Usage: limen requests approve [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -145,12 +162,12 @@ Options:
 
 - `-m, --comment <COMMENT>`
 
-### `limen deny`
+#### `limen requests deny`
 
 Deny an access request
 
 ```text
-Usage: limen deny [OPTIONS] <ID>
+Usage: limen requests deny [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -161,12 +178,12 @@ Options:
 
 - `-m, --comment <COMMENT>`
 
-### `limen cancel`
+#### `limen requests cancel`
 
 Withdraw an access request of yours that is still waiting
 
 ```text
-Usage: limen cancel [OPTIONS] <ID>
+Usage: limen requests cancel [OPTIONS] <ID>
 ```
 
 Arguments:
@@ -430,6 +447,25 @@ Options:
 - `--new <NEW>`: The new policy: files or directories (after `--new`).
 - `--format <FORMAT>`: text, json, or markdown (for a pull request comment). Values: text, json, markdown. Default: `text`.
 - `--fail-on-widening`: Exit non-zero if anyone gains standing access, so CI can ask for a closer look.
+- `--replay <DAYS>`: Also replay the last DAYS (1 to 30, default 30) of recorded sessions through the active and the new policy and say who would have been refused (needs limen:admin; the old side must be `active`; the new files are read as `limen admin apply` reads them).
+- `--fail-on-affected`: With --replay: exit non-zero if any recorded session would have been refused.
+
+#### `limen policy suggest`
+
+Propose a tighter policy from what people used: access a role grants that nobody used.
+
+Needs limen:admin. It only proposes removals and never applies them. The history must be at least as long as the window.
+
+```text
+Usage: limen policy suggest [OPTIONS]
+```
+
+Options:
+
+- `--window-days <WINDOW_DAYS>`: Days of sessions to judge by (7 to 365). A quarterly job needs 120 or more. Default: `90`.
+- `-o, --output <FILE>`: Write the changed roles, as policy YAML, to this new file.
+- `--yaml`: Print only the YAML, for a pipe.
+- `--json`: Print the full result as JSON.
 
 ### `limen connect`
 
@@ -1083,7 +1119,7 @@ Options:
 
 #### `limen admin review`
 
-Access reviews and the roles they withhold (ADR-0029)
+Access reviews and the roles they withhold
 
 ```text
 Usage: limen admin review [OPTIONS] <COMMAND>
@@ -1197,7 +1233,7 @@ Options:
 
 #### `limen admin selftest`
 
-Test that the controls work, and keep a signed report (ADR-0051)
+Test that the controls work, and keep a signed report (ADR-0053)
 
 ```text
 Usage: limen admin selftest [OPTIONS] <COMMAND>
@@ -1262,7 +1298,7 @@ Options:
 
 #### `limen admin discovery`
 
-Resources workers found in a cloud account, waiting for you (ADR-0027)
+Resources workers found in a cloud account, waiting for you
 
 ```text
 Usage: limen admin discovery [OPTIONS] <COMMAND>
@@ -1360,7 +1396,7 @@ Options:
 
 ### `limen manage`
 
-The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant (ADR-0042)
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant
 
 ```text
 Usage: limen manage [OPTIONS] <COMMAND>
@@ -1555,12 +1591,12 @@ Options:
 
 - `--note <NOTE>`
 
-##### `limen manage changes reject`
+##### `limen manage changes deny`
 
 Refuse a change
 
 ```text
-Usage: limen manage changes reject [OPTIONS] --note <NOTE> <ID>
+Usage: limen manage changes deny [OPTIONS] --note <NOTE> <ID>
 ```
 
 Arguments:

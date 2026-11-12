@@ -1,4 +1,4 @@
-//! `limen admin selftest ...` (ADR-0051): run the scheduled self-test of the
+//! `limen admin selftest ...` (ADR-0053): run the scheduled self-test of the
 //! controls, read its runs, and fetch a signed report. `limen audit verify
 //! --controls` checks a report offline.
 

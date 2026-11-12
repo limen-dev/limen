@@ -110,7 +110,7 @@ const MAX_FORWARDED_CERT_LEN: usize = 8 * 1024;
 /// Why an API call from a person or bot is refused, given what the database
 /// says about their account and login: `(audit reason, message)`, or `None`
 /// to let it through. A lock wins over an ended login. The scheduled
-/// self-test (ADR-0051) checks this very function.
+/// self-test (ADR-0053) checks this very function.
 #[must_use]
 pub fn refusal(locked: bool, ended: bool) -> Option<(&'static str, &'static str)> {
     match (locked, ended) {

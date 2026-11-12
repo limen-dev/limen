@@ -54,9 +54,10 @@ struct Cli {
     )]
     color: ColorWhen,
 
-    /// Proxy address, for example `limen.example.com:443`. Defaults to the last one used.
-    #[arg(long, global = true, env = "LIMEN_PROXY")]
-    proxy: Option<String>,
+    /// The Limen server, for example `limen.example.com` (port 443 unless you add one, as in
+    /// `localhost:3443`). Defaults to the last one used.
+    #[arg(long, global = true, env = "LIMEN_SERVER")]
+    server: Option<String>,
 
     /// Run a `connect` command in the background and return once it is listening.
     #[arg(short = 'd', long, global = true)]
@@ -102,9 +103,14 @@ enum Command {
         /// Print the login URL instead of opening a browser.
         #[arg(long)]
         no_browser: bool,
-        /// CA certificate to trust for the proxy. Pinned for later commands.
+        /// CA certificate to trust for the server, for a server whose certificate does not come
+        /// from a public CA (the dev stack, a private deployment). Pinned for later commands.
         #[arg(long)]
         ca_file: Option<PathBuf>,
+        /// Forget a CA pinned by an earlier `--ca-file` and trust the system's certificate
+        /// store, for a server that now has a certificate from a public CA.
+        #[arg(long, conflicts_with = "ca_file")]
+        system_roots: bool,
         /// Log in as a bot with this CI platform's identity token, instead of
         /// as a person. In GitHub Actions the token is requested for you.
         #[arg(long, value_enum, value_name = "METHOD", conflicts_with_all = ["device", "no_browser"])]
@@ -172,33 +178,30 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Your access requests. `--approvals` shows the ones waiting for you.
+    /// Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours.
+    #[command(args_conflicts_with_subcommands = true)]
     Requests {
-        /// Requests you may approve or deny.
-        #[arg(long, conflicts_with = "all")]
-        approvals: bool,
-        /// Every request (limen:admin or limen:auditor).
-        #[arg(long)]
-        all: bool,
-        /// pending, approved, denied, expired, cancelled, or revoked.
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        list: commands::access::RequestsListArgs,
+        #[command(subcommand)]
+        command: Option<commands::access::RequestsCommand>,
     },
-    /// Approve an access request. Never your own.
+    /// Approve an access request (the same as `limen requests approve`).
+    #[command(hide = true)]
     Approve {
         id: String,
         #[arg(long, short = 'm')]
         comment: Option<String>,
     },
-    /// Deny an access request.
+    /// Deny an access request (the same as `limen requests deny`).
+    #[command(hide = true)]
     Deny {
         id: String,
         #[arg(long, short = 'm')]
         comment: Option<String>,
     },
-    /// Withdraw an access request of yours that is still waiting.
+    /// Withdraw an access request (the same as `limen requests cancel`).
+    #[command(hide = true)]
     Cancel { id: String },
     /// Say why you can or cannot reach a resource.
     Explain {
@@ -326,7 +329,7 @@ enum Command {
         command: commands::admin::AdminCommand,
     },
     /// The management API: read policy documents and write resources, as an
-    /// admin or as a bot with a policy_writer grant (ADR-0042).
+    /// admin or as a bot with a policy_writer grant.
     Manage {
         #[command(subcommand)]
         command: commands::manage::ManageCommand,
@@ -583,7 +586,7 @@ async fn connect_argv(
     let kind = commands::kind_of(proxy, resource).await?;
     let mut argv = vec!["limen".to_owned()];
     if let Some(p) = proxy {
-        argv.extend(["--proxy".to_owned(), p.to_owned()]);
+        argv.extend(["--server".to_owned(), p.to_owned()]);
     }
     argv.extend(commands::connect_words(&kind, resource));
     argv.extend(extra.iter().cloned());
@@ -617,9 +620,11 @@ async fn main() {
         ColorWhen::Never => anstream::ColorChoice::Never,
     });
     // Logs go to stderr and default to warnings, so command output stays clean.
-    telemetry::init_with_default(LogFormat::Text, "warn");
+    // The platform verifier logs every failed certificate check as an error; the command reports
+    // the failure itself, with the fix, so the raw line is only noise unless RUST_LOG asks for it.
+    telemetry::init_with_default(LogFormat::Text, "warn,rustls_platform_verifier=off");
     if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
-        tokio::spawn(commands::conns::watch_expiry(id, cli.proxy.clone()));
+        tokio::spawn(commands::conns::watch_expiry(id, cli.server.clone()));
     }
     let result = run(cli).await;
     if let Ok(id) = std::env::var(commands::conns::ENV_ID) {
@@ -661,7 +666,7 @@ fn opens_listener(command: &Command) -> bool {
 
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    let proxy = cli.proxy.as_deref();
+    let proxy = cli.server.as_deref();
     if cli.detach {
         anyhow::ensure!(
             opens_listener(&cli.command),
@@ -677,6 +682,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             token_file,
             audience,
             ca_file,
+            system_roots,
             ..
         } => {
             commands::bot::run(commands::bot::BotLogin {
@@ -686,7 +692,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 token_env: token_env.as_deref(),
                 token_file: token_file.as_deref(),
                 audience: audience.as_deref(),
-                ca_file: ca_file.as_deref(),
+                ca: commands::login::CaChoice::from_flags(ca_file.as_deref(), system_roots),
             })
             .await
         }
@@ -694,10 +700,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             device,
             no_browser,
             ca_file,
+            system_roots,
             ..
         } => {
             ui::banner();
-            commands::login::run(proxy, device, !no_browser, ca_file.as_deref()).await
+            let ca = commands::login::CaChoice::from_flags(ca_file.as_deref(), system_roots);
+            commands::login::run(proxy, device, !no_browser, ca).await
         }
         Command::Logout => commands::logout(proxy).await,
         Command::Doctor { resource, json } => {
@@ -778,20 +786,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Requests {
-            approvals,
-            all,
-            status,
-            json,
-        } => {
-            let scope = if approvals {
-                "approvable"
-            } else if all {
-                "all"
-            } else {
-                "mine"
-            };
-            commands::access::requests(proxy, scope, status.as_deref(), json).await
+        Command::Requests { list, command } => {
+            commands::access::requests_command(proxy, list, command).await
         }
         Command::Approve { id, comment } => {
             commands::access::decide(proxy, &id, true, comment.as_deref()).await
@@ -1037,12 +1033,38 @@ mod tests {
     }
 
     #[test]
+    fn request_commands_parse_in_new_and_old_forms() {
+        for args in [
+            &["request", "db", "--for", "30m"][..],
+            &["requests"],
+            &["requests", "--approvals"],
+            &["requests", "--all", "--status", "pending", "--json"],
+            &["requests", "ls", "--all"],
+            &["requests", "approve", "id1", "-m", "ok"],
+            &["requests", "deny", "id1", "-m", "no"],
+            &["requests", "cancel", "id1"],
+            // The old top-level forms stay for one release.
+            &["approve", "id1", "-m", "ok"],
+            &["deny", "id1"],
+            &["cancel", "id1"],
+            &["manage", "changes", "deny", "id1", "--note", "n"],
+            &["manage", "changes", "reject", "id1", "--note", "n"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        // Flags of the list do not mix with a subcommand.
+        assert!(Cli::try_parse_from(["limen", "requests", "--all", "approve", "id1"]).is_err());
+    }
+
+    #[test]
     fn kube_commands_parse() {
         for args in [
             &["kube", "login", "c"][..],
             &["kube", "login", "c", "--kubeconfig", "/tmp/k"],
             &["kube", "login", "c", "--print"],
-            &["--proxy", "p:1", "kube", "credentials"],
+            &["--server", "p:1", "kube", "credentials"],
             &["kube", "config"],
             &["kube", "config", "--print"],
             &["kube", "config", "--uninstall"],

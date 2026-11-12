@@ -135,16 +135,16 @@ async fn diagnose(
 ) -> Option<String> {
     let Some(proxy) = check_proxy(report, flag) else {
         for name in ["ca", "network", "tls", "clock", "login", "session"] {
-            report.skip(name, "no proxy");
+            report.skip(name, "no server");
         }
         return None;
     };
-    let roots = check_ca(report, &proxy);
+    let ca_ok = check_ca(report, &proxy);
     let reachable = check_network(report, &proxy).await;
-    let tls_ok = match (&roots, reachable) {
-        (Some(roots), true) => check_tls(report, &proxy, roots).await,
-        (None, _) => {
-            report.skip("tls", "no CA pinned");
+    let tls_ok = match (ca_ok, reachable) {
+        (true, true) => check_tls(report, &proxy).await,
+        (false, _) => {
+            report.skip("tls", "the pinned CA is unusable");
             false
         }
         (_, false) => {
@@ -177,53 +177,68 @@ async fn diagnose(
 }
 
 fn check_proxy(report: &mut Report, flag: Option<&str>) -> Option<String> {
-    let Ok(proxy) = api::resolve_proxy(flag) else {
-        report.fail(
-            "proxy",
-            "no proxy selected",
-            "`limen login --proxy <host:port> --ca-file <ca.pem>`, or set LIMEN_PROXY",
-        );
-        return None;
+    let proxy = match api::resolve_server(flag) {
+        Ok(proxy) => proxy,
+        Err(e) if flag.is_some() => {
+            report.fail(
+                "server",
+                format!(
+                    "{:?} is not a valid server address: {e}",
+                    flag.unwrap_or_default()
+                ),
+                "use a host name, for example `--server limen.example.com`",
+            );
+            return None;
+        }
+        Err(_) => {
+            report.fail(
+                "server",
+                "no server selected",
+                "`limen login --server limen.example.com`, or set LIMEN_SERVER",
+            );
+            return None;
+        }
     };
     if let Err(e) = api::server_name(&proxy) {
         report.fail(
-            "proxy",
-            format!("{proxy:?} is not a valid proxy address: {e}"),
-            "use host:port, for example `--proxy limen.example.com:443`",
+            "server",
+            format!("{proxy:?} is not a valid server address: {e}"),
+            "use a host name, for example `--server limen.example.com`",
         );
         return None;
     }
     let source = if flag.is_some() {
-        "from --proxy or LIMEN_PROXY"
+        "from --server or LIMEN_SERVER"
     } else {
         "from the last login"
     };
-    report.pass("proxy", format!("{proxy} ({source})"));
+    report.pass("server", format!("{proxy} ({source})"));
     Some(proxy)
 }
 
-/// The pinned CA, if there is one and it is usable.
-fn check_ca(
-    report: &mut Report,
-    proxy: &str,
-) -> Option<Vec<rustls_pki_types::CertificateDer<'static>>> {
-    let fix = format!("`limen login --proxy {proxy} --ca-file <ca.pem>` with the proxy's CA");
+/// The pinned CA, if there is one. `false` when it is there but unusable. With none pinned the
+/// system trust store is used (a server with a public certificate, ADR-0043), which is fine.
+fn check_ca(report: &mut Report, proxy: &str) -> bool {
+    let fix = format!("`limen login --server {proxy} --ca-file <ca.pem>` with the server's CA");
     let pem = match profile::trusted_ca(proxy) {
         Ok(Some(pem)) => pem,
         Ok(None) => {
-            report.fail("ca", format!("no CA is pinned for {proxy}"), fix);
-            return None;
+            report.pass(
+                "ca",
+                "no CA pinned; the server's certificate is checked against the system trust store",
+            );
+            return true;
         }
         Err(e) => {
             report.fail("ca", format!("can't read the pinned CA: {e:#}"), fix);
-            return None;
+            return false;
         }
     };
     let roots = match limen_tunnel::tls::certs_from_pem(&pem) {
         Ok(roots) if !roots.is_empty() => roots,
         Ok(_) | Err(_) => {
             report.fail("ca", "the pinned CA file holds no PEM certificate", fix);
-            return None;
+            return false;
         }
     };
     let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -241,7 +256,7 @@ fn check_ca(
             format!("the pinned CA {} has expired", expired.join(", ")),
             fix,
         );
-        return None;
+        return false;
     }
     if !expired.is_empty() {
         report.warn(
@@ -258,7 +273,7 @@ fn check_ca(
         "ca",
         format!("{n} CA certificate{} pinned", if n == 1 { "" } else { "s" }),
     );
-    Some(roots)
+    true
 }
 
 /// DNS and TCP, separately from TLS, so "unreachable" and "untrusted" read differently.
@@ -290,20 +305,16 @@ async fn check_network(report: &mut Report, proxy: &str) -> bool {
     false
 }
 
-async fn check_tls(
-    report: &mut Report,
-    proxy: &str,
-    roots: &[rustls_pki_types::CertificateDer<'static>],
-) -> bool {
+async fn check_tls(report: &mut Report, proxy: &str) -> bool {
     let attempt = async {
-        let config = limen_tunnel::tls::client_config(roots, None, &[limen_tunnel::alpn::H2])?;
+        let config = api::tls_config(proxy, None, &[limen_tunnel::alpn::H2])?;
         let name = api::server_name(proxy)?;
         limen_tunnel::connect::dial(proxy, name, std::sync::Arc::new(config)).await?;
         anyhow::Ok(())
     };
     match tokio::time::timeout(STEP_TIMEOUT, attempt).await {
         Ok(Ok(())) => {
-            report.pass("tls", "the proxy's certificate is signed by the pinned CA");
+            report.pass("tls", "the server's certificate is trusted");
             true
         }
         Ok(Err(e)) => {
@@ -325,16 +336,13 @@ async fn check_tls(
 /// A TLS failure in words, with the fix.
 fn tls_problem(proxy: &str, error: &str) -> (String, String) {
     if let Some(hint) = api::tls_hint(error) {
-        return (
-            "the proxy's certificate isn't signed by the pinned CA".into(),
-            hint.into(),
-        );
+        return ("the server's certificate isn't trusted".into(), hint.into());
     }
     if error.contains("NotValidForName") {
         let host = api::server_name(proxy).unwrap_or(proxy);
         return (
             format!("the proxy's certificate isn't valid for {host}"),
-            "use the name on the proxy's certificate in --proxy".into(),
+            "use the name on the server's certificate in --server".into(),
         );
     }
     if error.contains("Expired") || error.contains("NotValidYet") {
@@ -346,7 +354,7 @@ fn tls_problem(proxy: &str, error: &str) -> (String, String) {
     }
     (
         format!("TLS handshake failed: {error}"),
-        "check that --proxy names the Limen proxy's TLS port".into(),
+        "check that --server names the Limen server's TLS port".into(),
     )
 }
 
@@ -434,7 +442,7 @@ fn server_call_failed(report: &mut Report, error: &anyhow::Error) {
                 "the proxy answered TLS but not Limen's API: {}",
                 status.message()
             ),
-            "check that --proxy names the Limen proxy, not another service",
+            "check that --server names the Limen server, not another service",
         ),
         _ => report.fail(
             "clock",
@@ -862,7 +870,7 @@ mod tests {
     #[test]
     fn tls_failures_say_what_to_do() {
         let (summary, fix) = tls_problem("p:443", "invalid peer certificate: UnknownIssuer");
-        assert!(summary.contains("pinned CA") && fix.contains("--ca-file"));
+        assert!(summary.contains("isn't trusted") && fix.contains("--ca-file"));
         let (summary, _) = tls_problem(
             "limen.example:443",
             "invalid peer certificate: NotValidForName",

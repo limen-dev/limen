@@ -16,6 +16,10 @@ pub mod alpn {
     pub const TUNNEL: &[u8] = b"limen-tunnel/1";
     /// Proxy → proxy peering, used to reach a worker tunnel held by another proxy.
     pub const PEER: &[u8] = b"limen-peer/1";
+    /// Worker → proxy API calls (enrollment, renewal, and calls relayed to the control plane).
+    /// HTTP/2 like [`H2`], but its own name so that a proxy holding a publicly trusted
+    /// certificate can tell workers, which pin the internal CA, from the CLI and browsers.
+    pub const WORKER_API: &[u8] = b"limen-worker-api/1";
     /// CLI local listener → proxy, for database sessions.
     pub const DB: &[u8] = b"limen-db/1";
     /// CLI local listener → proxy, for Redis sessions.
@@ -38,9 +42,13 @@ pub mod alpn {
     pub const HTTP1: &[u8] = b"http/1.1";
     pub const HTTP11: &[u8] = b"http/1.1";
 
-    pub const ALL: [&[u8]; 12] = [
-        TUNNEL, PEER, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, TCP, SSH, H2, HTTP11,
+    pub const ALL: [&[u8]; 13] = [
+        TUNNEL, PEER, WORKER_API, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, TCP, SSH, H2, HTTP11,
     ];
+
+    /// The protocols spoken only by Limen's own components, which verify the proxy against the
+    /// internal CA. A client offering nothing else is given the internal certificate.
+    pub const INTERNAL: [&[u8]; 3] = [TUNNEL, PEER, WORKER_API];
 }
 
 /// Refusals a worker makes before it reads anything from a session stream,

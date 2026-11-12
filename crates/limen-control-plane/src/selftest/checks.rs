@@ -1,4 +1,4 @@
-//! The checks of the scheduled self-test (ADR-0051).
+//! The checks of the scheduled self-test (ADR-0053).
 //!
 //! Every check names the path it exercised and claims nothing wider. None of
 //! them mints a credential for a real identity, writes a row that outlives

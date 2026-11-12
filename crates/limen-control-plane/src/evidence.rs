@@ -239,7 +239,7 @@ pub async fn export(
         .collect();
     sections.insert("sessions".into(), Value::Array(sessions.clone()));
 
-    // Whether the controls were being tested, and what they found (ADR-0051).
+    // Whether the controls were being tested, and what they found (ADR-0053).
     // Each run's signed report has its own manifest hash, so an auditor can ask
     // for the report itself.
     let ctl = rows(

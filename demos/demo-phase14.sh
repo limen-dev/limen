@@ -36,7 +36,7 @@ source "$here/scripts/lib.sh"
 stack_setup ssh bots
 
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY="localhost:$LIMEN_PORT_PROXY"
+export LIMEN_SERVER="localhost:$LIMEN_PORT_PROXY"
 export LIMEN_DEX_URL="http://localhost:$LIMEN_PORT_DEX"
 issuer_url="http://localhost:$LIMEN_PORT_CI_ISSUER"
 ca="$state/internal-ca.pem"
@@ -124,7 +124,7 @@ pass "stack up; the profile and the writer grant are in policy"
 
 step "The CI job logs in as the bot: no secret, and no limen:admin"
 mint 1 > "$state/work/token-1.jwt"
-as_bot --proxy "$LIMEN_PROXY" login --bot github_actions --token-file "$state/work/token-1.jwt" --ca-file "$ca" >/dev/null
+as_bot --server "$LIMEN_SERVER" login --bot github_actions --token-file "$state/work/token-1.jwt" --ca-file "$ca" >/dev/null
 rm -f "$state/work/token-1.jwt"
 as_bot manage whoami > "$state/work/whoami.json"
 [ "$(json 'd["grant"]["namespace"]' < "$state/work/whoami.json")" = demo-team ] || fail "the bot's grant isn't demo-team"
@@ -248,4 +248,4 @@ PY
 pass "every write and refusal is in the trail, with its owner"
 
 printf '\n\033[32mPhase 14 demo passed.\033[0m\n'
-echo "This stack: project $project, proxy $LIMEN_PROXY. Stop it: LIMEN_PROJECT=$project docker compose -p $project down -v"
+echo "This stack: project $project, proxy $LIMEN_SERVER. Stop it: LIMEN_PROJECT=$project docker compose -p $project down -v"

@@ -186,6 +186,102 @@ mod tests {
         assert_eq!(degrade.degraded_failures(), 1);
     }
 
+    /// The mode comes from `LIMEN_AUDIT_FAILURE_MODE`. Only the two exact
+    /// spellings parse, so a typo stops the component from starting instead of
+    /// quietly picking a mode, and the default is fail closed.
+    #[test]
+    fn failure_mode_parses_only_the_exact_names_and_defaults_to_fail_closed() {
+        assert_eq!(FailureMode::default(), FailureMode::FailClosed);
+        assert_eq!("fail_closed".parse(), Ok(FailureMode::FailClosed));
+        assert_eq!("degrade".parse(), Ok(FailureMode::Degrade));
+        for bad in [
+            "",
+            "fail-closed",
+            "FailClosed",
+            "FAIL_CLOSED",
+            "Degrade",
+            " degrade",
+            "degrade ",
+            "degraded",
+            "open",
+        ] {
+            assert!(bad.parse::<FailureMode>().is_err(), "{bad:?}");
+        }
+    }
+
+    /// A failed write under fail closed is an error, isn't counted as a
+    /// degraded loss (that counter is for events let through), and doesn't
+    /// stop later events once the sink is back.
+    #[tokio::test]
+    async fn fail_closed_refuses_each_failed_write_and_recovers_with_the_sink() {
+        let sink = Arc::new(MemorySink::default());
+        let emitter = Emitter::new("proxy", "p", sink.clone(), FailureMode::FailClosed);
+        let emit = || {
+            emitter.emit(
+                EventKind::AuthLogin,
+                Context::default(),
+                serde_json::Value::Null,
+            )
+        };
+        sink.set_failing(true);
+        for _ in 0..2 {
+            assert!(matches!(emit().await, Err(AuditError::SinkUnavailable(_))));
+        }
+        assert_eq!(emitter.degraded_failures(), 0);
+        assert_eq!(sink.events().len(), 0, "no event was recorded");
+        sink.set_failing(false);
+        let id = emit().await.expect("the sink is back");
+        assert_eq!(
+            sink.events().iter().map(|e| e.event_id).collect::<Vec<_>>(),
+            [id]
+        );
+    }
+
+    /// Proxies and workers write to a local spool. When it is full the
+    /// emitter must refuse the action under fail closed, and let it through
+    /// (counted) only under degrade.
+    #[tokio::test]
+    async fn a_full_spool_fails_the_action_unless_degraded() {
+        use crate::ship::SpoolSink;
+        use crate::spool::{Spool, SpoolConfig};
+
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        let mut config = SpoolConfig::new(dir.path(), &["control-plane"]);
+        config.max_bytes = 2048;
+        let spool = Spool::open(config).expect("open");
+        spool.start();
+        let sink = Arc::new(SpoolSink(spool.clone()));
+        let closed = Emitter::new("worker", "w1", sink.clone(), FailureMode::FailClosed);
+        let data = serde_json::json!({"pad": "x".repeat(200)});
+        let mut written = 0;
+        let err = loop {
+            match closed
+                .emit(EventKind::WorkerEnroll, Context::default(), data.clone())
+                .await
+            {
+                Ok(_) => written += 1,
+                Err(e) => break e,
+            }
+            assert!(written < 100, "a 2 KiB spool never filled");
+        };
+        assert!(written > 0, "the first events fit");
+        assert!(err.to_string().contains("spool is full"), "{err}");
+        assert_eq!(closed.degraded_failures(), 0);
+        assert_eq!(spool.pending("control-plane"), written);
+
+        let degrade = Emitter::new("worker", "w1", sink, FailureMode::Degrade);
+        degrade
+            .emit(EventKind::WorkerEnroll, Context::default(), data)
+            .await
+            .expect("degrade lets the action go ahead");
+        assert_eq!(degrade.degraded_failures(), 1);
+        assert_eq!(
+            spool.pending("control-plane"),
+            written,
+            "nothing was written"
+        );
+    }
+
     #[tokio::test]
     async fn jsonl_sink_appends_parseable_lines() {
         let dir = limen_testkit::temp_dir().expect("tempdir");

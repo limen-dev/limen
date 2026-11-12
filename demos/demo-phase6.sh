@@ -33,7 +33,7 @@ source "$here/scripts/lib.sh"
 stack_setup db
 export LIMEN_HOME="$state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:43443
+export LIMEN_SERVER=localhost:43443
 export LIMEN_DEV_CA="$state/internal-ca.pem"
 export LIMEN_DEX_URL=http://localhost:45556
 pg_port=55432

@@ -89,7 +89,7 @@ Locking a user or killing a session ends open streams and long-running responses
 With the full local stack and a real sign-in, `deploy/compose/setup.sh --stacks kube` starts the dev stack, a k3s cluster `kubernetes-dev`, and a second worker serving it as `eks-staging` (pool `kube`):
 
 ```sh
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # admin@example.com / password
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # admin@example.com / password
 limen kube login eks-staging --kubeconfig /tmp/eks-staging.json
 export KUBECONFIG=/tmp/eks-staging.json
 kubectl get pods -A

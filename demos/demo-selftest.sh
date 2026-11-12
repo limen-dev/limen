@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scheduled self-test and controls report demo (ADR-0051). The control plane
+# Scheduled self-test and controls report demo (ADR-0053). The control plane
 # tests its own controls with a test principal no issuer will vouch for, signs
 # a report, and writes an audit event with the report's hash first. This runs
 # the checks and the report's tamper tests, runs a control plane against a

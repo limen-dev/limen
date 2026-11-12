@@ -16,6 +16,8 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_worker_sessions_active`, `limen_worker_sessions_max`, `limen_worker_draining` | gauge | | worker |
 | `limen_worker_sessions_refused_total`, `limen_proxy_sessions_refused_total` | counter | `reason` | worker, proxy |
 | `limen_policy_snapshot_age_seconds` | gauge | | proxy, worker |
+| `limen_proxy_public_cert_expiry_timestamp_seconds` | gauge | | proxy (only with `--public-cert-file`) |
+| `limen_proxy_public_cert_reload_failures_total` | counter | | proxy (only with `--public-cert-file`) |
 | `limen_audit_spool_pending` | gauge | `consumer` | all |
 | `limen_audit_spool_bytes` | gauge | | all |
 | `limen_audit_shipped_total`, `limen_audit_ship_errors_total` | counter | `consumer` | all |
@@ -27,6 +29,7 @@ Every component (control plane, proxy, worker) serves Prometheus/OpenMetrics tex
 | `limen_policy_shadow_rules`, `limen_policy_shadow_days_left` | gauge | | control plane |
 | `limen_policy_shadow_denies_total` | counter | `role`, `rule` | proxy |
 | `limen_policy_shadow_events_dropped_total` | counter | | proxy |
+| `limen_policy_replays_total` | counter | | control plane |
 | `limen_recordings_pending` | gauge | | worker |
 | `limen_selftest_last_run_timestamp_seconds`, `limen_selftest_last_run_ok` | gauge | | control plane |
 | `limen_selftest_checks` | gauge | `status` (`passed`, `failed`, `skipped`) | control plane |
@@ -46,7 +49,7 @@ Set `--otlp-endpoint` (`LIMEN_OTLP_ENDPOINT`) on a component to export traces ov
 
 ## Alerts
 
-- Prometheus: [`deploy/prometheus/alerts.yml`](../../deploy/prometheus/alerts.yml). Covers a growing audit spool, failing audit shipping, a denial spike, disconnected workers, stale policy, CA signing errors and latency, and a component not answering. Set `job` names to match your scrape config. Checked with `promtool check rules`; not run against a live Alertmanager.
+- Prometheus: [`deploy/prometheus/alerts.yml`](../../deploy/prometheus/alerts.yml). Covers a growing audit spool, failing audit shipping, a denial spike, disconnected workers, stale policy, a public certificate close to expiry or failing to reload, CA signing errors and latency, and a component not answering. Set `job` names to match your scrape config. Checked with `promtool check rules`; not run against a live Alertmanager.
 - Datadog: the monitors in `deploy/terraform/modules/datadog` (`metrics_namespace` enables the metric ones). Checked with `terraform validate` only; **unverified in a real Datadog account** (issue #63).
 
 Thresholds are starting points. Tune the denial threshold to your user count.

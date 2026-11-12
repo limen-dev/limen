@@ -1,4 +1,4 @@
--- Scheduled self-test of the controls (ADR-0051).
+-- Scheduled self-test of the controls (ADR-0053).
 
 -- One row per run. The signed report is kept as the exact bytes that were
 -- signed (bytea): jsonb would reorder keys and break the signature.

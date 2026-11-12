@@ -73,7 +73,7 @@ Dex works as the IdP, with one caveat found in testing: with Dex v2.46.0 a refre
 ```bash
 deploy/compose/setup.sh                         # the check is on by default
 mise run install-cli                            # the CLI must send the refresh token
-limen --proxy localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # developer@example.com / password
+limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.pem   # developer@example.com / password
 ```
 
 Open `https://localhost:3443/console/users`: after one interval (15 seconds) the person's *last check* is fresh. Then:

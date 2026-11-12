@@ -34,7 +34,7 @@ pub fn is_bot(username: &str) -> bool {
     username.starts_with(BOT_PREFIX)
 }
 
-/// The scheduled self-test's principal is `selftest:<probe>` (ADR-0051). No
+/// The scheduled self-test's principal is `selftest:<probe>` (ADR-0053). No
 /// issuer will vouch for the prefix: the user CA, the certificate verifier,
 /// OIDC login and SCIM refuse it, so the name can never carry real access.
 pub const SELFTEST_PREFIX: &str = "selftest:";

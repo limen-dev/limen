@@ -57,6 +57,9 @@ service Admin {
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
   // The active policy's documents, for `limen policy who-can|what-can|diff`.
   rpc GetPolicyDocuments(GetPolicyDocumentsRequest) returns (GetPolicyDocumentsResponse);
+  // A tighter policy proposed from what people used (ADR-0050). Removals only,
+  // never applied. Writes a `policy.suggest` audit event before it answers.
+  rpc SuggestPolicy(SuggestPolicyRequest) returns (SuggestPolicyResponse);
   // Resources workers found in a cloud account (ADR-0027), and the admin's
   // decision on each.
   rpc ListDiscovered(ListDiscoveredRequest) returns (ListDiscoveredResponse);
@@ -244,6 +247,9 @@ message ApplyPolicyRequest {
   // The source these files replace (ADR-0042 §3). Empty is `default`: what
   // every apply before Phase 14 wrote. Other sources' documents are untouched.
   string source = 5;
+  // Dry run only: also replay the last N days (1 to 30) of recorded sessions
+  // through the active and the new policy (ADR-0051). 0 is no replay.
+  uint32 replay_days = 6;
 }
 
 message PolicyDiff {
@@ -269,6 +275,9 @@ message ApplyPolicyResponse {
   // mode or gives one more time (always): nothing was applied, and another
   // admin approves the held change (`limen manage changes approve <id>`).
   string pending_change_id = 8;
+  // The replay of recorded sessions, as JSON of limen_policy::replay::ReplayReport,
+  // when `replay_days` asked for one (ADR-0051).
+  string replay_json = 9;
 }
 
 message PolicyTestResult {
@@ -287,6 +296,24 @@ message GetPolicyDocumentsResponse {
   int64 version = 1;
   // JSON array of policy documents, as in a policy snapshot.
   string documents_json = 2;
+}
+
+message SuggestPolicyRequest {
+  // Days of sessions to judge by; 0 means 90. 7 to 365.
+  uint32 window_days = 1;
+}
+
+message SuggestPolicyResponse {
+  int64 policy_version = 1;
+  string policy_digest = 2;
+  // The full result, as JSON.
+  string report_json = 3;
+  // The changed roles, as policy YAML.
+  string yaml = 4;
+  // A report for a person to read.
+  string text = 5;
+  // The effective-access diff from the active policy to the suggestion.
+  string diff = 6;
 }
 
 message GetPolicyRequest {}
@@ -855,7 +882,7 @@ message ExportEvidenceResponse {
   string manifest_sha256 = 2;
 }
 
-// The scheduled self-test of the controls and its signed report (ADR-0051).
+// The scheduled self-test of the controls and its signed report (ADR-0053).
 service Controls {
   // Admin: start a self-test now. It runs in the background and returns at
   // once; poll ListSelfTestRuns. If one is already running, that one comes

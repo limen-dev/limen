@@ -457,7 +457,7 @@ pub struct Config {
     #[arg(long, env = "LIMEN_SEARCH_HISTORY_URL")]
     pub search_history_url: Option<String>,
 
-    /// How often the controls are tested (ADR-0051): a signed "controls are
+    /// How often the controls are tested (ADR-0053): a signed "controls are
     /// working" report with an audit event. `0s` turns the schedule off; an
     /// admin can still run a test by hand.
     #[arg(long, env = "LIMEN_SELFTEST_INTERVAL", value_parser = parse_duration_or_zero, default_value = "24h")]
@@ -670,13 +670,16 @@ impl Config {
             .as_deref()
             .is_some_and(|a| a.trim().eq_ignore_ascii_case(bucket.trim()));
         // The same name on another endpoint is another store; on the same one it is not.
+        // S3 bucket names are global on AWS, so every AWS endpoint (any region,
+        // or none at all) is the same store.
         let norm = |e: &str| e.trim().trim_end_matches('/').to_ascii_lowercase();
+        let aws = |e: &str| e.contains("amazonaws.com");
         let other_endpoint = self.audit_ocsf_s3_endpoint.as_deref().is_some_and(|e| {
             let e = norm(e);
-            match self.audit_s3_endpoint.as_deref() {
-                Some(a) => e != norm(a),
+            match self.audit_s3_endpoint.as_deref().map(norm) {
+                Some(a) => e != a && !(aws(&e) && aws(&a)),
                 // The audit bucket is on AWS (no endpoint): an AWS endpoint is the same store.
-                None => !e.contains("amazonaws.com"),
+                None => !aws(&e),
             }
         });
         if same_bucket && !other_endpoint {
@@ -924,6 +927,32 @@ mod tests {
                 "--audit-ocsf-s3-endpoint=https://s3.eu-west-1.amazonaws.com"
             ])
             .is_err()
+        );
+        // Two AWS regions are still one global bucket namespace.
+        for ocsf in [
+            "https://s3.eu-west-1.amazonaws.com",
+            "https://s3.amazonaws.com",
+        ] {
+            assert!(
+                ok(&[
+                    "--audit-s3-bucket=audit",
+                    "--audit-s3-endpoint=https://s3.us-east-1.amazonaws.com",
+                    "--audit-ocsf-s3-bucket=audit",
+                    &format!("--audit-ocsf-s3-endpoint={ocsf}"),
+                ])
+                .is_err(),
+                "{ocsf}"
+            );
+        }
+        // An S3-compatible store and AWS are different stores.
+        assert!(
+            ok(&[
+                "--audit-s3-bucket=audit",
+                "--audit-s3-endpoint=http://s3:8333",
+                "--audit-ocsf-s3-bucket=audit",
+                "--audit-ocsf-s3-endpoint=https://s3.eu-west-1.amazonaws.com",
+            ])
+            .is_ok()
         );
         // Spelling out the audit endpoint again does not make it another store.
         for same in ["http://s3:8333", "http://s3:8333/"] {

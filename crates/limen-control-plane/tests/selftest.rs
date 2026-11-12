@@ -1,4 +1,4 @@
-//! The scheduled self-test and controls report (ADR-0051) against a real
+//! The scheduled self-test and controls report (ADR-0053) against a real
 //! PostgreSQL. Set `LIMEN_TEST_DATABASE_URL` to run them.
 
 #![allow(clippy::large_futures)]

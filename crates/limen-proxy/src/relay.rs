@@ -376,7 +376,7 @@ mod tests {
             .expect("request")
     }
 
-    /// The CLI reaches `limen admin selftest` through the proxy (ADR-0051).
+    /// The CLI reaches `limen admin selftest` through the proxy (ADR-0053).
     #[test]
     fn the_controls_api_is_relayed() {
         assert!(RELAYED_PREFIXES.contains(&"/limen.v1.Controls/"));

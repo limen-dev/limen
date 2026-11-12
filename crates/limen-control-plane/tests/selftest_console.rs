@@ -1,4 +1,4 @@
-//! The console Controls page (ADR-0051): readers see it, only admins start a
+//! The console Controls page (ADR-0053): readers see it, only admins start a
 //! run, and a POST needs the console's own origin and CSRF token. Set
 //! `LIMEN_TEST_DATABASE_URL` to run them.
 

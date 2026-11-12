@@ -1,4 +1,4 @@
-//! The `Controls` API (ADR-0051). Thin: the rules are in [`crate::selftest`].
+//! The `Controls` API (ADR-0053). Thin: the rules are in [`crate::selftest`].
 
 use limen_proto::v1::controls_server::Controls;
 use limen_proto::v1::{

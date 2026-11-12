@@ -161,7 +161,7 @@ fn default_ssh_config() -> anyhow::Result<PathBuf> {
 
 /// `limen config ssh --install`.
 pub async fn install_ssh(proxy: Option<&str>, file: Option<&Path>) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let resources = fetch(&proxy).await?;
     let count = write_ssh_fragment(&proxy, &resources)?;
     let generated = rebuild_ssh(&proxy)?;
@@ -386,7 +386,7 @@ fn kube_aggregate(fragments: &[serde_json::Value]) -> (serde_json::Value, Vec<St
 
 /// `limen kube config`.
 pub async fn install_kube(proxy: Option<&str>, print: bool) -> anyhow::Result<()> {
-    let proxy = api::resolve_proxy(proxy)?;
+    let proxy = api::resolve_server(proxy)?;
     let resources = fetch(&proxy).await?;
     if print {
         let (fragment, _) = kube_fragment_for(&proxy, &resources)?;
@@ -644,7 +644,7 @@ mod tests {
             ],
         );
         assert_eq!(skipped, ["evil\nHost *"]);
-        assert!(text.contains("Host web-1 web-1.limen\n    User ubuntu\n    ProxyCommand /usr/bin/limen --proxy limen.example:443 ssh-proxy %r %h\n"));
+        assert!(text.contains("Host web-1 web-1.limen\n    User ubuntu\n    ProxyCommand /usr/bin/limen --server limen.example:443 ssh-proxy %r %h\n"));
         // Two logins: the user names one, so no User line.
         assert!(text.contains("Host bastion bastion.limen\n    ProxyCommand"));
         assert!(!text.contains("orders") && !text.contains("evil"));

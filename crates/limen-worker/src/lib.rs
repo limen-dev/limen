@@ -211,6 +211,11 @@ pub struct Config {
 }
 
 /// `--drain-timeout-secs` when unset (and so is the legacy setting).
+/// What a worker offers when it calls the proxy's API. `limen-worker-api/1` lets a proxy that
+/// holds a public certificate recognise a worker and give it the internal one (ADR-0043); `h2`
+/// keeps it working against a proxy that predates that.
+const API_ALPN: &[&[u8]] = &[alpn::WORKER_API, alpn::H2];
+
 const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_mins(10);
 
 impl Config {
@@ -304,8 +309,7 @@ impl Worker {
                 let ca = bootstrap_ca
                     .as_deref()
                     .context("--ca-file is required to enroll")?;
-                let tls =
-                    client_config(&limen_tunnel::tls::certs_from_pem(ca)?, None, &[alpn::H2])?;
+                let tls = client_config(&limen_tunnel::tls::certs_from_pem(ca)?, None, API_ALPN)?;
                 Ok(channel(&addr, &name, SharedClientConfig::new(tls)))
             },
         )
@@ -316,7 +320,7 @@ impl Worker {
             let tls = client_config(
                 &[creds.internal_ca()?],
                 Some(creds.tls_identity()?),
-                &[alpn::H2],
+                API_ALPN,
             )?;
             Ok(channel(&addr, &name, SharedClientConfig::new(tls)))
         })
@@ -502,7 +506,7 @@ impl Worker {
         let tls = client_config(
             &[creds.internal_ca()?],
             Some(creds.tls_identity()?),
-            &[alpn::H2],
+            API_ALPN,
         )?;
         Ok(channel(
             &self.config.proxy_addr,
@@ -939,7 +943,7 @@ pub async fn run(
             let tls = client_config(
                 &[creds.internal_ca()?],
                 Some(creds.tls_identity()?),
-                &[alpn::H2],
+                API_ALPN,
             )?;
             Ok(channel(&addr, &name, SharedClientConfig::new(tls)))
         },

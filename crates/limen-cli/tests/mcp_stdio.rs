@@ -15,7 +15,7 @@ fn session(input: &str) -> (Vec<Value>, std::process::ExitStatus) {
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .env("XDG_DATA_HOME", home.path())
-        .env_remove("LIMEN_PROXY")
+        .env_remove("LIMEN_SERVER")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

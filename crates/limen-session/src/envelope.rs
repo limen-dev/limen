@@ -21,7 +21,7 @@ pub enum Purpose {
     WebAppSession,
     /// A pack of compliance evidence (ADR-0029).
     EvidencePack,
-    /// A signed report of the scheduled self-test of the controls (ADR-0051).
+    /// A signed report of the scheduled self-test of the controls (ADR-0053).
     ControlsReport,
 }
 
@@ -232,6 +232,215 @@ mod tests {
     use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 
     use super::*;
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};
+
+    const ALL: [Purpose; 5] = [
+        Purpose::SessionGrant,
+        Purpose::PolicySnapshot,
+        Purpose::AuditManifest,
+        Purpose::WebAppSession,
+        Purpose::EvidencePack,
+    ];
+
+    async fn internal_ca() -> CertificateAuthority {
+        CertificateAuthority::create_self_signed(
+            CaPurpose::Internal,
+            Arc::new(FileSigner::generate().expect("key")),
+        )
+        .await
+        .expect("ca")
+    }
+
+    async fn component(ca: &CertificateAuthority, kind: ComponentKind, id: &str) -> EnvelopeSigner {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let csr = CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr");
+        let cert = ca
+            .issue_component(ComponentCertRequest {
+                csr_der: csr.der().to_vec(),
+                kind,
+                id: id.into(),
+                dns_names: vec![],
+                labels: std::collections::BTreeMap::new(),
+                ttl: Duration::from_secs(600),
+            })
+            .await
+            .expect("issue");
+        EnvelopeSigner::new(&key.serialize_pem(), cert.der.to_vec()).expect("signer")
+    }
+
+    /// The reason an envelope was refused, so each case proves which check fired.
+    fn refusal(result: Result<(ComponentIdentity, &[u8]), SessionError>) -> String {
+        match result {
+            Err(SessionError::Signature(reason)) => reason,
+            Err(other) => panic!("expected a signature refusal, got {other:?}"),
+            Ok((who, _)) => panic!("expected a refusal, verified as signed by {who:?}"),
+        }
+    }
+
+    /// The control plane signs four purposes with one key. Only the label in
+    /// the signed message keeps, say, a policy snapshot from being replayed as
+    /// a browser's web-app session, so the kind check can't be what stops it.
+    #[tokio::test]
+    async fn a_signature_for_one_purpose_never_verifies_as_another() {
+        let ca = internal_ca().await;
+        let cp = component(&ca, ComponentKind::ControlPlane, "cp1").await;
+        let proxy = component(&ca, ComponentKind::Proxy, "p1").await;
+        let signer_for = |p: Purpose| match p {
+            Purpose::SessionGrant => &proxy,
+            _ => &cp,
+        };
+        for signed_as in ALL {
+            let signed = signer_for(signed_as)
+                .sign(signed_as, b"payload".to_vec())
+                .expect("sign");
+            let (who, payload) = verify(&signed, signed_as, ca.cert_der()).expect("verifies");
+            assert_eq!(payload, b"payload");
+            assert_eq!(who.kind, signed_as.signer_kind());
+            for presented_as in ALL.into_iter().filter(|p| *p != signed_as) {
+                let reason = refusal(verify(&signed, presented_as, ca.cert_der()));
+                // Same signer kind: the label is the only thing that differs.
+                if presented_as.signer_kind() == signed_as.signer_kind() {
+                    assert_eq!(
+                        reason, "signature does not verify",
+                        "{signed_as:?} presented as {presented_as:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A proxy may sign session grants only, a worker nothing, and the control
+    /// plane everything but session grants. A valid signature by the wrong kind
+    /// is refused before the signature is even checked.
+    #[tokio::test]
+    async fn only_the_allowed_component_kind_may_sign_each_purpose() {
+        let ca = internal_ca().await;
+        let cp = component(&ca, ComponentKind::ControlPlane, "cp1").await;
+        let proxy = component(&ca, ComponentKind::Proxy, "p1").await;
+        let worker = component(&ca, ComponentKind::Worker, "w1").await;
+        for purpose in ALL {
+            for (kind, signer) in [
+                (ComponentKind::ControlPlane, &cp),
+                (ComponentKind::Proxy, &proxy),
+                (ComponentKind::Worker, &worker),
+            ] {
+                let signed = signer.sign(purpose, b"payload".to_vec()).expect("sign");
+                let result = verify(&signed, purpose, ca.cert_der());
+                if kind == purpose.signer_kind() {
+                    assert!(result.is_ok(), "{kind} signing {purpose:?}");
+                } else {
+                    assert_eq!(
+                        refusal(result),
+                        format!("a {kind} may not sign {purpose:?}"),
+                        "{kind} signing {purpose:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The certificate in the envelope decides who signed it, so it must chain
+    /// to the internal CA and hold the key that made the signature.
+    #[tokio::test]
+    async fn the_signer_certificate_must_be_trusted_and_match_the_signature() {
+        let ca = internal_ca().await;
+        let rogue_ca = internal_ca().await;
+        let cp = component(&ca, ComponentKind::ControlPlane, "cp1").await;
+        let other_cp = component(&ca, ComponentKind::ControlPlane, "cp2").await;
+        let rogue = component(&rogue_ca, ComponentKind::ControlPlane, "cp1").await;
+        let purpose = Purpose::PolicySnapshot;
+
+        // A well-formed control plane certificate from a CA nobody trusts.
+        let by_rogue = rogue.sign(purpose, b"payload".to_vec()).expect("sign");
+        assert!(verify(&by_rogue, purpose, rogue_ca.cert_der()).is_ok());
+        let reason = refusal(verify(&by_rogue, purpose, ca.cert_der()));
+        assert!(
+            reason.starts_with("certificate is not valid for this CA"),
+            "{reason}"
+        );
+
+        // A real signature, but the envelope names another trusted signer.
+        let mut swapped = cp.sign(purpose, b"payload".to_vec()).expect("sign");
+        swapped.signer_cert_der.clone_from(
+            &other_cp
+                .sign(purpose, vec![])
+                .expect("sign")
+                .signer_cert_der,
+        );
+        assert_eq!(
+            refusal(verify(&swapped, purpose, ca.cert_der())),
+            "signature does not verify"
+        );
+
+        // A changed payload, a missing signature, and no certificate at all.
+        let good = cp.sign(purpose, b"payload".to_vec()).expect("sign");
+        let mut tampered = good.clone();
+        tampered.payload = b"pAyload".to_vec();
+        assert_eq!(
+            refusal(verify(&tampered, purpose, ca.cert_der())),
+            "signature does not verify"
+        );
+        let mut unsigned = good.clone();
+        unsigned.signature.clear();
+        assert_eq!(
+            refusal(verify(&unsigned, purpose, ca.cert_der())),
+            "signature does not verify"
+        );
+        let mut no_cert = good;
+        no_cert.signer_cert_der.clear();
+        refusal(verify(&no_cert, purpose, ca.cert_der()));
+    }
+
+    #[test]
+    fn malformed_der_signatures_are_refused() {
+        // r = 1, s = 2: the smallest valid shape.
+        let ok = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02];
+        assert!(ecdsa_der_to_jose(&ok).is_ok());
+        let mut r33 = vec![0x30, 0x26, 0x02, 0x21, 0x01];
+        r33.extend([0xaa; 32]);
+        r33.extend([0x02, 0x01, 0x02]);
+        let cases: [(&str, Vec<u8>); 6] = [
+            ("too short", vec![0x30, 0x04, 0x02, 0x01, 0x01, 0x02]),
+            (
+                "not a sequence",
+                vec![0x31, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02],
+            ),
+            (
+                "wrong outer length",
+                vec![0x30, 0x07, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02],
+            ),
+            (
+                "not an integer",
+                vec![0x30, 0x06, 0x04, 0x01, 0x01, 0x02, 0x01, 0x02],
+            ),
+            (
+                "truncated integer",
+                vec![0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x05, 0x02],
+            ),
+            // 33 bytes with a non-zero first byte can't fit in 32.
+            ("oversized integer", r33),
+        ];
+        for (name, der) in cases {
+            assert!(ecdsa_der_to_jose(&der).is_err(), "{name}");
+        }
+        // A leading zero (DER's sign byte) is stripped, not counted.
+        let mut padded = vec![0x30, 0x26, 0x02, 0x21, 0x00];
+        padded.extend([0xaa; 32]);
+        padded.extend([0x02, 0x01, 0x02]);
+        let raw = ecdsa_der_to_jose(&padded).expect("a sign byte is allowed");
+        assert_eq!(&raw[..32], &[0xaa; 32]);
+        // Bytes after both integers.
+        let mut trailing = ok.to_vec();
+        trailing[1] = 0x07;
+        trailing.push(0x00);
+        assert!(ecdsa_der_to_jose(&trailing).is_err(), "trailing data");
+    }
 
     #[test]
     fn jose_signature_uses_fixed_width_r_and_s() {

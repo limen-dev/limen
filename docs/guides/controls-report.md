@@ -1,6 +1,6 @@
 # Self-test and controls report
 
-Limen tests its own controls on a schedule and keeps a signed report of the result. An auditor can then see, without asking anyone, that the controls were being tested and what they found. Design and decisions: [ADR-0051](../adr/0051-scheduled-self-test.md).
+Limen tests its own controls on a schedule and keeps a signed report of the result. An auditor can then see, without asking anyone, that the controls were being tested and what they found. Design and decisions: [ADR-0053](../adr/0053-scheduled-self-test.md).
 
 **It is the control plane attesting to itself.** The signature proves that a control plane your internal CA issued produced exactly these results and that nobody edited them afterwards. It does not prove the checks ran honestly: a compromised control plane could sign a clean report. Every report says so inside the signature. To prove the audit trail, someone who does not have to trust Limen runs [`limen audit verify`](../runbooks/audit-verify.md) against it.
 

@@ -23,7 +23,7 @@
 <tbody>
 {% for r in rows %}
 <tr>
-  <td><a href="/console/changes/{{ r.id }}" class="mono">{{ r.id }}</a>{% if !r.reason.is_empty() %}<div class="muted">{{ r.reason }}</div>{% endif %}</td>
+  <td><a class="cell-main" href="/console/changes/{{ r.id }}">{% if r.reason.is_empty() %}Policy change{% else %}{{ r.reason }}{% endif %}</a><div class="cell-sub mono">{{ r.id }}</div></td>
   <td>{{ r.author }}{% if !r.run_by.is_empty() %}<div class="muted">run by {{ r.run_by }}</div>{% endif %}</td>
   <td>{% for g in r.gains.iter().take(3) %}<div>{{ g }}</div>{% endfor %}{% if r.gains.len() > 3 %}<div class="muted">and {{ r.gains.len() - 3 }} more</div>{% endif %}</td>
   <td>{{ r.created }}</td>

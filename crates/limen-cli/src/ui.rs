@@ -139,17 +139,20 @@ pub fn render_error(err: &anyhow::Error) -> String {
         let _ = write!(out, "\n  {} {cause}", dim("caused by:"));
     }
     let text = format!("{err:#}");
-    let hint =
-        if text.contains("not logged in") || text.contains("EXPIRED") || text.contains("expired") {
-            Some("Run `limen login` to sign in again.")
-        } else if text.contains("untrusted") || text.contains("certificate") && text.contains("CA")
-        {
-            Some("Pin the proxy's CA with `limen login --ca-file <ca.pem>`.")
-        } else if text.contains("control plane unreachable") || text.contains("unavailable") {
-            Some("The service may be restarting. Try again in a few seconds.")
-        } else {
-            None
-        };
+    let hint = if text.contains("not logged in")
+        || text.contains("EXPIRED")
+        || text.contains("expired")
+    {
+        Some("Run `limen login` to sign in again.")
+    } else if text.contains("untrusted") || text.contains("certificate") && text.contains("CA") {
+        Some(
+            "Pin the server's CA with `limen login --ca-file <ca.pem>`, or if it now has a public certificate and you pinned an old CA, run `limen login --system-roots`.",
+        )
+    } else if text.contains("control plane unreachable") || text.contains("unavailable") {
+        Some("The service may be restarting. Try again in a few seconds.")
+    } else {
+        None
+    };
     if let Some(h) = hint {
         let _ = write!(out, "\n  {}", dim(&format!("→ {h}")));
     }

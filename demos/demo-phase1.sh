@@ -17,7 +17,7 @@ source "$here/scripts/lib.sh"
 stack_setup ssh observability bots
 export LIMEN_HOME="$here/.state/home"
 export LIMEN_BIN="${LIMEN_BIN:-$root/target/release/limen}"
-export LIMEN_PROXY=localhost:3443
+export LIMEN_SERVER=localhost:3443
 limen() { "$LIMEN_BIN" "$@"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }

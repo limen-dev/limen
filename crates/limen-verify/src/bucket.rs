@@ -386,7 +386,7 @@ const MAX_TAIL_PROBLEMS: usize = 20;
 /// before it.
 ///
 /// This reads **manifests only**. It never fetches a batch, so it can run
-/// with the control plane's own write role (ADR-0051). It lists every manifest
+/// with the control plane's own write role (ADR-0053). It lists every manifest
 /// key to find each writer's newest, so it grows with the number of manifests;
 /// the reads are bounded to `last + 1` per writer. It therefore can't see a modified batch or a
 /// gap in the events' own numbering; [`verify_bucket`] does, with read access

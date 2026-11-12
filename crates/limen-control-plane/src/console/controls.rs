@@ -1,4 +1,4 @@
-//! The Controls page (ADR-0051): the latest self-test, its checks, the run
+//! The Controls page (ADR-0053): the latest self-test, its checks, the run
 //! history, and a signed report to download. Reading is for admins and
 //! auditors; starting a run is for admins, over POST with the CSRF token.
 

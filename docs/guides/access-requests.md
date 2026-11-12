@@ -45,8 +45,8 @@ limen ls                                   # shows what you can ask for, with no
 limen request orders-prod --for 30m --reason "INC-123: orders table is locked" --wait
 limen requests                             # yours
 limen requests --approvals                 # waiting for you to decide
-limen approve <id> -m "ok for 30 minutes"  # or: limen deny <id> -m "use staging"
-limen cancel <id>                          # withdraw your own pending request
+limen requests approve <id> -m "ok for 30 minutes"  # or: limen requests deny <id> -m "use staging"
+limen requests cancel <id>                 # withdraw your own pending request
 limen request web-prod --break-glass --for 20m --reason "prod is down"
 limen explain orders-prod                  # why you can't reach it, and what to do
 ```

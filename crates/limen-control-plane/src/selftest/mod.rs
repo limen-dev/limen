@@ -1,4 +1,4 @@
-//! The scheduled self-test and controls report (ADR-0051).
+//! The scheduled self-test and controls report (ADR-0053).
 //!
 //! A run is claimed with one row in `selftest_runs` (a partial unique index
 //! lets only one run be `running` across every replica), runs the checks in
@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::state::{AppState, internal};
 
 /// Who a scheduled run is attributed to. The reserved prefix keeps it from
-/// ever being a person (ADR-0051).
+/// ever being a person (ADR-0053).
 pub const SCHEDULER: &str = "selftest:scheduler";
 /// A manual run may start at most this often.
 const MANUAL_GAP_SECS: f64 = 60.0;

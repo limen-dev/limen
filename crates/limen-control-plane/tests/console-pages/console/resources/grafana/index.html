@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="darkreader-lock">
+<title>grafana · Limen</title>
+<link rel="icon" href="/console/static/logo-mark.svg?v=ee6acea41c22" type="image/svg+xml">
+<link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/console/static/console.css?v=ee6acea41c22">
+<script src="/console/static/console.js?v=ee6acea41c22"></script>
+
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/console/">
+      <img class="logo-light" src="/console/static/logo-mark.svg?v=ee6acea41c22" alt="" width="26" height="26">
+      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=ee6acea41c22" alt="" width="26" height="26">
+      <span>Limen</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#key-round"/></svg><span>Access</span></a>
+      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#file-diff"/></svg><span>Policy changes</span></a>
+      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#shield-check"/></svg><span>Reviews</span></a>
+      
+      
+      <div class="nav-label">Administration</div>
+      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#users"/></svg><span>Users</span></a>
+      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#bot"/></svg><span>Bots</span></a>
+      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#server"/></svg><span>Workers</span></a>
+      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#activity"/></svg><span>Audit trail</span></a>
+      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#scroll-text"/></svg><span>Policy</span></a>
+      <a href="/console/simulator"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#play"/></svg><span>Access simulator</span></a>
+      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#chart-column"/></svg><span>Dashboards</span></a>
+      <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#plug"/></svg><span>Integrations</span></a>
+      
+    </nav>
+    <div class="sidebar-foot">
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#moon"/></svg></button>
+      </div>
+      <form method="post" action="/console/logout" class="me">
+        <span class="avatar av-4" aria-hidden="true">A</span>
+        <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#log-out"/></svg></button>
+      </form>
+    </div>
+  </aside>
+  <div class="main">
+    <main>
+
+<div class="page-head">
+  <div class="title-row">
+    <span class="kind lg k-web"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#globe"/></svg></span>
+    <div><h1>grafana</h1><p class="sub">web</p></div>
+  </div>
+  <div class="row">
+    
+    <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#arrow-left"/></svg>All resources</a>
+  </div>
+</div>
+<div class="card facts-card"><table class="facts">
+  <tr><th>Labels</th><td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=platform</span></div></td></tr>
+  
+  <tr><th>Target</th><td class="mono">grafana.apps.example.com → grafana.internal.example:443</td></tr>
+  <tr><th>Worker selector</th><td><div class="chips"><span class="chip">pool=dev</span></div></td></tr>
+  
+  <tr><th>You can access as</th><td><div class="chips"><span class="chip">access</span></div></td></tr>
+  <tr><th>Connect</th><td><span class="cmd"><code>limen web open grafana</code><button type="button" class="secondary" data-copy="limen web open grafana" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#copy"/></svg></button></span></td></tr>
+</table></div>
+
+
+<h2>Who can reach it</h2>
+
+<div class="table-wrap"><table>
+  <thead><tr><th>Role</th><th>How</th><th>As</th><th>Who</th><th>Approved by</th></tr></thead>
+  <tbody><tr>
+    <td><span class="chip c0">dev-planned</span></td>
+    <td>standing</td>
+    <td><div class="chips"><span class="chip">access</span></div></td>
+    <td>group developers</td><td>—</td>
+  </tr><tr>
+    <td><span class="chip c5">sre-planned</span></td>
+    <td>standing</td>
+    <td><div class="chips"><span class="chip">access</span></div></td>
+    <td>group sre</td><td>—</td>
+  </tr></tbody>
+</table></div>
+
+
+
+<h2>Workers that can serve it <span class="count">1</span></h2>
+
+<div class="table-wrap"><table>
+  <thead><tr><th>Worker</th><th>Last seen</th><th class="num">Tunnels</th></tr></thead>
+  <tbody><tr><td class="mono">worker-9253bcd0c507</td><td class="nowrap">2026-11-10 21:21:29 UTC</td><td class="num">2</td></tr></tbody>
+</table></div>
+
+
+<h2>Recent sessions</h2>
+
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v=ee6acea41c22#terminal"/></svg><div>No sessions yet.</div></div>
+
+
+    </main>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
+  </div>
+</div>
+</body>
+</html>

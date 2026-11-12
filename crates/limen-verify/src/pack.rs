@@ -73,7 +73,7 @@ pub fn verify_pack(
 }
 
 /// Check a signed, sectioned document offline: the same envelope serves
-/// evidence packs and controls reports (ADR-0029, ADR-0051). `format` is the
+/// evidence packs and controls reports (ADR-0029, ADR-0053). `format` is the
 /// format string it must carry, both outside and inside the signed manifest,
 /// and `purpose` the signature label, so one kind of document can't be passed
 /// off as the other.

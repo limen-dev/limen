@@ -39,7 +39,7 @@ The Resources page shows whether something is reachable. A red "none" in the Wor
 
 ## Checking phones and other browsers
 
-After changing `crates/limen-control-plane/src/console/assets/` or `templates/`, run `deploy/compose/scripts/console-matrix.mjs`. It signs in through the identity provider, opens every page (and each list's first detail page) in each engine and size, and reports sideways scrolling, JavaScript errors, axe-core violations (WCAG 2.1 AA) and touch targets under 32px. Run it in both themes.
+After changing `crates/limen-control-plane/assets/` or `templates/`, run `deploy/compose/scripts/console-matrix.mjs`. It signs in through the identity provider, opens every page (and each list's first detail page) in each engine and size, and reports sideways scrolling, JavaScript errors, axe-core violations (WCAG 2.1 AA) and touch targets under 32px. Run it in both themes.
 
 ```sh
 mkdir /tmp/matrix && cd /tmp/matrix && npm init -y && npm i playwright-core axe-core
@@ -70,4 +70,4 @@ rm -rf crates/limen-control-plane/tests/console-pages/console && cp -R /tmp/cons
 mise exec -- gitleaks dir crates/limen-control-plane/tests/console-pages --redact --no-banner   # dev data only, but check
 ```
 
-A fixture shows what the stack held when it was captured (dev users, no live sessions), so it covers the markup of 18 pages and nothing that needs a click: forms, lock, kill and token creation are not exercised, and neither are the session detail, recording and watch pages (no live session when captured).
+A fixture shows what the stack held when it was captured (dev users, no live sessions), so it covers the markup of 23 pages and nothing that needs a click: forms, lock, kill and token creation are not exercised. The session detail page is a finished SSH session; `check` answers its recording request with a short invented recording (recordings are never saved), so the player starts and its controls are measured. The live watch page, access request and review detail, bot runs, Kubernetes requests and discovered resources are not in the fixtures (the stack had no such data); the sweep of window widths (320 to 1920px) runs on every page. `snapshot` replaces each page's CSRF token with a constant.

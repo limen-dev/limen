@@ -1,4 +1,4 @@
-# ADR-0051: Scheduled self-test and controls report
+# ADR-0053: Scheduled self-test and controls report
 
 - Status: Proposed (issue #113, `needs: design`). Built at the owner's request with the defaults below; the decisions under Open for review are not yet approved, and the status stays Proposed until they are.
 - Date: 2026-11-10

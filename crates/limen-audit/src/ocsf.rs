@@ -299,6 +299,8 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
         K::PolicyShadowDeny => Mapped::new(BASE, OTHER)
             .detail("shadow deny")
             .severity(MEDIUM),
+        // An admin read recorded sessions to preview a change; nothing changed.
+        K::PolicyReplay => Mapped::new(BASE, OTHER).detail("policy replay"),
         K::PolicyWriteDenied => Mapped::new(BASE, OTHER)
             .detail("policy write denied")
             .severity(LOW)
@@ -342,7 +344,9 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
             Mapped::new(ENTITY_MANAGEMENT, OTHER).detail("access review")
         }
 
-        K::AuditSearch | K::AuditVerifyAccess => Mapped::new(API_ACTIVITY, act(2, "Read")),
+        K::AuditSearch | K::AuditVerifyAccess | K::PolicySuggest => {
+            Mapped::new(API_ACTIVITY, act(2, "Read"))
+        }
         K::EvidenceExport => Mapped::new(API_ACTIVITY, act(1, "Create")),
         // A check run by Limen on itself, not an entity change: the verdict
         // (`data.status`) stays in `unmapped`.
@@ -416,12 +420,16 @@ fn millis(event: &Event) -> i64 {
     i64::try_from(event.time.unix_timestamp_nanos() / 1_000_000).unwrap_or(0)
 }
 
-/// An IP address from the event, if it is one (the native field is free
-/// text for some producers).
-fn ip(data: &Value, key: &str) -> Option<String> {
-    text(data, key)
-        .and_then(|s| s.parse::<std::net::IpAddr>().ok())
-        .map(|a| a.to_string())
+/// An OCSF endpoint from the event's address, if it is one. The native field
+/// is free text: the proxy writes a socket address (`203.0.113.9:51234`,
+/// `[2001:db8::1]:22`), the control plane a bare IP.
+fn endpoint(data: &Value, key: &str) -> Option<Value> {
+    let s = text(data, key)?;
+    if let Ok(ip) = s.parse::<std::net::IpAddr>() {
+        return Some(json!({ "ip": ip.to_string() }));
+    }
+    let sa = s.parse::<std::net::SocketAddr>().ok()?;
+    Some(json!({ "ip": sa.ip().to_string(), "port": sa.port() }))
 }
 
 fn product(version: &str, component: Option<&str>) -> Value {
@@ -507,8 +515,8 @@ pub fn to_ocsf(event: &Event, product_version: &str) -> Value {
             obj.insert("user".into(), who);
         }
     }
-    if let Some(addr) = ip(&event.data, "client_addr") {
-        obj.insert("src_endpoint".into(), json!({ "ip": addr }));
+    if let Some(src) = endpoint(&event.data, "client_addr") {
+        obj.insert("src_endpoint".into(), src);
     }
     if class.uid == HTTP_ACTIVITY.uid {
         let mut req = Map::new();
@@ -630,7 +638,9 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::WebResponse,
     EventKind::WebSocket,
     EventKind::PolicyChange,
+    EventKind::PolicySuggest,
     EventKind::PolicyShadowDeny,
+    EventKind::PolicyReplay,
     EventKind::PolicyWriteDenied,
     EventKind::PolicyOwnershipTransfer,
     EventKind::PolicyChangePending,
@@ -713,7 +723,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 62);
+        assert_eq!(before, 64);
     }
 
     #[test]
@@ -770,6 +780,28 @@ mod tests {
         assert_eq!(denied["class_uid"], 3002);
         assert_eq!(denied["status_id"], 2);
         assert_eq!(denied["severity_id"], 2);
+    }
+
+    #[test]
+    fn a_socket_address_becomes_an_endpoint_with_its_port() {
+        // The proxy writes `SocketAddr::to_string()` for its sessions and denials.
+        let src = |addr: &str| {
+            to_ocsf(
+                &event(EventKind::SessionStart, json!({"client_addr": addr})),
+                "1",
+            )["src_endpoint"]
+                .clone()
+        };
+        assert_eq!(
+            src("203.0.113.9:51234"),
+            json!({"ip": "203.0.113.9", "port": 51234})
+        );
+        assert_eq!(
+            src("[2001:db8::1]:22"),
+            json!({"ip": "2001:db8::1", "port": 22})
+        );
+        assert_eq!(src("2001:db8::1"), json!({"ip": "2001:db8::1"}));
+        assert_eq!(src("not an ip"), Value::Null);
     }
 
     #[test]

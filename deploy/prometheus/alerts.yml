@@ -55,6 +55,23 @@ groups:
           summary: "{{ $labels.instance }} cannot refresh its signed policy"
           description: "Database, Redis and Kubernetes access stops after the 5-minute grace period; SSH already fails closed."
 
+      - alert: LimenPublicCertExpiring
+        # Only proxies started with --public-cert-file export this (ADR-0043).
+        expr: min by (instance, job) (limen_proxy_public_cert_expiry_timestamp_seconds - time()) < 14 * 86400
+        for: 1h
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.instance }}: the public certificate expires in under 14 days"
+          description: "The proxy keeps serving it until it expires, then the CLI and browsers fail with a trust error. Workers and peers are not affected. Replace the files (they are re-read every minute and on SIGHUP)."
+
+      - alert: LimenPublicCertReloadFailing
+        expr: sum by (instance, job) (increase(limen_proxy_public_cert_reload_failures_total[15m])) > 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.instance }} cannot load the replacement public certificate"
+          description: "The last good certificate is still in use. Check the proxy log for why the new files were refused: not PEM, expired, or a key that does not match the certificate."
+
       - alert: LimenCaSigningErrors
         expr: sum by (kind) (increase(limen_ca_sign_errors_total[10m])) > 0
         for: 5m

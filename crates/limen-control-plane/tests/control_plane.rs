@@ -235,6 +235,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 sources: sources(),
                 dry_run: true,
                 source_ref: String::new(),
+                replay_days: 0,
             },
             Some(&admin_user),
         ))
@@ -253,6 +254,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 sources: sources(),
                 dry_run: false,
                 source_ref: "abc123".into(),
+                replay_days: 0,
             },
             Some(&admin_user),
         ))
@@ -278,6 +280,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 sources: sources(),
                 dry_run: false,
                 source_ref: String::new(),
+                replay_days: 0,
             },
             Some(&admin_user),
         ))
@@ -336,6 +339,7 @@ async fn admin_apply_policy_then_users_see_only_their_resources() {
                 sources: sources(),
                 dry_run: true,
                 source_ref: String::new(),
+                replay_days: 0,
             },
             Some(&dev_user),
         ))
@@ -370,6 +374,7 @@ async fn invalid_policy_is_rejected() {
                 sources: bad,
                 dry_run: false,
                 source_ref: String::new(),
+                replay_days: 0,
             },
             Some(&admin_user),
         ))
