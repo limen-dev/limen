@@ -1,0 +1,129 @@
+name: ci
+
+# Runs the path-filtered workflows a pull request touches and reports one check, `ci-ok`, for the
+# ruleset to require. A workflow-level `paths:` filter that matches nothing never reports its
+# checks, which would block the merge; here the filter is a job instead.
+# A draft pull request runs nothing; marking it ready for review starts the run.
+# GitHub-hosted runners (docs/runbooks/ci-runners.md).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # A manual run ignores the path filters. release.yml dispatches it on the release pull request,
+  # which the workflow token cannot start a pull_request run for.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Changed areas
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      audit: ${{ steps.filter.outputs.audit }}
+      infra: ${{ steps.filter.outputs.infra }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      website: ${{ steps.filter.outputs.website }}
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the path matcher
+        run: python3 scripts/ci-changes.py --self-test
+
+      - name: Decide which workflows apply
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PR" ]; then
+            printf '%s=true\n' rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
+          echo "changed files: $(wc -l < "$RUNNER_TEMP/changed.txt")"
+          python3 scripts/ci-changes.py "$RUNNER_TEMP/changed.txt" rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
+
+  rust:
+    name: rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    uses: ./.github/workflows/rust.yml
+    permissions:
+      contents: read
+
+  audit:
+    name: audit
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
+    uses: ./.github/workflows/audit.yml
+    permissions:
+      contents: read
+
+  infra:
+    name: infra
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    uses: ./.github/workflows/infra.yml
+    permissions:
+      contents: read
+
+  workflows:
+    name: workflows
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    uses: ./.github/workflows/workflows.yml
+    permissions:
+      contents: read
+
+  website:
+    name: website
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    uses: ./.github/workflows/website.yml
+    # The deploy job in website.yml needs these, and a caller must grant what the callee declares.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  ci-ok:
+    name: ci-ok
+    # always(), so a failed need fails this job instead of skipping it. `changes` is a need too:
+    # if the filter breaks, every area is skipped and the gate must not pass.
+    if: ${{ always() && !github.event.pull_request.draft }}
+    needs: [changes, rust, audit, infra, workflows, website]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every needed area passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS"])
+          for name, n in needs.items():
+              print(name + ": " + n["result"])
+          if needs["changes"]["result"] != "success":
+              sys.exit("the change filter did not succeed")
+          bad = [k for k, n in needs.items() if n["result"] not in ("success", "skipped")]
+          if bad:
+              sys.exit("failed: " + ", ".join(bad))
+          PY
