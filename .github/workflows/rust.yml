@@ -21,6 +21,14 @@ on:
       - "!LICENSE"
       - "!.github/**"
       - ".github/workflows/rust.yml"
+      # Files under the paths above that the build or tests read: generated
+      # docs the tests compare, the CLI's embedded logo, and the release
+      # workflow scripts/check-versions.sh checks.
+      - "docs/cli-reference.md"
+      - "docs/policy-schema/**"
+      - "docs/guides/audit-ocsf.md"
+      - "assets/logo-mark.svg"
+      - ".github/workflows/release.yml"
   # A draft pull request runs nothing; marking it ready for review starts the run.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
