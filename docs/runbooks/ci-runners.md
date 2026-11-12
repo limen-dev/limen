@@ -1,6 +1,6 @@
 # CI runners and which jobs run
 
-CI for `limen-dev/limen` runs on GitHub-hosted runners. Workflows (`.github/workflows/`): `rust.yml`, `audit.yml`, `secret-scan.yml`, `infra.yml`, `workflows.yml`, `website.yml`, `browser-tests.yml` and `release.yml`.
+CI for `limen-dev/limen` runs on GitHub-hosted runners. Workflows (`.github/workflows/`): `ci.yml`, `rust.yml`, `audit.yml`, `secret-scan.yml`, `infra.yml`, `workflows.yml`, `website.yml`, `browser-tests.yml` and `release.yml`.
 
 ## What runs for a change
 
@@ -18,7 +18,7 @@ Each of `rust.yml`, `audit.yml`, `infra.yml`, `workflows.yml` and `website.yml` 
 | `website.yml` | `website/`, `docs/`, `deploy/compose/README.md`, `deploy/helm/limen/README.md` and the READMEs under `deploy/terraform/` (the build publishes them into the site), `mise.toml` | `npm ci` and `npm run build`: build, link and anchor check, site rules (ADR-0031). Not part of the release gate |
 | `browser-tests.yml` | `crates/limen-control-plane/assets/`, `templates/` and `tests/console-pages/`, `deploy/compose/scripts/console-snapshot-matrix.mjs` (console job only, Chromium and WebKit, not on a draft); Mondays 04:30 UTC or `gh workflow run browser-tests.yml` run both jobs with Firefox | Console: the saved pages in `tests/console-pages/`. Website: the built site (`website/scripts/browser-matrix.mjs`, never on a pull request). Both in phone, tablet and desktop sizes, dark and light |
 
-Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow. `release.yml` calls the first four (not the website) before building anything.
+Issue templates and `dependabot.yml` start nothing. Manual runs (`workflow_dispatch`) ignore the filter and run every job of that workflow; for `ci.yml` that means every area, and `release.yml` dispatches it on the release pull request (whose pushes start no pull request run). `release.yml` also calls `rust.yml`, `audit.yml`, `infra.yml` and `workflows.yml` (not the website) before building anything.
 
 In `rust.yml`, the slow test and image jobs start only after lint passes, so a formatting or clippy failure spends no runner minutes on tests. Pull requests read the Rust build cache from `main` but don't write one (`save-if`), saving over a minute at the end of each test job.
 

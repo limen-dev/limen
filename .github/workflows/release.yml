@@ -84,9 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ needs.please.outputs.pr_branch }}
         run: |
-          for workflow in rust audit infra workflows; do
-            gh workflow run "${workflow}.yml" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
-          done
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
 
   # All checks must pass on the exact commit before anything is built.
   verify-rust:

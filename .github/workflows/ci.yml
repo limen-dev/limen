@@ -9,6 +9,9 @@ name: ci
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # A manual run ignores the path filters. release.yml dispatches it on the release pull request,
+  # which the workflow token cannot start a pull_request run for.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,6 +51,10 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          if [ -z "$PR" ]; then
+            printf '%s=true\n' rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
           echo "changed files: $(wc -l < "$RUNNER_TEMP/changed.txt")"
           python3 scripts/ci-changes.py "$RUNNER_TEMP/changed.txt" rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
