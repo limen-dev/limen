@@ -52,7 +52,7 @@ jobs:
           ref: ${{ needs.please.outputs.pr_branch }}
           persist-credentials: false
 
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
       - name: Refresh the lock file
         run: cargo update --workspace
@@ -155,7 +155,7 @@ jobs:
           version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           [ "v${version}" = "${TAG}" ] || { echo "tag ${TAG} but Cargo.toml says ${version}" >&2; exit 1; }
 
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
       - name: Add target
         run: rustup target add "${{ matrix.target }}"
@@ -308,7 +308,7 @@ jobs:
           ref: ${{ needs.please.outputs.sha }}
           persist-credentials: false
 
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: helm
 
