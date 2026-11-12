@@ -98,7 +98,6 @@ pub(super) async fn run<C, U>(
     info: StreamInfo,
     client: C,
     upstream: U,
-    expires: OffsetDateTime,
     recording: Option<Recorder>,
     started: Instant,
 ) where
@@ -163,16 +162,11 @@ pub(super) async fn run<C, U>(
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         loop {
             tick.tick().await;
-            if OffsetDateTime::now_utc() >= expires {
-                return "max_session_ttl reached";
-            }
-            if let Some(snapshot) = worker.policy.latest()
-                && let Some(why) = snapshot.restrictions.blocks(
-                    &admitted.username,
-                    &admitted.login_id,
-                    &admitted.session_id,
-                )
-            {
+            let snapshot = worker.policy.latest();
+            if let Some(why) = admitted.stop_reason(
+                snapshot.as_ref().map(|s| &*s.restrictions),
+                OffsetDateTime::now_utc(),
+            ) {
                 return why;
             }
         }

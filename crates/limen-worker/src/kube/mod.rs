@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use clap::Args;
 use limen_policy::{AccessRequest, Principal};
 use limen_session::grant::VerifiedGrant;
+use limen_session::snapshot::Restrictions;
 use time::OffsetDateTime;
 use tonic::Status;
 
@@ -104,6 +105,30 @@ pub(crate) struct Admitted {
     pub ci: Option<std::collections::BTreeMap<String, String>>,
     /// The access grants this session's roles depend on. When one ends, so does a stream.
     pub request_ids: Vec<String>,
+}
+
+impl Admitted {
+    /// Why an open stream (a `watch`, `logs -f`, or an upgraded `exec`,
+    /// `attach`, or `port-forward`) must stop at `now`: the session reached
+    /// its deadline, an access grant it depends on ended, or the user was
+    /// locked, logged out, or the session killed. `restrictions` is from the
+    /// worker's latest snapshot, if it has one.
+    pub(super) fn stop_reason(
+        &self,
+        restrictions: Option<&Restrictions>,
+        now: OffsetDateTime,
+    ) -> Option<&'static str> {
+        if now >= self.expires {
+            return Some("max_session_ttl reached");
+        }
+        let restrictions = restrictions?;
+        if !self.request_ids.is_empty()
+            && restrictions.grant_ended(&self.request_ids, now.unix_timestamp())
+        {
+            return Some("the access grant ended");
+        }
+        restrictions.blocks(&self.username, &self.login_id, &self.session_id)
+    }
 }
 
 /// The worker's own checks for a Kubernetes grant, on its own policy
@@ -201,4 +226,92 @@ pub(crate) fn admit(
         ci: verified.user.bot.then(|| verified.user.ci.clone()),
         request_ids: effective.request_ids,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use limen_session::snapshot::{ActiveGrant, Restrictions};
+    use time::{Duration, OffsetDateTime};
+
+    use super::Admitted;
+
+    fn admitted(now: OffsetDateTime, request_ids: &[&str]) -> Admitted {
+        Admitted {
+            session_id: "s-1".into(),
+            username: "ada@example.com".into(),
+            login_id: "l-1".into(),
+            actor_type: "user",
+            groups: vec![],
+            resource: "eks-prod".into(),
+            proxy_id: "p-1".into(),
+            expires: now + Duration::hours(1),
+            ci: None,
+            request_ids: request_ids.iter().map(|&s| s.to_owned()).collect(),
+        }
+    }
+
+    fn grant(id: &str, expires: OffsetDateTime) -> ActiveGrant {
+        ActiveGrant {
+            request_id: id.into(),
+            username: "ada@example.com".into(),
+            role: "eks-writer".into(),
+            resource: "eks-prod".into(),
+            expires_at_unix: expires.unix_timestamp(),
+        }
+    }
+
+    #[test]
+    fn a_stream_runs_while_nothing_has_ended() {
+        let now = OffsetDateTime::now_utc();
+        let held = Restrictions {
+            grants: vec![grant("r-1", now + Duration::minutes(30))],
+            ..Restrictions::default()
+        };
+        assert_eq!(admitted(now, &["r-1"]).stop_reason(Some(&held), now), None);
+        assert_eq!(admitted(now, &[]).stop_reason(None, now), None);
+    }
+
+    #[test]
+    fn a_stream_stops_at_its_deadline_even_without_a_snapshot() {
+        let now = OffsetDateTime::now_utc();
+        let a = admitted(now, &[]);
+        assert_eq!(
+            a.stop_reason(None, a.expires),
+            Some("max_session_ttl reached")
+        );
+    }
+
+    /// Upgraded streams (`exec`, `attach`, `port-forward`) use this check as
+    /// well as streaming responses, so a revoked or expired grant ends them.
+    #[test]
+    fn a_stream_stops_when_its_grant_is_revoked_or_expires() {
+        let now = OffsetDateTime::now_utc();
+        let a = admitted(now, &["r-1"]);
+        let revoked = Restrictions::default();
+        assert_eq!(
+            a.stop_reason(Some(&revoked), now),
+            Some("the access grant ended")
+        );
+        let expired = Restrictions {
+            grants: vec![grant("r-1", now)],
+            ..Restrictions::default()
+        };
+        assert_eq!(
+            a.stop_reason(Some(&expired), now),
+            Some("the access grant ended")
+        );
+    }
+
+    #[test]
+    fn a_stream_stops_when_the_user_is_locked() {
+        let now = OffsetDateTime::now_utc();
+        let locked = Restrictions {
+            locked_users: ["Ada@example.com".to_owned()].into(),
+            ..Restrictions::default()
+        };
+        assert_eq!(
+            admitted(now, &[]).stop_reason(Some(&locked), now),
+            Some("user locked")
+        );
+    }
 }

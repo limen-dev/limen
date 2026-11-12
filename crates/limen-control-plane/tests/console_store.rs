@@ -542,12 +542,16 @@ async fn kubernetes_requests_are_listed_in_kubectls_terms() {
     assert_eq!(kept, 0);
 }
 
+static T0: std::sync::OnceLock<time::OffsetDateTime> = std::sync::OnceLock::new();
+
 fn login_request(login: &str, cluster: &str, verb: &str, status: u16, seconds: i64) -> Event {
     let mut e = kube_request(DEVELOPER, cluster, verb, "pods", "web", status);
     e.data["login_id"] = json!(login);
     e.data["worker_id"] = json!("w1");
     e.data["proxy_id"] = json!("p1");
-    e.time += time::Duration::seconds(seconds);
+    // Offsets from one shared instant: events built a few milliseconds apart
+    // would otherwise make "a 90 second session" 90.001 seconds on a slow runner.
+    e.time = *T0.get_or_init(time::OffsetDateTime::now_utc) + time::Duration::seconds(seconds);
     e
 }
 

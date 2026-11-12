@@ -584,14 +584,15 @@ async fn people_the_idp_disabled_are_purged_after_the_window_and_only_them() {
     person(&h, "old.admin@example.com", Some("admin@example.com"), 400).await;
     person(&h, "enabled@example.com", None, 0).await;
 
-    // The background job runs the same purge, so it may get there first: what
-    // matters is who is left, not which of the two did the deleting.
-    let _ = limen_control_plane::idp_check::purge_disabled(&h.state).await;
-    assert!(!exists(&h, "old.idp@example.com").await);
-    assert!(
-        !exists(&h, "old.scim@example.com").await,
-        "SCIM never sends a delete for a user, so its deactivations are purged too"
-    );
+    // The background job runs the same purge, and a person it is deleting right
+    // now is locked (SKIP LOCKED), so this call skips them and returns before
+    // the other transaction commits. What matters is who is left once both are
+    // done, not which of the two did the deleting: purge until they are gone.
+    eventually("the disabled people are purged", || async {
+        let _ = limen_control_plane::idp_check::purge_disabled(&h.state).await;
+        !exists(&h, "old.idp@example.com").await && !exists(&h, "old.scim@example.com").await
+    })
+    .await;
     assert!(exists(&h, "recent.idp@example.com").await, "89 days: kept");
     assert!(
         exists(&h, "old.admin@example.com").await,

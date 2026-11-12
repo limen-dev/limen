@@ -131,7 +131,7 @@ check_prerequisites() {
 # recreated so they enroll again; the rest of the running stack is kept.
 start_stack() {
   stack_setup ${scale_flag[@]+"${scale_flag[@]}"} ${stacks[@]+"${stacks[@]}"}
-  stack_policy_files "$root" "${stacks[@]}" || fail "could not select policy examples"
+  stack_policy_files "$root" ${stacks[@]+"${stacks[@]}"} || fail "could not select policy examples"
   stack_lock
   locked=true
   state="$STACK_STATE"

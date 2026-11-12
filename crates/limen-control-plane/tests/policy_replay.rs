@@ -348,6 +348,32 @@ async fn a_replay_that_cannot_be_audited_does_not_run() {
             break;
         }
     }
+    // A login event is bigger than what may be left, so the loop above can stop
+    // with room for a smaller event, and the replay's own start event (two
+    // digests) would then fit and the replay run. Fill the last bytes with
+    // tiny events until even one is refused: nothing the replay records fits.
+    let mut full = false;
+    for _ in 0..500 {
+        match f
+            .h
+            .state
+            .audit
+            .emit(
+                EventKind::UserLock,
+                limen_audit::Context::default(),
+                serde_json::json!({}),
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                assert!(e.to_string().contains("spool is full"), "{e}");
+                full = true;
+                break;
+            }
+        }
+    }
+    assert!(full, "the spool never filled");
     // The same dry run without a replay still works: it is the replay, which
     // reads who used what, that needs the audit trail.
     f.call(&f.admin, tightened(), true, 0)

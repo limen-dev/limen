@@ -866,20 +866,27 @@ mod tests {
         let e = event(
             EventKind::JoinTokenCreate,
             json!({
-                "token": "abc",
-                "join_token": "def",
+                "token": "leak-token",
+                "join_token": "leak-join",
                 "token_id": "kept",
-                "access_token": "ghi",
-                "Password": "hunter2",
+                "access_token": "leak-access",
+                "Password": "leak-password",
                 "nested": {"api_key": "k", "list": [{"client_secret": "s"}]},
-                "authorization": "Bearer x",
+                "authorization": "Bearer leak-auth",
                 "cookie": "c",
                 "resource": "orders-prod"
             }),
         );
         let text = serde_json::to_string(&to_ocsf(&e, "1")).unwrap();
         for leaked in [
-            "abc", "def", "ghi", "hunter2", "Bearer x", "\"k\"", "\"s\"", "\"c\"",
+            "leak-token",
+            "leak-join",
+            "leak-access",
+            "leak-password",
+            "Bearer leak-auth",
+            "\"k\"",
+            "\"s\"",
+            "\"c\"",
         ] {
             assert!(!text.contains(leaked), "{leaked} leaked: {text}");
         }
