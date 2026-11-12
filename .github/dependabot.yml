@@ -29,7 +29,13 @@ updates:
     directories:
       - /deploy/terraform/modules/audit
       - /deploy/terraform/modules/datadog
+      - /deploy/terraform/modules/discovery
+      - /deploy/terraform/modules/ec2
+      - /deploy/terraform/modules/ecs
+      - /deploy/terraform/modules/foundation
       - /deploy/terraform/examples/audit
+      - /deploy/terraform/examples/complete
+      - /deploy/terraform/examples/kubernetes
     schedule:
       interval: weekly
     commit-message:
