@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     # The build publishes docs/ and the compose README into the site.
-    paths: &paths
+    paths:
       - "website/**"
       - "docs/**"
       - "deploy/compose/README.md"
@@ -17,10 +17,9 @@ on:
       - "deploy/terraform/**/README.md"
       - "mise.toml"
       - ".github/workflows/website.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
+  # Pull requests start this through ci.yml, which reads the paths above (the required check is ci-ok).
+  # Called by ci.yml for pull requests.
+  workflow_call:
   # A manual run ignores the path filter, and publishes when run on main.
   workflow_dispatch:
 
