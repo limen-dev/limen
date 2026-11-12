@@ -104,6 +104,35 @@ const CREDENTIAL_COMMANDS: &[&str] = &[
     "SLAVEOF",
 ];
 
+/// Commands that take no keys and whose arguments are control words or
+/// numbers, never stored data. Their arguments are logged even without
+/// `audit.log_values`, so the trail says what was asked (`SELECT 3`,
+/// `INFO keyspace`). `None` is any subcommand; free-form text such as `ECHO`
+/// and `PING` messages, `CLIENT SETNAME`, and `COMMAND GETKEYS` (which holds
+/// keys) are deliberately not here.
+const PLAIN_ARGS: &[(&str, Option<&[&str]>)] = &[
+    ("SELECT", None),
+    ("INFO", None),
+    ("DBSIZE", None),
+    ("TIME", None),
+    ("LASTSAVE", None),
+    ("ROLE", None),
+    ("WAIT", None),
+    ("COMMAND", Some(&["DOCS", "INFO", "COUNT", "LIST"])),
+    ("CLIENT", Some(&["ID", "GETNAME", "INFO"])),
+];
+
+fn plain_args(insp: &Inspection) -> bool {
+    PLAIN_ARGS.iter().any(|(name, subs)| {
+        *name == insp.name
+            && match (subs, &insp.sub) {
+                (None, _) => true,
+                (Some(subs), Some(sub)) => subs.contains(&sub.as_str()),
+                (Some(_), None) => false,
+            }
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 struct KeySpec {
     first: i64,
@@ -381,12 +410,14 @@ impl Rules {
             "resource": resource,
             "redis_user": redis_user,
         });
-        if audit.log_values {
+        let credential = CREDENTIAL_COMMANDS.contains(&insp.name.as_str());
+        if audit.log_values || (plain_args(insp) && !credential) {
             data["args"] = if CREDENTIAL_COMMANDS.contains(&insp.name.as_str()) {
                 json!("[REDACTED]")
             } else {
                 json!(
-                    args[1..]
+                    // The subcommand has its own field; don't list it twice.
+                    args[1 + usize::from(insp.sub.is_some())..]
                         .iter()
                         .take(AUDIT_LIST_MAX)
                         .map(|a| shorten(&String::from_utf8_lossy(a)))
@@ -1068,6 +1099,36 @@ mod tests {
             let a = args(words);
             let data = Rules::audit_data(&rules.inspect(&a), &a, &on, "c", "u");
             assert!(!data.to_string().contains("s3cret"), "{words:?}: {data}");
+        }
+    }
+
+    #[test]
+    fn plain_control_arguments_are_logged_without_opt_in() {
+        let rules = Rules::new(vec![grant(&[], &[], &[])], specs());
+        let off = RedisAudit::default();
+        for (words, shown) in [
+            (&["SELECT", "3"][..], json!(["3"])),
+            (&["INFO", "keyspace"], json!(["keyspace"])),
+            (&["COMMAND", "DOCS"], json!([])),
+        ] {
+            let a = args(words);
+            let data = Rules::audit_data(&rules.inspect(&a), &a, &off, "c", "u");
+            assert_eq!(data["args"], shown, "{words:?}");
+        }
+        // Free text, keyed commands and credential commands stay redacted.
+        for words in [
+            &["ECHO", "hunter2"][..],
+            &["PING", "hunter2"],
+            &["SET", "k", "hunter2"],
+            &["CLIENT", "SETNAME", "hunter2"],
+            &["COMMAND", "GETKEYS", "GET", "hunter2"],
+            &["HELLO", "3", "AUTH", "default", "hunter2"],
+            &["CONFIG", "GET", "hunter2"],
+        ] {
+            let a = args(words);
+            let data = Rules::audit_data(&rules.inspect(&a), &a, &off, "c", "u");
+            assert!(!data.to_string().contains("hunter2"), "{words:?}: {data}");
+            assert!(data.get("args").is_none(), "{words:?}: {data}");
         }
     }
 

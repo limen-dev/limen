@@ -1107,9 +1107,23 @@ fn redis_statement(data: &serde_json::Value) -> String {
     let mut parts: Vec<String> = Vec::new();
     parts.extend(text(data, "command").map(str::to_owned));
     parts.extend(text(data, "subcommand").map(str::to_owned));
-    let listed = words("args").or_else(|| words("keys")).unwrap_or_default();
+    let args = words("args");
+    let listed = args.clone().or_else(|| words("keys")).unwrap_or_default();
     let shown = listed.len();
     parts.extend(listed);
+    // Arguments that are withheld (values, free text): say how many words the
+    // command had, so `ECHO` is not mistaken for a bare `ECHO`.
+    if args.is_none()
+        && shown == 0
+        && let Some(arity) = number(data, "arity")
+        && arity > 1 + i64::from(text(data, "subcommand").is_some())
+    {
+        let hidden = arity - 1 - i64::from(text(data, "subcommand").is_some());
+        parts.push(format!(
+            "({hidden} arg{} not logged)",
+            if hidden == 1 { "" } else { "s" }
+        ));
+    }
     // The event lists at most 100 keys; say when there were more.
     if let Some(total) = number(data, "keys_total")
         && let Ok(total) = usize::try_from(total)
@@ -1963,6 +1977,33 @@ pub async fn menu_pages(state: &crate::state::AppState, username: &str) -> (bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redis_statement_says_when_arguments_were_withheld() {
+        let st = |v: serde_json::Value| redis_statement(&v);
+        // Keys shown: nothing more to say.
+        assert_eq!(
+            st(serde_json::json!({"command":"SET","keys":["k"],"arity":3})),
+            "SET k"
+        );
+        // Free text withheld.
+        assert_eq!(
+            st(serde_json::json!({"command":"ECHO","keys":[],"arity":2})),
+            "ECHO (1 arg not logged)"
+        );
+        // Subcommand is not an argument.
+        assert_eq!(
+            st(serde_json::json!({"command":"COMMAND","subcommand":"DOCS","keys":[],"arity":2})),
+            "COMMAND DOCS"
+        );
+        // Plain arguments logged.
+        assert_eq!(
+            st(serde_json::json!({"command":"SELECT","keys":[],"args":["3"],"arity":2})),
+            "SELECT 3"
+        );
+        // A refusal has no arity.
+        assert_eq!(st(serde_json::json!({"command":"ASD"})), "ASD");
+    }
 
     #[test]
     fn summary_keeps_only_listed_fields() {
