@@ -158,8 +158,8 @@
           "type": "boolean"
         },
         "normalize_literals": {
-          "default": false,
-          "description": "Replace literals in logged statement text with `?` (`audit.normalize_literals`).",
+          "default": true,
+          "description": "Replace literals in logged statement text with `?`. On by default, so\nthe trail holds the shape of a statement and not the values in it; set\n`false` to log the full text. Always written to the snapshot (never\nskipped), so a component that reads it sees the setting and does not\nfall back to its own default during an upgrade.",
           "type": "boolean"
         },
         "password_dir": {

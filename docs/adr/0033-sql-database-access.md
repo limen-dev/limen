@@ -104,3 +104,11 @@ All five slices are implemented. The five questions were answered as proposed: s
   - `tls_ca_file` is required (no system roots), with `tls_server_name` for certificates that carry another name.
 - **Not verified.** RDS and Aurora IAM tokens and `AWSAuthenticationPlugin`, the Redshift credential APIs, MD5 against a real Redshift server, and Redshift behavior in general. The PostgreSQL `rds_iam` role is a stub in tests; the MySQL IAM plugin does not exist in vanilla MySQL and is untested.
 - **Deferred.** Fuzzing the MySQL codec and the PostgreSQL frame splitter (ADR-0012 promises it), cursors, compression, `LOCAL INFILE`, GSSAPI, and statement-level policy.
+
+## Amendment (2026-11-12): literals are replaced by default
+
+Statement text in the audit trail used to be logged in full, with `normalize_literals` as a per-resource opt-in (an owner decision at Phase 6). The default is now the reverse: `normalize_literals` is **true**, so `WHERE email = 'a@b.c'` is logged as `WHERE email = ?`, and `normalize_literals: false` logs the full text. Reasons: the trail goes to S3 and Datadog, which more people can read and which keep data longer than the database; statements carry personal data, tokens and pasted credentials; and the Redis, MongoDB and search audits already withhold values by default. The cost is that an auditor can no longer see which row a statement read or changed from the trail alone. A resource that needs that opts out knowingly.
+
+- **Upgrade:** the policy snapshot always carries the field. A worker from before this change defaults to `false` when it is missing, so it logs full text until it is upgraded (control plane first, then proxies, then workers, as always). Existing resources that never set the field start normalizing once their worker is upgraded; those that set `normalize_literals: false` keep full text. Delegated writers cannot set the field, so their resources get the default.
+- **Known gap:** comments (`/* ... */`, `-- ...`) are kept as written, so a value placed in a comment is logged. Masking them is not done here.
+- **Unverified:** the normalizer is a tokenizer over `sqlparser`; it was not re-reviewed or fuzzed for this change, and a literal it misses stays in the trail.

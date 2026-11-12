@@ -1396,3 +1396,25 @@ fn a_search_target_with_defaults_serializes_as_before() {
         .expect("target");
     assert!(!t.tls && t.audit.redact_ids && !t.audit.log_bodies);
 }
+
+#[test]
+fn sql_literals_are_normalized_unless_the_resource_opts_out() {
+    use crate::model::DbTarget;
+    let default: DbTarget = serde_json::from_value(serde_json::json!({"endpoint": "db:5432"}))
+        .expect("a target with only an endpoint parses");
+    assert!(default.normalize_literals, "normalizing is the default");
+    // The snapshot always names it, so an older component can't fall back to its own default.
+    assert_eq!(
+        serde_json::to_value(&default).expect("serializes")["normalize_literals"],
+        true
+    );
+    let off: DbTarget = serde_json::from_value(
+        serde_json::json!({"endpoint": "db:5432", "normalize_literals": false}),
+    )
+    .expect("parses");
+    assert!(!off.normalize_literals);
+    assert_eq!(
+        serde_json::to_value(&off).expect("serializes")["normalize_literals"],
+        false
+    );
+}
