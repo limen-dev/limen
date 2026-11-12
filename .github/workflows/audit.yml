@@ -14,7 +14,7 @@ on:
       - "deny.toml"
       - "mise.toml"
       - ".github/workflows/audit.yml"
-  # Pull requests start this through ci.yml, which reads the paths above (the required check is ci-ok).
+  # Pull requests run through ci.yml, which reads the paths above.
   schedule:
     - cron: "17 5 * * 1-5"
   # Called by release.yml, which tests the exact commit before building anything.

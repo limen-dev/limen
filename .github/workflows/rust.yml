@@ -29,7 +29,7 @@ on:
       - "docs/guides/audit-ocsf.md"
       - "assets/logo-mark.svg"
       - ".github/workflows/release.yml"
-  # Pull requests start this through ci.yml, which reads the paths above (the required check is ci-ok).
+  # Pull requests run through ci.yml, which reads the paths above.
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
     inputs:

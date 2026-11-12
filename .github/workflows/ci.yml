@@ -1,13 +1,9 @@
 name: ci
 
-# Starts the path-filtered workflows (rust, audit, infra, workflows, website) for a pull request
-# and reports one result, `ci-ok`, which is the check the ruleset requires. A workflow-level
-# `paths:` filter that matches nothing leaves its checks "Expected" forever, so a required check
-# cannot sit behind one; here the filter is a job, and `ci-ok` passes when a skipped area
-# was not needed and fails when a needed one failed.
-# The paths come from each workflow's own `push` trigger (scripts/ci-changes.py).
+# Runs the path-filtered workflows a pull request touches and reports one check, `ci-ok`, for the
+# ruleset to require. A workflow-level `paths:` filter that matches nothing never reports its
+# checks, which would block the merge; here the filter is a job instead.
 # A draft pull request runs nothing; marking it ready for review starts the run.
-# secret-scan has no path filter and is not part of this.
 # GitHub-hosted runners (docs/runbooks/ci-runners.md).
 
 on:
@@ -90,8 +86,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.website == 'true'
     uses: ./.github/workflows/website.yml
-    # website.yml's deploy job declares these. A called workflow may not ask for more than the
-    # caller grants, even for a job that never runs on a pull request (it needs main).
+    # The deploy job in website.yml needs these, and a caller must grant what the callee declares.
     permissions:
       contents: read
       pages: write
@@ -99,8 +94,8 @@ jobs:
 
   ci-ok:
     name: ci-ok
-    # always(): a skipped need is normal, a failed or cancelled one is not. `changes` is a need
-    # too, so a broken filter fails the gate instead of skipping every area and passing.
+    # always(), so a failed need fails this job instead of skipping it. `changes` is a need too:
+    # if the filter breaks, every area is skipped and the gate must not pass.
     if: ${{ always() && !github.event.pull_request.draft }}
     needs: [changes, rust, audit, infra, workflows, website]
     runs-on: ubuntu-24.04
