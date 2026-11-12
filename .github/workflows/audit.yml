@@ -7,17 +7,14 @@ on:
   push:
     branches: [main]
     # Only these start it: add a path here when a check reads a new file (manifests, lock file, deny config).
-    paths: &paths
+    paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "deny.toml"
       - "mise.toml"
       - ".github/workflows/audit.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
+  # Pull requests run through ci.yml, which reads the paths above.
   schedule:
     - cron: "17 5 * * 1-5"
   # Called by release.yml, which tests the exact commit before building anything.

@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     # Only these start it: add a path here when a check reads a new file (files the checks read).
-    paths: &paths
+    paths:
       - "deploy/terraform/**"
       - "deploy/helm/**"
       - "deploy/grafana/**"
@@ -22,10 +22,7 @@ on:
       - "deploy/compose/scripts/test-policy-selection.sh"
       - "crates/**"
       - ".github/workflows/infra.yml"
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths: *paths
+  # Pull requests run through ci.yml, which reads the paths above.
   # Called by release.yml, which tests the exact commit before building anything.
   workflow_call:
   # A manual run ignores the path filter.
