@@ -6,7 +6,7 @@
 //! grants.
 
 use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect};
-use sqlparser::tokenizer::{Token, Tokenizer};
+use sqlparser::tokenizer::{Token, Tokenizer, Whitespace};
 
 /// The SQL flavour of a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +170,10 @@ pub fn split(sql: &str, flavor: Flavor) -> Vec<Statement> {
 
 /// Replace literals with `?` (`audit.normalize_literals`). Text that can't be
 /// tokenized is withheld entirely rather than logged with its literals.
+///
+/// Comments are masked too, since a value can sit in one. The exception is a
+/// MySQL executable comment (`/*! ... */`, `/*!50000 ... */`): the server runs
+/// its content, so it is normalized as SQL and kept, not hidden.
 #[must_use]
 pub fn normalize(sql: &str, flavor: Flavor) -> String {
     let Ok(tokens) = Tokenizer::new(flavor.dialect(), sql).tokenize() else {
@@ -178,6 +182,19 @@ pub fn normalize(sql: &str, flavor: Flavor) -> String {
     tokens
         .iter()
         .map(|t| match t {
+            Token::Whitespace(Whitespace::SingleLineComment { prefix, comment }) => {
+                let newline = if comment.ends_with('\n') { "\n" } else { "" };
+                format!("{prefix}?{newline}")
+            }
+            Token::Whitespace(Whitespace::MultiLineComment(body)) => match body.strip_prefix('!') {
+                Some(code) if flavor == Flavor::Mysql => {
+                    // Skip the optional version digits, then normalize what runs.
+                    let digits = code.chars().take_while(char::is_ascii_digit).count();
+                    let (version, code) = code.split_at(digits);
+                    format!("/*!{version}{}*/", normalize(code, flavor))
+                }
+                _ => "/* ? */".to_owned(),
+            },
             Token::Number(..)
             | Token::SingleQuotedString(_)
             | Token::DoubleQuotedString(_)
@@ -270,6 +287,76 @@ mod tests {
             "select \"Name\" from users where id = ? and email = ? and x = ?"
         );
         assert!(normalize("select 'oops", Flavor::Postgres).contains("withheld"));
+    }
+
+    #[test]
+    fn comments_are_masked_but_executable_mysql_comments_are_kept() {
+        let pg = |q: &str| normalize(q, Flavor::Postgres);
+        let my = |q: &str| normalize(q, Flavor::Mysql);
+        assert_eq!(pg("select 1 -- tok_9f\nfrom t"), "select ? --?\nfrom t");
+        assert_eq!(pg("select /* tok_9f */ 1"), "select /* ? */ ?");
+        assert_eq!(my("select 1 # tok_9f\n"), "select ? #?\n");
+        // Postgres has no executable comments: `/*!` is only a comment there.
+        assert_eq!(pg("select /*! tok_9f */ 1"), "select /* ? */ ?");
+        // MySQL runs the content of `/*! ... */`, so it must stay visible.
+        // (The tokenizer already reads them as SQL, so the markers go but the
+        // content shows with its literals replaced.)
+        let ran = my("select 1 /*!50000 , 'tok_9f' */");
+        assert!(ran.contains(", ?") && !ran.contains("tok_9f"), "{ran}");
+        assert!(my("/*! drop table t */").contains("drop table t"));
+        // An optimizer hint is an ordinary comment.
+        assert_eq!(my("select /*+ tok_9f */ 1"), "select /* ? */ ?");
+    }
+
+    /// Whatever is typed, the canary never reaches the normalized text. A
+    /// small deterministic generator stands in for a fuzzer so this runs in CI;
+    /// `fuzz/fuzz_targets/sql_normalize.rs` is the open-ended version.
+    #[test]
+    fn a_secret_in_any_literal_or_comment_never_survives() {
+        const CANARY: &str = "tok_9f3a";
+        // Which flavors read each form as a literal or comment: 1 PostgreSQL, 2 MySQL.
+        // (In PostgreSQL a double-quoted word is an identifier and `#` an operator;
+        // MySQL has no dollar quotes, `U&'` or nested comments, so those words stay.)
+        type Wrap = (u8, fn(&str) -> String);
+        let wrap: &[Wrap] = &[
+            (3, |c| format!("'{c}'")),
+            (3, |c| format!("'it''s {c}'")),
+            (3, |c| format!("'back\\\\{c}'")),
+            (1, |c| format!("E'\\'{c}'")),
+            (1, |c| format!("$${c}$$")),
+            (1, |c| format!("$q${c}$q$")),
+            (2, |c| format!("\"{c}\"")),
+            (3, |c| format!("N'{c}'")),
+            (3, |c| format!("X'{c}'")),
+            (1, |c| format!("U&'{c}'")),
+            (3, |c| format!("-- {c}\n")),
+            (3, |c| format!("/* {c} */")),
+            (1, |c| format!("/* a /* {c} */ b */")),
+            (2, |c| format!("# {c}\n")),
+            (3, |c| format!("/*+ {c} */")),
+        ];
+        let glue = [" ", "", ", ", " = ", "(", ")", " and ", ";", "\n", "\t"];
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            usize::try_from(x >> 33).unwrap_or(0)
+        };
+        for _ in 0..20_000 {
+            for flavor in [Flavor::Postgres, Flavor::Mysql] {
+                let mut q = String::from("select ");
+                for _ in 0..=(next() % 6) {
+                    q.push_str(glue[next() % glue.len()]);
+                    let (mask, make) = wrap[next() % wrap.len()];
+                    if mask & if flavor == Flavor::Mysql { 2 } else { 1 } != 0 {
+                        q.push_str(&make(CANARY));
+                    }
+                }
+                let out = normalize(&q, flavor);
+                assert!(!out.contains(CANARY), "{flavor:?}: {q:?} -> {out:?}");
+            }
+        }
     }
 
     #[test]
