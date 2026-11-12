@@ -184,6 +184,21 @@ impl Rig {
     async fn kinds(&self) -> Vec<EventKind> {
         self.h.audit_kinds().await
     }
+
+    /// Run the expiry job's pass until it has written an expiry event. The
+    /// control plane's own job runs the same pass, and a row it is expiring
+    /// is locked (`FOR UPDATE SKIP LOCKED`), so a single call here can skip it
+    /// and return before the other transaction commits.
+    async fn expire_until_audited(&self) {
+        for _ in 0..100 {
+            access::expire(&self.h.state).await.expect("expire");
+            if self.kinds().await.contains(&EventKind::AccessExpire) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("nothing was expired");
+    }
 }
 
 #[tokio::test]
@@ -326,7 +341,7 @@ async fn ask_approve_use_and_expire() {
         snapshot.restrictions.grants.is_empty(),
         "expired grants leave the snapshot"
     );
-    access::expire(&r.h.state).await.expect("expire");
+    r.expire_until_audited().await;
     access::expire(&r.h.state).await.expect("expire again");
 
     let kinds = r.kinds().await;
@@ -744,7 +759,7 @@ async fn a_pending_request_lapses_and_is_audited() {
         .await
         .expect_err("lapsed");
     assert_eq!(late.code(), Code::FailedPrecondition);
-    access::expire(&r.h.state).await.expect("expire");
+    r.expire_until_audited().await;
     let mine = r
         .access()
         .list_access_requests(forwarded(
