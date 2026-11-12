@@ -456,19 +456,28 @@ pub async fn prune(state: &AppState) {
     }
 }
 
-/// Run the checks on the schedule, and keep the metrics fresh. Does nothing
-/// to the schedule when the interval is zero; the metrics still publish.
-pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
-    let interval = state.config.selftest_interval;
-    // A run this control plane started before it stopped will never finish.
-    let _ = sqlx::query(
+/// Mark the runs this control plane started before it last stopped as
+/// abandoned: nothing will finish them. Called once at startup, before the API
+/// serves and the job starts, so it can never touch a run begun in this
+/// process.
+pub async fn abandon_own_stale(state: &AppState) {
+    if let Err(e) = sqlx::query(
         "UPDATE selftest_runs SET status = 'abandoned', finished_at = now(),
                 error = 'the control plane running it restarted'
          WHERE status = 'running' AND control_plane = $1",
     )
     .bind(&state.config.id)
     .execute(&state.db)
-    .await;
+    .await
+    {
+        tracing::warn!(error = %e, "abandoning self-test runs left by a restart failed");
+    }
+}
+
+/// Run the checks on the schedule, and keep the metrics fresh. Does nothing
+/// to the schedule when the interval is zero; the metrics still publish.
+pub async fn job(state: AppState, mut shutdown: watch::Receiver<bool>) {
+    let interval = state.config.selftest_interval;
     // Let a fresh process settle before it judges itself, but never wait
     // longer than half an interval.
     let grace = STARTUP_GRACE.min(interval / 2);

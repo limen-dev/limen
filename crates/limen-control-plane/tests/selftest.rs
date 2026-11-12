@@ -358,3 +358,44 @@ async fn the_schedule_runs_by_itself_once_across_replicas() {
     peer.begin_shutdown();
     let _ = peer.finish().await;
 }
+
+#[tokio::test]
+async fn a_restart_abandons_its_own_stale_runs_and_only_those() {
+    let Some(r) = rig().await else { return };
+    for (id, plane) in [
+        (uuid::Uuid::now_v7(), "cp-test"),
+        (uuid::Uuid::now_v7(), "cp-other"),
+    ] {
+        sqlx::query(
+            "INSERT INTO selftest_runs (id, trigger, requested_by, control_plane, status, started_at)
+             VALUES ($1, 'manual', 'x', $2, 'abandoned', now() - interval '1 hour')",
+        )
+        .bind(id)
+        .bind(plane)
+        .execute(&r.h.state.db)
+        .await
+        .expect("insert");
+    }
+    // One running row of this control plane (the abandoned ones don't count).
+    sqlx::query(
+        "INSERT INTO selftest_runs (id, trigger, requested_by, control_plane, status)
+         VALUES ($1, 'manual', 'x', 'cp-test', 'running')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .execute(&r.h.state.db)
+    .await
+    .expect("running");
+    limen_control_plane::selftest::abandon_own_stale(&r.h.state).await;
+    assert_eq!(
+        r.count("SELECT count(*) FROM selftest_runs WHERE status = 'running'")
+            .await,
+        0
+    );
+    assert_eq!(
+        r.count(
+            "SELECT count(*) FROM selftest_runs WHERE status = 'abandoned' AND error LIKE '%restarted%'"
+        )
+        .await,
+        1
+    );
+}

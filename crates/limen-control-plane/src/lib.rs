@@ -248,6 +248,8 @@ pub async fn run(
     // "shutting down" and the registry row must stay fresh while the spool
     // ships.
     let (done_tx, done) = watch::channel(false);
+    // Before anything can start a run in this process.
+    selftest::abandon_own_stale(&state).await;
     state.pipeline.start_sinks(&state.db);
     tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
