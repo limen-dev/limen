@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [redis_frames, mongo_wire, amqp_frames, kafka_header, mysql_packets, pg_frames, policy_yaml, policy_eval, policy_scalars, cp_parsers, proxy_web]
+        target: [redis_frames, mongo_wire, amqp_frames, kafka_header, mysql_packets, pg_frames, policy_yaml, policy_eval, policy_scalars, cp_parsers, proxy_web, sql_normalize]
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

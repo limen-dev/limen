@@ -91,7 +91,7 @@
 <h2>Commands</h2>
 <p class="hint">
   <strong>{{ statement_total }}</strong> command{% if statement_total != 1 %}s{% endif %}: <strong>{{ statement_total - statement_errors }}</strong> allowed, <strong>{{ statement_errors }}</strong> refused by policy.
-  "Allowed" means policy let the command through to the server; the server's own answer is not recorded. Redis sessions have no terminal recording; this is the audited record of what was sent. Key names are shown (hashed if the resource asks for it); values are never kept.
+  "Allowed" means policy let the command through to the server; the server's own answer is not recorded. Redis sessions have no terminal recording; this is the audited record of what was sent. Key names are shown (hashed if the resource asks for it). Values and free-text arguments are not kept unless the resource opts in; a command that shows none says how many arguments were left out.
   {% if statement_total > 500 %}Showing the first 500. The full trail is in the audit sinks.{% endif %}
 </p>
 {% else if s.is_mongo %}

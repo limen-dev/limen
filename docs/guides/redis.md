@@ -37,7 +37,7 @@ Full syntax: [policy reference](../policy.md).
 
 ## What is audited
 
-One `redis.command` event per command, written *before* forwarding (if it can't be written, the command is refused): user, session, command, subcommand, key names, argument count, resource, Redis user. **Values are not logged**; `audit.log_values: true` opts in, and `audit.redact_keys: true` hashes key names. `AUTH`, `HELLO`, `ACL`, `MIGRATE` and `CONFIG` arguments are never logged. A refusal is `auth.denied` with `action: redis`. `session.start` and `session.end` carry `kind: redis`. Locking a user or killing a session ends the session as usual.
+One `redis.command` event per command, written *before* forwarding (if it can't be written, the command is refused): user, session, command, subcommand, key names, argument count, resource, Redis user. **Values are not logged**; `audit.log_values: true` opts in (a short list of keyless control commands, such as `SELECT 3` and `INFO keyspace`, always logs its arguments, and the console shows `(N args not logged)` for other commands that show no keys), and `audit.redact_keys: true` hashes key names. `AUTH`, `HELLO`, `ACL`, `MIGRATE` and `CONFIG` arguments are never logged. A refusal is `auth.denied` with `action: redis`. `session.start` and `session.end` carry `kind: redis`. Locking a user or killing a session ends the session as usual.
 
 The console session page lists commands ([command lists](console.md)) with key names (hashed under `redact_keys`) and arguments only under `log_values`. A command is "allowed" (policy passed it on) or "refused" (with the reason). The server's reply isn't recorded, so a command the server's ACL rejects still shows as allowed.
 

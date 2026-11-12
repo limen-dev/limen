@@ -34,7 +34,7 @@ The proxy adds `session.start` and `session.end` (with `database`). Refused logi
 - Text is logged as written, one event per statement in a multi-statement message. Statements over 256 KiB are truncated; `statement_sha256` hashes the whole.
 - Prepared statements: the text is logged at `Parse`/`COM_STMT_PREPARE`; each `Execute` logs the statement name and `parse_query_id`. **Parameter values are never logged.**
 - Never logged: result rows, `COPY` data, passwords.
-- `normalize_literals: true` on a resource replaces literals with `?` (`email = 'a@b.c'` becomes `email = ?`). Text that can't be tokenized is withheld.
+- Literals are replaced with `?` in logged statement text by default (`email = 'a@b.c'` becomes `email = ?`), so the trail shows what was run but not the values in it. Comments are replaced too (`-- ?`, `/* ? */`), except a MySQL `/*! ... */` comment, which the server runs and so stays visible as SQL. Text that can't be tokenized is withheld. Set `normalize_literals: false` on a resource to log the full text; do that only where the audit sinks are as tightly held as the database.
 - The console session page lists the statements ([command lists](console.md)); text is kept up to 16 KiB.
 - Statement text can still contain secrets a user typed. Treat the audit store accordingly ([threat model](../threat-model.md)).
 
@@ -91,7 +91,7 @@ spec:
 | `tls_ca_file` | PEM bundle that signs the database's certificate. **Required**: certificate and name are verified. |
 | `tls_server_name` | Certificate name, when it differs from the host in `endpoint`. |
 | `insecure_dev` | Plain text to the database. Refused unless the worker runs with `--allow-insecure-db-targets` (local compose only). |
-| `normalize_literals` | Replace literals in logged text with `?`. |
+| `normalize_literals` | Replace literals in logged text with `?`. On by default; `false` logs the full text. |
 | `cluster_identifier` / `workgroup` | Redshift IAM: provisioned cluster or serverless workgroup. |
 | `admin_user`, `admin_password_file`, `bootstrap` | Role bootstrap. `admin_secret_arn` (Secrets Manager) is not supported yet; use the password file. |
 
