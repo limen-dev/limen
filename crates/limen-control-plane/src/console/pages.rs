@@ -433,7 +433,7 @@ pub async fn resources(
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
-        // A decoy (ADR-0052) is not a resource: no worker serves it, nothing
+        // A decoy (ADR-0053) is not a resource: no worker serves it, nothing
         // is reachable, and the policy page is where an admin sees it.
         if r.spec.honeytoken.is_some() {
             continue;

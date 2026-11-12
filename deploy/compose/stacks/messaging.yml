@@ -23,7 +23,9 @@ services:
       - ./config/targets/messaging/rabbitmq.conf:/etc/rabbitmq/conf.d/90-limen.conf:ro
       - ./config/targets/messaging/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # As the rabbitmq user, never root: a root-run CLI that starts before the server has made its
+      # Erlang cookie creates it root-owned, and the server (uid 999) then dies with "eacces".
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 3s
       timeout: 10s
       retries: 40

@@ -5,7 +5,7 @@
 |---|---|
 | `crates/` | Rust workspace: four binaries, shared libraries, and test crates. What each crate does: [design §12](docs/design.md#12-workspace-layout) |
 | `proto/` | Protobuf definitions for the control plane API and the worker tunnel |
-| `deploy/` | `compose/` (the local dev stack, started by `setup.sh`), `docker/`, `grafana/` (dashboards and alert rules, generated for Athena and Trino), `kubernetes/`, `terraform/` (audit store, Datadog monitors) |
+| `deploy/` | `compose/` (the local dev stack, started by `setup.sh`), `docker/`, `grafana/` (dashboards and alert rules, generated for Athena and Trino), `helm/` (the chart), `kubernetes/`, `prometheus/` (alert rules), `terraform/` (audit store, Datadog monitors) |
 | `demos/` | One demo per phase, which checks its exit criteria against a running stack |
 | `docs/` | Design, ADRs, threat model, policy and component references, guides (for users), runbooks (for operators) |
 | `examples/` | Example policy documents |

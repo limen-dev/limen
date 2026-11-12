@@ -8,7 +8,7 @@
 - **Producers**: proxy, worker, and control plane. Each writes to its own **local segmented spool**: append-only files, `u32 len | u32 crc32c | payload` framing, group-commit fsync every 50 ms or 256 events, a durable consumer offset, and 64 MiB segments deleted after ack. The spool's max size and high-water mark are configurable.
 - **Transport**: producers stream batches to control plane ingest (gRPC, through the proxy for workers). The control plane acks only after its own spool has fsynced. Producers retry until ack, so delivery is **at-least-once**. Consumers deduplicate on `event_id`.
 - **Sinks** (control plane, leader per shard):
-  - **S3**: JSONL.gz batches with SSE-KMS and optional Object Lock. Each batch gets a signed manifest that chains `prev_manifest_sha256` per writer instance. `limen admin audit verify` walks the chain.
+  - **S3**: JSONL.gz batches with SSE-KMS and optional Object Lock. Each batch gets a signed manifest that chains `prev_manifest_sha256` per writer instance. `limen audit verify` walks the chain.
   - **Datadog**: Logs HTTP intake.
 
   Each sink has its own offset, so a Datadog outage doesn't hold back S3 and vice versa.

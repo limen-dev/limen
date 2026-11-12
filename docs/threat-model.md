@@ -306,7 +306,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 | T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
 | Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |
 
-### TB16: Honeytoken resources (ADR-0052)
+### TB16: Honeytoken resources (ADR-0053)
 *Built in the honeytoken PR. Tested against local stand-ins only.*
 
 | Threat | Mitigation |
@@ -367,7 +367,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 ## 7. Review log
 | Date | Phase | Change |
 |---|---|---|
-| 2026-11-10 | #108 | Honeytoken resources (ADR-0052, TB16): a decoy resource kind kept apart from real resources, new audit event `detect.honeytoken`, new proxy and control-plane touch checks. No new store or entry point |
+| 2026-11-10 | #108 | Honeytoken resources (ADR-0053, TB16): a decoy resource kind kept apart from real resources, new audit event `detect.honeytoken`, new proxy and control-plane touch checks. No new store or entry point |
 | 2026-11-08 | #111 | IdP-driven offboarding (ADR-0047): the CLI sends the IdP's refresh token at login; the control plane stores it sealed and checks logins on a schedule (TB0). New table `idp_logins`, new audit events `idp.offboard` and `idp.check_failed`. Reverses the ADR-0006 default of storing no refresh token, when `--idp-token-key` is set |
 | 2026-11-05 | Pentest | Static code review ([`pentest-plan.md`](pentest-plan.md)): revoked components are refused at grant admission, by peer proxies and by the control plane API (TB2); components send only their own audit event kinds and sessions, and a session keeps its first identity, recording link and hash (TB3, TB6, TB7); connections are capped per source and anonymous API connections are time-limited (TB1); the policy access diff sees a grant's scope, not only its principals (ADR-0042 §4). Still open, so the mitigations above are not fully true for them: a worker's forged `session.start` that is projected first, the unsigned chain-resume manifest, and worker dials to brokers a Kafka or Mongo server names (see the plan) |
 | 2026-11-09 | ADR-0049 | OCSF export (TB6): separate bucket and key for the SIEM, secret-named fields redacted, a bounded lag so the projection cannot fill the spool. Tested against SeaweedFS only (no SIEM or Security Lake) |

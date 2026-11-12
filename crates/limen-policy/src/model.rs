@@ -569,7 +569,7 @@ pub struct ResourceSpec {
     /// every other resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated: Option<Delegated>,
-    /// Makes the document a decoy instead of a resource (ADR-0052). Set, no
+    /// Makes the document a decoy instead of a resource (ADR-0053). Set, no
     /// protocol section may be. Left out otherwise, so components from before
     /// the decoy read every other resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]

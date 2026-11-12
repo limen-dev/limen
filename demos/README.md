@@ -23,7 +23,7 @@ running one: they build the CLI and start containers.
 | `demo-phase13.sh` | Access requests and break-glass, search, discovery, live watch |
 | `demo-phase14.sh` | The management API (ADR-0042) |
 | `demo-shadow.sh` | Shadow mode for deny rules (ADR-0046) |
-| `demo-honeytoken.sh` | Honeytoken resources: a decoy that is listed, refused like any name, and audited (ADR-0052) |
+| `demo-honeytoken.sh` | Honeytoken resources: a decoy that is listed, refused like any name, and audited (ADR-0053) |
 | `demo-policy-suggest.sh` | `limen policy suggest`: removals proposed from real sessions (ADR-0050) |
 | `demo-replay.sh` | Replay recorded sessions against a policy change (ADR-0051) |
 | `demo-idp-offboarding.sh` | IdP-driven onboarding (groups become roles) and offboarding against a real Dex (ADR-0047) |

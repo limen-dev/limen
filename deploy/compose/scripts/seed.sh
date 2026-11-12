@@ -40,7 +40,7 @@ seed_messaging() {
   # container would otherwise just run out the two-minute timeout.
   local up=false
   for _ in $(seq 1 240); do
-    if "${compose[@]}" exec -T rabbitmq-target rabbitmq-diagnostics -q ping >/dev/null 2>&1; then up=true; break; fi
+    if "${compose[@]}" exec -T -u rabbitmq rabbitmq-target rabbitmq-diagnostics -q ping >/dev/null 2>&1; then up=true; break; fi
     if [ -n "$("${compose[@]}" ps -q --status exited rabbitmq-target 2>/dev/null)" ]; then
       "${compose[@]}" logs --tail 20 rabbitmq-target >&2 || true
       fail "rabbitmq exited at start (its log is above)"

@@ -136,7 +136,7 @@ impl Access for AccessService {
             (user.username.clone(), user.roles.clone())
         };
         let resource = r.resource.trim();
-        // Explaining a honeytoken is a touch (ADR-0052), before anything can
+        // Explaining a honeytoken is a touch (ADR-0053), before anything can
         // fail on the request; an admin looking at another user's access is
         // not. The answer is the ordinary one: the decoy is in no role's
         // reach, so it reads as a resource the caller can't reach.

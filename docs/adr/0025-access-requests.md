@@ -2,6 +2,7 @@
 
 - Status: Accepted and built (Phase 13). The owner asked for the whole phase on 2026-10-25.
 - Date: 2026-10-14
+- Amended by ADR-0052 (2026-11-11): the CLI verbs are `limen requests approve|deny|cancel`; `limen admin approve|deny` no longer exists.
 
 ## Context
 Today access is standing: if a role maps to your groups, you can reach its resources whenever you like. The design (ADR-0008) reserved `Decision::RequiresApproval` and every enforcement point already treats it as deny, with tests. The goal now is access that **exists only when someone asked for it, for a stated reason, for a limited time**: "I need `orders-prod` for 30 minutes because of incident 123."

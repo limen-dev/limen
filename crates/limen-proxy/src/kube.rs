@@ -309,7 +309,7 @@ async fn open(
         .policy
         .fresh(now)
         .map_err(|e| sessions::failed(format!("access can't be decided right now ({e})")))?;
-    // A honeytoken answers like any cluster the caller can't reach (ADR-0052).
+    // A honeytoken answers like any cluster the caller can't reach (ADR-0053).
     let decoy = snapshot.policy.honeytoken(cluster).is_some();
     if let Some(why) = snapshot
         .restrictions

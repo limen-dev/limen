@@ -1,4 +1,4 @@
-//! Honeytoken resources end to end (ADR-0052): a decoy is listed for the
+//! Honeytoken resources end to end (ADR-0053): a decoy is listed for the
 //! role it is exposed to, every attempt to use it is refused like any other
 //! name and audited as `detect.honeytoken`, and nothing a wildcard role says
 //! reaches it.

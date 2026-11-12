@@ -178,33 +178,30 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Your access requests. `--approvals` shows the ones waiting for you.
+    /// Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours.
+    #[command(args_conflicts_with_subcommands = true)]
     Requests {
-        /// Requests you may approve or deny.
-        #[arg(long, conflicts_with = "all")]
-        approvals: bool,
-        /// Every request (limen:admin or limen:auditor).
-        #[arg(long)]
-        all: bool,
-        /// pending, approved, denied, expired, cancelled, or revoked.
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        list: commands::access::RequestsListArgs,
+        #[command(subcommand)]
+        command: Option<commands::access::RequestsCommand>,
     },
-    /// Approve an access request. Never your own.
+    /// Approve an access request (the same as `limen requests approve`).
+    #[command(hide = true)]
     Approve {
         id: String,
         #[arg(long, short = 'm')]
         comment: Option<String>,
     },
-    /// Deny an access request.
+    /// Deny an access request (the same as `limen requests deny`).
+    #[command(hide = true)]
     Deny {
         id: String,
         #[arg(long, short = 'm')]
         comment: Option<String>,
     },
-    /// Withdraw an access request of yours that is still waiting.
+    /// Withdraw an access request (the same as `limen requests cancel`).
+    #[command(hide = true)]
     Cancel { id: String },
     /// Say why you can or cannot reach a resource.
     Explain {
@@ -332,7 +329,7 @@ enum Command {
         command: commands::admin::AdminCommand,
     },
     /// The management API: read policy documents and write resources, as an
-    /// admin or as a bot with a policy_writer grant (ADR-0042).
+    /// admin or as a bot with a policy_writer grant.
     Manage {
         #[command(subcommand)]
         command: commands::manage::ManageCommand,
@@ -789,20 +786,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await
         }
-        Command::Requests {
-            approvals,
-            all,
-            status,
-            json,
-        } => {
-            let scope = if approvals {
-                "approvable"
-            } else if all {
-                "all"
-            } else {
-                "mine"
-            };
-            commands::access::requests(proxy, scope, status.as_deref(), json).await
+        Command::Requests { list, command } => {
+            commands::access::requests_command(proxy, list, command).await
         }
         Command::Approve { id, comment } => {
             commands::access::decide(proxy, &id, true, comment.as_deref()).await
@@ -1045,6 +1030,32 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn request_commands_parse_in_new_and_old_forms() {
+        for args in [
+            &["request", "db", "--for", "30m"][..],
+            &["requests"],
+            &["requests", "--approvals"],
+            &["requests", "--all", "--status", "pending", "--json"],
+            &["requests", "ls", "--all"],
+            &["requests", "approve", "id1", "-m", "ok"],
+            &["requests", "deny", "id1", "-m", "no"],
+            &["requests", "cancel", "id1"],
+            // The old top-level forms stay for one release.
+            &["approve", "id1", "-m", "ok"],
+            &["deny", "id1"],
+            &["cancel", "id1"],
+            &["manage", "changes", "deny", "id1", "--note", "n"],
+            &["manage", "changes", "reject", "id1", "--note", "n"],
+        ] {
+            let mut full = vec!["limen"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        // Flags of the list do not mix with a subcommand.
+        assert!(Cli::try_parse_from(["limen", "requests", "--all", "approve", "id1"]).is_err());
     }
 
     #[test]

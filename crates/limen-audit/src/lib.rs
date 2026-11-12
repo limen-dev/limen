@@ -102,7 +102,7 @@ pub enum EventKind {
     /// request itself went ahead.
     #[serde(rename = "policy.shadow_deny")]
     PolicyShadowDeny,
-    /// Someone touched a honeytoken (ADR-0052): a decoy resource that looks
+    /// Someone touched a honeytoken (ADR-0053): a decoy resource that looks
     /// real, is granted by no role and is backed by nothing. Every attempt to
     /// use one is a high-signal alert. `data.resource`, `action` (`ssh`, `db`,
     /// `kube`, `request`, `explain`, …), `principal`, `roles`, `client_addr`,
@@ -273,7 +273,7 @@ fn clipped(s: &str) -> String {
     s.chars().take(TOUCH_FIELD_MAX).collect()
 }
 
-/// Who touched a honeytoken (ADR-0052), for [`touch_data`].
+/// Who touched a honeytoken (ADR-0053), for [`touch_data`].
 #[derive(Debug, Clone, Copy)]
 pub struct Touch<'a> {
     /// The decoy's name, as the caller typed it.

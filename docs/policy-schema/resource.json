@@ -679,7 +679,7 @@
           "type": "null"
         }
       ],
-      "description": "Makes the document a decoy instead of a resource (ADR-0052). Set, no\nprotocol section may be. Left out otherwise, so components from before\nthe decoy read every other resource."
+      "description": "Makes the document a decoy instead of a resource (ADR-0053). Set, no\nprotocol section may be. Left out otherwise, so components from before\nthe decoy read every other resource."
     },
     "kafka": {
       "anyOf": [

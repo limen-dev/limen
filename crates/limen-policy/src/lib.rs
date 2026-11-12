@@ -197,7 +197,7 @@ pub struct Policy {
     group_roles: BTreeMap<String, BTreeSet<String>>,
     mapping_docs: BTreeMap<String, model::RoleMappingDoc>,
     resources: BTreeMap<String, ResourceDoc>,
-    /// Decoys (ADR-0052), kept apart from `resources` on purpose: everything
+    /// Decoys (ADR-0053), kept apart from `resources` on purpose: everything
     /// that routes, grants, bootstraps or connects reads `resources`, so a
     /// decoy is absent from all of it. Only the code that lists or alerts
     /// reads this map.
@@ -649,7 +649,7 @@ impl Policy {
         self.resources.len()
     }
 
-    /// The decoy called `name` (ADR-0052), if there is one. Enforcement and
+    /// The decoy called `name` (ADR-0053), if there is one. Enforcement and
     /// listing code asks this where a person names a resource; nothing that
     /// grants access reads decoys.
     #[must_use]

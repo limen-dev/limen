@@ -199,7 +199,7 @@ pub(crate) async fn handle(
     }
 }
 
-/// Report that `user` touched a honeytoken (ADR-0052). The request is already
+/// Report that `user` touched a honeytoken (ADR-0053). The request is already
 /// refused, so a failure to write this is logged loudly rather than turned
 /// into a different answer, which would tell the caller what they hit.
 pub(crate) async fn report_honeytoken(
@@ -317,7 +317,7 @@ pub(crate) struct Denial {
     pub(crate) audit: bool,
     /// For the audit event's `data.reason` instead of the message.
     pub(crate) code: Option<&'static str>,
-    /// The request named a honeytoken (ADR-0052). The caller also reports
+    /// The request named a honeytoken (ADR-0053). The caller also reports
     /// `detect.honeytoken`; the refusal itself reads like any other.
     pub(crate) honeytoken: bool,
 }
@@ -622,7 +622,7 @@ pub(crate) async fn open_web_stream(
         ..Default::default()
     };
     let span = session_span();
-    let (session_id, worker, inbound, outbound, _slot, resolved) = establish(
+    let (session_id, worker, inbound, outbound, slot, resolved) = establish(
         proxy,
         user,
         user_cert_der,
@@ -636,6 +636,9 @@ pub(crate) async fn open_web_stream(
     let proxy = proxy.clone();
     let user = user.clone();
     tokio::spawn(async move {
+        // The worker's load slot lasts as long as the stream (a WebSocket can
+        // run for hours), not just until the stream is handed back.
+        let _slot = slot;
         relay(
             &proxy,
             relay_io,

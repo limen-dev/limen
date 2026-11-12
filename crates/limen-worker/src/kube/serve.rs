@@ -455,7 +455,6 @@ async fn start_stream(
     let upstream_upgrade = hyper::upgrade::on(&mut *response);
     let worker = ctx.worker.clone();
     let admitted = Arc::clone(admitted);
-    let expires = admitted.expires;
     tokio::spawn(async move {
         let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) else {
             // The stream never ran: close what session.start opened.
@@ -476,7 +475,6 @@ async fn start_stream(
             stream_info,
             TokioIo::new(client),
             TokioIo::new(upstream),
-            expires,
             recording,
             started,
         )
@@ -497,23 +495,11 @@ async fn start_stream(
 /// Why a response that is still streaming (a `watch`, `logs -f`) must stop:
 /// the user was locked, the session was killed, or the grant ran out.
 fn must_stop(ctx: &Ctx) -> Option<&'static str> {
-    let admitted = &ctx.admitted;
-    if time::OffsetDateTime::now_utc() >= admitted.expires {
-        return Some("max_session_ttl reached");
-    }
-    ctx.worker.policy.latest().and_then(|snapshot| {
-        if !admitted.request_ids.is_empty()
-            && snapshot.restrictions.grant_ended(
-                &admitted.request_ids,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-        {
-            return Some("the access grant ended");
-        }
-        snapshot
-            .restrictions
-            .blocks(&admitted.username, &admitted.login_id, &admitted.session_id)
-    })
+    let snapshot = ctx.worker.policy.latest();
+    ctx.admitted.stop_reason(
+        snapshot.as_ref().map(|s| &*s.restrictions),
+        time::OffsetDateTime::now_utc(),
+    )
 }
 
 /// Relay the API server's response body, and cut it off if the user is locked

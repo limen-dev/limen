@@ -1,9 +1,10 @@
-//! `limen request`, `requests`, `approve`, `deny`, `cancel`, `explain`, and
+//! `limen request`, `requests` (list, approve, deny, cancel), `explain`, and
 //! the admin views of grants (ADR-0025, ADR-0028).
 
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
+use clap::{Args, Subcommand};
 use limen_proto::v1::access_client::AccessClient;
 use limen_proto::v1::{
     AccessRequestInfo, CancelAccessRequestRequest, DecideAccessRequestRequest, ExplainRequest,
@@ -13,6 +14,73 @@ use limen_proto::v1::{
 use time::OffsetDateTime;
 
 use crate::{api, ui};
+
+/// What `limen requests` lists.
+#[derive(Debug, Args)]
+pub struct RequestsListArgs {
+    /// Requests you may approve or deny.
+    #[arg(long, conflicts_with = "all")]
+    pub approvals: bool,
+    /// Every request (limen:admin or limen:auditor).
+    #[arg(long)]
+    pub all: bool,
+    /// pending, approved, denied, expired, cancelled, or revoked.
+    #[arg(long)]
+    pub status: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// `limen requests <command>`: act on one request.
+#[derive(Debug, Subcommand)]
+pub enum RequestsCommand {
+    /// List requests: yours, or with a flag the ones waiting for you. The default.
+    Ls(RequestsListArgs),
+    /// Approve an access request. Never your own.
+    Approve {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Deny an access request.
+    Deny {
+        id: String,
+        #[arg(long, short = 'm')]
+        comment: Option<String>,
+    },
+    /// Withdraw an access request of yours that is still waiting.
+    Cancel { id: String },
+}
+
+/// Run `limen requests`, with or without a subcommand.
+pub async fn requests_command(
+    proxy: Option<&str>,
+    list: RequestsListArgs,
+    command: Option<RequestsCommand>,
+) -> anyhow::Result<()> {
+    match command {
+        None => list_requests(proxy, &list).await,
+        Some(RequestsCommand::Ls(args)) => list_requests(proxy, &args).await,
+        Some(RequestsCommand::Approve { id, comment }) => {
+            decide(proxy, &id, true, comment.as_deref()).await
+        }
+        Some(RequestsCommand::Deny { id, comment }) => {
+            decide(proxy, &id, false, comment.as_deref()).await
+        }
+        Some(RequestsCommand::Cancel { id }) => cancel(proxy, &id).await,
+    }
+}
+
+async fn list_requests(proxy: Option<&str>, a: &RequestsListArgs) -> anyhow::Result<()> {
+    let scope = if a.approvals {
+        "approvable"
+    } else if a.all {
+        "all"
+    } else {
+        "mine"
+    };
+    requests(proxy, scope, a.status.as_deref(), a.json).await
+}
 
 fn client(
     proxy: Option<&str>,
@@ -370,7 +438,7 @@ pub async fn requests(
     );
     if scope == "approvable" {
         ui::hint(
-            "Decide with `limen approve <id>` or `limen deny <id>`; the id above, with --comment to say why.",
+            "Decide with `limen requests approve <id>` or `limen requests deny <id>`; the id above, with --comment to say why.",
         );
     }
     Ok(())

@@ -100,7 +100,7 @@ spec:
 
 ## Honeytokens
 
-A `resource` with a `honeytoken` block instead of a protocol section is a decoy (ADR-0052, [guide](guides/honeytokens.md)): it looks like a resource in `limen ls` for the roles it is exposed to, no role grants it, nothing backs it, and every attempt to use it is audited as `detect.honeytoken`.
+A `resource` with a `honeytoken` block instead of a protocol section is a decoy (ADR-0053, [guide](guides/honeytokens.md)): it looks like a resource in `limen ls` for the roles it is exposed to, no role grants it, nothing backs it, and every attempt to use it is audited as `detect.honeytoken`.
 
 ```yaml
 kind: resource

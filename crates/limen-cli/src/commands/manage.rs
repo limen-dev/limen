@@ -147,7 +147,8 @@ pub enum ChangesCommand {
         note: Option<String>,
     },
     /// Refuse a change.
-    Reject {
+    #[command(alias = "reject")]
+    Deny {
         id: String,
         /// Why. Required.
         #[arg(long)]
@@ -467,7 +468,7 @@ async fn changes(api: &mut Api, command: ChangesCommand) -> anyhow::Result<Value
             .into_inner()
             .change,
         )?,
-        ChangesCommand::Reject { id, note } => change(
+        ChangesCommand::Deny { id, note } => change(
             api.reject_change(pb::RejectChangeRequest { id, note })
                 .await
                 .map_err(|s| api::status_error(&s))?

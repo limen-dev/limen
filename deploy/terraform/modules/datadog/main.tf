@@ -68,7 +68,7 @@ resource "datadog_monitor" "honeytoken" {
   name    = "Limen: honeytoken touched (${var.environment})"
   type    = "log alert"
   query   = "logs(\"${local.logs} event_kind:detect.honeytoken\").index(\"*\").rollup(\"count\").last(\"5m\") > 0"
-  message = "{{log.attributes.user}} tried to use the honeytoken {{log.attributes.data.resource}} (ADR-0052). No one has a reason to: treat it as a stolen credential, a scan, or someone looking around. ${local.notify}"
+  message = "{{log.attributes.user}} tried to use the honeytoken {{log.attributes.data.resource}} (ADR-0053). No one has a reason to: treat it as a stolen credential, a scan, or someone looking around. ${local.notify}"
   monitor_thresholds {
     critical = 0
   }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Honeytoken demo (ADR-0052): a decoy resource that looks real. A developer
+# Honeytoken demo (ADR-0053): a decoy resource that looks real. A developer
 # lists it, tries to connect, request it and explain it; each is refused with
 # the answer any unreachable name gets, and the proxy and control plane audit
 # detect.honeytoken with the user, roles and address. A real resource beside
