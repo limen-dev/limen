@@ -67,6 +67,23 @@ fn describe(r: &SelfTestRunInfo) -> String {
     )
 }
 
+/// The runs as a table (colour included; tests strip it).
+fn runs_table(runs: &[SelfTestRunInfo]) -> String {
+    let rows: Vec<[String; 5]> = runs
+        .iter()
+        .map(|r| {
+            [
+                r.id.clone(),
+                when(r.started_at_unix),
+                r.trigger.clone(),
+                verdict(&r.status),
+                describe(r),
+            ]
+        })
+        .collect();
+    ui::table(["RUN", "STARTED", "BY", "RESULT", "CHECKS"], &rows)
+}
+
 pub async fn run(proxy: Option<&str>, command: SelftestCommand) -> anyhow::Result<()> {
     let (_, channel) = api::authenticated(proxy)?;
     let mut client = ControlsClient::new(channel);
@@ -153,19 +170,7 @@ pub async fn run(proxy: Option<&str>, command: SelftestCommand) -> anyhow::Resul
                 );
                 return Ok(());
             }
-            let rows: Vec<[String; 5]> = runs
-                .iter()
-                .map(|r| {
-                    [
-                        r.id.clone(),
-                        when(r.started_at_unix),
-                        r.trigger.clone(),
-                        verdict(&r.status),
-                        describe(r),
-                    ]
-                })
-                .collect();
-            ui::print_table(["RUN", "STARTED", "BY", "RESULT", "CHECKS"], &rows);
+            anstream::print!("{}", runs_table(&runs));
             Ok(())
         }
         SelftestCommand::Report { id, out } => {
@@ -199,5 +204,35 @@ pub async fn run(proxy: Option<&str>, command: SelftestCommand) -> anyhow::Resul
             );
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(id: &str, status: &str, failed: u32, skipped: u32) -> SelfTestRunInfo {
+        SelfTestRunInfo {
+            id: id.into(),
+            trigger: "schedule".into(),
+            status: status.into(),
+            started_at_unix: 1_794_000_000,
+            passed: 6,
+            failed,
+            skipped,
+            ..SelfTestRunInfo::default()
+        }
+    }
+
+    #[test]
+    fn the_table_shows_the_verdict_and_every_count_in_plain_text() {
+        let out = ui::plain(&runs_table(&[
+            run("r-1", "passed", 0, 2),
+            run("r-2", "failed", 1, 0),
+        ]));
+        assert!(out.contains("RUN") && out.contains("RESULT"), "{out}");
+        assert!(out.contains("6 passed, 0 failed, 2 skipped"), "{out}");
+        assert!(out.contains("failed") && out.contains("1 failed"), "{out}");
+        assert!(!out.contains('\u{1b}'), "colour must be stripped: {out:?}");
     }
 }
