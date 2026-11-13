@@ -158,3 +158,91 @@ async fn readers_see_the_page_and_only_admins_start_a_run_with_a_csrf_token() {
         .expect("count");
     assert_eq!(count, 1);
 }
+
+/// The sidebar groups (ADR-0053): what each role is offered, and nothing that
+/// would answer 403. Audit trail and Controls are for admins and auditors;
+/// Dashboards and everything under Administration are for admins.
+#[tokio::test]
+async fn the_sidebar_offers_each_role_only_what_it_can_open() {
+    let Some(h) = Harness::start_with(&[
+        format!("--console-public-url={ORIGIN}"),
+        "--console-oidc-client-secret=s3cr3t".to_owned(),
+    ])
+    .await
+    else {
+        return;
+    };
+    session(&h, "root", limen_core::identity::ADMIN_ROLE).await;
+    session(&h, "audit", limen_core::identity::AUDITOR_ROLE).await;
+    session(&h, "dev", "some-role").await;
+    let (_, proxy) = h.enroll_proxy().await;
+    let app = console::router(h.state.clone());
+    let sidebar = |who: &'static str| {
+        let app = app.clone();
+        let proxy = proxy.clone();
+        async move {
+            let r = app
+                .oneshot(request("GET", "/console/", who, &proxy, None, false))
+                .await
+                .expect("response");
+            assert_eq!(r.status(), StatusCode::OK, "{who}");
+            let body = axum::body::to_bytes(r.into_body(), 1 << 20)
+                .await
+                .expect("body");
+            let html = String::from_utf8_lossy(&body).into_owned();
+            html.split("<nav class=\"nav\"")
+                .nth(1)
+                .and_then(|n| n.split("</nav>").next())
+                .expect("a sidebar")
+                .to_owned()
+        }
+    };
+    let links = |nav: &str, path: &str| nav.contains(&format!("href=\"{path}\""));
+    let all_admin = [
+        "/console/users",
+        "/console/bots",
+        "/console/workers",
+        "/console/policy",
+        "/console/simulator",
+        "/console/integrations",
+    ];
+
+    let admin = sidebar("root").await;
+    assert!(admin.contains("Record") && admin.contains("Administration"));
+    // Each group has a button that controls its own list of links.
+    for group in ["record", "administration"] {
+        assert!(
+            admin.contains(&format!("aria-controls=\"nav-{group}\"")),
+            "{group}"
+        );
+        assert!(admin.contains(&format!("id=\"nav-{group}\"")), "{group}");
+    }
+    for p in ["/console/audit", "/console/controls", "/console/dashboards"] {
+        assert!(links(&admin, p), "admin: {p}");
+    }
+    for p in all_admin {
+        assert!(links(&admin, p), "admin: {p}");
+    }
+    // One Audit trail link, not one per group.
+    assert_eq!(admin.matches("href=\"/console/audit\"").count(), 1);
+
+    let auditor = sidebar("audit").await;
+    assert!(auditor.contains("Record") && !auditor.contains("Administration"));
+    assert!(links(&auditor, "/console/audit") && links(&auditor, "/console/controls"));
+    assert!(
+        !links(&auditor, "/console/dashboards"),
+        "dashboards are admin-only"
+    );
+    for p in all_admin {
+        assert!(!links(&auditor, p), "auditor must not be offered {p}");
+    }
+
+    let person = sidebar("dev").await;
+    assert!(!person.contains("Record") && !person.contains("Administration"));
+    for p in ["/console/audit", "/console/controls", "/console/dashboards"] {
+        assert!(!links(&person, p), "person must not be offered {p}");
+    }
+    for p in all_admin {
+        assert!(!links(&person, p), "person must not be offered {p}");
+    }
+}

@@ -1,29 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Controls{% endblock %}
+{% block refresh %}{% if running %} data-refresh="2"{% else %} data-refresh="10"{% endif %}{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
     <h1>Controls</h1>
-    <p class="sub">Limen tests its own controls with a test principal that can never gain access: a denied path is denied, an expired certificate is refused, a lock is seen, the audit trail is shipping. Tests run {{ interval }}.</p>
+    <p class="sub">Limen tests its own controls on a schedule ({{ interval }}) with a test identity that can never gain access, and keeps a signed report of what it found.</p>
   </div>
+  {% if chrome.is_admin %}
+  <form method="post" action="/console/controls/run" class="inline">
+    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+    <button type="submit"{% if running %} disabled{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Run a self-test now</button>
+  </form>
+  {% endif %}
 </div>
 {% if let Some(n) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#check"/></svg>{{ n }}</div>{% endif %}
 {% if let Some(e) = error %}<pre class="error">{{ e }}</pre>{% endif %}
 
-{% if chrome.is_admin %}
-<form method="post" action="/console/controls/run" class="inline">
-  <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
-  <button type="submit"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg>Run a self-test now</button>
-</form>
+{% if running %}
+<div class="card"><span class="pill warn">Running</span> A self-test is running. This page updates by itself when it finishes.</div>
+{% endif %}
+{% if let Some(n) = newest_without_report %}
+<div class="card"><span class="pill {{ n.tone }}">{{ n.status }}</span> The newest self-test ({{ n.when }}, {{ n.trigger }}) ended without a report, so it is not the result below. Alerts count it as not OK. Run another, and check the control plane's logs.</div>
 {% endif %}
 
-{% if let Some(n) = newest_without_report %}
-<div class="card"><span class="pill {{ n.tone }}">{{ n.status }}</span> The newest self-test ({{ n.when }}, {{ n.trigger }}) ended without a report, so it is not the result below. It counts as not OK for the alerts. Run another, and check the control plane's logs.</div>
-{% endif %}
-<h2>Latest result with a report</h2>
+<h2>Latest result</h2>
 {% if let Some(l) = latest %}
-<p><span class="pill {{ l.tone }}">{{ l.status }}</span> {{ l.summary }}. Started {{ l.when }}, {{ l.trigger }}. <a href="/console/controls/{{ l.id }}/report">Download the signed report</a></p>
-<div class="table-wrap"><table>
+<p>
+  <span class="pill {{ l.tone }}">{{ l.status }}</span>
+  {% if l.passed > 0 %}<span class="pill ok">{{ l.passed }} passed</span>{% endif %}
+  {% if l.failed > 0 %}<span class="pill bad">{{ l.failed }} failed</span>{% endif %}
+  {% if l.skipped > 0 %}<span class="pill warn" title="A skipped check did not run. It is not a pass.">{{ l.skipped }} skipped</span>{% endif %}
+  <span class="muted">{{ l.when }} · {{ l.trigger }}</span>
+</p>
+<div class="table-wrap"><table class="checks">
   <thead><tr><th>Check</th><th>Result</th><th>What it found</th></tr></thead>
   <tbody>
   {% for c in checks %}
@@ -35,29 +45,29 @@
   {% endfor %}
   </tbody>
 </table></div>
-<p class="hint">A skipped check did not run and is not a pass. {{ attestation }}</p>
+<p><a class="button secondary" href="/console/controls/{{ l.id }}/report"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Download the signed report</a></p>
+<p class="hint">A skipped check did not run and is not a pass. The report is the control plane attesting to itself: the signature shows it is intact and came from this control plane, not that the checks were honest. Check it anywhere with <code>limen audit verify --controls limen-controls.json --ca-file internal-ca.pem</code>, and verify the audit trail itself with <code>limen audit verify</code>.</p>
 {% else %}
-<div class="card empty"><div>No self-test has finished yet.</div></div>
+<div class="card empty"><div>No self-test has finished yet.{% if chrome.is_admin %} Run one now, or wait for the next scheduled run.{% endif %}</div></div>
 {% endif %}
 
 <h2>History <span class="count">{{ runs.len() }}</span></h2>
 {% if runs.is_empty() %}
-<div class="card empty"><div>No runs.</div></div>
+<div class="card empty"><div>No runs yet.</div></div>
 {% else %}
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="history">
   <thead><tr><th>Started</th><th>By</th><th>Result</th><th>Checks</th><th></th></tr></thead>
   <tbody>
   {% for r in runs %}
   <tr>
     <td class="nowrap">{{ r.when }}</td>
-    <td>{{ r.trigger }}</td>
-    <td><span class="pill {{ r.tone }}">{{ r.status }}</span></td>
-    <td>{{ r.summary }}</td>
+    <td data-label="By">{{ r.trigger }}</td>
+    <td data-label="Result"><span class="pill {{ r.tone }}">{{ r.status }}</span></td>
+    <td data-label="Checks">{% if r.passed > 0 %}<span class="pill ok">{{ r.passed }} passed</span> {% endif %}{% if r.failed > 0 %}<span class="pill bad">{{ r.failed }} failed</span> {% endif %}{% if r.skipped > 0 %}<span class="pill warn">{{ r.skipped }} skipped</span>{% endif %}{% if r.passed == 0 && r.failed == 0 && r.skipped == 0 %}<span class="muted">none</span>{% endif %}</td>
     <td>{% if r.has_report %}<a href="/console/controls/{{ r.id }}/report">Report</a>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table></div>
 {% endif %}
-<p class="hint">Check a report anywhere with <code>limen audit verify --controls limen-controls.json --ca-file internal-ca.pem</code>. It shows the report is intact and signed by this control plane. It is the control plane attesting to itself, so verify the audit trail itself with <code>limen audit verify</code> too.</p>
 {% endblock %}

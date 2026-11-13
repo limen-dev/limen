@@ -20,18 +20,30 @@ pub struct RunView {
     pub id: String,
     pub when: String,
     pub trigger: String,
+    /// Capitalised for display.
     pub status: String,
     pub tone: &'static str,
-    pub summary: String,
+    pub passed: i32,
+    pub failed: i32,
+    pub skipped: i32,
     pub has_report: bool,
 }
 
 pub struct CheckView {
     pub title: String,
     pub id: String,
+    /// Capitalised for display.
     pub status: String,
     pub tone: &'static str,
     pub detail: String,
+}
+
+fn capitalised(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
 }
 
 #[derive(Template)]
@@ -45,8 +57,9 @@ pub struct ControlsPage {
     /// The newest run, when it ended without a report (an error or an
     /// abandoned run) and so is not the result shown below.
     pub newest_without_report: Option<RunView>,
+    /// A run is in progress: the page polls quickly until it ends.
+    pub running: bool,
     pub checks: Vec<CheckView>,
-    pub attestation: String,
     pub interval: String,
 }
 
@@ -69,16 +82,15 @@ fn run_view(r: &RunRow) -> RunView {
         id: r.id.to_string(),
         when: time_text(Some(r.started_at)),
         trigger: if r.trigger == "manual" {
-            format!("by {}", r.requested_by)
+            r.requested_by.clone()
         } else {
-            "scheduled".to_owned()
+            "Scheduled".to_owned()
         },
-        status: r.status.clone(),
+        status: capitalised(&r.status),
         tone: tone(&r.status),
-        summary: format!(
-            "{} passed, {} failed, {} skipped",
-            r.passed, r.failed, r.skipped
-        ),
+        passed: r.passed,
+        failed: r.failed,
+        skipped: r.skipped,
         has_report: r.manifest_sha256.is_some(),
     }
 }
@@ -86,7 +98,8 @@ fn run_view(r: &RunRow) -> RunView {
 fn interval_text(secs: u64) -> String {
     match secs {
         0 => "off (runs only when an admin starts one)".to_owned(),
-        s if s % 86_400 == 0 => format!("every {} d", s / 86_400),
+        86_400 => "every day".to_owned(),
+        s if s % 86_400 == 0 => format!("every {} days", s / 86_400),
         s if s % 3600 == 0 => format!("every {} h", s / 3600),
         s => format!("every {} min", (s / 60).max(1)),
     }
@@ -106,28 +119,24 @@ pub async fn page(
     };
     // The newest run with a report: what the checks table shows.
     let latest = runs.iter().find(|r| r.manifest_sha256.is_some());
-    let (mut checks, mut attestation) = (Vec::new(), String::new());
+    let mut checks = Vec::new();
     if let Some(r) = latest
         && let Ok((_, bytes)) = selftest::report(&state, r.id).await
         && let Ok(doc) = serde_json::from_slice::<Value>(&bytes)
     {
-        doc["sections"]["meta"]["attestation"]
-            .as_str()
-            .unwrap_or_default()
-            .clone_into(&mut attestation);
         for c in doc["sections"]["checks"].as_array().into_iter().flatten() {
             let status = c["status"].as_str().unwrap_or("").to_owned();
             checks.push(CheckView {
                 title: c["title"].as_str().unwrap_or("").to_owned(),
                 id: c["id"].as_str().unwrap_or("").to_owned(),
                 tone: tone(&status),
-                status,
+                status: capitalised(&status),
                 detail: c["detail"].as_str().unwrap_or("").to_owned(),
             });
         }
     }
     let notice = match q.done.as_deref() {
-        Some("started") => Some("Self-test started. Reload in a few seconds."),
+        Some("started") => Some("Self-test started. The results appear here when it finishes."),
         Some("running") => Some("A self-test is already running."),
         _ => None,
     };
@@ -141,9 +150,9 @@ pub async fn page(
                 .first()
                 .filter(|r| r.manifest_sha256.is_none() && r.status != "running")
                 .map(run_view),
+            running: runs.first().is_some_and(|r| r.status == "running"),
             latest: latest.map(run_view),
             checks,
-            attestation,
             interval: interval_text(state.config.selftest_interval.as_secs()),
         }
         .render(),

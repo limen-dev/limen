@@ -20,38 +20,26 @@ use crate::state::AppState;
 
 /// A check and what it is called in a report. The order is the report's.
 pub const CHECKS: &[(&str, &str)] = &[
-    (
-        "policy.declared_tests",
-        "The policy_test documents pass against the policy in force",
-    ),
+    ("policy.declared_tests", "Your policy tests pass"),
     (
         "policy.engine",
-        "The policy engine denies by default, lets a deny win, and treats a requestable role as no access",
+        "The policy engine denies by default and lets a deny win",
     ),
-    (
-        "cert.expired_refused",
-        "The certificate verifier refuses a user certificate past its end date",
-    ),
+    ("cert.expired_refused", "Expired certificates are refused"),
     (
         "cert.foreign_ca_refused",
-        "The certificate verifier refuses a user certificate from a CA it was not given",
+        "Certificates from another CA are refused",
     ),
     (
         "lock.refused",
-        "A locked account, and an ended login, are refused on the API and certificate paths",
+        "Locked accounts and ended logins are refused",
     ),
-    (
-        "audit.sinks",
-        "The audit spool is shipping: no sink is stuck behind",
-    ),
+    ("audit.sinks", "Audit events are being shipped"),
     (
         "audit.manifest_tail",
-        "The newest S3 audit manifests are signed by their writer, numbered without a gap and chained",
+        "Recent audit manifests are signed and in order",
     ),
-    (
-        "recording.integrity",
-        "Recent session recordings still match the hash reported when they ended",
-    ),
+    ("recording.integrity", "Session recordings are unchanged"),
 ];
 
 /// Longest any one check may run.
@@ -75,6 +63,10 @@ fn fail(detail: impl Into<String>) -> Verdict {
 }
 fn skip(detail: impl Into<String>) -> Verdict {
     (Status::Skipped, detail.into())
+}
+
+fn plural(n: usize, one: &'static str, many: &'static str) -> &'static str {
+    if n == 1 { one } else { many }
 }
 
 /// Keep a detail to one short line: it is free text from a policy author or
@@ -145,7 +137,7 @@ fn declared_tests(state: &AppState) -> Verdict {
     let loaded = state.policy.current();
     let report = loaded.policy.run_tests();
     if report.results.is_empty() {
-        return skip("no policy_test document is declared, so nothing was checked");
+        return skip("No policy tests are defined, so nothing was checked.");
     }
     let total = report.results.len();
     let failed: Vec<&str> = report
@@ -156,13 +148,14 @@ fn declared_tests(state: &AppState) -> Verdict {
         .collect();
     if failed.is_empty() {
         pass(format!(
-            "{total} cases passed (policy version {})",
+            "{total} policy {} passed (policy version {}).",
+            plural(total, "test", "tests"),
             loaded.version
         ))
     } else {
         let names: Vec<String> = failed.iter().take(3).map(|n| tidy(n)).collect();
         fail(format!(
-            "{} of {total} cases failed: {}",
+            "{} of {total} policy tests failed: {}.",
             failed.len(),
             names.join("; ")
         ))
@@ -302,7 +295,10 @@ fn engine() -> Verdict {
         .map(|(w, _)| *w)
         .collect();
     if wrong.is_empty() {
-        pass(format!("{} decisions came out as designed", cases.len()))
+        pass(format!(
+            "All {} test decisions came out as designed.",
+            cases.len()
+        ))
     } else {
         fail(format!("decided wrongly: {}", wrong.join("; ")))
     }
@@ -357,7 +353,7 @@ async fn cert_expired_refused() -> Verdict {
         ));
     }
     match limen_ca::verify::verify_user_at(&cert, ca.cert_der(), now + time::Duration::hours(2)) {
-        Err(_) => pass("accepted while valid, refused two hours after its 60-second life"),
+        Err(_) => pass("A test certificate was accepted while valid and refused after it expired."),
         Ok(_) => fail("a certificate past its end date was accepted"),
     }
 }
@@ -376,7 +372,7 @@ async fn cert_foreign_ca_refused() -> Verdict {
         return fail("the probe certificate was refused by its own CA");
     }
     match limen_ca::verify::verify_user(&cert, other.cert_der()) {
-        Err(_) => pass("accepted by its own CA, refused by another"),
+        Err(_) => pass("A test certificate was accepted by its own CA and refused by another."),
         Ok(_) => fail("a certificate from another CA was accepted"),
     }
 }
@@ -453,7 +449,7 @@ async fn lock_probe(state: &AppState) -> Result<Verdict, sqlx::Error> {
         wrong.push("an ordinary account would be refused");
     }
     Ok(if wrong.is_empty() {
-        pass("a lock and an ended login are seen and refused; the probe was rolled back")
+        pass("A lock and an ended login were seen and refused. The test left nothing behind.")
     } else {
         fail(wrong.join("; "))
     })
@@ -479,7 +475,9 @@ async fn audit_sinks(state: &AppState) -> Verdict {
 fn sink_summary(state: &AppState) -> String {
     let n = state.pipeline.sink_snapshots().len();
     format!(
-        "on this control plane, {n} sinks are caught up or shipping (a backlog passes if a batch was accepted in the last 15 minutes)"
+        "{n} audit {} on this control plane {} up to date.",
+        plural(n, "sink", "sinks"),
+        if n == 1 { "is" } else { "are" }
     )
 }
 
@@ -516,7 +514,7 @@ fn sink_problems(state: &AppState) -> Vec<String> {
 /// to find, not this check's.
 async fn manifest_tail(state: &AppState) -> Verdict {
     let Some(sink) = state.pipeline.s3_sink() else {
-        return skip("this control plane has no S3 audit sink");
+        return skip("This control plane has no S3 audit store.");
     };
     let ca = state.cas.internal.cert_der();
     match limen_verify::bucket::verify_manifest_tail(
@@ -529,10 +527,13 @@ async fn manifest_tail(state: &AppState) -> Verdict {
     .await
     {
         Err(e) => fail(format!("the manifests could not be read: {e}")),
-        Ok(r) if r.writers == 0 => skip("the bucket holds no manifests yet"),
+        Ok(r) if r.writers == 0 => skip("The audit store has no manifests yet."),
         Ok(r) if r.ok() => pass(format!(
-            "{} manifests of {} writers: signed, numbered and chained (batches and event numbering are not read; use `limen audit verify`)",
-            r.manifests, r.writers
+            "The newest {} {} of {} {} are signed, in order and chained. Event batches are not read: use `limen audit verify` for those.",
+            r.manifests,
+            plural(r.manifests, "manifest", "manifests"),
+            r.writers,
+            plural(r.writers, "writer", "writers")
         )),
         Ok(r) => fail(r.problems.join("; ")),
     }
@@ -558,7 +559,7 @@ async fn recording_integrity(state: &AppState) -> Verdict {
         Err(e) => return fail(format!("the sessions could not be listed: {e}")),
     };
     if rows.is_empty() {
-        return skip("no ended session has a recording yet");
+        return skip("No ended session has a recording yet.");
     }
     let mut read = 0usize;
     let mut checked = 0usize;
@@ -591,16 +592,22 @@ async fn recording_integrity(state: &AppState) -> Verdict {
     }
     if bad.is_empty() && checked == 0 {
         skip(format!(
-            "{oversized} recent recordings are over the size this check reads"
+            "{oversized} recent {} are too large for this check to read.",
+            plural(oversized, "recording", "recordings")
         ))
     } else if bad.is_empty() {
         let extra = if oversized > 0 {
-            format!(" ({oversized} over the size limit were not read)")
+            format!(
+                " {oversized} too large to read {} skipped.",
+                if oversized == 1 { "was" } else { "were" }
+            )
         } else {
             String::new()
         };
         pass(format!(
-            "{checked} recent recordings match their recorded hashes{extra}"
+            "{checked} recent {} still {} the hash recorded when the session ended.{extra}",
+            plural(checked, "recording", "recordings"),
+            if checked == 1 { "matches" } else { "match" }
         ))
     } else {
         fail(bad.join("; "))
