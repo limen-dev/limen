@@ -516,28 +516,6 @@ Options:
 
 - `--all`: End all of them.
 
-### `limen mcp`
-
-Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
-
-Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
-
-```text
-Usage: limen mcp [OPTIONS]
-```
-
-### `limen completions`
-
-Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`
-
-```text
-Usage: limen completions [OPTIONS] <SHELL>
-```
-
-Arguments:
-
-- `<SHELL>` Values: bash, elvish, fish, powershell, zsh.
-
 ### `limen show`
 
 Show one resource: type, labels, how you may access it, and the command to connect
@@ -569,7 +547,7 @@ Arguments:
 
 ### `limen config`
 
-Print configuration snippets for other tools
+Set up other tools and the CLI itself: ssh, mcp, completions, animations
 
 ```text
 Usage: limen config [OPTIONS] <COMMAND>
@@ -596,6 +574,37 @@ Print how to add `limen mcp` to an AI agent (Claude Code and any client that rea
 ```text
 Usage: limen config mcp [OPTIONS]
 ```
+
+#### `limen config completions`
+
+Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`
+
+```text
+Usage: limen config completions [OPTIONS] <SHELL>
+```
+
+Arguments:
+
+- `<SHELL>` Values: bash, elvish, fish, powershell, zsh.
+
+#### `limen config animations`
+
+Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
+
+Saved in `~/.limen/settings.json` (or `$LIMEN_HOME`). `LIMEN_NO_ANIMATION` and `LIMEN_NO_BANNER` still turn things off for one run, and nothing animates when stderr is not a terminal or `CI` is set.
+
+```text
+Usage: limen config animations [OPTIONS]
+```
+
+Options:
+
+- `--on`: Turn animations on.
+- `--off`: Turn animations off: spinners and the logo print plain lines.
+- `--speed <SPEED>`: How fast the logo and spinners move. Values: slow, normal, fast.
+- `--logo <LOGO>`: Show the logo at the top of `limen`, `limen --help` and `limen login`. Values: on, off.
+- `--call-spinner <CALL_SPINNER>`: Show a spinner while a call to the proxy is slow. Values: on, off.
+- `--reset`: Back to the defaults.
 
 ### `limen db`
 

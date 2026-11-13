@@ -140,14 +140,25 @@ fn banner_enabled(stderr_is_terminal: bool, opted_out: bool) -> bool {
 }
 
 /// Print the logo to stderr, so it never mixes into output that is parsed or
-/// piped. Skipped when stderr isn't a terminal or `LIMEN_NO_BANNER` is set.
-/// Where motion is on, the logo is drawn as a quick wipe (about a fifth of a
-/// second); otherwise it is printed at once.
+/// piped. Skipped when stderr isn't a terminal, `LIMEN_NO_BANNER` is set, or the
+/// logo is off in the settings. Where motion is on, the logo is drawn as a wipe
+/// at the chosen speed (about a second by default); otherwise it is printed at once.
 pub fn banner() {
-    let opted_out = std::env::var_os(BANNER_OPT_OUT).is_some();
+    let opted_out = std::env::var_os(BANNER_OPT_OUT).is_some() || !crate::settings::get().logo;
     if !banner_enabled(std::io::stderr().is_terminal(), opted_out) {
         return;
     }
+    draw_logo(crate::settings::get().speed);
+}
+
+/// Play the logo once at `speed`, whatever the logo setting says: for trying a setting out.
+pub fn preview_logo(speed: crate::settings::Speed) {
+    if std::io::stderr().is_terminal() {
+        draw_logo(speed);
+    }
+}
+
+fn draw_logo(speed: crate::settings::Speed) {
     let width = banner_lines()
         .iter()
         .map(|l| l.iter().map(|(t, _)| t.chars().count()).sum::<usize>())
@@ -165,8 +176,8 @@ pub fn banner() {
         if reveal > width {
             break;
         }
-        reveal += 2;
-        std::thread::sleep(Duration::from_millis(12));
+        reveal += 1;
+        std::thread::sleep(Duration::from_millis(speed.banner_step_ms()));
         // Back to the first line of the banner (raw: `anstream` drops cursor codes under NO_COLOR).
         let _ = std::io::stderr().write_all(b"\x1b[4F");
     }
@@ -372,23 +383,46 @@ const SPINNER_DELAY: Duration = Duration::from_millis(300);
 /// How long before the elapsed time is appended, so a long wait shows it has not hung.
 const TIMER_AFTER: Duration = Duration::from_secs(5);
 
-/// Whether anything may move on stderr: only on a terminal that can take it,
-/// outside CI, and unless the user opted out (`LIMEN_NO_ANIMATION`). Only
-/// stderr is looked at (as for the banner), so a redirected stdout changes
-/// nothing. `NO_COLOR` strips colour but is not about motion.
-pub fn motion_enabled(stderr_is_tty: bool, term: Option<&str>, ci: bool, opted_out: bool) -> bool {
-    stderr_is_tty && term != Some("dumb") && !ci && !opted_out
+/// Why nothing may move on stderr, or `None` when it may: it takes a terminal that can show it,
+/// outside CI, and neither the environment (`LIMEN_NO_ANIMATION`) nor the saved settings
+/// (`limen config animations --off`) opting out. Only stderr is looked at (as for the banner), so a
+/// redirected stdout changes nothing. `NO_COLOR` strips colour but is not about motion.
+pub fn motion_off_reason_for(
+    stderr_is_tty: bool,
+    term: Option<&str>,
+    ci: bool,
+    env_opted_out: bool,
+) -> Option<&'static str> {
+    if env_opted_out {
+        Some("LIMEN_NO_ANIMATION is set")
+    } else if ci {
+        Some("CI is set")
+    } else if term == Some("dumb") {
+        Some("TERM is dumb")
+    } else if !stderr_is_tty {
+        Some("stderr is not a terminal")
+    } else {
+        None
+    }
 }
 
-/// [`motion_enabled`] for this process: the real terminal and environment.
-pub fn motion() -> bool {
+/// [`motion_off_reason_for`] for this process: the real terminal, environment and settings.
+pub fn motion_off_reason() -> Option<&'static str> {
+    // The saved setting wins over everything else, and says so.
+    if !crate::settings::get().animations {
+        return Some("animations are off in the settings");
+    }
     let ci = std::env::var("CI").is_ok_and(|v| !matches!(v.as_str(), "" | "0" | "false"));
-    motion_enabled(
+    motion_off_reason_for(
         std::io::stderr().is_terminal(),
         std::env::var("TERM").ok().as_deref(),
         ci,
         std::env::var_os("LIMEN_NO_ANIMATION").is_some(),
     )
+}
+
+pub fn motion() -> bool {
+    motion_off_reason().is_none()
 }
 
 /// `4.2s`, or `2m14s` from a minute on.
@@ -403,7 +437,7 @@ fn elapsed_text(d: Duration) -> String {
 
 /// A spinner on stderr while something slow happens. It appears only after
 /// 300 ms, adds the elapsed time after 5 s, and is a plain `›` line when
-/// motion is off (see [`motion_enabled`]), so scripts and logs stay clean.
+/// motion is off (see [`motion_off_reason_for`]), so scripts and logs stay clean.
 /// Output from other code while one is live would land in the middle of it:
 /// finish it first (every current caller does).
 pub struct Spinner {
@@ -454,6 +488,7 @@ fn start(message: &str, announce: bool, counted: bool) -> Spinner {
         let stop = std::sync::Arc::clone(&stop);
         let drawn = std::sync::Arc::clone(&drawn);
         let message = message.to_owned();
+        let frame_tens = crate::settings::get().speed.frame_tens();
         std::thread::spawn(move || {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             // Draw nothing until the step has taken a moment.
@@ -485,7 +520,7 @@ fn start(message: &str, announce: bool, counted: bool) -> Spinner {
                 let _ = std::io::stderr().flush();
                 i += 1;
                 // In short slices, so stopping the spinner never waits out a whole frame.
-                for _ in 0..8 {
+                for _ in 0..frame_tens {
                     if stop.load(Ordering::Relaxed) {
                         break;
                     }
@@ -545,7 +580,11 @@ pub struct BusyGuard;
 
 #[must_use]
 pub fn busy(label: &str) -> Option<BusyGuard> {
-    if !BUSY_ON.load(Ordering::Relaxed) || EXPLICIT.load(Ordering::Relaxed) > 0 || !motion() {
+    if !BUSY_ON.load(Ordering::Relaxed)
+        || EXPLICIT.load(Ordering::Relaxed) > 0
+        || !crate::settings::get().call_spinner
+        || !motion()
+    {
         return None;
     }
     let mut state = busy_state();
@@ -810,12 +849,16 @@ mod tests {
 
     #[test]
     fn motion_needs_a_terminal_and_no_opt_out() {
-        assert!(motion_enabled(true, Some("xterm-256color"), false, false));
-        assert!(motion_enabled(true, None, false, false));
-        assert!(!motion_enabled(false, Some("xterm"), false, false));
-        assert!(!motion_enabled(true, Some("dumb"), false, false));
-        assert!(!motion_enabled(true, Some("xterm"), true, false));
-        assert!(!motion_enabled(true, Some("xterm"), false, true));
+        let why = |tty, term, ci, env| motion_off_reason_for(tty, term, ci, env);
+        assert_eq!(why(true, Some("xterm-256color"), false, false), None);
+        assert_eq!(why(true, None, false, false), None);
+        assert!(why(false, Some("xterm"), false, false).is_some());
+        assert!(why(true, Some("dumb"), false, false).is_some());
+        assert!(why(true, Some("xterm"), true, false).is_some());
+        assert_eq!(
+            why(true, Some("xterm"), false, true),
+            Some("LIMEN_NO_ANIMATION is set")
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod commands;
 mod oidc;
 mod profile;
 mod reference;
+mod settings;
 mod ui;
 
 use std::path::PathBuf;
@@ -248,8 +249,12 @@ enum Command {
     /// Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
     ///
     /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+    /// Agents run this; to set one up, see `limen config mcp`.
+    #[command(hide = true)]
     Mcp,
     /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
+    /// Also `limen config completions`.
+    #[command(hide = true)]
     Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
     #[command(hide = true)]
@@ -270,7 +275,7 @@ enum Command {
     /// OpenSSH ProxyCommand used by `limen ssh` and `limen config ssh`.
     #[command(hide = true)]
     SshProxy { login: String, host: String },
-    /// Print configuration snippets for other tools.
+    /// Set up other tools and the CLI itself: ssh, mcp, completions, animations.
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -402,6 +407,32 @@ enum ConfigCommand {
     },
     /// Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
     Mcp,
+    /// Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`.
+    Completions { shell: clap_complete::Shell },
+    /// Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
+    ///
+    /// Saved in `~/.limen/settings.json` (or `$LIMEN_HOME`). `LIMEN_NO_ANIMATION` and `LIMEN_NO_BANNER`
+    /// still turn things off for one run, and nothing animates when stderr is not a terminal or `CI` is set.
+    Animations {
+        /// Turn animations on.
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        /// Turn animations off: spinners and the logo print plain lines.
+        #[arg(long)]
+        off: bool,
+        /// How fast the logo and spinners move.
+        #[arg(long, value_enum)]
+        speed: Option<settings::Speed>,
+        /// Show the logo at the top of `limen`, `limen --help` and `limen login`.
+        #[arg(long, value_enum)]
+        logo: Option<settings::Switch>,
+        /// Show a spinner while a call to the proxy is slow.
+        #[arg(long, value_enum)]
+        call_spinner: Option<settings::Switch>,
+        /// Back to the defaults.
+        #[arg(long)]
+        reset: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -664,6 +695,19 @@ fn opens_listener(command: &Command) -> bool {
     )
 }
 
+/// The completion script for `shell`, on stdout.
+fn print_completions(shell: clap_complete::Shell) {
+    // Render first: writing straight to a closed pipe (`| head`) would panic.
+    let mut script = Vec::new();
+    clap_complete::generate(
+        shell,
+        &mut <Cli as clap::CommandFactory>::command(),
+        "limen",
+        &mut script,
+    );
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
+}
+
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.server.as_deref();
@@ -744,16 +788,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
         Command::Mcp => commands::mcp::serve(proxy).await,
-        Command::Completions { shell } => {
-            // Render first: writing straight to a closed pipe (`| head`) would panic.
-            let mut script = Vec::new();
-            clap_complete::generate(
-                shell,
-                &mut <Cli as clap::CommandFactory>::command(),
-                "limen",
-                &mut script,
-            );
-            let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
+        Command::Completions { shell }
+        | Command::Config {
+            command: ConfigCommand::Completions { shell },
+        } => {
+            print_completions(shell);
             Ok(())
         }
         Command::MarkdownHelp => {
@@ -860,6 +899,24 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Mcp,
         } => commands::mcp::config(proxy),
+        Command::Config {
+            command:
+                ConfigCommand::Animations {
+                    on,
+                    off,
+                    speed,
+                    logo,
+                    call_spinner,
+                    reset,
+                },
+        } => commands::animations::run(&commands::animations::Args {
+            on,
+            off,
+            speed,
+            logo,
+            call_spinner,
+            reset,
+        }),
         Command::Db {
             command:
                 DbCommand::Connect {

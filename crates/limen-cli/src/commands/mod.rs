@@ -2,6 +2,7 @@
 
 pub mod access;
 pub mod admin;
+pub mod animations;
 pub mod audit;
 pub mod bot;
 pub mod conns;
