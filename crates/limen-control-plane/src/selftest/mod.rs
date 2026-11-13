@@ -131,7 +131,7 @@ pub async fn claim(
         .map_err(|e| internal("checking recent manual runs", e))?;
         if recent {
             return Err(GrpcStatus::resource_exhausted(
-                "a self-test was run by hand a moment ago; wait a minute",
+                "a self-test was started less than a minute ago; try again in a minute",
             ));
         }
     }
