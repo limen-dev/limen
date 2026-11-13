@@ -807,6 +807,13 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   table.history td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
 }
 
+/* Page changes cross-fade instead of blinking. The sidebar has its own name, so it stays where it is
+   and only the content changes: a click reads as a new page, not a reload. Browsers without view
+   transitions ignore all of this. The default fade is 0.25 s; 0.15 s keeps a click feeling instant. */
+@view-transition { navigation: auto; }
+.sidebar { view-transition-name: sidebar; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s; }
+
 /* Reduced motion, once and for everything: any animation or transition, present or added later,
    runs to its end state at once. The vendored player is left alone, because forcing its loader and
    controls to finish in no time can freeze or hide them. The rules above that say `animation: none`
@@ -818,4 +825,5 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
     transition-duration: .01ms !important;
     scroll-behavior: auto !important;
   }
+  @view-transition { navigation: none; }
 }

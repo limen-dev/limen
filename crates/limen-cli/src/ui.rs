@@ -288,30 +288,83 @@ pub fn expiry(remaining: time::Duration) -> String {
 
 // ---- spinner ---------------------------------------------------------------------------
 
-/// A spinner on stderr while something slow happens. Silent when stderr isn't
-/// a terminal, so scripts and logs stay clean.
+/// How long a step runs before its spinner is drawn: a quick one shows nothing.
+const SPINNER_DELAY: Duration = Duration::from_millis(300);
+/// How long before the elapsed time is appended, so a long wait shows it has not hung.
+const TIMER_AFTER: Duration = Duration::from_secs(5);
+
+/// Whether anything may move on stderr: only on a terminal that can take it,
+/// outside CI, and unless the user opted out (`LIMEN_NO_ANIMATION`). Only
+/// stderr is looked at (as for the banner), so a redirected stdout changes
+/// nothing. `NO_COLOR` strips colour but is not about motion.
+pub fn motion_enabled(stderr_is_tty: bool, term: Option<&str>, ci: bool, opted_out: bool) -> bool {
+    stderr_is_tty && term != Some("dumb") && !ci && !opted_out
+}
+
+/// [`motion_enabled`] for this process: the real terminal and environment.
+pub fn motion() -> bool {
+    let ci = std::env::var("CI").is_ok_and(|v| !matches!(v.as_str(), "" | "0" | "false"));
+    motion_enabled(
+        std::io::stderr().is_terminal(),
+        std::env::var("TERM").ok().as_deref(),
+        ci,
+        std::env::var_os("LIMEN_NO_ANIMATION").is_some(),
+    )
+}
+
+/// `4.2s`, or `2m14s` from a minute on.
+fn elapsed_text(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
+}
+
+/// A spinner on stderr while something slow happens. It appears only after
+/// 300 ms, adds the elapsed time after 5 s, and is a plain `›` line when
+/// motion is off (see [`motion_enabled`]), so scripts and logs stay clean.
+/// Output from other code while one is live would land in the middle of it:
+/// finish it first (every current caller does).
 pub struct Spinner {
     stop: std::sync::Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
     interactive: bool,
+    started: std::time::Instant,
 }
 
 #[must_use]
 pub fn spinner(message: &str) -> Spinner {
-    let interactive = std::io::stderr().is_terminal();
+    let interactive = motion();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let started = std::time::Instant::now();
     let handle = interactive.then(|| {
         let stop = std::sync::Arc::clone(&stop);
         let message = message.to_owned();
         std::thread::spawn(move || {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            // Draw nothing until the step has taken a moment.
+            while started.elapsed() < SPINNER_DELAY {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
             let mut i = 0;
             while !stop.load(Ordering::Relaxed) {
+                let elapsed = started.elapsed();
+                let timer = if elapsed >= TIMER_AFTER {
+                    format!(" · {}", elapsed_text(elapsed))
+                } else {
+                    String::new()
+                };
                 // Read each frame, so a resize is picked up. The frame, a space, and one
                 // spare column keep the line from wrapping, which `\r` can't undo.
-                let text = fit(&message, columns().saturating_sub(3));
+                let room = columns().saturating_sub(3 + timer.chars().count());
+                let text = fit(&message, room);
                 clear_line();
-                anstream::eprint!("{} {text}", accent(frames[i % frames.len()]));
+                anstream::eprint!("{} {text}{}", accent(frames[i % frames.len()]), dim(&timer));
                 let _ = std::io::stderr().flush();
                 i += 1;
                 std::thread::sleep(Duration::from_millis(80));
@@ -325,6 +378,7 @@ pub fn spinner(message: &str) -> Spinner {
         stop,
         handle,
         interactive,
+        started,
     }
 }
 
@@ -428,6 +482,26 @@ impl Spinner {
         self.halt();
     }
 
+    /// Stop the spinner and leave a result in its place: `✔ message`, with the
+    /// time it took when that was over a second. On a terminal that is a line
+    /// on stderr; when motion is off the result goes to stdout as
+    /// [`success`] does, so a script sees what it always saw.
+    pub fn succeed(mut self, message: &str) {
+        let elapsed = self.started.elapsed();
+        let interactive = self.interactive;
+        self.halt();
+        if interactive {
+            let took = if elapsed >= Duration::from_secs(1) {
+                dim(&format!("  {}", elapsed_text(elapsed)))
+            } else {
+                String::new()
+            };
+            anstream::eprintln!("{} {message}{took}", green("✔"));
+        } else {
+            success(message);
+        }
+    }
+
     fn halt(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
@@ -482,6 +556,24 @@ mod tests {
         assert!(banner_enabled(true, false));
         assert!(!banner_enabled(false, false));
         assert!(!banner_enabled(true, true));
+    }
+
+    #[test]
+    fn motion_needs_a_terminal_and_no_opt_out() {
+        assert!(motion_enabled(true, Some("xterm-256color"), false, false));
+        assert!(motion_enabled(true, None, false, false));
+        assert!(!motion_enabled(false, Some("xterm"), false, false));
+        assert!(!motion_enabled(true, Some("dumb"), false, false));
+        assert!(!motion_enabled(true, Some("xterm"), true, false));
+        assert!(!motion_enabled(true, Some("xterm"), false, true));
+    }
+
+    #[test]
+    fn elapsed_reads_in_seconds_then_minutes() {
+        assert_eq!(elapsed_text(Duration::from_millis(1400)), "1.4s");
+        assert_eq!(elapsed_text(Duration::from_secs(59)), "59.0s");
+        assert_eq!(elapsed_text(Duration::from_secs(134)), "2m14s");
+        assert_eq!(elapsed_text(Duration::from_secs(60)), "1m00s");
     }
 
     #[test]

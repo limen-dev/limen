@@ -99,7 +99,7 @@ The included file has one `Host` entry per SSH resource (`web-staging-1` and `we
 
 ## Troubleshooting
 
-`limen doctor` checks what access depends on, in the order it usually breaks, and says how to fix each failure. It exits 1 if any check failed.
+`limen doctor` checks what access depends on, in the order it usually breaks, and says how to fix each failure. It exits 1 if any check failed. On a terminal each check appears as it finishes, with a dim `… name` line while a slow one runs; piped output and `--json` are printed once at the end.
 
 ```text
 ✔ proxy    localhost:3443 (from the last login)
@@ -124,3 +124,6 @@ $ ssh ubuntu@orders-prod.limen
     - `prod-ssh`: approved by members of sre-leads
   Run: limen request orders-prod --for 30m --reason "..."
 ```
+
+## Spinners and animation
+Slow steps show a spinner on stderr after about a third of a second, with the elapsed time after five seconds, and finish with a result line. Nothing moves when stderr is not a terminal, when `TERM=dumb`, when `CI` is set, or when `LIMEN_NO_ANIMATION` is set; you then get one plain `›` line per step. `NO_COLOR` removes colour but not the spinner. Ctrl-C during a wait ends it cleanly and exits 130.

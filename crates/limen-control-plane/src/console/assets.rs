@@ -142,6 +142,7 @@ mod tests {
             "animation-iteration-count: 1 !important",
             "transition-duration: .01ms !important",
             "scroll-behavior: auto !important",
+            "@view-transition { navigation: none; }",
             "::before",
             "::after",
         ] {
@@ -160,6 +161,19 @@ mod tests {
         assert_eq!(CSS.matches("--nav-shadow:").count(), 3);
         // The cue exists for the sidebar and for the phone strip.
         assert!(CSS.matches("no-repeat local").count() >= 4);
+    }
+
+    #[test]
+    fn view_transitions_come_before_the_reduced_motion_override() {
+        let on = CSS
+            .find("@view-transition { navigation: auto; }")
+            .expect("page changes cross-fade");
+        let off = CSS
+            .rfind("@view-transition { navigation: none; }")
+            .expect("reduced motion turns them off");
+        assert!(on < off, "the override must come later in the cascade");
+        // The sidebar stays put while the content fades.
+        assert!(CSS.contains("view-transition-name: sidebar"));
     }
 
     #[test]
