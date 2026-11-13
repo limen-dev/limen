@@ -307,7 +307,10 @@ pub fn spinner(message: &str) -> Spinner {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let mut i = 0;
             while !stop.load(Ordering::Relaxed) {
-                anstream::eprint!("\r{} {message}", accent(frames[i % frames.len()]));
+                // Read each frame, so a resize is picked up. The frame, a space, and one
+                // spare column keep the line from wrapping, which `\r` can't undo.
+                let text = fit(&message, columns().saturating_sub(3));
+                anstream::eprint!("\r\x1b[2K{} {text}", accent(frames[i % frames.len()]));
                 let _ = std::io::stderr().flush();
                 i += 1;
                 std::thread::sleep(Duration::from_millis(80));
@@ -322,6 +325,46 @@ pub fn spinner(message: &str) -> Spinner {
         handle,
         interactive,
     }
+}
+
+/// Width assumed when `COLUMNS` is unset or unusable.
+const FALLBACK_COLUMNS: usize = 80;
+
+/// The terminal width from `COLUMNS` (shells set it but often don't export it,
+/// hence the fallback).
+fn columns() -> usize {
+    columns_from(std::env::var("COLUMNS").ok().as_deref())
+}
+
+fn columns_from(value: Option<&str>) -> usize {
+    value
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 10)
+        .unwrap_or(FALLBACK_COLUMNS)
+}
+
+/// Shorten `text` to at most `width` characters, ending in `…` when it was cut.
+/// Counts characters, not display columns, and must be given text without
+/// escape codes (style after fitting).
+fn fit(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_owned();
+    }
+    let keep = width.saturating_sub(1);
+    let mut out: String = text.chars().take(keep).collect();
+    if width > 0 {
+        out.push('…');
+    }
+    out
+}
+
+/// Ctrl-C during a wait: erase the spinner, say what happened, and exit 130
+/// (the shell's code for an interrupt). A signal skips `Drop`, so without this
+/// the prompt lands on a half-drawn spinner line.
+pub fn interrupted(spinner: Spinner, message: &str) -> ! {
+    spinner.finish();
+    anstream::eprintln!("{message}");
+    std::process::exit(130)
 }
 
 impl Spinner {
@@ -385,6 +428,26 @@ mod tests {
         assert!(banner_enabled(true, false));
         assert!(!banner_enabled(false, false));
         assert!(!banner_enabled(true, true));
+    }
+
+    #[test]
+    fn fit_cuts_long_text_and_marks_it() {
+        assert_eq!(fit("short", 10), "short");
+        assert_eq!(fit("exactly ten", 11), "exactly ten");
+        assert_eq!(fit("a message that is too long", 10), "a message…");
+        assert_eq!(fit("anything", 1), "…");
+        assert_eq!(fit("anything", 0), "");
+        // Characters, not bytes: a multi-byte one is never split.
+        assert_eq!(fit("ééééé", 3), "éé…");
+    }
+
+    #[test]
+    fn columns_reads_the_variable_with_a_fallback() {
+        assert_eq!(columns_from(Some("120")), 120);
+        assert_eq!(columns_from(Some(" 100 ")), 100);
+        assert_eq!(columns_from(None), FALLBACK_COLUMNS);
+        assert_eq!(columns_from(Some("wide")), FALLBACK_COLUMNS);
+        assert_eq!(columns_from(Some("0")), FALLBACK_COLUMNS);
     }
 
     #[test]

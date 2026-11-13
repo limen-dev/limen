@@ -20,6 +20,7 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .06);
   --ring: 0 0 0 3px rgba(20, 184, 166, .35);
   --sidebar: #ffffff;
+  --nav-shadow: rgba(16, 24, 40, .22);
   --radius: 10px;
 }
 :root[data-theme="dark"] { color-scheme: dark; }
@@ -35,6 +36,7 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, .4);
   --ring: 0 0 0 3px rgba(45, 212, 191, .35);
   --sidebar: #0c1018;
+  --nav-shadow: rgba(255, 255, 255, .16);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -48,6 +50,7 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .4);
     --ring: 0 0 0 3px rgba(45, 212, 191, .35);
     --sidebar: #0c1018;
+    --nav-shadow: rgba(255, 255, 255, .16);
   }
 }
 
@@ -574,6 +577,14 @@ html { background: var(--bg); }
   .sidebar-foot { order: 2; }
   .nav { order: 3; flex: 0 0 100%; flex-wrap: nowrap; overflow-x: auto; margin: 0 -14px; padding: 2px 14px 4px; scrollbar-width: none; }
   .nav::-webkit-scrollbar { display: none; }
+  /* The same cue for the strip, which scrolls sideways: a shadow at the edge that has more behind it. */
+  .nav {
+    background:
+      linear-gradient(to right, var(--sidebar) 30%, transparent) left / 28px 100% no-repeat local,
+      linear-gradient(to left, var(--sidebar) 30%, transparent) right / 28px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--nav-shadow), transparent) left / 10px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--nav-shadow), transparent) right / 10px 100% no-repeat scroll;
+  }
   .nav a { flex: none; white-space: nowrap; }
 }
 /* Touch targets: at least 32px, and the menu and tabs a comfortable 38px. */
@@ -736,6 +747,18 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   .sidebar { overflow: hidden; }
   .sidebar-head .brand { flex: 1; min-width: 0; }
   .nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 2px; margin: -2px; }
+  /* A shadow at the top once the menu has scrolled and at the bottom while there is more below, and
+     none at either end. The `local` layers scroll with the content and cover the fixed shadows when
+     the menu is at that end, so there is no script and no loading state: it is a scroll position.
+     Backgrounds sit under the links, so nothing is covered; a hovered link's own background paints
+     over the shadow, which is accepted. */
+  .nav {
+    background:
+      linear-gradient(var(--sidebar) 30%, transparent) top / 100% 28px no-repeat local,
+      linear-gradient(transparent, var(--sidebar) 70%) bottom / 100% 28px no-repeat local,
+      radial-gradient(farthest-side at 50% 0, var(--nav-shadow), transparent) top / 100% 10px no-repeat scroll,
+      radial-gradient(farthest-side at 50% 100%, var(--nav-shadow), transparent) bottom / 100% 10px no-repeat scroll;
+  }
   .sidebar-foot { flex: none; margin-top: 0; }
   /* Collapsed: a narrow column of icons, and the page uses the room the sidebar gave up. Every
      rule is scoped to the sidebar and the shell, because the flag sits on <html> and the sign-in
@@ -782,4 +805,17 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   table.checks td, table.history td { padding: 4px 0; border: 0; text-align: left; }
   table.history td[data-label] { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   table.history td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+}
+
+/* Reduced motion, once and for everything: any animation or transition, present or added later,
+   runs to its end state at once. The vendored player is left alone, because forcing its loader and
+   controls to finish in no time can freeze or hide them. The rules above that say `animation: none`
+   stay where they are stricter. A test (assets.rs) fails if this block is removed or weakened. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.ap-player, .ap-player *), *:not(.ap-player, .ap-player *)::before, *:not(.ap-player, .ap-player *)::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,6 +1,6 @@
 # ADR-0054: Motion in the CLI and the console
 
-- Status: Proposed (owner request, 2026-11-13; no issue yet). Nothing here is built.
+- Status: Proposed (owner request, 2026-11-13; no issue yet). The first slice (Console 1, 3, 4 and CLI 4, 6) was started at the owner's request in the same PR; the rest is not built.
 - Date: 2026-11-13
 - Decision needed: approve the rollout order and answer the two open questions at the end.
 
@@ -27,12 +27,12 @@ Constraints that decide most of the rest:
 
 ### Console
 **1. A cue that the sidebar scrolls.** The cue is an edge fade, not a loading indicator: the menu is static and nothing is being fetched, so a loader would say "wait" about something complete. A soft shadow appears at the top once you have scrolled down, and at the bottom while there is more below, and each clears at its end. That is "have I reached the end of it or not".
-- CSS only. Where scroll-driven animations exist (`animation-timeline: scroll()`) they drive the fades; elsewhere the `background-attachment: local` shadow pair on `.nav` does.
+- CSS only, using the `background-attachment: local` shadow pair on `.nav`. It works wherever CSS gradients do, so the scroll-driven (`animation-timeline`) variant was not needed and is dropped.
 - Both themes. The dark sidebar is `#0c1018`, so a dark shadow on it is invisible: dark mode uses a lighter hairline or tint. The cover gradients use `var(--sidebar)` so the shadows are hidden at rest.
 - A hovered or current link has its own opaque background, which paints over the shadow. Accepted: the cue is for the resting menu.
 - The scrollbar (`scrollbar-width: thin`) stays. The cue is visual and links stay focusable, so nothing depends on it.
 - The phone strip scrolls sideways and gets a right-edge fade by the same technique, which must not cover the last link or clip its focus ring.
-- *Partly verified.* The local-attachment technique was tried on a standalone page with 24 links in one Chrome: the shadows show at the top and bottom while mid-scroll and clear at the ends. `animation-timeline: scroll()` is supported in that Chrome (`CSS.supports`), but the scroll-driven path itself was not exercised. Not tried in Safari or Firefox, nor in the real sidebar (hover states, the collapsed mode, `margin: -2px`). The implementation PR must show the real sidebar in more than one browser, in both themes.
+- *Verification so far.* The real `console.css` with the sidebar's markup (a static harness, the menu forced shorter than the window) in one Chrome: in both themes the top shadow is absent at rest and present when scrolled, and the bottom shadow is present until the end. Not checked in Safari or Firefox, in the real console behind sign-in, with the collapsed sidebar, or on a phone width.
 
 **2. Page changes that don't blink (its own PR, and the one taste call).** It answers "what changed?": the sidebar stays still while only the content swaps, so a click reads as a change of page, not a reload. `@view-transition { navigation: auto; }`, with the sidebar given `view-transition-name: sidebar` so a click cross-fades the main column while the sidebar stays put. The browser's default root cross-fade is believed to be 0.25 s (unverified), so the PR sets `::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s }`.
 - It applies to every full navigation: link clicks, POST-redirects, auto-submitted filters and back/forward. The sign-in and error pages have no sidebar, so only the root fades. `/watch` pages start with a blank player, so the live-region fix (Console 3) ships first or with it.
@@ -47,10 +47,9 @@ Constraints that decide most of the rest:
 ```css
 @media (prefers-reduced-motion: reduce) {
   *:not(.ap-player, .ap-player *), *:not(.ap-player, .ap-player *)::before, *:not(.ap-player, .ap-player *)::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-  @view-transition { navigation: none; }
 }
 ```
-The vendored asciinema player is excluded, because forcing its own loader and transitions to `.01ms` can freeze or hide them. Existing `animation: none` opt-outs stay where they are stricter. The live dot's pulse is also cut to one iteration, which is the intended reduced-motion result. The Rust test reads `console.css` and checks the block is present with its view-transition line. That protects the block from being removed or weakened; new rules are covered by the block itself, since it applies to everything.
+The vendored asciinema player is excluded, because forcing its own loader and transitions to `.01ms` can freeze or hide them. Existing `animation: none` opt-outs stay where they are stricter. The live dot's pulse is also cut to one iteration, which is the intended reduced-motion result. The Rust test (`console/assets.rs`) reads `console.css` and checks the last reduced-motion block has these declarations and the player exclusion. The view-transitions PR adds `@view-transition { navigation: none }` to it. That protects the block from being removed or weakened; new rules are covered by the block itself, since it applies to everything.
 
 **Not in the console:** chart draw-in (the server draws plain bars, and growing them delays the data), animated nav-group folds, button, flash and copy-icon polish, skeleton loaders, count-up numbers, and animating rows as they sort or filter. None answers a rule 1 question.
 

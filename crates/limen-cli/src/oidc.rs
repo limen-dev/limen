@@ -234,10 +234,15 @@ pub async fn pkce_login(
         crate::ui::warn("could not open a browser automatically");
     }
     let waiting = crate::ui::spinner("Waiting for you to finish signing in");
-    let callback = tokio::time::timeout(LOGIN_TIMEOUT, rx)
-        .await
-        .context("timed out waiting for the browser login")?
-        .context("callback listener stopped")?;
+    let callback = tokio::select! {
+        received = tokio::time::timeout(LOGIN_TIMEOUT, rx) => received
+            .context("timed out waiting for the browser login")?
+            .context("callback listener stopped")?,
+        _ = tokio::signal::ctrl_c() => {
+            server.abort();
+            crate::ui::interrupted(waiting, "Sign-in cancelled.")
+        }
+    };
     server.abort();
     waiting.finish();
 

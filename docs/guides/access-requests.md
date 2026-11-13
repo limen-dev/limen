@@ -51,6 +51,8 @@ limen request web-prod --break-glass --for 20m --reason "prod is down"
 limen explain orders-prod                  # why you can't reach it, and what to do
 ```
 
+`--wait` keeps the command open until the request is decided (up to an hour). Ctrl-C stops waiting, prints that the request is still open, and exits with status 130; the request itself stays pending. `limen login` behaves the same while it waits for the browser.
+
 You rarely need `limen explain`: a refused connection prints the same answer under the error (plain `ssh` too, after `limen config ssh --install`), with who approves the role and the command to ask. `limen doctor <resource>` does too. After a grant ends, `explain` names it for a day.
 
 In the console, **Access** has *Ask for access*, *My requests*, *Waiting for me* (the approvals queue) and, for admins and auditors, *Active grants* and *Everyone's requests*. A resource you can ask for has a **Request access** button. Approvers see the reason, the duration and **what the requester did on that resource in the past 30 days**.
