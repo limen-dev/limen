@@ -26,6 +26,13 @@
   if (load(SIDEBAR_KEY) === 'collapsed') root.setAttribute('data-sidebar', 'collapsed');
 
   document.addEventListener('DOMContentLoaded', function () {
+    // A new sign-in always starts with the full sidebar: reaching the sign-in page (or signing
+    // out) forgets a saved "collapsed" choice.
+    if (document.querySelector('main.signin')) store(SIDEBAR_KEY, '');
+    document.querySelectorAll('form[action$="/console/logout"]').forEach(function (f) {
+      f.addEventListener('submit', function () { store(SIDEBAR_KEY, ''); });
+    });
+
     // Fold and unfold a group. A group with the current page in it stays open, so the page you are
     // on is never hidden: its button does nothing and says nothing.
     document.querySelectorAll('.nav-group').forEach(function (group) {
