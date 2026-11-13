@@ -20,6 +20,25 @@ use crate::pack::{FileEntry, Manifest, Verification, sha, verify_signed};
 pub const FORMAT: &str = "limen-controls/1";
 
 /// Printed in every report, inside the signature.
+/// The file name a downloaded report gets: `limen-controls-report-20261113T191502Z.json`.
+/// The time is when the run started, in UTC, with no colons so every filesystem takes it, and it
+/// sorts in the order the runs happened. The console and the CLI both use it.
+#[must_use]
+pub fn report_file_name(started_at_unix: i64) -> String {
+    match time::OffsetDateTime::from_unix_timestamp(started_at_unix) {
+        Ok(t) => format!(
+            "limen-controls-report-{:04}{:02}{:02}T{:02}{:02}{:02}Z.json",
+            t.year(),
+            u8::from(t.month()),
+            t.day(),
+            t.hour(),
+            t.minute(),
+            t.second()
+        ),
+        Err(_) => "limen-controls-report.json".to_owned(),
+    }
+}
+
 pub const ATTESTATION: &str = "This report is the control plane attesting to itself. The signature shows that a control plane the internal CA issued produced exactly these results; it does not show that the checks ran honestly, and it does not replace verifying the audit trail offline with `limen audit verify`.";
 
 /// Checks whose conditions are always met, so a report in which one was
@@ -295,6 +314,22 @@ pub fn verify_report(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // assertions on JSON built in the test
 mod tests {
+    #[test]
+    fn a_downloaded_report_is_named_for_when_its_run_started() {
+        // 2026-11-13 19:15:02 UTC.
+        assert_eq!(
+            report_file_name(1_794_597_302),
+            "limen-controls-report-20261113T191502Z.json"
+        );
+        // Earlier names sort first, and nothing in a name needs escaping.
+        assert!(report_file_name(1_000_000_000) < report_file_name(1_794_597_302));
+        assert!(
+            report_file_name(1_794_597_302)
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+        );
+    }
+
     use std::sync::Arc;
 
     use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};

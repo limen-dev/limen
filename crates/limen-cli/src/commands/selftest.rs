@@ -37,8 +37,10 @@ pub enum SelftestCommand {
     Report {
         /// The run's id, from `limen admin selftest ls`. Default: the latest with a report.
         id: Option<String>,
-        #[arg(long, default_value = "limen-controls.json")]
-        out: std::path::PathBuf,
+        /// Where to save it. Default: `limen-controls-report-<when the run started, UTC>.json`
+        /// in the current directory.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
     },
 }
 
@@ -192,6 +194,11 @@ pub async fn run(proxy: Option<&str>, command: SelftestCommand) -> anyhow::Resul
                 .await
                 .map_err(|s| api::status_error(&s))?
                 .into_inner();
+            let out = out.unwrap_or_else(|| {
+                std::path::PathBuf::from(limen_verify::controls::report_file_name(
+                    r.run.as_ref().map_or(0, |run| run.started_at_unix),
+                ))
+            });
             crate::profile::atomic_write(&out, &r.report, 0o600)
                 .with_context(|| format!("writing {}", out.display()))?;
             ui::success(&format!(

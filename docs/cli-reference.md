@@ -1280,7 +1280,7 @@ Arguments:
 
 Options:
 
-- `--out <OUT>` Default: `limen-controls.json`.
+- `--out <OUT>`: Where to save it. Default: `limen-controls-report-<when the run started, UTC>.json` in the current directory.
 
 #### `limen admin evidence`
 

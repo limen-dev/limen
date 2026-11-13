@@ -35,7 +35,7 @@ It runs every 24 hours. `--selftest-interval` (`LIMEN_SELFTEST_INTERVAL`) change
 ```sh
 limen admin selftest run                 # now; waits, exits 2 if a control failed (limen:admin)
 limen admin selftest ls                  # recent runs (limen:admin or limen:auditor)
-limen admin selftest report --out limen-controls.json
+limen admin selftest report              # saves limen-controls-report-<start time, UTC>.json; --out to choose
 ```
 
 A manual run is allowed once a minute; if one is already running you get that one. The console has a **Controls** page with the same.
@@ -43,9 +43,9 @@ A manual run is allowed once a minute; if one is already running you get that on
 ## Checking a report offline
 
 ```sh
-limen audit verify --controls limen-controls.json --ca-file internal-ca.pem
-limen audit verify --controls limen-controls.json --ca-file internal-ca.pem --strict   # skipped counts as failed
-limen audit verify --controls limen-controls.json --ca-file internal-ca.pem --audit-events audit.jsonl
+limen audit verify --controls limen-controls-report-20261113T191502Z.json --ca-file internal-ca.pem
+limen audit verify --controls limen-controls-report-20261113T191502Z.json --ca-file internal-ca.pem --strict   # skipped counts as failed
+limen audit verify --controls limen-controls-report-20261113T191502Z.json --ca-file internal-ca.pem --audit-events audit.jsonl
 ```
 
 It checks the signature (judged at the time the report records, so it still verifies after the signer's certificate expires), every section against the signed manifest, and that every check the report says it expected is present once. With `--audit-events` it also looks for the run's `selftest.run` event, which carries the report's manifest hash: the event is written before the report exists, so a report that was never produced or was swapped shows. It exits 2 if the report is damaged or a control failed.

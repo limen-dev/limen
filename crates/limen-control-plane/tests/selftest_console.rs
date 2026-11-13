@@ -157,6 +157,52 @@ async fn readers_see_the_page_and_only_admins_start_a_run_with_a_csrf_token() {
         .await
         .expect("count");
     assert_eq!(count, 1);
+
+    // The download is named for when the run started, so reports saved over time sort and never
+    // overwrite each other.
+    let (id, started): (uuid::Uuid, time::OffsetDateTime) = {
+        let mut found = None;
+        for _ in 0..200 {
+            found = sqlx::query_as(
+                "SELECT id, started_at FROM selftest_runs WHERE report IS NOT NULL LIMIT 1",
+            )
+            .fetch_optional(&h.state.db)
+            .await
+            .expect("run");
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        found.expect("the run produced a report")
+    };
+    let dl = send(request(
+        "GET",
+        &format!("/console/controls/{id}/report"),
+        "audit",
+        &proxy,
+        None,
+        false,
+    ))
+    .await;
+    assert_eq!(dl.status(), StatusCode::OK);
+    let disposition = dl
+        .headers()
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .expect("a content-disposition")
+        .to_owned();
+    assert_eq!(
+        disposition,
+        format!(
+            "attachment; filename=\"{}\"",
+            limen_verify::controls::report_file_name(started.unix_timestamp())
+        )
+    );
+    assert!(
+        disposition.contains("limen-controls-report-20"),
+        "{disposition}"
+    );
 }
 
 /// The sidebar groups (ADR-0053): what each role is offered, and nothing that

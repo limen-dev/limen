@@ -46,7 +46,7 @@
   </tbody>
 </table></div>
 <p><a class="button secondary" href="/console/controls/{{ l.id }}/report"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg>Download the signed report</a></p>
-<p class="hint">A skipped check did not run and is not a pass. The report is the control plane attesting to itself: the signature shows it is intact and came from this control plane, not that the checks were honest. Check it anywhere with <code>limen audit verify --controls limen-controls.json --ca-file internal-ca.pem</code>, and verify the audit trail itself with <code>limen audit verify</code>.</p>
+<p class="hint">A skipped check did not run and is not a pass. The report is the control plane attesting to itself: the signature shows it is intact and came from this control plane, not that the checks were honest. Check it anywhere with <code>limen audit verify --controls limen-controls-report-&lt;time&gt;.json --ca-file internal-ca.pem</code>, and verify the audit trail itself with <code>limen audit verify</code>.</p>
 {% else %}
 <div class="card empty"><div>No self-test has finished yet.{% if chrome.is_admin %} Run one now, or wait for the next scheduled run.{% endif %}</div></div>
 {% endif %}

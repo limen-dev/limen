@@ -211,18 +211,22 @@ pub async fn report(State(state): State<AppState>, auth: Auth, Path(id): Path<St
         );
     };
     match selftest::report(&state, id).await {
-        Ok((_, bytes)) => (
-            [
-                (CONTENT_TYPE, "application/json"),
-                (CACHE_CONTROL, "no-store"),
-                (
-                    CONTENT_DISPOSITION,
-                    "attachment; filename=\"limen-controls.json\"",
-                ),
-            ],
-            bytes,
-        )
-            .into_response(),
+        Ok((run, bytes)) => {
+            // The name is built from digits and fixed text only, so it needs no escaping.
+            let name = limen_verify::controls::report_file_name(run.started_at.unix_timestamp());
+            (
+                [
+                    (CONTENT_TYPE, "application/json".to_owned()),
+                    (CACHE_CONTROL, "no-store".to_owned()),
+                    (
+                        CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{name}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
         Err(s) => action_error(&s),
     }
 }
