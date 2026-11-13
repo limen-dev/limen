@@ -148,15 +148,16 @@ pub fn banner() {
     if !banner_enabled(std::io::stderr().is_terminal(), opted_out) {
         return;
     }
-    if !motion() {
-        anstream::eprint!("{}", banner_text());
-        return;
-    }
     let width = banner_lines()
         .iter()
         .map(|l| l.iter().map(|(t, _)| t.chars().count()).sum::<usize>())
         .max()
         .unwrap_or(0);
+    // The wipe moves the cursor up four lines, which only holds while no line wraps.
+    if !motion() || columns() <= width {
+        anstream::eprint!("{}", banner_text());
+        return;
+    }
     let mut reveal = 0;
     loop {
         anstream::eprint!("{}", banner_frame(reveal));
@@ -418,9 +419,9 @@ pub struct Spinner {
 
 #[must_use]
 pub fn spinner(message: &str) -> Spinner {
-    // A per-call spinner may be running: this one replaces it.
-    drop(take_busy());
+    // Count first, so a call starting now stays out of the way; then replace a running per-call one.
     EXPLICIT.fetch_add(1, Ordering::Relaxed);
+    drop(take_busy());
     start(message, true, true)
 }
 
@@ -483,7 +484,13 @@ fn start(message: &str, announce: bool, counted: bool) -> Spinner {
                 );
                 let _ = std::io::stderr().flush();
                 i += 1;
-                std::thread::sleep(Duration::from_millis(80));
+                // In short slices, so stopping the spinner never waits out a whole frame.
+                for _ in 0..8 {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
             }
         })
     });
