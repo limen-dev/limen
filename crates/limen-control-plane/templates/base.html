@@ -28,8 +28,15 @@
       <a href="/console/resources"{% if chrome.active == "resources" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#database"/></svg><span>Resources</span></a>
       <a href="/console/sessions"{% if chrome.active == "sessions" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#terminal"/></svg><span>{% if chrome.reads_record %}Sessions{% else %}My sessions{% endif %}</span></a>
       {% if chrome.sees_access %}<a href="/console/access"{% if chrome.active == "access" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg><span>Access</span></a>{% endif %}
-      {% if chrome.sees_changes %}<a href="/console/changes"{% if chrome.active == "changes" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg><span>Policy changes</span></a>{% endif %}
-      {% if chrome.sees_reviews %}<a href="/console/reviews"{% if chrome.active == "reviews" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg><span>Reviews</span></a>{% endif %}
+      {% if chrome.sees_reviews || chrome.sees_changes %}
+      <div class="nav-group" data-group="approvals">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-approvals"><span>Approvals</span><svg class="i chev"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-approvals">
+          {% if chrome.sees_changes %}<a href="/console/changes"{% if chrome.active == "changes" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#file-diff"/></svg><span>Policy changes</span></a>{% endif %}
+          {% if chrome.sees_reviews %}<a href="/console/reviews"{% if chrome.active == "reviews" %} aria-current="page"{% endif %}><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#shield-check"/></svg><span>Reviews</span></a>{% endif %}
+        </div>
+      </div>
+      {% endif %}
       {% if chrome.reads_record %}
       <div class="nav-group" data-group="record">
         <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-record"><span>Record</span><svg class="i chev"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg></button>

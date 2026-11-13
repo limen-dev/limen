@@ -6,49 +6,72 @@
 <meta name="color-scheme" content="light dark">
 <meta name="darkreader-lock">
 <title>Overview · Limen</title>
-<link rel="icon" href="/console/static/logo-mark.svg?v=df07b240ca8e" type="image/svg+xml">
+<link rel="icon" href="/console/static/logo-mark.svg?v=eeb7b72ffe00" type="image/svg+xml">
 <link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/console/static/console.css?v=df07b240ca8e">
-<script src="/console/static/console.js?v=df07b240ca8e"></script>
+<link rel="stylesheet" href="/console/static/console.css?v=eeb7b72ffe00">
+<script src="/console/static/console.js?v=eeb7b72ffe00"></script>
 
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <a class="brand" href="/console/">
-      <img class="logo-light" src="/console/static/logo-mark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <span>Limen</span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a href="/console/" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#layout-dashboard"/></svg><span>Overview</span></a>
-      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#database"/></svg><span>Resources</span></a>
-      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><span>Sessions</span></a>
-      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg><span>Access</span></a>
-      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg><span>Policy changes</span></a>
-      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg><span>Reviews</span></a>
+    <div class="sidebar-head">
+      <a class="brand" href="/console/">
+        <img class="logo-light" src="/console/static/logo-mark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <span>Limen</span>
+      </a>
+      <button type="button" class="sidebar-toggle" aria-controls="nav" aria-expanded="true" aria-label="Collapse the sidebar"><svg class="i ic-close"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-close"/></svg><svg class="i ic-open"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-open"/></svg></button>
+    </div>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="/console/" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#key-round"/></svg><span>Access</span></a>
+      
+      <div class="nav-group" data-group="approvals">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-approvals"><span>Approvals</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-approvals">
+          <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#file-diff"/></svg><span>Policy changes</span></a>
+          <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Reviews</span></a>
+        </div>
+      </div>
       
       
-      <div class="nav-label">Administration</div>
-      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg><span>Users</span></a>
-      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg><span>Bots</span></a>
-      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#server"/></svg><span>Workers</span></a>
-      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg><span>Audit trail</span></a>
-      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg><span>Policy</span></a>
-      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#chart-column"/></svg><span>Dashboards</span></a>
+      <div class="nav-group" data-group="record">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-record"><span>Record</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-record">
+          <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg><span>Audit trail</span></a>
+          <a href="/console/controls"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Controls</span></a>
+          <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chart-column"/></svg><span>Dashboards</span></a>
+        </div>
+      </div>
+      
+      
+      <div class="nav-group" data-group="administration">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-administration"><span>Administration</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-administration">
+          <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#users"/></svg><span>Users</span></a>
+          <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#bot"/></svg><span>Bots</span></a>
+          <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#server"/></svg><span>Workers</span></a>
+          <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#scroll-text"/></svg><span>Policy</span></a>
+          <a href="/console/simulator"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#play"/></svg><span>Access simulator</span></a>
+          <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#plug"/></svg><span>Integrations</span></a>
+        </div>
+      </div>
       
     </nav>
     <div class="sidebar-foot">
       <div class="theme" role="group" aria-label="Theme">
-        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#monitor"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#sun"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#moon"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#moon"/></svg></button>
       </div>
       <form method="post" action="/console/logout" class="me">
         <span class="avatar av-4" aria-hidden="true">A</span>
         <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
-        <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
-        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#log-out"/></svg></button>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#log-out"/></svg></button>
       </form>
     </div>
   </aside>
@@ -58,18 +81,18 @@
 <div class="page-head">
   <div>
     <h1>Overview</h1>
-    <p class="sub">Signed in as admin@example.com with the roles limen:admin, sre, sre-planned. This console session ends 2026-11-04 05:48:46 UTC.</p>
+    <p class="sub">Signed in as admin@example.com with the roles limen:admin, sre, sre-planned. This console session ends 2026-11-14 03:15:15 UTC.</p>
   </div>
 </div>
 
 
 
 <section class="stats">
-  <a class="card stat c-green" href="/console/sessions?filter=active"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg></span><div><b>0</b><span>Active sessions</span></div></a>
-  <a class="card stat c-blue" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg></span><div><b>1</b><span>Users seen</span></div></a>
-  <a class="card stat c-amber" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#lock"/></svg></span><div><b>0</b><span>Locked</span></div></a>
-  <a class="card stat c-violet" href="/console/workers"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#plug"/></svg></span><div><b>2</b><span>Workers connected</span></div></a>
-  <a class="card stat c-teal" href="/console/policy"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg></span><div><b>v1</b><span>Policy version</span></div></a>
+  <a class="card stat c-green" href="/console/sessions?filter=active"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg></span><div><b>0</b><span>Active sessions</span></div></a>
+  <a class="card stat c-blue" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=eeb7b72ffe00#users"/></svg></span><div><b>2</b><span>Users seen</span></div></a>
+  <a class="card stat c-amber" href="/console/users"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=eeb7b72ffe00#lock"/></svg></span><div><b>0</b><span>Disabled</span></div></a>
+  <a class="card stat c-violet" href="/console/workers"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=eeb7b72ffe00#plug"/></svg></span><div><b>2</b><span>Workers connected</span></div></a>
+  <a class="card stat c-teal" href="/console/policy"><span class="stat-icon"><svg class="i lg"><use href="/console/static/icons.svg?v=eeb7b72ffe00#scroll-text"/></svg></span><div><b>v1</b><span>Policy version</span></div></a>
 </section>
 
 
@@ -80,199 +103,199 @@
   <tbody>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span><div><div class="cell-main">bastion-staging</div><div class="cell-sub">ssh</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/bastion-staging">bastion-staging</a><div class="cell-sub">ssh</div></div></div></td>
       <td><div class="chips"><span class="chip">ec2-user</span><span class="chip">ubuntu</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">tier=bastion</span></div></td>
-      <td><span class="cmd"><code>limen ssh bastion-staging</code><button type="button" class="secondary" data-copy="limen ssh bastion-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen ssh bastion-staging</code><button type="button" class="secondary" data-copy="limen ssh bastion-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mysql"/></svg></span><div><div class="cell-main">billing-mysql-staging</div><div class="cell-sub">mysql</div></div></div></td>
-      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_readonly</span><span class="chip">limen_rw</span><span class="chip">limen_write</span></div></td>
+      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/billing-mysql-staging">billing-mysql-staging</a><div class="cell-sub">mysql</div></div></div></td>
+      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen db connect billing-mysql-staging</code><button type="button" class="secondary" data-copy="limen db connect billing-mysql-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen db connect billing-mysql-staging</code><button type="button" class="secondary" data-copy="limen db connect billing-mysql-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span><div><div class="cell-main">cache-staging</div><div class="cell-sub">redis</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-staging">cache-staging</a><div class="cell-sub">redis</div></div></div></td>
       <td><div class="chips"><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen redis connect cache-staging</code><button type="button" class="secondary" data-copy="limen redis connect cache-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen redis connect cache-staging</code><button type="button" class="secondary" data-copy="limen redis connect cache-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span><div><div class="cell-main">cache-valkey</div><div class="cell-sub">redis</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-valkey">cache-valkey</a><div class="cell-sub">redis</div></div></div></td>
       <td><div class="chips"><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen redis connect cache-valkey</code><button type="button" class="secondary" data-copy="limen redis connect cache-valkey" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen redis connect cache-valkey</code><button type="button" class="secondary" data-copy="limen redis connect cache-valkey" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><div class="cell-main">catalog-atlas</div><div class="cell-sub">mongodb</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-atlas">catalog-atlas</a><div class="cell-sub">mongodb</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=catalog</span></div></td>
-      <td><span class="cmd"><code>limen mongo connect catalog-atlas</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-atlas" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mongo connect catalog-atlas</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-atlas" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><div class="cell-main">catalog-staging</div><div class="cell-sub">mongodb</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-staging">catalog-staging</a><div class="cell-sub">mongodb</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=catalog</span></div></td>
-      <td><span class="cmd"><code>limen mongo connect catalog-staging</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mongo connect catalog-staging</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><div class="cell-main">catalog-x509</div><div class="cell-sub">mongodb</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-x509">catalog-x509</a><div class="cell-sub">mongodb</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=catalog</span></div></td>
-      <td><span class="cmd"><code>limen mongo connect catalog-x509</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-x509" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mongo connect catalog-x509</code><button type="button" class="secondary" data-copy="limen mongo connect catalog-x509" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kubernetes"/></svg></span><div><div class="cell-main">eks-staging</div><div class="cell-sub">kubernetes</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kubernetes"/></svg></span><div><a class="cell-main" href="/console/resources/eks-staging">eks-staging</a><div class="cell-sub">kubernetes</div></div></div></td>
       <td><div class="chips"><span class="chip">limen:edit</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen kube login eks-staging</code><button type="button" class="secondary" data-copy="limen kube login eks-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen kube login eks-staging</code><button type="button" class="secondary" data-copy="limen kube login eks-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><div class="cell-main">events-kafka-scram</div><div class="cell-sub">kafka</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-scram">events-kafka-scram</a><div class="cell-sub">kafka</div></div></div></td>
       <td><div class="chips"><span class="chip">admin</span><span class="chip">consumer</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen kafka connect events-kafka-scram</code><button type="button" class="secondary" data-copy="limen kafka connect events-kafka-scram" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen kafka connect events-kafka-scram</code><button type="button" class="secondary" data-copy="limen kafka connect events-kafka-scram" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><div class="cell-main">events-kafka-staging</div><div class="cell-sub">kafka</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-staging">events-kafka-staging</a><div class="cell-sub">kafka</div></div></div></td>
       <td><div class="chips"><span class="chip">admin</span><span class="chip">consumer</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen kafka connect events-kafka-staging</code><button type="button" class="secondary" data-copy="limen kafka connect events-kafka-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen kafka connect events-kafka-staging</code><button type="button" class="secondary" data-copy="limen kafka connect events-kafka-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-rabbitmq"/></svg></span><div><div class="cell-main">events-rabbit-staging</div><div class="cell-sub">rabbitmq</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/events-rabbit-staging">events-rabbit-staging</a><div class="cell-sub">rabbitmq</div></div></div></td>
       <td><div class="chips"><span class="chip">admin</span><span class="chip">consumer</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen mq connect events-rabbit-staging</code><button type="button" class="secondary" data-copy="limen mq connect events-rabbit-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mq connect events-rabbit-staging</code><button type="button" class="secondary" data-copy="limen mq connect events-rabbit-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><div class="cell-main">grafana</div><div class="cell-sub">web</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/grafana">grafana</a><div class="cell-sub">web</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen web open grafana</code><button type="button" class="secondary" data-copy="limen web open grafana" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen web open grafana</code><button type="button" class="secondary" data-copy="limen web open grafana" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><div class="cell-main">legacy-ftp</div><div class="cell-sub">tcp</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/legacy-ftp">legacy-ftp</a><div class="cell-sub">tcp</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen tcp legacy-ftp</code><button type="button" class="secondary" data-copy="limen tcp legacy-ftp" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen tcp legacy-ftp</code><button type="button" class="secondary" data-copy="limen tcp legacy-ftp" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span><div><div class="cell-main">logs-opensearch</div><div class="cell-sub">opensearch</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/logs-opensearch">logs-opensearch</a><div class="cell-sub">opensearch</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen search connect logs-opensearch</code><button type="button" class="secondary" data-copy="limen search connect logs-opensearch" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen search connect logs-opensearch</code><button type="button" class="secondary" data-copy="limen search connect logs-opensearch" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-rabbitmq"/></svg></span><div><div class="cell-main">orders-mq</div><div class="cell-sub">rabbitmq</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mq">orders-mq</a><div class="cell-sub">rabbitmq</div></div></div></td>
       <td><div class="chips"><span class="chip">admin</span><span class="chip">consumer</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen mq connect orders-mq</code><button type="button" class="secondary" data-copy="limen mq connect orders-mq" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mq connect orders-mq</code><button type="button" class="secondary" data-copy="limen mq connect orders-mq" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mysql"/></svg></span><div><div class="cell-main">orders-mysql-staging</div><div class="cell-sub">mysql</div></div></div></td>
-      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_readonly</span><span class="chip">limen_rw</span><span class="chip">limen_write</span></div></td>
+      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mysql-staging">orders-mysql-staging</a><div class="cell-sub">mysql</div></div></div></td>
+      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen db connect orders-mysql-staging</code><button type="button" class="secondary" data-copy="limen db connect orders-mysql-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen db connect orders-mysql-staging</code><button type="button" class="secondary" data-copy="limen db connect orders-mysql-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span><div><div class="cell-main">orders-prod</div><div class="cell-sub">postgres</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-prod">orders-prod</a><div class="cell-sub">postgres</div></div></div></td>
       <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_write</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen db connect orders-prod</code><button type="button" class="secondary" data-copy="limen db connect orders-prod" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen db connect orders-prod</code><button type="button" class="secondary" data-copy="limen db connect orders-prod" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span><div><div class="cell-main">orders-staging</div><div class="cell-sub">postgres</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-staging">orders-staging</a><div class="cell-sub">postgres</div></div></div></td>
       <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen db connect orders-staging</code><button type="button" class="secondary" data-copy="limen db connect orders-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen db connect orders-staging</code><button type="button" class="secondary" data-copy="limen db connect orders-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><div class="cell-main">payments-msk</div><div class="cell-sub">kafka</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/payments-msk">payments-msk</a><div class="cell-sub">kafka</div></div></div></td>
       <td><div class="chips"><span class="chip">admin</span><span class="chip">consumer</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=payments</span></div></td>
-      <td><span class="cmd"><code>limen kafka connect payments-msk</code><button type="button" class="secondary" data-copy="limen kafka connect payments-msk" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen kafka connect payments-msk</code><button type="button" class="secondary" data-copy="limen kafka connect payments-msk" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><div class="cell-main">reviews-docdb</div><div class="cell-sub">mongodb</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/reviews-docdb">reviews-docdb</a><div class="cell-sub">mongodb</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=catalog</span></div></td>
-      <td><span class="cmd"><code>limen mongo connect reviews-docdb</code><button type="button" class="secondary" data-copy="limen mongo connect reviews-docdb" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen mongo connect reviews-docdb</code><button type="button" class="secondary" data-copy="limen mongo connect reviews-docdb" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span><div><div class="cell-main">search-opensearch</div><div class="cell-sub">opensearch</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-opensearch">search-opensearch</a><div class="cell-sub">opensearch</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen search connect search-opensearch</code><button type="button" class="secondary" data-copy="limen search connect search-opensearch" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen search connect search-opensearch</code><button type="button" class="secondary" data-copy="limen search connect search-opensearch" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-elasticsearch"/></svg></span><div><div class="cell-main">search-staging</div><div class="cell-sub">elasticsearch</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-elasticsearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-staging">search-staging</a><div class="cell-sub">elasticsearch</div></div></div></td>
       <td><div class="chips"><span class="chip">read</span><span class="chip">write</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen search connect search-staging</code><button type="button" class="secondary" data-copy="limen search connect search-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen search connect search-staging</code><button type="button" class="secondary" data-copy="limen search connect search-staging" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><div class="cell-main">tcp-blocked</div><div class="cell-sub">tcp</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-blocked">tcp-blocked</a><div class="cell-sub">tcp</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=phase12</span><span class="chip">team=blocked</span></div></td>
-      <td><span class="cmd"><code>limen tcp tcp-blocked</code><button type="button" class="secondary" data-copy="limen tcp tcp-blocked" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen tcp tcp-blocked</code><button type="button" class="secondary" data-copy="limen tcp tcp-blocked" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><div class="cell-main">tcp-echo</div><div class="cell-sub">tcp</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-echo">tcp-echo</a><div class="cell-sub">tcp</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=phase12</span><span class="chip">team=platform</span></div></td>
-      <td><span class="cmd"><code>limen tcp tcp-echo</code><button type="button" class="secondary" data-copy="limen tcp tcp-echo" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen tcp tcp-echo</code><button type="button" class="secondary" data-copy="limen tcp tcp-echo" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#warehouse"/></svg></span><div><div class="cell-main">warehouse-prod</div><div class="cell-sub">redshift</div></div></div></td>
-      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_readonly</span><span class="chip">limen_rw</span><span class="chip">limen_write</span></div></td>
+      <td><div class="kind-cell"><span class="kind k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#warehouse"/></svg></span><div><a class="cell-main" href="/console/resources/warehouse-prod">warehouse-prod</a><div class="cell-sub">redshift</div></div></div></td>
+      <td><div class="chips"><span class="chip">limen_read</span><span class="chip">limen_write</span></div></td>
       <td><div class="chips"><span class="chip">env=prod</span><span class="chip">team=data</span></div></td>
-      <td><span class="cmd"><code>limen db connect warehouse-prod</code><button type="button" class="secondary" data-copy="limen db connect warehouse-prod" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen db connect warehouse-prod</code><button type="button" class="secondary" data-copy="limen db connect warehouse-prod" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><div class="cell-main">web-demo</div><div class="cell-sub">web</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo">web-demo</a><div class="cell-sub">web</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=phase12</span></div></td>
-      <td><span class="cmd"><code>limen web open web-demo</code><button type="button" class="secondary" data-copy="limen web open web-demo" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen web open web-demo</code><button type="button" class="secondary" data-copy="limen web open web-demo" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><div class="cell-main">web-demo-other</div><div class="cell-sub">web</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo-other">web-demo-other</a><div class="cell-sub">web</div></div></div></td>
       <td><div class="chips"><span class="chip">access</span></div></td>
       <td><div class="chips"><span class="chip">env=phase12</span></div></td>
-      <td><span class="cmd"><code>limen web open web-demo-other</code><button type="button" class="secondary" data-copy="limen web open web-demo-other" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen web open web-demo-other</code><button type="button" class="secondary" data-copy="limen web open web-demo-other" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span><div><div class="cell-main">web-staging-1</div><div class="cell-sub">ssh</div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/web-staging-1">web-staging-1</a><div class="cell-sub">ssh</div></div></div></td>
       <td><div class="chips"><span class="chip">ec2-user</span><span class="chip">ubuntu</span></div></td>
       <td><div class="chips"><span class="chip">env=staging</span></div></td>
-      <td><span class="cmd"><code>limen ssh web-staging-1</code><button type="button" class="secondary" data-copy="limen ssh web-staging-1" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#copy"/></svg></button></span></td>
+      <td><span class="cmd"><code>limen ssh web-staging-1</code><button type="button" class="secondary" data-copy="limen ssh web-staging-1" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#copy"/></svg></button></span></td>
     </tr>
   
   </tbody>
@@ -281,11 +304,11 @@
 
 <h2>Recent sessions <a class="muted ml-auto" href="/console/sessions">View all</a></h2>
 
-<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><div>No sessions yet.</div></div>
+<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg><div>No sessions yet.</div></div>
 
 
     </main>
-    <div class="foot">Limen 0.1.0-rc.1 · policy v1</div>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
   </div>
 </div>
 </body>

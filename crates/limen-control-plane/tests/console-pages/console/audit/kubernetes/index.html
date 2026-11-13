@@ -6,49 +6,72 @@
 <meta name="color-scheme" content="light dark">
 <meta name="darkreader-lock">
 <title>Kubernetes audit · Limen</title>
-<link rel="icon" href="/console/static/logo-mark.svg?v=df07b240ca8e" type="image/svg+xml">
+<link rel="icon" href="/console/static/logo-mark.svg?v=eeb7b72ffe00" type="image/svg+xml">
 <link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/console/static/console.css?v=df07b240ca8e">
-<script src="/console/static/console.js?v=df07b240ca8e"></script>
+<link rel="stylesheet" href="/console/static/console.css?v=eeb7b72ffe00">
+<script src="/console/static/console.js?v=eeb7b72ffe00"></script>
 
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <a class="brand" href="/console/">
-      <img class="logo-light" src="/console/static/logo-mark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <span>Limen</span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#layout-dashboard"/></svg><span>Overview</span></a>
-      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#database"/></svg><span>Resources</span></a>
-      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><span>Sessions</span></a>
-      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg><span>Access</span></a>
-      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg><span>Policy changes</span></a>
-      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg><span>Reviews</span></a>
+    <div class="sidebar-head">
+      <a class="brand" href="/console/">
+        <img class="logo-light" src="/console/static/logo-mark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <span>Limen</span>
+      </a>
+      <button type="button" class="sidebar-toggle" aria-controls="nav" aria-expanded="true" aria-label="Collapse the sidebar"><svg class="i ic-close"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-close"/></svg><svg class="i ic-open"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-open"/></svg></button>
+    </div>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#key-round"/></svg><span>Access</span></a>
+      
+      <div class="nav-group" data-group="approvals">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-approvals"><span>Approvals</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-approvals">
+          <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#file-diff"/></svg><span>Policy changes</span></a>
+          <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Reviews</span></a>
+        </div>
+      </div>
       
       
-      <div class="nav-label">Administration</div>
-      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg><span>Users</span></a>
-      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg><span>Bots</span></a>
-      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#server"/></svg><span>Workers</span></a>
-      <a href="/console/audit" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg><span>Audit trail</span></a>
-      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg><span>Policy</span></a>
-      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#chart-column"/></svg><span>Dashboards</span></a>
+      <div class="nav-group" data-group="record">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-record"><span>Record</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-record">
+          <a href="/console/audit" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg><span>Audit trail</span></a>
+          <a href="/console/controls"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Controls</span></a>
+          <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chart-column"/></svg><span>Dashboards</span></a>
+        </div>
+      </div>
+      
+      
+      <div class="nav-group" data-group="administration">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-administration"><span>Administration</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-administration">
+          <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#users"/></svg><span>Users</span></a>
+          <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#bot"/></svg><span>Bots</span></a>
+          <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#server"/></svg><span>Workers</span></a>
+          <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#scroll-text"/></svg><span>Policy</span></a>
+          <a href="/console/simulator"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#play"/></svg><span>Access simulator</span></a>
+          <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#plug"/></svg><span>Integrations</span></a>
+        </div>
+      </div>
       
     </nav>
     <div class="sidebar-foot">
       <div class="theme" role="group" aria-label="Theme">
-        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#monitor"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#sun"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#moon"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#moon"/></svg></button>
       </div>
       <form method="post" action="/console/logout" class="me">
         <span class="avatar av-4" aria-hidden="true">A</span>
         <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
-        <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
-        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#log-out"/></svg></button>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#log-out"/></svg></button>
       </form>
     </div>
   </aside>
@@ -61,7 +84,7 @@
     <p class="sub">Every Kubernetes API request through Limen, newest first, in kubectl's terms. Bodies and query strings are not kept here; the complete, signed events are in your audit sinks.</p>
   </div>
 </div>
-<nav class="tabs cats" aria-label="Audit categories"><a href="/console/audit"><span class="kind-dot k-other"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg></span>All events</a><a href="/console/audit?kind=auth.*"><span class="kind-dot k-auth"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg></span>Sign-ins</a><a href="/console/audit?kind=session.*%2Cssh.*"><span class="kind-dot k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span>Sessions</a><a href="/console/audit?kind=db.*"><span class="kind-dot k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span>SQL</a><a href="/console/audit?kind=mongo.*"><span class="kind-dot k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span>MongoDB</a><a href="/console/audit?kind=redis.*"><span class="kind-dot k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span>Redis</a><a href="/console/audit?kind=search.*"><span class="kind-dot k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span>Search</a><a href="/console/audit?kind=kafka.*%2Cmq.*"><span class="kind-dot k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span>Messaging</a><a href="/console/audit?kind=web.*"><span class="kind-dot k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span>Web</a><a href="/console/audit/kubernetes" aria-current="true"><span class="kind-dot k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kubernetes"/></svg></span>Kubernetes</a><a href="/console/audit?kind=policy.*%2Ccomponent.*%2Cjoin_token.*%2Cworker.*%2Cuser.*"><span class="kind-dot k-admin"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg></span>Admin</a></nav>
+<nav class="tabs cats" aria-label="Audit categories"><a href="/console/audit"><span class="kind-dot k-other"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg></span>All events</a><a href="/console/audit?kind=auth.*"><span class="kind-dot k-auth"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#key-round"/></svg></span>Sign-ins</a><a href="/console/audit?kind=session.*%2Cssh.*"><span class="kind-dot k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span>Sessions</a><a href="/console/audit?kind=db.*"><span class="kind-dot k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span>SQL</a><a href="/console/audit?kind=mongo.*"><span class="kind-dot k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span>MongoDB</a><a href="/console/audit?kind=redis.*"><span class="kind-dot k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span>Redis</a><a href="/console/audit?kind=search.*"><span class="kind-dot k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span>Search</a><a href="/console/audit?kind=kafka.*%2Cmq.*"><span class="kind-dot k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span>Messaging</a><a href="/console/audit?kind=web.*"><span class="kind-dot k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span>Web</a><a href="/console/audit/kubernetes" aria-current="true"><span class="kind-dot k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kubernetes"/></svg></span>Kubernetes</a><a href="/console/audit?kind=policy.*%2Ccomponent.*%2Cjoin_token.*%2Cworker.*%2Cuser.*"><span class="kind-dot k-admin"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg></span>Admin</a></nav>
 <form method="get" action="/console/audit/kubernetes" class="filters">
   <label><span>Cluster</span>
     <select name="cluster"><option value="">All clusters</option></select>
@@ -78,7 +101,7 @@
   <label><span>Outcome</span>
     <select name="problems"><option value="">All</option><option value="1">Refused or failed (400+)</option></select>
   </label>
-  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#search"/></svg>Filter</button>
+  <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#search"/></svg>Filter</button>
 </form>
 <div class="table-wrap"><table>
   <thead><tr><th>When</th><th>User</th><th>Cluster</th><th>Verb</th><th>Resource</th><th>Namespace</th><th>Name</th><th>Status</th><th>Time</th><th></th></tr></thead>
@@ -94,7 +117,7 @@
 </p>
 
     </main>
-    <div class="foot">Limen 0.1.0-rc.1 · policy v1</div>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
   </div>
 </div>
 </body>

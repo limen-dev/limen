@@ -615,6 +615,7 @@ details > summary .pill { white-space: normal; text-align: left; }
    denser sizes above. The menu strip scrolls sideways, so taller links do not widen the page. */
 @media (pointer: coarse) {
   .brand, .nav a { min-height: 44px; }
+  .brand { min-width: 44px; }
   .tabs a, .tabs.kinds a, .tabs.cats a { display: inline-flex; align-items: center; min-height: 44px; }
   button, .button { min-height: 44px; }
   button.secondary, button.danger, .theme button, .me button.link { min-width: 44px; min-height: 44px; }
@@ -706,7 +707,6 @@ form.stack label.check { min-height: 24px; padding-block: 2px; }
    <html> by console.js before the first paint (data-nav = collapsed groups, data-sidebar), so
    there is no flash. A group that holds the current page never collapses. */
 .sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.sidebar-head .brand { flex: 1; min-width: 0; }
 button.sidebar-toggle { display: none; background: none; border: 1px solid transparent; color: var(--text-3); padding: 6px; border-radius: 8px; min-width: 32px; min-height: 32px; justify-content: center; }
 button.sidebar-toggle:hover { background: var(--sunken); color: var(--text); border-color: transparent; }
 html.js button.sidebar-toggle { display: inline-flex; }
@@ -729,7 +729,16 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
 @media (min-width: 901px) {
   /* A folded group, unless it holds the current page. */
   html[data-nav~="record"] .nav-group[data-group="record"]:not(:has(a[aria-current="page"])) .nav-items,
-  html[data-nav~="administration"] .nav-group[data-group="administration"]:not(:has(a[aria-current="page"])) .nav-items { display: none; }
+  html[data-nav~="administration"] .nav-group[data-group="administration"]:not(:has(a[aria-current="page"])) .nav-items,
+  html[data-nav~="approvals"] .nav-group[data-group="approvals"]:not(:has(a[aria-current="page"])) .nav-items { display: none; }
+  /* The sign-out and theme controls stay on screen: the menu scrolls inside the sidebar when it is
+     taller than the window, instead of pushing them below the fold. */
+  .sidebar { overflow: hidden; }
+  .sidebar-head .brand { flex: 1; min-width: 0; }
+  .nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 2px; margin: -2px; }
+  .sidebar-foot { flex: none; margin-top: 0; }
+  /* Collapsed, the page uses the room the sidebar gave up. */
+  html[data-sidebar="collapsed"] .main { max-width: none; }
   html[data-sidebar="collapsed"] .shell { grid-template-columns: 64px 1fr; }
   html[data-sidebar="collapsed"] .sidebar { padding: 16px 8px; align-items: center; }
   html[data-sidebar="collapsed"] .sidebar-head { flex-direction: column; align-items: center; gap: 4px; }

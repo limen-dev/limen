@@ -6,49 +6,72 @@
 <meta name="color-scheme" content="light dark">
 <meta name="darkreader-lock">
 <title>Reviews · Limen</title>
-<link rel="icon" href="/console/static/logo-mark.svg?v=df07b240ca8e" type="image/svg+xml">
+<link rel="icon" href="/console/static/logo-mark.svg?v=eeb7b72ffe00" type="image/svg+xml">
 <link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/console/static/console.css?v=df07b240ca8e">
-<script src="/console/static/console.js?v=df07b240ca8e"></script>
+<link rel="stylesheet" href="/console/static/console.css?v=eeb7b72ffe00">
+<script src="/console/static/console.js?v=eeb7b72ffe00"></script>
 
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <a class="brand" href="/console/">
-      <img class="logo-light" src="/console/static/logo-mark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <span>Limen</span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#layout-dashboard"/></svg><span>Overview</span></a>
-      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#database"/></svg><span>Resources</span></a>
-      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><span>Sessions</span></a>
-      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg><span>Access</span></a>
-      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg><span>Policy changes</span></a>
-      <a href="/console/reviews" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg><span>Reviews</span></a>
+    <div class="sidebar-head">
+      <a class="brand" href="/console/">
+        <img class="logo-light" src="/console/static/logo-mark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <span>Limen</span>
+      </a>
+      <button type="button" class="sidebar-toggle" aria-controls="nav" aria-expanded="true" aria-label="Collapse the sidebar"><svg class="i ic-close"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-close"/></svg><svg class="i ic-open"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-open"/></svg></button>
+    </div>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#key-round"/></svg><span>Access</span></a>
+      
+      <div class="nav-group" data-group="approvals">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-approvals"><span>Approvals</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-approvals">
+          <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#file-diff"/></svg><span>Policy changes</span></a>
+          <a href="/console/reviews" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Reviews</span></a>
+        </div>
+      </div>
       
       
-      <div class="nav-label">Administration</div>
-      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg><span>Users</span></a>
-      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg><span>Bots</span></a>
-      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#server"/></svg><span>Workers</span></a>
-      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg><span>Audit trail</span></a>
-      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg><span>Policy</span></a>
-      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#chart-column"/></svg><span>Dashboards</span></a>
+      <div class="nav-group" data-group="record">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-record"><span>Record</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-record">
+          <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg><span>Audit trail</span></a>
+          <a href="/console/controls"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Controls</span></a>
+          <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chart-column"/></svg><span>Dashboards</span></a>
+        </div>
+      </div>
+      
+      
+      <div class="nav-group" data-group="administration">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-administration"><span>Administration</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-administration">
+          <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#users"/></svg><span>Users</span></a>
+          <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#bot"/></svg><span>Bots</span></a>
+          <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#server"/></svg><span>Workers</span></a>
+          <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#scroll-text"/></svg><span>Policy</span></a>
+          <a href="/console/simulator"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#play"/></svg><span>Access simulator</span></a>
+          <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#plug"/></svg><span>Integrations</span></a>
+        </div>
+      </div>
       
     </nav>
     <div class="sidebar-foot">
       <div class="theme" role="group" aria-label="Theme">
-        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#monitor"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#sun"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#moon"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#moon"/></svg></button>
       </div>
       <form method="post" action="/console/logout" class="me">
         <span class="avatar av-4" aria-hidden="true">A</span>
         <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
-        <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
-        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#log-out"/></svg></button>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#log-out"/></svg></button>
       </form>
     </div>
   </aside>
@@ -66,9 +89,9 @@
 
 
 <details class="start">
-  <summary class="button"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg>Start a review</summary>
+  <summary class="button"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg>Start a review</summary>
   <form method="post" action="/console/reviews/start" class="card fields">
-    <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
+    <input type="hidden" name="csrf" value="fixture">
     <label class="grow"><span>Name</span><input type="text" name="name" placeholder="Optional, e.g. Q4 access review" maxlength="200"></label>
     <label><span>Days to answer</span><input type="number" name="due_days" value="14" min="1" max="90" class="w-80"></label>
     <label><span>Days a removal holds</span><input type="number" name="override_days" value="30" min="1" max="365" class="w-80"></label>
@@ -84,7 +107,7 @@
   <tbody>
   
   <tr>
-    <td><a class="cell-main" href="/console/reviews/01a19ea2-49aa-7639-b9ea-2f5d5b4f25ce">Scheduled access review 2026-11-02</a><div class="cell-sub">started by system</div></td>
+    <td><a class="cell-main" href="/console/reviews/01a1d62f-1e59-72b0-8290-909f2993b5be">Scheduled access review 2026-11-13</a><div class="cell-sub">started by system</div></td>
     <td><div class="review-progress"><div class="progress" title="0 of 6 decided"><span style="width:0%"></span></div><small>0 of 6 decided</small></div></td>
     <td><span class="muted">nothing yet</span></td>
     <td class="nowrap">in 13 d</td>
@@ -105,9 +128,9 @@
 <div class="card">
 <form method="get" action="/console/reviews/evidence" class="stack wide">
   <div class="row">
-    <label><span>From</span> <input type="date" name="from" value="2026-08-05" required></label>
-    <label><span>To (not included)</span> <input type="date" name="to" value="2026-11-04" required></label>
-    <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg>Download a signed pack</button>
+    <label><span>From</span> <input type="date" name="from" value="2026-08-15" required></label>
+    <label><span>To (not included)</span> <input type="date" name="to" value="2026-11-14" required></label>
+    <button type="submit" class="secondary"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#file-diff"/></svg>Download a signed pack</button>
   </div>
   <p class="hint">Requests, approvals, grants, reviews, locks, policy changes, and sessions for the period, with a signed manifest of hashes. Check it anywhere with <code>limen audit verify --evidence</code>. Exporting is itself recorded in the audit trail.</p>
 </form>
@@ -115,7 +138,7 @@
 
 
     </main>
-    <div class="foot">Limen 0.1.0-rc.1 · policy v1</div>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
   </div>
 </div>
 </body>
