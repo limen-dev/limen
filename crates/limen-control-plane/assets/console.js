@@ -136,6 +136,10 @@
       return Array.prototype.some.call(main.querySelectorAll('input,textarea,select'), function (el) {
         if (el.type === 'hidden' || el.type === 'submit' || el.type === 'button') return false;
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+        // A <select> has no defaultValue: it is changed when an option's selection differs from its default.
+        if (el.tagName === 'SELECT') {
+          return Array.prototype.some.call(el.options, function (o) { return o.selected !== o.defaultSelected; });
+        }
         return el.value !== el.defaultValue;
       });
     }
@@ -339,5 +343,226 @@ document.addEventListener('DOMContentLoaded', function () {
       });
       document.addEventListener('click', function (e) { if (!root.contains(e.target)) list.hidden = true; });
     });
+  });
+})();
+
+// Relative times: <time datetime="RFC 3339" title="absolute UTC">absolute UTC</time> reads "5 minutes
+// ago" while it is recent, and keeps the absolute text (as the text and as the tooltip) once it is
+// older than two weeks, in the future, or when there is no script. The server's text is the
+// fallback; nothing else changes. Re-run after the auto-refresh swaps the page and every 30 s.
+(function () {
+  function plural(n, unit) { return n + ' ' + unit + (n === 1 ? '' : 's') + ' ago'; }
+  function relative(then, now) {
+    var s = Math.floor((now - then) / 1000);
+    if (s < 0) return null;          // a clock that disagrees with the server: show the real time
+    if (s < 60) return 'just now';
+    if (s < 3600) return plural(Math.floor(s / 60), 'minute');
+    if (s < 86400) return plural(Math.floor(s / 3600), 'hour');
+    if (s < 14 * 86400) return plural(Math.floor(s / 86400), 'day');
+    return null;
+  }
+  function stamp() {
+    var now = Date.now();
+    Array.prototype.forEach.call(document.querySelectorAll('time[datetime][title]'), function (el) {
+      var then = Date.parse(el.getAttribute('datetime'));
+      if (isNaN(then)) return;
+      var text = relative(then, now);
+      el.textContent = text === null ? el.getAttribute('title') : text;
+    });
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    stamp();
+    setInterval(stamp, 30000);
+    // The refresh replaces <main>'s children. Watch only that level: setting a <time>'s text is
+    // deeper, so stamping never wakes this observer again.
+    var main = document.querySelector('main');
+    if (main && window.MutationObserver) new MutationObserver(stamp).observe(main, { childList: true });
+  });
+})();
+
+// Command palette: Ctrl/Cmd+K, or the "Jump to" button. It lists the pages the menu already shows
+// this person (so it can't offer a page they can't open) and asks the server for resources, which
+// answers with the same set the Resources page shows. "g" then a letter goes to a page.
+(function () {
+  var SHORTCUTS = { h: '/console/', r: '/console/resources', s: '/console/sessions', a: '/console/audit', u: '/console/users', w: '/console/workers', p: '/console/policy' };
+  var KEYS = {};
+  Object.keys(SHORTCUTS).forEach(function (k) { KEYS[SHORTCUTS[k]] = k; });
+
+  function typing(t) {
+    return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+  }
+  function pages() {
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.nav a[href]'), function (a) {
+      var label = a.querySelector('span');
+      var name = (label ? label.textContent : a.textContent).trim();
+      if (name) out.push({ name: name, href: a.getAttribute('href'), kind: 'page', key: KEYS[a.getAttribute('href')] || '' });
+    });
+    return out;
+  }
+
+  var root = null, input = null, list = null, opener = null;
+  var shown = [], active = 0, seq = 0, timer = null, resources = [];
+
+  function build() {
+    root = document.createElement('div');
+    root.className = 'palette-backdrop';
+    root.hidden = true;
+    var box = document.createElement('div');
+    box.className = 'palette';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Jump to');
+    input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'palette-input';
+    input.placeholder = 'Jump to a page or a resource';
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-label', 'Jump to a page or a resource');
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', 'palette-list');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    list = document.createElement('ul');
+    list.id = 'palette-list';
+    list.className = 'palette-list';
+    list.setAttribute('role', 'listbox');
+    var hint = document.createElement('div');
+    hint.className = 'palette-hint';
+    hint.textContent = '↑ ↓ to move · Enter to open · Esc to close · g then a letter jumps to a page';
+    box.appendChild(input);
+    box.appendChild(list);
+    box.appendChild(hint);
+    root.appendChild(box);
+    document.body.appendChild(root);
+    // Resources from the last query may not match the new text, and Enter must never open one that
+    // doesn't: drop them at once, show the pages that match, and add resources when the answer lands.
+    input.addEventListener('input', function () { resources = []; active = 0; seq++; schedule(); render(); });
+    input.addEventListener('keydown', onKey);
+    root.addEventListener('mousedown', function (e) { if (e.target === root) close(); });
+  }
+
+  function matches(item, needle) { return !needle || item.name.toLowerCase().indexOf(needle) !== -1; }
+
+  function render() {
+    var needle = input.value.trim().toLowerCase();
+    shown = pages().filter(function (p) { return matches(p, needle); }).concat(resources);
+    if (active >= shown.length) active = Math.max(0, shown.length - 1);
+    list.textContent = '';
+    if (!shown.length) {
+      var none = document.createElement('li');
+      none.className = 'palette-none';
+      none.textContent = 'Nothing matches.';
+      list.appendChild(none);
+      input.removeAttribute('aria-activedescendant');
+      return;
+    }
+    shown.forEach(function (it, i) {
+      var li = document.createElement('li');
+      li.id = 'palette-opt-' + i;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', String(i === active));
+      if (i === active) li.className = 'on';
+      var a = document.createElement('a');
+      a.href = it.href;
+      var n = document.createElement('span');
+      n.textContent = it.name;
+      var k = document.createElement('span');
+      k.className = 'palette-kind';
+      k.textContent = it.key ? it.kind + ' · g ' + it.key : it.kind;
+      a.appendChild(n);
+      a.appendChild(k);
+      li.appendChild(a);
+      li.addEventListener('mousemove', function () { if (active !== i) { active = i; paintActive(); } });
+      list.appendChild(li);
+    });
+    input.setAttribute('aria-activedescendant', 'palette-opt-' + active);
+  }
+
+  function paintActive() {
+    Array.prototype.forEach.call(list.children, function (li, i) {
+      li.className = i === active ? 'on' : '';
+      li.setAttribute('aria-selected', String(i === active));
+    });
+    input.setAttribute('aria-activedescendant', 'palette-opt-' + active);
+    var cur = list.children[active];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(ask, 120);
+  }
+  function ask() {
+    var mine = ++seq;
+    fetch('/console/suggest/resources?q=' + encodeURIComponent(input.value.trim()), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (d) {
+        if (mine !== seq || !root || root.hidden) return;
+        resources = (Array.isArray(d) ? d : []).map(function (r) { return { name: r.name, href: r.href, kind: r.kind, key: '' }; });
+        render();
+      })
+      .catch(function () { /* offline: pages still work */ });
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key === 'Tab') { e.preventDefault(); return; } // the box is the only stop
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!shown.length) return;
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length;
+      paintActive();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (shown[active]) window.location.href = shown[active].href;
+    }
+  }
+
+  function open() {
+    if (!root) build();
+    if (!root.hidden) return;
+    opener = document.activeElement;
+    root.hidden = false;
+    input.value = '';
+    active = 0;
+    resources = [];
+    render();
+    input.focus();
+    ask();
+  }
+  function close() {
+    if (!root || root.hidden) return;
+    root.hidden = true;
+    clearTimeout(timer);
+    seq++;
+    if (opener && opener.focus) opener.focus();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var cmd = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K');
+    if (cmd) { e.preventDefault(); if (root && !root.hidden) close(); else open(); return; }
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('[data-palette-open]')) open();
+  });
+  document.addEventListener('DOMContentLoaded', function () {
+    if (/Mac|iPhone|iPad/.test(navigator.platform || '')) {
+      Array.prototype.forEach.call(document.querySelectorAll('.palette-open kbd'), function (k) { k.textContent = '\u2318K'; });
+    }
+  });
+
+  // g, then a letter, within a second: go to that page, if the menu has it.
+  var armed = 0;
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || (root && !root.hidden)) return;
+    if (armed && Date.now() - armed < 1000 && SHORTCUTS[e.key]) {
+      var href = SHORTCUTS[e.key];
+      armed = 0;
+      if (document.querySelector('.nav a[href="' + href + '"]')) { e.preventDefault(); window.location.href = href; }
+      return;
+    }
+    armed = e.key === 'g' ? Date.now() : 0;
   });
 })();

@@ -24,6 +24,7 @@ pub mod oidc_flow;
 mod pages;
 mod policy_edit;
 mod query;
+mod resource_ui;
 #[cfg(fuzzing)]
 pub use query::fuzz as query_fuzz;
 pub mod store;
@@ -114,6 +115,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/console/simulator", get(pages::simulator))
         .route("/console/simulator/suggest", get(pages::simulator_suggest))
+        .route("/console/suggest/resources", get(pages::resource_suggest))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

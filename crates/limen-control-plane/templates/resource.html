@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ name }}{% endblock %}
+{% block refresh %} data-refresh="10"{% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/console/resources">Resources</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><span aria-current="page">{{ name }}</span></nav>
 <div class="page-head">
   <div class="title-row">
     <span class="kind lg {{ kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ icon }}"/></svg></span>
@@ -11,17 +13,69 @@
     <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All resources</a>
   </div>
 </div>
+
+<div class="card status-strip">
+  {% if let Some(h) = health %}<div><span class="muted">Status</span><span class="pill {{ h.pill() }}" title="{{ h.hint() }}">{{ h.label() }}</span></div>{% endif %}
+  <div><span class="muted">Last used</span>{% if let Some(t) = last_used %}<time datetime="{{ t.iso }}" title="{{ t.text }}">{{ t.text }}</time>{% else %}<span class="muted">never</span>{% endif %}</div>
+  {% if chrome.reads_record %}<div><span class="muted">Open now</span>{% if live.is_empty() %}<span>nobody</span>{% else %}<span class="pill live">{{ live.len() }} live</span>{% endif %}</div>{% endif %}
+  <div class="strip-links"><a href="{{ sessions_href }}">{% if chrome.reads_record %}All sessions{% else %}Your sessions{% endif %}</a>{% if let Some(a) = audit_href %}<a href="{{ a }}">Audit trail</a>{% endif %}</div>
+</div>
+
+<h2>Connect</h2>
+<div class="card connect-card">
+{% if principals.is_empty() %}
+  <p class="muted">{% if can_request %}Your roles don't open this resource yet. Ask for access and, once it is approved, the command to open it appears here.{% else if chrome.reads_record %}Your own roles don't open this resource, so there is no command to run as you. You can see it because you {% if chrome.is_admin %}administer Limen{% else %}audit it{% endif %}.{% else %}None of your own roles open this resource, so there is nothing to connect with.{% endif %}</p>
+{% else %}
+{% if let Some(phase) = connect.planned %}
+  <span class="cmd soon"><code>{{ connect.command }}</code></span> <span class="pill">{{ phase }}</span> <span class="hint">Not available yet: you can list it, but nothing serves it until then.</span>
+{% else %}
+  <ul class="connect-list">
+  {% for o in options %}
+    <li>{% if let Some(p) = o.principal %}<span class="connect-as"><span class="muted">as</span> <span class="chip">{{ p }}</span></span>{% endif %}<span class="cmd"><code>{{ o.command }}</code><button type="button" class="secondary" data-copy="{{ o.command }}" title="Copy" aria-label="Copy command{% if let Some(p) = o.principal %} for {{ p }}{% endif %}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span></li>
+  {% endfor %}
+  </ul>
+  <p class="hint">Run it in a terminal where you have signed in with <code>limen login</code>.</p>
+{% endif %}
+{% endif %}
+</div>
+
+{% if !live.is_empty() %}
+<h2>On it now <span class="count">{{ live.len() }}</span></h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>User</th><th>As</th><th>Since</th><th class="actions"><span class="sr-only">Actions</span></th></tr></thead>
+  <tbody>{% for s in live %}<tr>
+    <td>{{ s.user }}</td><td class="mono">{{ s.login }}</td>
+    <td class="nowrap"><time datetime="{{ s.since.iso }}" title="{{ s.since.text }}">{{ s.since.text }}</time></td>
+    <td class="actions"><a href="/console/sessions/{{ s.id }}">Details</a>{% if s.watch %} · <a href="/console/sessions/{{ s.id }}/watch">Watch</a>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+<nav class="tabs detail-tabs" aria-label="Resource sections">{% for t in tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="true"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>
+
+{% if tab == "overview" %}
 <div class="card facts-card"><table class="facts">
-  <tr><th>Labels</th><td><div class="chips">{% for l in labels %}<span class="chip">{{ l }}</span>{% endfor %}</div></td></tr>
+  <tr><th>Labels</th><td><div class="chips">{% for l in labels %}<span class="chip">{{ l }}</span>{% endfor %}{% if labels.is_empty() %}<span class="muted">none</span>{% endif %}</div></td></tr>
   {% if chrome.is_admin %}
   <tr><th>Target</th><td class="mono">{{ target }}{% if pinned %} <span class="pill ok">host key pinned</span>{% endif %}</td></tr>
   <tr><th>Worker selector</th><td><div class="chips">{% for l in selector %}<span class="chip">{{ l }}</span>{% endfor %}{% if selector.is_empty() %}<span class="muted">any worker</span>{% endif %}</div></td></tr>
   {% endif %}
   <tr><th>You can access as</th><td><div class="chips">{% for p in principals %}<span class="chip">{{ p }}</span>{% endfor %}{% if principals.is_empty() %}<span class="muted">not with your own roles</span>{% endif %}</div></td></tr>
-  {% if !principals.is_empty() %}<tr><th>Connect</th><td>{% if let Some(phase) = connect.planned %}<span class="cmd soon"><code>{{ connect.command }}</code></span> <span class="pill">{{ phase }}</span> <span class="hint">Not available yet: you can list it, but nothing serves it until then.</span>{% else %}<span class="cmd"><code>{{ connect.command }}</code><button type="button" class="secondary" data-copy="{{ connect.command }}" title="Copy" aria-label="Copy command"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% endif %}</td></tr>{% endif %}
 </table></div>
 
-{% if chrome.reads_record %}
+{% if chrome.is_admin %}
+<h2>Workers that can serve it <span class="count">{{ workers.len() }}</span></h2>
+{% if workers.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plug"/></svg><div>No enrolled worker matches the selector, so sessions to this resource will fail.</div></div>{% else %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Worker</th><th>Last seen</th><th class="num">Tunnels</th></tr></thead>
+  <tbody>{% for w in workers %}<tr><td class="mono">{{ w.id }}{% if let Some(name) = w.name %} <span class="cell-sub">{{ name }}</span>{% endif %}</td><td class="nowrap">{{ w.last_seen }}</td><td class="num">{% if w.tunnels == 0 %}<span class="pill bad">0</span>{% else %}{{ w.tunnels }}{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+{% endif %}
+
+<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %} <a class="muted ml-auto" href="{{ sessions_href }}">View all</a></h2>
+{% include "sessions_table.html" %}
+
+{% else if tab == "access" %}
 <h2>Who can reach it</h2>
 {% if who_can.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>Nobody. No role that selects it is held by a group or a bot, or can be requested.</div></div>{% else %}
 <div class="table-wrap"><table>
@@ -33,17 +87,9 @@
     <td>{{ a.who }}</td><td>{% if a.approvers.is_empty() %}—{% else %}{{ a.approvers }}{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table></div>{% endif %}
-{% endif %}
-{% if chrome.is_admin %}
 
-<h2>Workers that can serve it <span class="count">{{ workers.len() }}</span></h2>
-{% if workers.is_empty() %}<div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#plug"/></svg><div>No enrolled worker matches the selector, so sessions to this resource will fail.</div></div>{% else %}
-<div class="table-wrap"><table>
-  <thead><tr><th>Worker</th><th>Last seen</th><th class="num">Tunnels</th></tr></thead>
-  <tbody>{% for w in workers %}<tr><td class="mono">{{ w.id }}{% if let Some(name) = w.name %} <span class="cell-sub">{{ name }}</span>{% endif %}</td><td class="nowrap">{{ w.last_seen }}</td><td class="num">{{ w.tunnels }}</td></tr>{% endfor %}</tbody>
-</table></div>{% endif %}
-{% endif %}
-
-<h2>{% if chrome.is_admin %}Recent sessions{% else %}Your recent sessions{% endif %}</h2>
+{% else %}
+<h2>{% if chrome.is_admin %}Sessions{% else %}Your sessions{% endif %} <a class="muted ml-auto" href="{{ sessions_href }}">Filter and search</a></h2>
 {% include "sessions_table.html" %}
+{% endif %}
 {% endblock %}

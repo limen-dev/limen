@@ -20,6 +20,25 @@
 </section>
 {% endif %}
 
+{% if !attention.is_empty() %}
+<section class="card attention" aria-labelledby="attention-h">
+  <h2 id="attention-h"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-alert"/></svg>Needs you</h2>
+  <ul>{% for a in attention %}<li><a href="{{ a.href }}"><span class="pill {{ a.tone }}">{{ a.text }}</span><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-right"/></svg></a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if !recent.is_empty() %}
+<h2>Continue where you left off</h2>
+<div class="recent">
+  {% for r in recent %}
+  <div class="card recent-card">
+    <div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }} · <time datetime="{{ r.last.iso }}" title="{{ r.last.text }}">{{ r.last.text }}</time></div></div></div>
+    <span class="cmd"><code>{{ r.connect.command }}</code><button type="button" class="secondary" data-copy="{{ r.connect.command }}" title="Copy" aria-label="Copy the connect command for {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <h2>Resources you can access <span class="count">{{ resources.len() }}</span></h2>
 {% if resources.is_empty() %}
 <div class="card empty"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#ban"/></svg><div>Your roles don't grant access to any resource.</div></div>

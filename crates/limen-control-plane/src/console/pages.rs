@@ -13,9 +13,12 @@ use limen_core::names::NAME_LABEL;
 use limen_policy::Document;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use super::query;
+use super::resource_ui::{self, ResourceSort};
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, EventView, HitView, Home,
@@ -226,6 +229,131 @@ pub async fn signin() -> Response {
 
 // ---- overview ------------------------------------------------------------------------
 
+/// What is waiting for this viewer, most urgent first. Each line links to where it is dealt with.
+/// Counts are of things the viewer may already see on those pages; a line with nothing behind it
+/// is left out, so an empty card is no card.
+async fn attention_items(
+    state: &AppState,
+    auth: &Auth,
+    overview: &Stats,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut items = Vec::new();
+    if auth.is_admin {
+        let (components, tunnels) = db::list_components(&state.db)
+            .await
+            .map_err(|e| db_error("listing components", &e))?;
+        let loaded = state.policy.current();
+        let down = loaded
+            .policy
+            .documents()
+            .iter()
+            .filter_map(|d| match d {
+                Document::Resource(r) => Some(r),
+                _ => None,
+            })
+            .filter(|r| {
+                views::Health::of(&matching_workers(
+                    &components,
+                    &tunnels,
+                    &r.spec.worker_selector,
+                ))
+                .needs_attention()
+            })
+            .count();
+        if down > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} without a connected worker, so sessions will fail",
+                    plural(down, "resource", "resources")
+                ),
+                href: "/console/resources?sort=attention&attention=1".to_owned(),
+                tone: "bad",
+            });
+        }
+        if overview.locked > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} disabled",
+                    plural(overview.locked, "account", "accounts")
+                ),
+                href: "/console/users".to_owned(),
+                tone: "warn",
+            });
+        }
+    }
+    if auth.sees_access {
+        let who = crate::access::Who {
+            username: &auth.username,
+            is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            via: "console",
+        };
+        let waiting = crate::access::list_requests(
+            state,
+            &who,
+            &limen_proto::v1::ListAccessRequestsRequest {
+                scope: "approvable".into(),
+                status: String::new(),
+                limit: 100,
+            },
+        )
+        .await
+        .map_err(|s| action_error(&s))?
+        .iter()
+        .filter(|r| r.can_decide)
+        .count();
+        if waiting > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} waiting for your decision",
+                    plural(waiting, "access request", "access requests")
+                ),
+                href: "/console/access?tab=approvals".to_owned(),
+                tone: "warn",
+            });
+        }
+    }
+    Ok(items)
+}
+
+/// The resources the viewer used last, among those they can still open. Only their own sessions
+/// count, for admins too: this is "where *you* left off".
+async fn recent_resources(
+    state: &AppState,
+    auth: &Auth,
+    reachable: &[ResourceView],
+) -> Result<Vec<views::RecentResource>, Response> {
+    let used = store::resource_activity(&state.db, Some(&auth.username))
+        .await
+        .map_err(|e| db_error("reading your recent resources", &e))?;
+    let mut recent: Vec<views::RecentResource> = reachable
+        .iter()
+        .filter(|r| r.connect.planned.is_none())
+        .filter_map(|r| {
+            let at = used.get(&r.name)?.last_started?;
+            Some(views::RecentResource {
+                name: r.name.clone(),
+                path: r.path.clone(),
+                kind: r.kind.clone(),
+                icon: r.icon,
+                kclass: r.kclass,
+                connect: views::connect_for(&r.kind, &r.name),
+                last: views::Stamp::of(at),
+            })
+        })
+        .collect();
+    recent.sort_by(|a, b| {
+        b.last
+            .iso
+            .cmp(&a.last.iso)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    recent.truncate(4);
+    Ok(recent)
+}
+
 pub async fn home(
     State(state): State<AppState>,
     auth: Auth,
@@ -235,7 +363,7 @@ pub async fn home(
         Ok(r) => r,
         Err(r) => return r,
     };
-    let resources = reach
+    let resources: Vec<ResourceView> = reach
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
@@ -293,6 +421,14 @@ pub async fn home(
             Err(e) => return db_error("counting for the overview", &e),
         }
     }
+    let attention = match attention_items(&state, &auth, &overview).await {
+        Ok(items) => items,
+        Err(r) => return r,
+    };
+    let recent = match recent_resources(&state, &auth, &resources).await {
+        Ok(items) => items,
+        Err(r) => return r,
+    };
     html(
         Home {
             chrome: chrome(&state, &auth, "home"),
@@ -302,6 +438,8 @@ pub async fn home(
             sessions,
             roles_text: format!("the roles {}", list_text(&auth.roles)),
             expires: time_text(Some(auth.expires_at)),
+            attention,
+            recent,
         }
         .render(),
     )
@@ -370,6 +508,8 @@ fn matching_workers(
 pub struct ResourcesQuery {
     kind: Option<String>,
     q: Option<String>,
+    sort: Option<String>,
+    attention: Option<String>,
 }
 
 /// Every `label=key=value` in the query string (repeatable; a value may contain commas).
@@ -383,52 +523,33 @@ fn label_filters(raw: Option<&str>) -> Vec<String> {
     labels
 }
 
-/// A `/console/resources` link for one filter combination, so every filter is shareable.
-fn resources_href(kind: Option<&str>, q: &str, labels: &[String]) -> String {
-    let mut ser = url::form_urlencoded::Serializer::new(String::new());
-    if let Some(k) = kind {
-        ser.append_pair("kind", k);
-    }
-    if !q.is_empty() {
-        ser.append_pair("q", q);
-    }
-    for l in labels {
-        ser.append_pair("label", l);
-    }
-    let query = ser.finish();
-    if query.is_empty() {
-        "/console/resources".to_owned()
-    } else {
-        format!("/console/resources?{query}")
-    }
-}
-
-pub async fn resources(
-    State(state): State<AppState>,
-    auth: Auth,
-    Query(q): Query<ResourcesQuery>,
-    RawQuery(raw): RawQuery,
-) -> Response {
+/// Every resource the viewer may see, with what the list shows about each. Admins see every
+/// resource and everyone's activity; anyone else sees only what their roles open and only their
+/// own last use. Filters and sorting come after this, so they can't reveal anything.
+async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>, Response> {
     let loaded = state.policy.current();
     let (components, tunnels) = if auth.is_admin {
         match db::list_components(&state.db).await {
             Ok(pair) => pair,
-            Err(e) => return db_error("listing components", &e),
+            Err(e) => return Err(db_error("listing components", &e)),
         }
     } else {
         (Vec::new(), Vec::new())
     };
-    let counts = if auth.is_admin {
-        store::session_counts_by_resource(&state.db)
-            .await
-            .unwrap_or_default()
-    } else {
-        std::collections::HashMap::new()
+    // Admins see everyone's sessions; anyone else only learns when they last used a resource.
+    let activity = match store::resource_activity(
+        &state.db,
+        (!auth.is_admin).then_some(auth.username.as_str()),
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => return Err(db_error("counting sessions per resource", &e)),
     };
     // Admins see every resource; everyone else only what their roles allow.
-    let accessible = match reachable_for(&state, &auth).await {
+    let accessible = match reachable_for(state, auth).await {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(r) => return Err(r),
     };
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
@@ -440,14 +561,18 @@ pub async fn resources(
         }
         let kind = spec_kind(&r.spec);
         let (icon, kclass) = views::kind_icon(kind);
-        let (total, active) = counts.get(&name).copied().unwrap_or((0, 0));
+        let seen = activity.get(&name).copied().unwrap_or_default();
+        let workers = auth
+            .is_admin
+            .then(|| matching_workers(&components, &tunnels, &r.spec.worker_selector));
         rows.push(ResourceRow {
             roles: if auth.is_admin {
                 access_roles(&loaded.policy, &name)
             } else {
                 Vec::new()
             },
-            workers: matching_workers(&components, &tunnels, &r.spec.worker_selector).len(),
+            workers: workers.as_ref().map_or(0, Vec::len),
+            health: workers.as_deref().map(views::Health::of),
             labels: r
                 .metadata
                 .labels
@@ -461,14 +586,31 @@ pub async fn resources(
                 String::new()
             },
             path: path_segment(&name),
+            // Only what the viewer can open gets a command to copy.
+            connect: mine.map(|_| views::connect_for(kind, &name)),
+            last_used: seen.last_started.map(views::Stamp::of),
             name,
             kind: kind.to_owned(),
             icon,
             kclass,
-            sessions: total,
-            active,
+            // Counts of everyone's sessions are admin-only; the query above is scoped otherwise.
+            sessions: if auth.is_admin { seen.total } else { 0 },
+            active: if auth.is_admin { seen.active } else { 0 },
         });
     }
+    Ok(rows)
+}
+
+pub async fn resources(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<ResourcesQuery>,
+    RawQuery(raw): RawQuery,
+) -> Response {
+    let mut rows = match resource_rows(&state, &auth).await {
+        Ok(rows) => rows,
+        Err(r) => return r,
+    };
     // Filters apply after access control, so a filter can't reveal anything.
     let needle =
         q.q.as_deref()
@@ -477,17 +619,37 @@ pub async fn resources(
     let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
     let label_filter = label_filters(raw.as_deref());
     let query_text = q.q.clone().unwrap_or_default();
+    let sort = ResourceSort::parse(q.sort.as_deref(), auth.is_admin);
+    // Worker health is admin-only, so the filter is too.
+    let attention = auth.is_admin && q.attention.as_deref() == Some("1");
+    let total = rows.len();
+    let attention_count = rows
+        .iter()
+        .filter(|r| r.health.is_some_and(views::Health::needs_attention))
+        .count();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
     kinds.dedup();
     rows.retain(|r| {
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
             && label_filter.iter().all(|l| r.labels.contains(l))
+            && (!attention || r.health.is_some_and(views::Health::needs_attention))
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
             })
     });
+    sort_rows(&mut rows, sort);
+    let filters = |kind: Option<&str>, labels: &[String], attention: bool| {
+        resource_ui::Filters {
+            kind,
+            q: &query_text,
+            labels,
+            sort,
+            attention,
+        }
+        .href()
+    };
     html(
         ResourcesPage {
             chrome: chrome(&state, &auth, "resources"),
@@ -496,7 +658,7 @@ pub async fn resources(
                 .map(|k| {
                     let (icon, kclass) = views::kind_icon(&k);
                     KindTab {
-                        href: resources_href(Some(&k), &query_text, &label_filter),
+                        href: filters(Some(&k), &label_filter, attention),
                         current: kind_filter.as_deref() == Some(k.as_str()),
                         icon,
                         kclass,
@@ -505,26 +667,36 @@ pub async fn resources(
                 })
                 .collect(),
             all_selected: kind_filter.is_none(),
-            all_href: resources_href(None, &query_text, &label_filter),
+            all_href: filters(None, &label_filter, attention),
             active_labels: label_filter
                 .iter()
                 .map(|l| LabelLink {
                     text: l.clone(),
-                    href: resources_href(
+                    href: filters(
                         kind_filter.as_deref(),
-                        &query_text,
                         &label_filter
                             .iter()
                             .filter(|o| *o != l)
                             .cloned()
                             .collect::<Vec<_>>(),
+                        attention,
                     ),
                 })
                 .collect(),
-            clear_href: resources_href(kind_filter.as_deref(), &query_text, &[]),
+            clear_href: filters(kind_filter.as_deref(), &[], attention),
             kind_value: kind_filter.clone().unwrap_or_default(),
             label_values: label_filter.clone(),
             query: query_text.clone(),
+            sorts: sort.options(auth.is_admin),
+            sort_value: if sort == ResourceSort::Name {
+                String::new()
+            } else {
+                sort.value().to_owned()
+            },
+            attention_on: attention,
+            attention_href: filters(kind_filter.as_deref(), &label_filter, !attention),
+            attention_count,
+            total,
             rows: rows
                 .into_iter()
                 .map(|r| {
@@ -538,7 +710,7 @@ pub async fn resources(
                             }
                             LabelLink {
                                 text: l.clone(),
-                                href: resources_href(kind_filter.as_deref(), &query_text, &next),
+                                href: filters(kind_filter.as_deref(), &next, attention),
                             }
                         })
                         .collect();
@@ -550,10 +722,128 @@ pub async fn resources(
     )
 }
 
+/// Lay the rows out in the order the pure rules give, so the ordering lives in one tested place.
+fn sort_rows(rows: &mut Vec<ResourceRow>, sort: ResourceSort) {
+    let mut keys: Vec<resource_ui::SortKey<'_>> = rows
+        .iter()
+        .map(|r| resource_ui::SortKey {
+            name: &r.name,
+            last_used: r
+                .last_used
+                .as_ref()
+                .and_then(|s| OffsetDateTime::parse(&s.iso, &Rfc3339).ok()),
+            active: r.active,
+            total: r.sessions,
+            health: r.health,
+        })
+        .collect();
+    resource_ui::sort_keys(&mut keys, sort);
+    let order: Vec<String> = keys.iter().map(|k| k.name.to_owned()).collect();
+    let mut taken: Vec<Option<ResourceRow>> = std::mem::take(rows).into_iter().map(Some).collect();
+    for name in order {
+        if let Some(slot) = taken
+            .iter_mut()
+            .find(|r| r.as_ref().is_some_and(|r| r.name == name))
+        {
+            rows.extend(slot.take());
+        }
+    }
+}
+
+/// The detail page's sections, as plain links. The access table is for readers of the record.
+fn detail_tabs(name: &str, current: &str, reads_record: bool) -> Vec<views::DetailTab> {
+    let href = |t: &str| {
+        if t == "overview" {
+            format!("/console/resources/{}", path_segment(name))
+        } else {
+            format!("/console/resources/{}?tab={t}", path_segment(name))
+        }
+    };
+    let mut tabs = vec![("overview", "Overview")];
+    if reads_record {
+        tabs.push(("access", "Access"));
+    }
+    tabs.push(("activity", "Activity"));
+    tabs.into_iter()
+        .map(|(t, label)| views::DetailTab {
+            href: href(t),
+            label,
+            current: t == current,
+        })
+        .collect()
+}
+
+/// Sessions open on a resource now, for readers of the record; nobody else sees who is on it.
+async fn live_sessions(
+    state: &AppState,
+    auth: &Auth,
+    name: &str,
+) -> Result<Vec<views::LiveSession>, Response> {
+    if !auth.reads_record() {
+        return Ok(Vec::new());
+    }
+    let open = SessionFilter {
+        resource: Some(name.to_owned()),
+        active_only: true,
+        limit: 10,
+        ..SessionFilter::default()
+    };
+    let can_watch = crate::live::may_watch(state, auth.is_admin, auth.is_auditor);
+    let rows = store::list_sessions(&state.db, &open)
+        .await
+        .map_err(|e| db_error("listing the sessions open on a resource", &e))?;
+    Ok(rows
+        .iter()
+        .take(10)
+        .filter_map(|s| {
+            Some(views::LiveSession {
+                id: s.session_id.to_string(),
+                user: s.username.clone().unwrap_or_else(|| "—".to_owned()),
+                login: s.login.clone().unwrap_or_else(|| "—".to_owned()),
+                since: views::Stamp::of(s.started_at?),
+                // Watching is SSH only, and a separate power from reading the record.
+                watch: can_watch && s.kind.as_deref() == Some("ssh"),
+            })
+        })
+        .collect())
+}
+
+/// Who can reach a resource, and how (ADR-0028).
+fn who_can_rows(policy: &limen_policy::Policy, name: &str) -> Vec<WhoRow> {
+    policy
+        .who_can(name)
+        .into_iter()
+        .map(|e| {
+            let mut who: Vec<String> = e.groups.iter().map(|g| format!("group {g}")).collect();
+            who.extend(e.bots.iter().map(|b| format!("bot {b}")));
+            WhoRow {
+                role: Chip {
+                    c: views::chip_color(&e.role),
+                    text: e.role,
+                },
+                how: match e.via {
+                    limen_policy::tooling::Via::Standing => "standing",
+                    limen_policy::tooling::Via::Request => "by request",
+                    limen_policy::tooling::Via::BreakGlass => "break-glass",
+                },
+                principals: e.principals.join(", "),
+                who: who.join(", "),
+                approvers: e.approvers.join(", "),
+            }
+        })
+        .collect()
+}
+
+#[derive(Deserialize)]
+pub struct ResourceTabQuery {
+    tab: Option<String>,
+}
+
 pub async fn resource_detail(
     State(state): State<AppState>,
     auth: Auth,
     Path(name): Path<String>,
+    Query(tab_query): Query<ResourceTabQuery>,
 ) -> Response {
     let not_found = || {
         error_page(
@@ -580,15 +870,36 @@ pub async fn resource_detail(
     }
     let kind = spec_kind(&r.spec);
     let (icon, kclass) = views::kind_icon(kind);
+    // The tab is a plain link, so it can be bookmarked. The access table is for people who may
+    // read the record; an unknown tab, or one the viewer can't have, is the overview.
+    let tab = match tab_query.tab.as_deref() {
+        Some("access") if auth.reads_record() => "access",
+        Some("activity") => "activity",
+        _ => "overview",
+    };
+    let tabs = detail_tabs(&name, tab, auth.reads_record());
+    let own = (!auth.reads_record()).then(|| auth.username.clone());
+    let shown: usize = if tab == "activity" { 25 } else { 10 };
     let filter = SessionFilter {
-        username: (!auth.reads_record()).then(|| auth.username.clone()),
+        username: own.clone(),
         resource: Some(name.clone()),
-        limit: 10,
+        limit: i64::try_from(shown).unwrap_or(10),
         ..SessionFilter::default()
     };
     let sessions = match store::list_sessions(&state.db, &filter).await {
-        Ok(rows) => rows.iter().take(10).map(SessionView::from).collect(),
+        Ok(rows) => rows.iter().take(shown).map(SessionView::from).collect(),
         Err(e) => return db_error("listing a resource's sessions", &e),
+    };
+    let last_used = match store::resource_activity(&state.db, own.as_deref()).await {
+        Ok(a) => a
+            .get(&name)
+            .and_then(|a| a.last_started)
+            .map(views::Stamp::of),
+        Err(e) => return db_error("reading a resource's activity", &e),
+    };
+    let live = match live_sessions(&state, &auth, &name).await {
+        Ok(v) => v,
+        Err(r) => return r,
     };
     let workers = if auth.is_admin {
         let (components, tunnels) = match db::list_components(&state.db).await {
@@ -599,39 +910,21 @@ pub async fn resource_detail(
     } else {
         Vec::new()
     };
-    let who_can = if auth.reads_record() {
-        loaded
-            .policy
-            .who_can(&name)
-            .into_iter()
-            .map(|e| {
-                let mut who: Vec<String> = e.groups.iter().map(|g| format!("group {g}")).collect();
-                who.extend(e.bots.iter().map(|b| format!("bot {b}")));
-                WhoRow {
-                    role: Chip {
-                        c: views::chip_color(&e.role),
-                        text: e.role,
-                    },
-                    how: match e.via {
-                        limen_policy::tooling::Via::Standing => "standing",
-                        limen_policy::tooling::Via::Request => "by request",
-                        limen_policy::tooling::Via::BreakGlass => "break-glass",
-                    },
-                    principals: e.principals.join(", "),
-                    who: who.join(", "),
-                    approvers: e.approvers.join(", "),
-                }
-            })
-            .collect()
+    let health = auth.is_admin.then(|| views::Health::of(&workers));
+    let who_can = if auth.reads_record() && tab == "access" {
+        who_can_rows(&loaded.policy, &name)
     } else {
         Vec::new()
     };
+    let principals = mine.map(|m| m.principals.clone()).unwrap_or_default();
+    let encoded = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
     html(
         ResourcePage {
             can_request: may_ask && mine.is_none(),
             who_can,
             chrome: chrome(&state, &auth, "resources"),
             connect: views::connect_for(kind, &name),
+            options: views::connect_options(kind, &name, &principals),
             name: name.clone(),
             kind: kind.to_owned(),
             icon,
@@ -656,9 +949,18 @@ pub async fn resource_detail(
             },
             pinned: r.spec.ssh.as_ref().is_some_and(|s| s.host_key.is_some()),
             description: r.metadata.description.clone().unwrap_or_default(),
-            principals: mine.map(|m| m.principals.clone()).unwrap_or_default(),
+            principals,
             workers,
             sessions,
+            tab,
+            tabs,
+            health,
+            last_used,
+            live,
+            sessions_href: format!("/console/sessions?resource={}", encoded(&name)),
+            audit_href: auth
+                .reads_record()
+                .then(|| format!("/console/audit?q={}", encoded(&name))),
         }
         .render(),
     )
@@ -2143,6 +2445,82 @@ pub async fn simulator_suggest(
         .into_response()
 }
 
+/// The resources named in a palette answer, at most.
+const PALETTE_RESOURCES: usize = 8;
+
+/// How well a resource matches what was typed: its name starts with it, contains it, or one of its
+/// labels does. `None` is no match. An empty needle matches everything alike.
+fn palette_rank(needle: &str, name: &str, labels: &[String]) -> Option<u8> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let n = name.to_lowercase();
+    if n.starts_with(needle) {
+        Some(0)
+    } else if n.contains(needle) {
+        Some(1)
+    } else if labels.iter().any(|l| l.to_lowercase().contains(needle)) {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+/// `GET /console/suggest/resources?q=`: the command palette's resources, as JSON
+/// `[{name, kind, href}]`. The same set as the Resources page (admins: every resource; everyone
+/// else: only what their roles open), so the palette never names a resource the page would hide.
+pub async fn resource_suggest(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<SuggestQuery>,
+) -> Response {
+    let accessible = match reachable_for(&state, &auth).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let needle: String =
+        q.q.trim()
+            .chars()
+            .take(100)
+            .collect::<String>()
+            .to_lowercase();
+    let loaded = state.policy.current();
+    let mut hits: Vec<(u8, String, &'static str)> = Vec::new();
+    for doc in loaded.policy.documents() {
+        let Document::Resource(r) = doc else { continue };
+        let name = &r.metadata.name;
+        if !auth.is_admin && !accessible.iter().any(|a| &a.name == name) {
+            continue;
+        }
+        let labels: Vec<String> = r
+            .metadata
+            .labels
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        if let Some(rank) = palette_rank(&needle, name, &labels) {
+            hits.push((rank, name.clone(), spec_kind(&r.spec)));
+        }
+    }
+    hits.sort();
+    let out: Vec<serde_json::Value> = hits
+        .into_iter()
+        .take(PALETTE_RESOURCES)
+        .map(|(_, name, kind)| {
+            serde_json::json!({
+                "name": name,
+                "kind": kind,
+                "href": format!("/console/resources/{}", path_segment(&name)),
+            })
+        })
+        .collect();
+    (
+        [(CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::Value::Array(out)),
+    )
+        .into_response()
+}
+
 /// `GET /console/simulator`: a search box, clickable groups, bots and people,
 /// and, once someone is chosen, what they can reach and could ask for. A GET,
 /// since it changes nothing: the address can be bookmarked or linked
@@ -2757,6 +3135,22 @@ mod label_filter_tests {
     use super::*;
 
     #[test]
+    fn palette_ranks_names_before_labels_and_hides_nonmatches() {
+        let labels = vec!["env=prod".to_owned()];
+        assert_eq!(palette_rank("", "bastion", &labels), Some(0));
+        assert_eq!(palette_rank("bas", "bastion", &labels), Some(0));
+        assert_eq!(palette_rank("tion", "bastion", &labels), Some(1));
+        assert_eq!(palette_rank("prod", "bastion", &labels), Some(2));
+        assert_eq!(palette_rank("nope", "bastion", &labels), None);
+        // The needle arrives lowercased; the name and labels are folded here.
+        assert_eq!(palette_rank("bas", "Bastion", &labels), Some(0));
+        assert_eq!(
+            palette_rank("env=prod", "x", &["ENV=PROD".to_owned()]),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn collects_repeated_labels_and_keeps_commas() {
         let got = label_filters(Some(
             "kind=ssh&label=env%3Dprod&label=note%3Da%2Cb&label=bad&label=env%3Dprod",
@@ -2767,7 +3161,15 @@ mod label_filter_tests {
 
     #[test]
     fn href_round_trips() {
-        let href = resources_href(Some("ssh"), "web", &["note=a,b".into(), "env=prod".into()]);
+        let labels = ["note=a,b".to_owned(), "env=prod".to_owned()];
+        let href = resource_ui::Filters {
+            kind: Some("ssh"),
+            q: "web",
+            labels: &labels,
+            sort: ResourceSort::Name,
+            attention: false,
+        }
+        .href();
         let (_, query) = href.split_once('?').expect("query string");
         assert_eq!(label_filters(Some(query)), ["env=prod", "note=a,b"]);
     }

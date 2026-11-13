@@ -386,25 +386,41 @@ pub async fn session(db: &Db, id: Uuid) -> Result<Option<SessionRow>, sqlx::Erro
 }
 
 /// Sessions per resource: (all time, active now).
-pub async fn session_counts_by_resource(
+/// What the sessions table says about one resource: how many sessions it has had, how many are
+/// open now, and when the latest one started.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResourceActivity {
+    pub total: i64,
+    pub active: i64,
+    pub last_started: Option<OffsetDateTime>,
+}
+
+/// Activity per resource name. With `username` set, only that person's sessions are counted, so a
+/// non-admin sees when *they* last used a resource and nothing about anyone else.
+pub async fn resource_activity(
     db: &Db,
-) -> Result<std::collections::HashMap<String, (i64, i64)>, sqlx::Error> {
+    username: Option<&str>,
+) -> Result<std::collections::HashMap<String, ResourceActivity>, sqlx::Error> {
     let rows = sqlx::query(concat!(
         "SELECT resource, count(*) AS total, count(*) FILTER (WHERE ",
         is_active!(),
-        ") AS active FROM sessions WHERE resource IS NOT NULL GROUP BY resource"
+        ") AS active, max(started_at) AS last_started FROM sessions
+         WHERE resource IS NOT NULL AND ($2::text IS NULL OR username = $2)
+         GROUP BY resource"
     ))
     .bind(ACTIVE_WINDOW_HOURS)
+    .bind(username)
     .fetch_all(db)
     .await?;
     rows.iter()
         .map(|r| {
             Ok((
                 r.try_get::<String, _>("resource")?,
-                (
-                    r.try_get::<i64, _>("total")?,
-                    r.try_get::<i64, _>("active")?,
-                ),
+                ResourceActivity {
+                    total: r.try_get("total")?,
+                    active: r.try_get("active")?,
+                    last_started: r.try_get("last_started")?,
+                },
             ))
         })
         .collect()
