@@ -239,6 +239,28 @@ pub async fn export(
         .collect();
     sections.insert("sessions".into(), Value::Array(sessions.clone()));
 
+    // Whether the controls were being tested, and what they found (ADR-0053).
+    // Each run's signed report has its own manifest hash, so an auditor can ask
+    // for the report itself.
+    let ctl = rows(
+        state,
+        "SELECT id, trigger, requested_by, status, started_at, finished_at, passed, failed, skipped, manifest_sha256
+         FROM selftest_runs WHERE started_at >= $1 AND started_at < $2 AND status <> 'running' ORDER BY started_at LIMIT $3",
+        from,
+        to,
+    )
+    .await?;
+    sections.insert(
+        "controls".into(),
+        Value::Array(ctl.iter().map(|r| json!({
+            "run_id": r.try_get::<uuid::Uuid, _>("id").map(|u| u.to_string()).unwrap_or_default(),
+            "trigger": text(r, "trigger"), "requested_by": text(r, "requested_by"), "status": text(r, "status"),
+            "started_at": ts(r, "started_at"), "finished_at": ts(r, "finished_at"),
+            "passed": r.try_get::<i32, _>("passed").unwrap_or(0), "failed": r.try_get::<i32, _>("failed").unwrap_or(0),
+            "skipped": r.try_get::<i32, _>("skipped").unwrap_or(0), "manifest_sha256": text(r, "manifest_sha256"),
+        })).collect()),
+    );
+
     for (name, v) in &sections {
         if i64::try_from(v.as_array().map_or(0, Vec::len)).unwrap_or(0) >= MAX_ROWS {
             notes.push(format!(

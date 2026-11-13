@@ -34,6 +34,28 @@ pub fn is_bot(username: &str) -> bool {
     username.starts_with(BOT_PREFIX)
 }
 
+/// The scheduled self-test's principal is `selftest:<probe>` (ADR-0053). No
+/// issuer will vouch for the prefix: the user CA, the certificate verifier,
+/// OIDC login and SCIM refuse it, so the name can never carry real access.
+pub const SELFTEST_PREFIX: &str = "selftest:";
+
+/// Whether `username` is in the self-test's reserved namespace. Case
+/// insensitive, because the database compares user names that way.
+#[must_use]
+pub fn is_selftest(username: &str) -> bool {
+    username
+        .get(..SELFTEST_PREFIX.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(SELFTEST_PREFIX))
+}
+
+/// Names no person may sign in with: `bot:` (machine identities) and
+/// `selftest:` (the self-test). Every sign-in path refuses them with this one
+/// predicate.
+#[must_use]
+pub fn is_reserved(username: &str) -> bool {
+    is_bot(username) || is_selftest(username)
+}
+
 /// `user` or `bot`: the `actor_type` audit events carry, so people and
 /// automation can be told apart (and filtered) everywhere.
 #[must_use]
@@ -203,6 +225,29 @@ fn decode(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_person_may_sign_in_under_a_reserved_name() {
+        assert!(is_reserved("bot:x") && is_reserved("SelfTest:x"));
+        assert!(!is_reserved("alice@example.com"));
+    }
+
+    #[test]
+    fn the_self_test_namespace_is_reserved_in_any_case() {
+        for name in ["selftest:probe", "SELFTEST:x", "SelfTest:"] {
+            assert!(is_selftest(name), "{name}");
+        }
+        for name in [
+            "selftest",
+            "selftes",
+            "xselftest:a",
+            "",
+            "bot:selftest:a",
+            "é",
+        ] {
+            assert!(!is_selftest(name), "{name}");
+        }
+    }
 
     #[test]
     fn round_trips_all_variants() {

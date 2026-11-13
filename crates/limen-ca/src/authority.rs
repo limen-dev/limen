@@ -157,6 +157,12 @@ impl CertificateAuthority {
     pub async fn issue_user(&self, req: UserCertRequest) -> Result<IssuedCert, CaError> {
         self.require(CaPurpose::UserX509)?;
         validate_name("username", &req.username)?;
+        // The self-test's name (ADR-0053) is never given a certificate.
+        if limen_core::identity::is_selftest(&req.username) {
+            return Err(CaError::InvalidRequest(
+                "the selftest: prefix is reserved".into(),
+            ));
+        }
         for role in &req.roles {
             validate_name("role", role)?;
         }

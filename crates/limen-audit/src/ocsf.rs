@@ -348,6 +348,9 @@ fn classify(kind: EventKind, data: &Value) -> Mapped {
             Mapped::new(API_ACTIVITY, act(2, "Read"))
         }
         K::EvidenceExport => Mapped::new(API_ACTIVITY, act(1, "Create")),
+        // A check run by Limen on itself, not an entity change: the verdict
+        // (`data.status`) stays in `unmapped`.
+        K::SelftestRun => Mapped::new(BASE, OTHER).detail("controls self-test"),
     }
 }
 
@@ -673,6 +676,7 @@ const ALL_KINDS: &[EventKind] = &[
     EventKind::ReviewComplete,
     EventKind::AccessDenyOverride,
     EventKind::EvidenceExport,
+    EventKind::SelftestRun,
     EventKind::SessionWatchStart,
     EventKind::SessionWatchStop,
 ];
@@ -719,7 +723,7 @@ mod tests {
         // `EventKind` is `Copy` and has no iterator; this count is what the
         // enum had when the mapping was written. A new kind must be added to
         // `ALL_KINDS` and to `classify` (which will not compile otherwise).
-        assert_eq!(before, 63);
+        assert_eq!(before, 64);
     }
 
     #[test]

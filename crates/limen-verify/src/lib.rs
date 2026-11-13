@@ -6,6 +6,7 @@
 
 pub mod bucket;
 mod client;
+pub mod controls;
 pub mod manifest;
 pub mod pack;
 

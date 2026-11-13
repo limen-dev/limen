@@ -6,49 +6,72 @@
 <meta name="color-scheme" content="light dark">
 <meta name="darkreader-lock">
 <title>Resources · Limen</title>
-<link rel="icon" href="/console/static/logo-mark.svg?v=df07b240ca8e" type="image/svg+xml">
+<link rel="icon" href="/console/static/logo-mark.svg?v=eeb7b72ffe00" type="image/svg+xml">
 <link rel="preload" href="/console/static/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/console/static/console.css?v=df07b240ca8e">
-<script src="/console/static/console.js?v=df07b240ca8e"></script>
+<link rel="stylesheet" href="/console/static/console.css?v=eeb7b72ffe00">
+<script src="/console/static/console.js?v=eeb7b72ffe00"></script>
 
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
-    <a class="brand" href="/console/">
-      <img class="logo-light" src="/console/static/logo-mark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=df07b240ca8e" alt="" width="26" height="26">
-      <span>Limen</span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#layout-dashboard"/></svg><span>Overview</span></a>
-      <a href="/console/resources" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#database"/></svg><span>Resources</span></a>
-      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg><span>Sessions</span></a>
-      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#key-round"/></svg><span>Access</span></a>
-      <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#file-diff"/></svg><span>Policy changes</span></a>
-      <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#shield-check"/></svg><span>Reviews</span></a>
+    <div class="sidebar-head">
+      <a class="brand" href="/console/">
+        <img class="logo-light" src="/console/static/logo-mark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v=eeb7b72ffe00" alt="" width="26" height="26">
+        <span>Limen</span>
+      </a>
+      <button type="button" class="sidebar-toggle" aria-controls="nav" aria-expanded="true" aria-label="Collapse the sidebar"><svg class="i ic-close"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-close"/></svg><svg class="i ic-open"><use href="/console/static/icons.svg?v=eeb7b72ffe00#panel-left-open"/></svg></button>
+    </div>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="/console/"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#layout-dashboard"/></svg><span>Overview</span></a>
+      <a href="/console/resources" aria-current="page"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#database"/></svg><span>Resources</span></a>
+      <a href="/console/sessions"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg><span>Sessions</span></a>
+      <a href="/console/access"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#key-round"/></svg><span>Access</span></a>
+      
+      <div class="nav-group" data-group="approvals">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-approvals"><span>Approvals</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-approvals">
+          <a href="/console/changes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#file-diff"/></svg><span>Policy changes</span></a>
+          <a href="/console/reviews"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Reviews</span></a>
+        </div>
+      </div>
       
       
-      <div class="nav-label">Administration</div>
-      <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#users"/></svg><span>Users</span></a>
-      <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#bot"/></svg><span>Bots</span></a>
-      <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#server"/></svg><span>Workers</span></a>
-      <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#activity"/></svg><span>Audit trail</span></a>
-      <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#scroll-text"/></svg><span>Policy</span></a>
-      <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#chart-column"/></svg><span>Dashboards</span></a>
+      <div class="nav-group" data-group="record">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-record"><span>Record</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-record">
+          <a href="/console/audit"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#activity"/></svg><span>Audit trail</span></a>
+          <a href="/console/controls"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#shield-check"/></svg><span>Controls</span></a>
+          <a href="/console/dashboards"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chart-column"/></svg><span>Dashboards</span></a>
+        </div>
+      </div>
+      
+      
+      <div class="nav-group" data-group="administration">
+        <button type="button" class="nav-label nav-toggle" aria-expanded="true" aria-controls="nav-administration"><span>Administration</span><svg class="i chev"><use href="/console/static/icons.svg?v=eeb7b72ffe00#chevron-right"/></svg></button>
+        <div class="nav-items" id="nav-administration">
+          <a href="/console/users"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#users"/></svg><span>Users</span></a>
+          <a href="/console/bots"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#bot"/></svg><span>Bots</span></a>
+          <a href="/console/workers"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#server"/></svg><span>Workers</span></a>
+          <a href="/console/policy"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#scroll-text"/></svg><span>Policy</span></a>
+          <a href="/console/simulator"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#play"/></svg><span>Access simulator</span></a>
+          <a href="/console/integrations"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#plug"/></svg><span>Integrations</span></a>
+        </div>
+      </div>
       
     </nav>
     <div class="sidebar-foot">
       <div class="theme" role="group" aria-label="Theme">
-        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#monitor"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#sun"/></svg></button>
-        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#moon"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="system" aria-pressed="false" title="Match the system"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#monitor"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="light" aria-pressed="false" title="Light"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#sun"/></svg></button>
+        <button type="button" class="secondary" data-theme-set="dark" aria-pressed="false" title="Dark"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#moon"/></svg></button>
       </div>
       <form method="post" action="/console/logout" class="me">
         <span class="avatar av-4" aria-hidden="true">A</span>
         <span class="me-text"><span class="me-name" title="admin@example.com">admin@example.com</span><br><span class="me-role">Administrator</span></span>
-        <input type="hidden" name="csrf" value="Hh0LwS_sERhnR01Naun17RpwE-stTYjK7Qad1MXcpp8">
-        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#log-out"/></svg></button>
+        <input type="hidden" name="csrf" value="fixture">
+        <button type="submit" class="link" title="Sign out" aria-label="Sign out"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#log-out"/></svg></button>
       </form>
     </div>
   </aside>
@@ -61,7 +84,7 @@
     <p class="sub">Everything Limen can reach, from the active policy.</p>
   </div>
   <form method="get" action="/console/resources" class="search">
-    <svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#search"/></svg>
+    <svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#search"/></svg>
     
     
     <input type="search" name="q" value="" placeholder="Search name or label" aria-label="Search" data-focus-search><kbd class="kbd-hint" aria-hidden="true">/</kbd>
@@ -70,7 +93,7 @@
 <nav class="tabs" aria-label="Resource views"><a href="/console/resources" aria-current="true">Configured</a><a href="/console/discovered">Discovered</a></nav>
 <div class="tabs kinds">
   <a href="/console/resources" aria-current="true">All</a>
-  <a href="/console/resources?kind=elasticsearch"><span class="kind-dot k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-elasticsearch"/></svg></span>elasticsearch</a><a href="/console/resources?kind=kafka"><span class="kind-dot k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span>kafka</a><a href="/console/resources?kind=kubernetes"><span class="kind-dot k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kubernetes"/></svg></span>kubernetes</a><a href="/console/resources?kind=mongodb"><span class="kind-dot k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span>mongodb</a><a href="/console/resources?kind=mysql"><span class="kind-dot k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mysql"/></svg></span>mysql</a><a href="/console/resources?kind=opensearch"><span class="kind-dot k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span>opensearch</a><a href="/console/resources?kind=postgres"><span class="kind-dot k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span>postgres</a><a href="/console/resources?kind=rabbitmq"><span class="kind-dot k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-rabbitmq"/></svg></span>rabbitmq</a><a href="/console/resources?kind=redis"><span class="kind-dot k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span>redis</a><a href="/console/resources?kind=redshift"><span class="kind-dot k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#warehouse"/></svg></span>redshift</a><a href="/console/resources?kind=ssh"><span class="kind-dot k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span>ssh</a><a href="/console/resources?kind=tcp"><span class="kind-dot k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span>tcp</a><a href="/console/resources?kind=web"><span class="kind-dot k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span>web</a>
+  <a href="/console/resources?kind=elasticsearch"><span class="kind-dot k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-elasticsearch"/></svg></span>elasticsearch</a><a href="/console/resources?kind=kafka"><span class="kind-dot k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span>kafka</a><a href="/console/resources?kind=kubernetes"><span class="kind-dot k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kubernetes"/></svg></span>kubernetes</a><a href="/console/resources?kind=mongodb"><span class="kind-dot k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span>mongodb</a><a href="/console/resources?kind=mysql"><span class="kind-dot k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mysql"/></svg></span>mysql</a><a href="/console/resources?kind=opensearch"><span class="kind-dot k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span>opensearch</a><a href="/console/resources?kind=postgres"><span class="kind-dot k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span>postgres</a><a href="/console/resources?kind=rabbitmq"><span class="kind-dot k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-rabbitmq"/></svg></span>rabbitmq</a><a href="/console/resources?kind=redis"><span class="kind-dot k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span>redis</a><a href="/console/resources?kind=redshift"><span class="kind-dot k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#warehouse"/></svg></span>redshift</a><a href="/console/resources?kind=ssh"><span class="kind-dot k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span>ssh</a><a href="/console/resources?kind=tcp"><span class="kind-dot k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span>tcp</a><a href="/console/resources?kind=web"><span class="kind-dot k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span>web</a>
 </div>
 
 
@@ -79,47 +102,47 @@
   <tbody>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/bastion-staging">bastion-staging</a><div class="cell-sub">ssh · <span class="mono">bastion:22</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/bastion-staging">bastion-staging</a><div class="cell-sub">ssh · <span class="mono">bastion:22</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=tier%3Dbastion">tier=bastion</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/billing-mysql-staging">billing-mysql-staging</a><div class="cell-sub">mysql · <span class="mono">billing.cluster-example.eu-west-1.rds.amazonaws.com:3306</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/billing-mysql-staging">billing-mysql-staging</a><div class="cell-sub">mysql · <span class="mono">billing.cluster-example.eu-west-1.rds.amazonaws.com:3306</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">auditor</span><span class="chip c0">dev-planned</span><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span><span class="chip c5">sre-planned</span><span class="chip c0">viewer</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-staging">cache-staging</a><div class="cell-sub">redis · <span class="mono">redis-target:6379</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-staging">cache-staging</a><div class="cell-sub">redis · <span class="mono">redis-target:6379</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-valkey">cache-valkey</a><div class="cell-sub">redis · <span class="mono">valkey-target:6379</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-redis"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-redis"/></svg></span><div><a class="cell-main" href="/console/resources/cache-valkey">cache-valkey</a><div class="cell-sub">redis · <span class="mono">valkey-target:6379</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-atlas">catalog-atlas</a><div class="cell-sub">mongodb · <span class="mono">catalog-shard-00-00.example.mongodb.net:27017 (Atlas)</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-atlas">catalog-atlas</a><div class="cell-sub">mongodb · <span class="mono">catalog-shard-00-00.example.mongodb.net:27017 (Atlas)</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dcatalog">team=catalog</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -129,27 +152,27 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-staging">catalog-staging</a><div class="cell-sub">mongodb · <span class="mono">mongo-target:27017</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-staging">catalog-staging</a><div class="cell-sub">mongodb · <span class="mono">mongo-target:27017</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dcatalog">team=catalog</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-x509">catalog-x509</a><div class="cell-sub">mongodb · <span class="mono">mongo-target:27017</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/catalog-x509">catalog-x509</a><div class="cell-sub">mongodb · <span class="mono">mongo-target:27017</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dcatalog">team=catalog</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kubernetes"/></svg></span><div><a class="cell-main" href="/console/resources/eks-staging">eks-staging</a><div class="cell-sub">kubernetes · <span class="mono">staging</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kubernetes"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kubernetes"/></svg></span><div><a class="cell-main" href="/console/resources/eks-staging">eks-staging</a><div class="cell-sub">kubernetes · <span class="mono">staging</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -159,57 +182,57 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-scram">events-kafka-scram</a><div class="cell-sub">kafka · <span class="mono">kafka-1:9092</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-scram">events-kafka-scram</a><div class="cell-sub">kafka · <span class="mono">kafka-1:9092</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-staging">events-kafka-staging</a><div class="cell-sub">kafka · <span class="mono">kafka-1:9092</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/events-kafka-staging">events-kafka-staging</a><div class="cell-sub">kafka · <span class="mono">kafka-1:9092</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/events-rabbit-staging">events-rabbit-staging</a><div class="cell-sub">rabbitmq · <span class="mono">rabbitmq-target:5672</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/events-rabbit-staging">events-rabbit-staging</a><div class="cell-sub">rabbitmq · <span class="mono">rabbitmq-target:5672</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><a class="cell-main" href="/console/resources/grafana">grafana</a><div class="cell-sub">web · <span class="mono">grafana.apps.example.com → grafana.internal.example:443</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/grafana">grafana</a><div class="cell-sub">web · <span class="mono">grafana.apps.example.com → grafana.internal.example:443</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c0">dev-planned</span><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><a class="cell-main" href="/console/resources/legacy-ftp">legacy-ftp</a><div class="cell-sub">tcp · <span class="mono">legacy-ftp:21</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/legacy-ftp">legacy-ftp</a><div class="cell-sub">tcp · <span class="mono">legacy-ftp:21</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/logs-opensearch">logs-opensearch</a><div class="cell-sub">opensearch · <span class="mono">search-logs-example.eu-west-1.es.amazonaws.com:443</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/logs-opensearch">logs-opensearch</a><div class="cell-sub">opensearch · <span class="mono">search-logs-example.eu-west-1.es.amazonaws.com:443</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -219,7 +242,7 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mq">orders-mq</a><div class="cell-sub">rabbitmq · <span class="mono">b-example.mq.eu-west-1.amazonaws.com:5671</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-rabbitmq"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-rabbitmq"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mq">orders-mq</a><div class="cell-sub">rabbitmq · <span class="mono">b-example.mq.eu-west-1.amazonaws.com:5671</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -229,17 +252,17 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mysql-staging">orders-mysql-staging</a><div class="cell-sub">mysql · <span class="mono">mysql-target:3306</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mysql"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mysql"/></svg></span><div><a class="cell-main" href="/console/resources/orders-mysql-staging">orders-mysql-staging</a><div class="cell-sub">mysql · <span class="mono">mysql-target:3306</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">auditor</span><span class="chip c0">dev-planned</span><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span><span class="chip c5">sre-planned</span><span class="chip c0">viewer</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-prod">orders-prod</a><div class="cell-sub">postgres · <span class="mono">orders.cluster-example.eu-west-1.rds.amazonaws.com:5432</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-prod">orders-prod</a><div class="cell-sub">postgres · <span class="mono">orders.cluster-example.eu-west-1.rds.amazonaws.com:5432</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">auditor</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span></div></td>
@@ -249,17 +272,17 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-staging">orders-staging</a><div class="cell-sub">postgres · <span class="mono">postgres-target:5432</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-postgres"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-postgres"/></svg></span><div><a class="cell-main" href="/console/resources/orders-staging">orders-staging</a><div class="cell-sub">postgres · <span class="mono">postgres-target:5432</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">auditor</span><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span><span class="chip c0">viewer</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/payments-msk">payments-msk</a><div class="cell-sub">kafka · <span class="mono">b-1.payments.example.kafka.eu-west-1.amazonaws.com:9098</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-kafka"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-kafka"/></svg></span><div><a class="cell-main" href="/console/resources/payments-msk">payments-msk</a><div class="cell-sub">kafka · <span class="mono">b-1.payments.example.kafka.eu-west-1.amazonaws.com:9098</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dpayments">team=payments</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -269,7 +292,7 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/reviews-docdb">reviews-docdb</a><div class="cell-sub">mongodb · <span class="mono">reviews.cluster-example.eu-west-1.docdb.amazonaws.com:27017 (DocumentDB)</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-mongodb"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-mongodb"/></svg></span><div><a class="cell-main" href="/console/resources/reviews-docdb">reviews-docdb</a><div class="cell-sub">mongodb · <span class="mono">reviews.cluster-example.eu-west-1.docdb.amazonaws.com:27017 (DocumentDB)</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Dcatalog">team=catalog</a></div></td>
       
       <td><div class="chips"><span class="chip c2">sre</span></div></td>
@@ -279,47 +302,47 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-opensearch">search-opensearch</a><div class="cell-sub">opensearch · <span class="mono">node-0.example.com:9200</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-opensearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-opensearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-opensearch">search-opensearch</a><div class="cell-sub">opensearch · <span class="mono">node-0.example.com:9200</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#k-elasticsearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-staging">search-staging</a><div class="cell-sub">elasticsearch · <span class="mono">elasticsearch-target:9200</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-elasticsearch"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#k-elasticsearch"/></svg></span><div><a class="cell-main" href="/console/resources/search-staging">search-staging</a><div class="cell-sub">elasticsearch · <span class="mono">elasticsearch-target:9200</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-blocked">tcp-blocked</a><div class="cell-sub">tcp · <span class="mono">tcp-target:8080</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-blocked">tcp-blocked</a><div class="cell-sub">tcp · <span class="mono">tcp-target:8080</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dphase12">env=phase12</a><a class="chip" href="/console/resources?label=team%3Dblocked">team=blocked</a></div></td>
       
       <td><div class="chips"><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-echo">tcp-echo</a><div class="cell-sub">tcp · <span class="mono">tcp-target:8080</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-tcp"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#network"/></svg></span><div><a class="cell-main" href="/console/resources/tcp-echo">tcp-echo</a><div class="cell-sub">tcp · <span class="mono">tcp-target:8080</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dphase12">env=phase12</a><a class="chip" href="/console/resources?label=team%3Dplatform">team=platform</a></div></td>
       
       <td><div class="chips"><span class="chip c4">phase12-tcp</span><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#warehouse"/></svg></span><div><a class="cell-main" href="/console/resources/warehouse-prod">warehouse-prod</a><div class="cell-sub">redshift · <span class="mono">warehouse.example.eu-west-1.redshift.amazonaws.com:5439</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-redshift"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#warehouse"/></svg></span><div><a class="cell-main" href="/console/resources/warehouse-prod">warehouse-prod</a><div class="cell-sub">redshift · <span class="mono">warehouse.example.eu-west-1.redshift.amazonaws.com:5439</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dprod">env=prod</a><a class="chip" href="/console/resources?label=team%3Ddata">team=data</a></div></td>
       
       <td><div class="chips"><span class="chip c2">auditor</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span><span class="chip c5">sre-planned</span></div></td>
@@ -329,31 +352,31 @@
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo">web-demo</a><div class="cell-sub">web · <span class="mono">app.apps.test → web-target:8080</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo">web-demo</a><div class="cell-sub">web · <span class="mono">app.apps.test → web-target:8080</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dphase12">env=phase12</a></div></td>
       
       <td><div class="chips"><span class="chip c5">phase12-web</span><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo-other">web-demo-other</a><div class="cell-sub">web · <span class="mono">other.apps.test → web-target:8080</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-web"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#globe"/></svg></span><div><a class="cell-main" href="/console/resources/web-demo-other">web-demo-other</a><div class="cell-sub">web · <span class="mono">other.apps.test → web-target:8080</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dphase12">env=phase12</a></div></td>
       
       <td><div class="chips"><span class="chip c5">phase12-web</span><span class="chip c5">sre-planned</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
   
     <tr>
-      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=df07b240ca8e#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/web-staging-1">web-staging-1</a><div class="cell-sub">ssh · <span class="mono">sshd-target:22</span></div></div></div></td>
+      <td><div class="kind-cell"><span class="kind k-ssh"><svg class="i"><use href="/console/static/icons.svg?v=eeb7b72ffe00#terminal"/></svg></span><div><a class="cell-main" href="/console/resources/web-staging-1">web-staging-1</a><div class="cell-sub">ssh · <span class="mono">sshd-target:22</span></div></div></div></td>
       <td><div class="chips"><a class="chip" href="/console/resources?label=env%3Dstaging">env=staging</a></div></td>
       
       <td><div class="chips"><span class="chip c3">contractor</span><span class="chip c2">deployer</span><span class="chip c4">dev-readonly</span><span class="chip c2">sre</span><span class="chip c0">sre-oncall</span></div></td>
-      <td class="num">2</td>
+      <td class="num">9</td>
       <td class="num">0</td>
       
     </tr>
@@ -363,7 +386,7 @@
 
 
     </main>
-    <div class="foot">Limen 0.1.0-rc.1 · policy v1</div>
+    <div class="foot">Limen 0.1.0-rc.2 · policy v1</div>
   </div>
 </div>
 </body>

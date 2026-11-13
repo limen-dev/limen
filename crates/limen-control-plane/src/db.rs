@@ -848,7 +848,10 @@ pub async fn active_lock(db: &Db, username: &str) -> Result<Option<LockRow>, sql
     .transpose()
 }
 
-pub async fn is_locked(db: &Db, username: &str) -> Result<bool, sqlx::Error> {
+pub async fn is_locked<'e, E: sqlx::PgExecutor<'e>>(
+    db: E,
+    username: &str,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM user_locks WHERE lower(username) = lower($1) AND released_at IS NULL)",
     )
@@ -939,8 +942,8 @@ pub async fn recent_revoked_logins(db: &Db) -> Result<Vec<String>, sqlx::Error> 
 
 /// Whether `username` is locked, and whether the login `login_id` has ended,
 /// in one round trip. Every API call a user makes asks this.
-pub async fn lock_and_logout(
-    db: &Db,
+pub async fn lock_and_logout<'e, E: sqlx::PgExecutor<'e>>(
+    db: E,
     username: &str,
     login_id: &str,
 ) -> Result<(bool, bool), sqlx::Error> {

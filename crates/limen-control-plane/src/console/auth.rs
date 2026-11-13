@@ -180,7 +180,7 @@ pub async fn callback(
             .await;
         }
     };
-    if limen_core::identity::is_bot(&identity.username) {
+    if limen_core::identity::is_reserved(&identity.username) {
         return deny(
             &state,
             addr.0,

@@ -882,6 +882,61 @@ message ExportEvidenceResponse {
   string manifest_sha256 = 2;
 }
 
+// The scheduled self-test of the controls and its signed report (ADR-0053).
+service Controls {
+  // Admin: start a self-test now. It runs in the background and returns at
+  // once; poll ListSelfTestRuns. If one is already running, that one comes
+  // back with already_running set. At most one manual run a minute.
+  rpc RunSelfTest(RunSelfTestRequest) returns (SelfTestRunInfo);
+  // Admin and auditors: the newest runs, newest first.
+  rpc ListSelfTestRuns(ListSelfTestRunsRequest) returns (ListSelfTestRunsResponse);
+  // Admin and auditors: the signed report of one run. Verify it offline with
+  // `limen audit verify --controls`.
+  rpc GetControlsReport(GetControlsReportRequest) returns (GetControlsReportResponse);
+}
+
+message RunSelfTestRequest {}
+
+message SelfTestRunInfo {
+  string id = 1;
+  // schedule or manual.
+  string trigger = 2;
+  string requested_by = 3;
+  // running, passed, failed, error, or abandoned.
+  string status = 4;
+  int64 started_at_unix = 5;
+  // 0 while running.
+  int64 finished_at_unix = 6;
+  uint32 passed = 7;
+  uint32 failed = 8;
+  // A skipped check is not a pass.
+  uint32 skipped = 9;
+  string manifest_sha256 = 10;
+  // Why a run ended in an error, if it did.
+  string error = 11;
+  // Set on the reply to RunSelfTest when a run was already in progress.
+  bool already_running = 12;
+}
+
+message ListSelfTestRunsRequest {
+  // Default 20, at most 200.
+  uint32 limit = 1;
+}
+
+message ListSelfTestRunsResponse {
+  repeated SelfTestRunInfo runs = 1;
+}
+
+message GetControlsReportRequest {
+  string id = 1;
+}
+
+message GetControlsReportResponse {
+  // JSON, signed by the control plane. The control plane attesting to itself.
+  bytes report = 1;
+  SelfTestRunInfo run = 2;
+}
+
 // Watching a live session (ADR-0030). The worker that records an SSH session
 // already holds its plaintext output; when an authorised person is watching,
 // it publishes the same bytes here and the console streams them. The user's

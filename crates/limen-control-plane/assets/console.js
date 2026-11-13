@@ -11,7 +11,88 @@
   }
   apply(saved());
 
+  // The sidebar: which groups are folded and whether it is icon-only. Read here, before the first
+  // paint, and put on <html> so the CSS shows the right state with no flash. `js` lets the CSS show
+  // the controls only when there is a script to run them. Browsers that block storage keep the
+  // choice for the page only.
+  var NAV_KEY = 'limen-nav';
+  var SIDEBAR_KEY = 'limen-sidebar';
+  function load(key) { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+  function store(key, value) {
+    try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key); } catch (e) { /* private mode */ }
+  }
+  root.classList.add('js');
+  root.setAttribute('data-nav', load(NAV_KEY));
+  if (load(SIDEBAR_KEY) === 'collapsed') root.setAttribute('data-sidebar', 'collapsed');
+
   document.addEventListener('DOMContentLoaded', function () {
+    // Fold and unfold a group. A group with the current page in it stays open, so the page you are
+    // on is never hidden: its button does nothing and says nothing.
+    document.querySelectorAll('.nav-group').forEach(function (group) {
+      var button = group.querySelector('.nav-toggle');
+      var name = group.getAttribute('data-group');
+      if (!button || !name) return;
+      if (group.querySelector('a[aria-current="page"]')) {
+        button.disabled = true;
+        button.setAttribute('aria-expanded', 'true');
+        return;
+      }
+      function folded() { return (root.getAttribute('data-nav') || '').split(' ').indexOf(name) !== -1; }
+      function paint() { button.setAttribute('aria-expanded', String(!folded())); }
+      paint();
+      button.addEventListener('click', function () {
+        var names = (root.getAttribute('data-nav') || '').split(' ').filter(function (n) { return n && n !== name; });
+        if (!folded()) names.push(name);
+        root.setAttribute('data-nav', names.join(' '));
+        store(NAV_KEY, names.join(' '));
+        paint();
+      });
+    });
+
+    // Keep the menu where it was scrolled. Each click loads a new page, so without this the menu
+    // jumps back to the top and the end of a long list is out of sight again. Per tab, so another
+    // window starts at the top.
+    var nav = document.querySelector('.nav');
+    if (nav) {
+      var SCROLL_KEY = 'limen-nav-scroll';
+      try {
+        var at = (sessionStorage.getItem(SCROLL_KEY) || '').split(',');
+        nav.scrollTop = Number(at[0]) || 0;
+        nav.scrollLeft = Number(at[1]) || 0;
+      } catch (e) { /* storage blocked: starts at the top */ }
+      var remember = function () {
+        try { sessionStorage.setItem(SCROLL_KEY, nav.scrollTop + ',' + nav.scrollLeft); } catch (e) { /* private mode */ }
+      };
+      nav.addEventListener('scroll', remember, { passive: true });
+      // A click on a link navigates at once: record the position first.
+      nav.addEventListener('click', remember);
+      window.addEventListener('pagehide', remember);
+    }
+
+    // Collapse the sidebar to icons. Each link gets its name as a tooltip while the text is hidden.
+    var side = document.querySelector('.sidebar-toggle');
+    if (side) {
+      var paintSide = function () {
+        var collapsed = root.getAttribute('data-sidebar') === 'collapsed';
+        var label = collapsed ? 'Expand the sidebar' : 'Collapse the sidebar';
+        side.setAttribute('aria-expanded', String(!collapsed));
+        side.setAttribute('aria-label', label);
+        side.title = label;
+        document.querySelectorAll('.nav a').forEach(function (a) {
+          var text = a.querySelector('span');
+          if (collapsed && text) a.title = text.textContent; else a.removeAttribute('title');
+        });
+      };
+      paintSide();
+      side.addEventListener('click', function () {
+        var collapsed = root.getAttribute('data-sidebar') === 'collapsed';
+        root.classList.add('nav-anim');
+        if (collapsed) root.removeAttribute('data-sidebar'); else root.setAttribute('data-sidebar', 'collapsed');
+        store(SIDEBAR_KEY, collapsed ? '' : 'collapsed');
+        paintSide();
+      });
+    }
+
     var mode = saved() || 'system';
     var buttons = document.querySelectorAll('[data-theme-set]');
     function mark() {

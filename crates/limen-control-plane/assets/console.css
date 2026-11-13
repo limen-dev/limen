@@ -615,6 +615,7 @@ details > summary .pill { white-space: normal; text-align: left; }
    denser sizes above. The menu strip scrolls sideways, so taller links do not widen the page. */
 @media (pointer: coarse) {
   .brand, .nav a { min-height: 44px; }
+  .brand { min-width: 44px; }
   .tabs a, .tabs.kinds a, .tabs.cats a { display: inline-flex; align-items: center; min-height: 44px; }
   button, .button { min-height: 44px; }
   button.secondary, button.danger, .theme button, .me button.link { min-width: 44px; min-height: 44px; }
@@ -700,3 +701,85 @@ form.stack label.check { min-height: 24px; padding-block: 2px; }
   table.workers td.actions form.inline input[type=text] { flex: 1 1 140px; width: auto; }
 }
 @media (max-width: 600px) { table.workers td[data-label="Labels"]:has(> .chips:empty) { display: none; } }
+
+/* ---- collapsible sidebar groups, and a collapsible sidebar (wide screens only) ----
+   Without JavaScript every group is open and no control shows. The saved choices are applied to
+   <html> by console.js before the first paint (data-nav = collapsed groups, data-sidebar), so
+   there is no flash. A group that holds the current page never collapses. */
+.sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+button.sidebar-toggle { display: none; background: none; border: 1px solid transparent; color: var(--text-3); padding: 6px; border-radius: 8px; min-width: 32px; min-height: 32px; justify-content: center; }
+button.sidebar-toggle:hover { background: var(--sunken); color: var(--text); border-color: transparent; }
+html.js button.sidebar-toggle { display: inline-flex; }
+.sidebar-toggle .ic-open { display: none; }
+html[data-sidebar="collapsed"] .sidebar-toggle .ic-close { display: none; }
+html[data-sidebar="collapsed"] .sidebar-toggle .ic-open { display: inline; }
+.nav-group { display: block; }
+button.nav-toggle, button.nav-toggle:hover { background: none; border: 0; border-radius: 6px; width: 100%; justify-content: space-between; text-align: left; color: var(--text-3); font: inherit; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 14px 10px 6px; cursor: default; }
+html.js button.nav-toggle { cursor: pointer; }
+html.js button.nav-toggle:hover { color: var(--text); }
+button.nav-toggle .chev { display: none; width: 14px; height: 14px; transition: transform .12s; }
+html.js button.nav-toggle .chev { display: block; transform: rotate(90deg); }
+html.js button.nav-toggle[aria-expanded="false"] .chev { transform: none; }
+button.nav-toggle:disabled { opacity: 1; cursor: default; }
+button.nav-toggle:disabled .chev { display: none; }
+button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); outline: none; }
+@media (prefers-reduced-motion: reduce) { button.nav-toggle .chev { transition: none; } }
+@media (pointer: coarse) { button.nav-toggle, button.sidebar-toggle { min-height: 44px; } button.sidebar-toggle { min-width: 44px; } }
+
+@media (min-width: 901px) {
+  /* A folded group, unless it holds the current page. */
+  html[data-nav~="record"] .nav-group[data-group="record"]:not(:has(a[aria-current="page"])) .nav-items,
+  html[data-nav~="administration"] .nav-group[data-group="administration"]:not(:has(a[aria-current="page"])) .nav-items,
+  html[data-nav~="approvals"] .nav-group[data-group="approvals"]:not(:has(a[aria-current="page"])) .nav-items { display: none; }
+  /* The sign-out and theme controls stay on screen: the menu scrolls inside the sidebar when it is
+     taller than the window, instead of pushing them below the fold. */
+  .sidebar { overflow: hidden; }
+  .sidebar-head .brand { flex: 1; min-width: 0; }
+  .nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 2px; margin: -2px; }
+  .sidebar-foot { flex: none; margin-top: 0; }
+  /* Collapsed: a narrow column of icons, and the page uses the room the sidebar gave up. Every
+     rule is scoped to the sidebar and the shell, because the flag sits on <html> and the sign-in
+     page has its own theme buttons and logo that must not change. The icons stay where they are, so
+     only the width moves. */
+  .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { white-space: nowrap; transition: opacity .15s ease; }
+  html[data-sidebar="collapsed"] .shell { grid-template-columns: 60px minmax(0, 1fr); }
+  html[data-sidebar="collapsed"] .shell .main { max-width: 100vw; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: flex-start; gap: 0; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; }
+  /* Icons only. The names stay in the page for screen readers and as tooltips (set by console.js). */
+  html[data-sidebar="collapsed"] .sidebar .brand span,
+  html[data-sidebar="collapsed"] .sidebar .nav a span { opacity: 0; }
+  html[data-sidebar="collapsed"] .sidebar .me-text { display: none; }
+  /* Group labels have no room; the groups stay apart by a rule, and all their links show. */
+  html[data-sidebar="collapsed"] .sidebar .nav-toggle { display: none; }
+  html[data-sidebar="collapsed"] .sidebar .nav-items { display: block !important; }
+  html[data-sidebar="collapsed"] .sidebar .nav-group { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-foot { align-items: center; }
+  html[data-sidebar="collapsed"] .sidebar .theme { flex-direction: column; }
+  html[data-sidebar="collapsed"] .sidebar .me { flex-direction: column; gap: 6px; }
+  /* Animate only when someone clicks the toggle (console.js adds nav-anim then), never on load. */
+  html.nav-anim .shell { transition: grid-template-columns .22s ease; }
+  html.nav-anim .shell .main { transition: max-width .22s ease; }
+}
+@media (min-width: 901px) and (prefers-reduced-motion: reduce) {
+  html.nav-anim .shell, html.nav-anim .shell .main, .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { transition: none; }
+}
+/* The phone and tablet strip has no groups to fold and nothing to collapse. */
+@media (max-width: 900px) {
+  .sidebar-head { display: contents; }
+  button.sidebar-toggle, html.js button.sidebar-toggle { display: none; }
+  .nav-group, .nav-items { display: contents; }
+  .nav-toggle { display: none; }
+}
+
+/* The Controls page on a phone: each check, and each run, is a card instead of a table that scrolls sideways. */
+@media (max-width: 600px) {
+  table.checks, table.checks tbody, table.checks tr, table.checks td,
+  table.history, table.history tbody, table.history tr, table.history td { display: block; }
+  table.checks thead, table.history thead { display: none; }
+  table.checks tr, table.history tr { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  table.checks tr:last-child, table.history tr:last-child { border-bottom: 0; }
+  table.checks td, table.history td { padding: 4px 0; border: 0; text-align: left; }
+  table.history td[data-label] { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  table.history td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+}

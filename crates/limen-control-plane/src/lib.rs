@@ -26,6 +26,7 @@ pub mod replicas;
 pub mod reviews;
 pub mod scim;
 pub mod search;
+pub mod selftest;
 pub mod server;
 pub mod services;
 pub mod sinks;
@@ -247,6 +248,8 @@ pub async fn run(
     // "shutting down" and the registry row must stay fresh while the spool
     // ships.
     let (done_tx, done) = watch::channel(false);
+    // Before anything can start a run in this process.
+    selftest::abandon_own_stale(&state).await;
     state.pipeline.start_sinks(&state.db);
     tokio::spawn(jobs::policy_refresh(state.clone(), stop.clone()));
     tokio::spawn(jobs::cleanup(state.clone(), stop.clone()));
@@ -254,6 +257,7 @@ pub async fn run(
     tokio::spawn(jobs::discovery_sweep(state.clone(), stop.clone()));
     tokio::spawn(jobs::reviews_tick(state.clone(), stop.clone()));
     tokio::spawn(idp_check::job(state.clone(), stop.clone()));
+    tokio::spawn(selftest::job(state.clone(), stop.clone()));
     let heartbeat = tokio::spawn(jobs::replica_heartbeat(
         state.clone(),
         done.clone(),

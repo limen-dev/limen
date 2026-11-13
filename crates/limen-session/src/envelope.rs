@@ -21,6 +21,8 @@ pub enum Purpose {
     WebAppSession,
     /// A pack of compliance evidence (ADR-0029).
     EvidencePack,
+    /// A signed report of the scheduled self-test of the controls (ADR-0053).
+    ControlsReport,
 }
 
 impl Purpose {
@@ -31,6 +33,7 @@ impl Purpose {
             Purpose::AuditManifest => b"limen/v1/audit-manifest",
             Purpose::WebAppSession => b"limen/v1/web-app-session",
             Purpose::EvidencePack => b"limen/v1/evidence-pack",
+            Purpose::ControlsReport => b"limen/v1/controls-report",
         }
     }
 
@@ -41,7 +44,8 @@ impl Purpose {
             Purpose::PolicySnapshot
             | Purpose::AuditManifest
             | Purpose::WebAppSession
-            | Purpose::EvidencePack => ComponentKind::ControlPlane,
+            | Purpose::EvidencePack
+            | Purpose::ControlsReport => ComponentKind::ControlPlane,
         }
     }
 }

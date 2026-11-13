@@ -23,10 +23,10 @@ use crate::Proxy;
 /// API services the proxy relays. `Registry` is deliberately absent: only
 /// proxies call it, directly. `PolicySync` and `SshCertificates` are for
 /// workers; the control plane rejects other callers. `Access`, `AuditSearch`,
-/// and `Reviews` are for people (each call checks the caller's roles);
+/// `Reviews` and `Controls` are for people (each call checks the caller's roles);
 /// `Discovery` and `Watch` are for workers. `ManagementService` is for
 /// admins and bot writers (ADR-0042); the control plane checks each call.
-const RELAYED_PREFIXES: [&str; 13] = [
+const RELAYED_PREFIXES: [&str; 14] = [
     "/limen.v1.AuditIngest/",
     "/limen.v1.Auth/",
     "/limen.v1.Resources/",
@@ -34,6 +34,7 @@ const RELAYED_PREFIXES: [&str; 13] = [
     "/limen.v1.Access/",
     "/limen.v1.AuditSearch/",
     "/limen.v1.Reviews/",
+    "/limen.v1.Controls/",
     "/limen.v1.Discovery/",
     "/limen.v1.Watch/",
     "/limen.v1.Enrollment/",
@@ -373,6 +374,13 @@ mod tests {
                 b"message",
             )))
             .expect("request")
+    }
+
+    /// The CLI reaches `limen admin selftest` through the proxy (ADR-0053).
+    #[test]
+    fn the_controls_api_is_relayed() {
+        assert!(RELAYED_PREFIXES.contains(&"/limen.v1.Controls/"));
+        assert!(RELAYED_PREFIXES.contains(&"/limen.v1.Reviews/"));
     }
 
     #[tokio::test]

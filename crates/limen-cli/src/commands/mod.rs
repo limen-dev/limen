@@ -18,6 +18,7 @@ pub mod policy;
 pub mod redis;
 pub mod review;
 pub mod search;
+pub mod selftest;
 pub mod ssh;
 pub mod tcp;
 pub mod tools;
