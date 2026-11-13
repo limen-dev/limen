@@ -674,6 +674,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         );
         return commands::conns::detach(proxy).await;
     }
+    // A spinner while a call to the proxy is slow, for the commands that print once it returns.
+    // Not for ones that serve a protocol on stdout (`mcp`, `ssh-proxy`) or are long-lived.
+    if matches!(
+        cli.command,
+        Command::Ls { .. }
+            | Command::Show { .. }
+            | Command::Request { .. }
+            | Command::Requests { .. }
+            | Command::Approve { .. }
+            | Command::Deny { .. }
+            | Command::Cancel { .. }
+            | Command::Explain { .. }
+            | Command::Policy { .. }
+            | Command::Audit { .. }
+            | Command::Review { .. }
+            | Command::Admin { .. }
+            | Command::Manage { .. }
+    ) {
+        ui::enable_busy();
+    }
     match cli.command {
         Command::Login {
             bot: Some(method),

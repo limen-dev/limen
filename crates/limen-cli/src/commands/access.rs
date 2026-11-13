@@ -82,9 +82,7 @@ async fn list_requests(proxy: Option<&str>, a: &RequestsListArgs) -> anyhow::Res
     requests(proxy, scope, a.status.as_deref(), a.json).await
 }
 
-fn client(
-    proxy: Option<&str>,
-) -> anyhow::Result<AccessClient<limen_tunnel::connect::TracedChannel>> {
+fn client(proxy: Option<&str>) -> anyhow::Result<AccessClient<crate::api::Channel>> {
     let (_, channel) = api::authenticated(proxy)?;
     Ok(AccessClient::new(channel))
 }

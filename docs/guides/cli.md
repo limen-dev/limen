@@ -126,4 +126,4 @@ $ ssh ubuntu@orders-prod.limen
 ```
 
 ## Spinners and animation
-Slow steps show a spinner on stderr after about a third of a second, with the elapsed time after five seconds, and finish with a result line. Nothing moves when stderr is not a terminal, when `TERM=dumb`, when `CI` is set, or when `LIMEN_NO_ANIMATION` is set; you then get one plain `›` line per step. `NO_COLOR` removes colour but not the spinner. Ctrl-C during a wait ends it cleanly and exits 130.
+The logo at the top of `limen`, `limen --help` and `limen login` wipes in over a fifth of a second. Any call to the proxy that takes more than a third of a second (in `ls`, `show`, `requests`, `audit`, `admin` and most other commands) shows a spinner named for it, such as `List resources`. Slow steps show a spinner on stderr after about a third of a second, with the elapsed time after five seconds, and finish with a result line. Nothing moves when stderr is not a terminal, when `TERM=dumb`, when `CI` is set, or when `LIMEN_NO_ANIMATION` is set; you then get one plain `›` line per step. `NO_COLOR` removes colour but not the spinner. Ctrl-C during a wait ends it cleanly and exits 130.

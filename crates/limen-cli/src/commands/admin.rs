@@ -368,7 +368,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
 
 /// Discovered resources.
 async fn discovery(
-    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
+    admin: &mut AdminClient<crate::api::Channel>,
     command: DiscoveryCommand,
 ) -> anyhow::Result<()> {
     use limen_proto::v1::ListDiscoveredRequest;
@@ -448,7 +448,7 @@ async fn discovery(
 }
 
 async fn review_discovered(
-    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
+    admin: &mut AdminClient<crate::api::Channel>,
     key: &str,
     note: Option<String>,
     accept: bool,
@@ -475,7 +475,7 @@ async fn review_discovered(
 
 /// Locks and session kills (ADR-0017).
 async fn run_locks(
-    admin: &mut AdminClient<limen_tunnel::connect::TracedChannel>,
+    admin: &mut AdminClient<crate::api::Channel>,
     command: AdminCommand,
 ) -> anyhow::Result<()> {
     match command {

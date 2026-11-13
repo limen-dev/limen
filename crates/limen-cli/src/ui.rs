@@ -63,21 +63,76 @@ fn visible_width(text: &str) -> usize {
 /// Set to anything to turn the banner off.
 const BANNER_OPT_OUT: &str = "LIMEN_NO_BANNER";
 
-/// The doorway mark (an arch, a dot, a threshold) and the product name, then a
-/// blank line so it stands apart from what follows. As in the logo, the arch
-/// takes the text colour and the dot and threshold are teal.
+/// One run of banner text and its style (`None` is plain).
+type Piece = (String, Option<Style>);
+
+/// The doorway mark (an arch, a dot, a threshold) and the product name, as
+/// three lines of styled pieces. As in the logo, the arch takes the text colour
+/// and the dot and threshold are teal. One source for the static banner and
+/// the animated one.
+fn banner_lines() -> [Vec<Piece>; 3] {
+    let piece = |text: &str, style: Option<Style>| (text.to_owned(), style);
+    [
+        vec![piece("  ╭───╮", Some(BOLD))],
+        vec![
+            piece("  │ ", Some(BOLD)),
+            piece("●", Some(TEAL)),
+            piece(" │", Some(BOLD)),
+            piece("   ", None),
+            piece("limen", Some(BOLD)),
+            piece(" ", None),
+            piece(limen_core::VERSION, Some(DIM)),
+        ],
+        vec![
+            piece(" ━━━━━━━", Some(TEAL)),
+            piece("  ", None),
+            piece("identity-aware access", Some(DIM)),
+        ],
+    ]
+}
+
+/// The banner followed by a blank line, so it stands apart from what follows.
 fn banner_text() -> String {
-    format!(
-        "{}\n{}{}{}   {} {}\n{}  {}\n\n",
-        bold("  ╭───╮"),
-        bold("  │ "),
-        accent("●"),
-        bold(" │"),
-        bold("limen"),
-        dim(limen_core::VERSION),
-        accent(" ━━━━━━━"),
-        dim("identity-aware access"),
-    )
+    let mut out = String::new();
+    for line in banner_lines() {
+        for (text, style) in line {
+            match style {
+                Some(style) => out.push_str(&paint(style, &text)),
+                None => out.push_str(&text),
+            }
+        }
+        out.push('\n');
+    }
+    out.push('\n');
+    out
+}
+
+/// The banner with only the first `reveal` columns drawn and a bright teal
+/// edge at the leading column: a wipe from the left. Always four lines, so
+/// each frame can be drawn over the last.
+fn banner_frame(reveal: usize) -> String {
+    let mut out = String::new();
+    for line in banner_lines() {
+        let mut col = 0;
+        for (text, style) in line {
+            for ch in text.chars() {
+                if col < reveal {
+                    match style {
+                        Some(style) => out.push_str(&paint(style, &ch.to_string())),
+                        None => out.push(ch),
+                    }
+                } else if col == reveal && ch != ' ' {
+                    out.push_str(&paint(TEAL, &ch.to_string()));
+                } else {
+                    out.push(' ');
+                }
+                col += 1;
+            }
+        }
+        out.push('\n');
+    }
+    out.push('\n');
+    out
 }
 
 fn banner_enabled(stderr_is_terminal: bool, opted_out: bool) -> bool {
@@ -86,10 +141,33 @@ fn banner_enabled(stderr_is_terminal: bool, opted_out: bool) -> bool {
 
 /// Print the logo to stderr, so it never mixes into output that is parsed or
 /// piped. Skipped when stderr isn't a terminal or `LIMEN_NO_BANNER` is set.
+/// Where motion is on, the logo is drawn as a quick wipe (about a fifth of a
+/// second); otherwise it is printed at once.
 pub fn banner() {
     let opted_out = std::env::var_os(BANNER_OPT_OUT).is_some();
-    if banner_enabled(std::io::stderr().is_terminal(), opted_out) {
+    if !banner_enabled(std::io::stderr().is_terminal(), opted_out) {
+        return;
+    }
+    if !motion() {
         anstream::eprint!("{}", banner_text());
+        return;
+    }
+    let width = banner_lines()
+        .iter()
+        .map(|l| l.iter().map(|(t, _)| t.chars().count()).sum::<usize>())
+        .max()
+        .unwrap_or(0);
+    let mut reveal = 0;
+    loop {
+        anstream::eprint!("{}", banner_frame(reveal));
+        let _ = std::io::stderr().flush();
+        if reveal > width {
+            break;
+        }
+        reveal += 2;
+        std::thread::sleep(Duration::from_millis(12));
+        // Back to the first line of the banner (raw: `anstream` drops cursor codes under NO_COLOR).
+        let _ = std::io::stderr().write_all(b"\x1b[4F");
     }
 }
 
@@ -328,6 +406,8 @@ fn elapsed_text(d: Duration) -> String {
 /// Output from other code while one is live would land in the middle of it:
 /// finish it first (every current caller does).
 pub struct Spinner {
+    /// An explicit spinner (not the per-call one), which the per-call one steps aside for.
+    counted: bool,
     stop: std::sync::Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
     interactive: bool,
@@ -338,6 +418,33 @@ pub struct Spinner {
 
 #[must_use]
 pub fn spinner(message: &str) -> Spinner {
+    // A per-call spinner may be running: this one replaces it.
+    drop(take_busy());
+    EXPLICIT.fetch_add(1, Ordering::Relaxed);
+    start(message, true, true)
+}
+
+/// Teal, brightening and fading: the frames take the colour of the logo's dot.
+const TEAL_RAMP: [(u8, u8, u8); 8] = [
+    (13, 148, 136),
+    (20, 184, 166),
+    (45, 212, 191),
+    (94, 234, 212),
+    (153, 246, 228),
+    (94, 234, 212),
+    (45, 212, 191),
+    (20, 184, 166),
+];
+
+fn ramp(step: usize) -> Style {
+    let (r, g, b) = TEAL_RAMP[step % TEAL_RAMP.len()];
+    Style::new()
+        .fg_color(Some(Color::Rgb(RgbColor(r, g, b))))
+        .effects(Effects::BOLD)
+}
+
+/// `announce`: print a plain `›` line when motion is off (the per-call spinner stays silent).
+fn start(message: &str, announce: bool, counted: bool) -> Spinner {
     let interactive = motion();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let started = std::time::Instant::now();
@@ -369,23 +476,124 @@ pub fn spinner(message: &str) -> Spinner {
                 let text = fit(&message, room);
                 clear_line();
                 drawn.store(true, Ordering::Relaxed);
-                anstream::eprint!("{} {text}{}", accent(frames[i % frames.len()]), dim(&timer));
+                anstream::eprint!(
+                    "{} {text}{}",
+                    paint(ramp(i / 2), frames[i % frames.len()]),
+                    if timer.is_empty() { timer } else { dim(&timer) }
+                );
                 let _ = std::io::stderr().flush();
                 i += 1;
                 std::thread::sleep(Duration::from_millis(80));
             }
         })
     });
-    if !interactive {
+    if !interactive && announce {
         anstream::eprintln!("{} {message}", accent("›"));
     }
     Spinner {
+        counted,
         stop,
         handle,
         interactive,
         started,
         drawn,
     }
+}
+
+// ---- per-call spinner ------------------------------------------------------------------
+
+/// Explicit spinners alive now; the per-call one stays out of their way.
+static EXPLICIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Set by commands that want a spinner while a call to the proxy is slow.
+static BUSY_ON: AtomicBool = AtomicBool::new(false);
+static BUSY: std::sync::Mutex<Busy> = std::sync::Mutex::new(Busy {
+    calls: 0,
+    spinner: None,
+});
+
+struct Busy {
+    calls: usize,
+    spinner: Option<Spinner>,
+}
+
+fn busy_state() -> std::sync::MutexGuard<'static, Busy> {
+    BUSY.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn take_busy() -> Option<Spinner> {
+    busy_state().spinner.take()
+}
+
+/// Turn on the per-call spinner for this run. Only for commands that print after their calls
+/// return; never for ones that serve a protocol on stdout or hand the terminal over.
+pub fn enable_busy() {
+    BUSY_ON.store(true, Ordering::Relaxed);
+}
+
+/// Held while one call to the proxy is in flight. The first call to take longer than 300 ms
+/// shows a spinner named for it; it is gone when the last call returns. Silent when motion is
+/// off, when not enabled, and while an explicit spinner is running.
+pub struct BusyGuard;
+
+#[must_use]
+pub fn busy(label: &str) -> Option<BusyGuard> {
+    if !BUSY_ON.load(Ordering::Relaxed) || EXPLICIT.load(Ordering::Relaxed) > 0 || !motion() {
+        return None;
+    }
+    let mut state = busy_state();
+    state.calls += 1;
+    if state.spinner.is_none() {
+        state.spinner = Some(start(label, false, false));
+    }
+    Some(BusyGuard)
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        let finished = {
+            let mut state = busy_state();
+            state.calls = state.calls.saturating_sub(1);
+            if state.calls == 0 {
+                state.spinner.take()
+            } else {
+                None
+            }
+        };
+        drop(finished); // stops the thread outside the lock
+    }
+}
+
+/// `/limen.v1.Access/ListAccessRequests` as `List access requests`.
+pub fn method_label(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let mut words: Vec<String> = Vec::new();
+    let mut prev_lower = false;
+    for ch in name.chars() {
+        if ch.is_uppercase() && (prev_lower || words.is_empty()) {
+            words.push(String::new());
+        }
+        if let Some(word) = words.last_mut() {
+            word.push(ch);
+        }
+        prev_lower = ch.is_lowercase();
+    }
+    if words.is_empty() {
+        return "Working".to_owned();
+    }
+    words
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            // Keep a lone capital (the `I` in `WhoAmI`) and acronyms; lower-case the rest.
+            if i == 0 || w.chars().count() == 1 || w.chars().all(char::is_uppercase) {
+                w.clone()
+            } else {
+                w.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Width assumed when neither `COLUMNS` nor the terminal gives a usable one.
@@ -513,6 +721,9 @@ impl Spinner {
         if self.drawn.load(Ordering::Relaxed) {
             clear_line();
         }
+        if std::mem::take(&mut self.counted) {
+            EXPLICIT.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -559,6 +770,35 @@ mod tests {
         assert!(banner_enabled(true, false));
         assert!(!banner_enabled(false, false));
         assert!(!banner_enabled(true, true));
+    }
+
+    #[test]
+    fn method_names_read_as_sentences() {
+        assert_eq!(
+            method_label("/limen.v1.Access/ListAccessRequests"),
+            "List access requests"
+        );
+        assert_eq!(method_label("/limen.v1.Auth/WhoAmI"), "Who am I");
+        assert_eq!(method_label("/x.Y/Ping"), "Ping");
+        assert_eq!(method_label(""), "Working");
+    }
+
+    #[test]
+    fn the_logo_wipes_in_and_ends_as_the_banner() {
+        // Last frame: every column drawn, the same text as the static banner (the colour codes
+        // differ only in being per character).
+        assert_eq!(plain(&banner_frame(1000)), plain(&banner_text()));
+        assert!(
+            banner_frame(1000).contains("\x1b[38;2;20;184;166m●"),
+            "the dot is teal"
+        );
+        // First frame: nothing but the leading edge; always four lines.
+        let first = plain(&banner_frame(0));
+        assert_eq!(first.lines().count(), 4);
+        assert!(first.lines().take(3).all(|l| l.trim().chars().count() <= 1));
+        // Mid-way: part of the text is there, part is not.
+        let mid = plain(&banner_frame(14));
+        assert!(mid.contains("limen") && !mid.contains("identity-aware access"));
     }
 
     #[test]

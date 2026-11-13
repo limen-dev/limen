@@ -1,13 +1,47 @@
 //! Connections to the proxy.
 
 use anyhow::{Context as _, bail};
-use limen_tunnel::connect::TracedChannel as Channel;
-use limen_tunnel::connect::{SharedClientConfig, channel};
+use limen_tunnel::connect::{SharedClientConfig, TracedChannel, channel};
 use limen_tunnel::tls::{Identity, client_config};
 use rustls::ClientConfig;
 use rustls_platform_verifier::BuilderVerifierExt as _;
 
 use crate::profile::{self, Profile};
+use crate::ui;
+
+/// The channel every command talks to the proxy over: the traced channel, plus a spinner while a
+/// call is slow (see [`ui::busy`]). It adds nothing to the request or the response.
+#[derive(Debug, Clone)]
+pub struct Channel(TracedChannel);
+
+type GrpcRequest = http::Request<tonic::body::Body>;
+
+impl tower::Service<GrpcRequest> for Channel {
+    type Response = <TracedChannel as tower::Service<GrpcRequest>>::Response;
+    type Error = <TracedChannel as tower::Service<GrpcRequest>>::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: GrpcRequest) -> Self::Future {
+        // Held until the response arrives, so the spinner covers the wait and is gone before the
+        // command prints anything.
+        let busy = ui::busy(&ui::method_label(request.uri().path()));
+        let call = self.0.call(request);
+        Box::pin(async move {
+            let response = call.await;
+            drop(busy);
+            response
+        })
+    }
+}
 
 /// Port used when the server is given as a bare host name.
 pub const DEFAULT_PORT: u16 = 443;
@@ -90,11 +124,11 @@ fn platform_tls_config(identity: Option<Identity>, alpn: &[&[u8]]) -> anyhow::Re
 /// A channel to `server`, presenting `identity` if given.
 pub fn connect(server: &str, identity: Option<Identity>) -> anyhow::Result<Channel> {
     let tls = tls_config(server, identity, &[limen_tunnel::alpn::H2])?;
-    Ok(channel(
+    Ok(Channel(channel(
         server,
         server_name(server)?,
         SharedClientConfig::new(tls),
-    ))
+    )))
 }
 
 /// The server to use: `--server`, else the current profile.
