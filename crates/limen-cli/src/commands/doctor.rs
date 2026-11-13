@@ -89,9 +89,9 @@ impl Report {
     /// A slow check is about to run: show its name, so a wait isn't mistaken for a hang.
     fn begin(&mut self, name: &str) {
         if self.live && !self.pending {
-            let mut out = std::io::stdout();
-            let _ = write!(out, "{}", ui::dim(&format!("… {name}")));
-            let _ = out.flush();
+            // Through `anstream`, so colour is stripped under NO_COLOR like the rest.
+            anstream::print!("{}", ui::dim(&format!("… {name}")));
+            let _ = std::io::stdout().flush();
             self.pending = true;
         }
     }

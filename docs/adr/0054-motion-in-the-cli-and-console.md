@@ -59,7 +59,7 @@ Everything goes through `crates/limen-cli/src/ui.rs`, on **stderr**, hand-writte
 
 **2. Start late, so quick commands show nothing.** The spinner is drawn only after 300 ms. A step that finishes before that prints no spinner. This is what rule 3 requires; today the spinner appears at once.
 
-**3. A spinner that ends in a result.** `Spinner::succeed(msg)` replaces the animated line with `✔ msg`, plus the elapsed time when the step took over a second (`✔ Approved.  1.4s`); the line stays in the scrollback. On a terminal it is a line on stderr, so a stdout redirected to a file no longer receives it; when motion is off it goes to stdout as `ui::success` does, so a script sees what it always saw. `finish()` keeps its meaning. The one site that prints a result right after `finish()` is `request --wait` ("Approved."), which now uses `succeed`. `selftest` and `login` keep their output (a verdict on stdout; a success line far from the spinner). **No `fail`:** an error already prints through the CLI's error renderer with `✖`, so a second line from the spinner would duplicate it.
+**3. A spinner that ends in a result.** `Spinner::succeed(msg)` replaces the animated line with `✔ msg`, plus the elapsed time when the step took over a second (`✔ Approved.  1.4s`); the line stays in the scrollback. It is printed on stdout, as `ui::success` always did, whatever the motion state, so scripts see what they always saw; only the elapsed time is new, and only on a terminal. `finish()` keeps its meaning. The one site that prints a result right after `finish()` is `request --wait` ("Approved."), which now uses `succeed`. `selftest` and `login` keep their output (a verdict on stdout; a success line far from the spinner). **No `fail`:** an error already prints through the CLI's error renderer with `✖`, so a second line from the spinner would duplicate it.
 
 **4. Waiting that shows it is waiting, and ends cleanly.** After 5 s the waiting spinners show a dimmed elapsed time (`⠋ Waiting for an approver · 2m14s`). It is a timer, not a bar, because the wait has no known length. The waits in `limen request --wait` (up to 1 h) and `limen login` (a 5 min timeout) have no Ctrl-C handler today (no `ctrl_c` in those files), so SIGINT ends the process and leaves a half-drawn line (`Drop` does not run on a signal). The PR selects on `tokio::signal::ctrl_c()` in those waits, finishes the spinner and exits 130. Because `ctrl_c()` disables the default SIGINT behaviour for the rest of the process, a task then makes any later Ctrl-C exit 130 too, so a token exchange stays interruptible. The exit code is a new convention (the CLI exits 1 on error, and `tcp` exits 0 on Ctrl-C), so it is documented in the CLI reference. No raw signal code and no `unsafe`.
 
@@ -83,7 +83,7 @@ Console: the real pages from the compose stack in more than one browser, both th
 - The saved pages in `crates/limen-control-plane/tests/console-pages/` should need no change for the foundation PR (to be confirmed by running them).
 - Risk: view transitions change how every page change feels. One rule to remove; the sidebar scroll-restore interaction is tested only for the position, not frame by frame.
 - A streamed `doctor` report pads names to ten characters.
-- A result line from `succeed` goes to stderr on a terminal.
+- A result from `succeed` still goes to stdout; on a terminal it may end with the elapsed time.
 
 ## Open for review
 1. **View transitions** are in, behind one CSS line to revert. Keep them? (Recommended: yes, if they feel right in the real console.)

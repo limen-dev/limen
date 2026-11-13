@@ -332,6 +332,8 @@ pub struct Spinner {
     handle: Option<std::thread::JoinHandle<()>>,
     interactive: bool,
     started: std::time::Instant,
+    /// Set by the thread once it has drawn a frame; only then is there a line to erase.
+    drawn: std::sync::Arc<AtomicBool>,
 }
 
 #[must_use]
@@ -339,8 +341,10 @@ pub fn spinner(message: &str) -> Spinner {
     let interactive = motion();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let started = std::time::Instant::now();
+    let drawn = std::sync::Arc::new(AtomicBool::new(false));
     let handle = interactive.then(|| {
         let stop = std::sync::Arc::clone(&stop);
+        let drawn = std::sync::Arc::clone(&drawn);
         let message = message.to_owned();
         std::thread::spawn(move || {
             let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -364,6 +368,7 @@ pub fn spinner(message: &str) -> Spinner {
                 let room = columns().saturating_sub(3 + timer.chars().count());
                 let text = fit(&message, room);
                 clear_line();
+                drawn.store(true, Ordering::Relaxed);
                 anstream::eprint!("{} {text}{}", accent(frames[i % frames.len()]), dim(&timer));
                 let _ = std::io::stderr().flush();
                 i += 1;
@@ -379,6 +384,7 @@ pub fn spinner(message: &str) -> Spinner {
         handle,
         interactive,
         started,
+        drawn,
     }
 }
 
@@ -482,21 +488,18 @@ impl Spinner {
         self.halt();
     }
 
-    /// Stop the spinner and leave a result in its place: `✔ message`, with the
-    /// time it took when that was over a second. On a terminal that is a line
-    /// on stderr; when motion is off the result goes to stdout as
-    /// [`success`] does, so a script sees what it always saw.
+    /// Stop the spinner and print a result in its place: `✔ message` on stdout,
+    /// as [`success`] does, with the time it took added when the step ran over
+    /// a second on a terminal. Where the result goes never depends on motion.
     pub fn succeed(mut self, message: &str) {
         let elapsed = self.started.elapsed();
         let interactive = self.interactive;
         self.halt();
-        if interactive {
-            let took = if elapsed >= Duration::from_secs(1) {
+        if interactive && elapsed >= Duration::from_secs(1) {
+            success(&format!(
+                "{message}{}",
                 dim(&format!("  {}", elapsed_text(elapsed)))
-            } else {
-                String::new()
-            };
-            anstream::eprintln!("{} {message}{took}", green("✔"));
+            ));
         } else {
             success(message);
         }
@@ -507,7 +510,7 @@ impl Spinner {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
-        if self.interactive {
+        if self.drawn.load(Ordering::Relaxed) {
             clear_line();
         }
     }

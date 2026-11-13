@@ -339,19 +339,22 @@ pub async fn request(proxy: Option<&str>, a: RequestArgs<'_>) -> anyhow::Result<
             "Stopped waiting. The request is still open (`limen requests`).",
         ),
     };
-    ui::exit_on_ctrl_c();
+    // The spinner goes first: a Ctrl-C while it is being stopped must not leave its line behind.
     match result {
         Some(r) if r.status == "approved" => {
             spinner.succeed("Approved.");
+            ui::exit_on_ctrl_c();
             granted_hint(&r);
             Ok(())
         }
         Some(r) => {
             spinner.finish();
+            ui::exit_on_ctrl_c();
             bail!("the request was {}", r.status)
         }
         None => {
             spinner.finish();
+            ui::exit_on_ctrl_c();
             bail!("gave up waiting; the request is still open (`limen requests`)")
         }
     }
