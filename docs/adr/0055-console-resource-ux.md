@@ -20,17 +20,24 @@ Two things in the console already work and are kept: the in-place refresh (`<mai
 - No inline script and no third-party origin (CSP, ADR-0017). New behaviour is in `console.js`.
 - Internal addresses stay admin-only. Worker health, everyone's session counts and the needs-attention filter are admin-only; a non-admin asking for them gets the default.
 - Filters apply after access control. A resource the viewer can't reach is a 404 whatever the query says.
-- Every new view and the new endpoint are GETs with no side effect. Nothing here changes state; the threat model has a row for the endpoint.
+- Every new view and the palette endpoint are GETs with no side effect. What changes state is a POST with the console's origin and CSRF checks: pins and saved views (a preference, nothing granted), and the bulk end and revoke (each item its own audited operation). The threat model has a row for each.
+
+## Also decided
+- **Pins and saved views are server-side**, in a new table `console_pins` (migration 0032), so they follow the person between browsers. A pinned resource or a saved view (a console address) is the person's own preference: nothing audited, nothing granted. A view is only one of four listed pages (resources, sessions, audit trail, dashboards) with its query, and the page still enforces access when it is opened; the same address a member can't open can't be saved by them. 50 per person. The post carries the CSRF token and the console origin, and the way back must be a console address. Pinning a dashboard view is how "pin to Overview" works.
+- **Bulk end-sessions and bulk revoke** loop over the existing single operations, so every item has its own audit event and the one reason; there is no batch shortcut. Admin only, at most 50.
+- **Errors per resource** are the dashboards' own definitions over the last 24 hours: refused attempts (from the audit trail's resource field), statements that returned an error code, web responses of 500 and over, and Kubernetes answers of 400 and over. Admin only. A count and where to look, not a rate: the four sources have no common denominator.
+- **Policy changes show a diff** per document against the active policy, so an approver reads what changes and not only who gains access.
+- **Recordings carry markers** where the output paused for 30 seconds or more, and a link can point at a moment (`?t=`). The player is handed the one fetch of the recording.
+- **Other detail pages** (sessions, users, changes, requests, reviews, watch) get breadcrumbs; a session links to its resource, person, similar sessions and its own audit trail. Workers list the resources each can serve and flag *quiet* and *cert expired*. The Overview adds policy changes and reviews waiting, your own pending requests, and a console session about to end. Pages that refresh show when they last did, with *Pause* and *Refresh now*. `j` and `k` move through table rows. Failures say what to do next.
 
 ## Left for later
 Each of these needs its own decision, so none is built here:
-- Pinned and favourite resources (they need per-user storage; a browser-only version would not follow the person between machines).
-- Bulk actions on tables (multi-select kill, revoke): they need a confirmation design and their own audit.
-- Markers on the recording timeline, a per-user "what can they reach" view, a worker health timeline, and push updates in place of polling.
-- An error rate per resource: the sessions table has no uniform failure field across protocols.
-- Breadcrumbs and the same "where next" links on the other detail pages (sessions, users, workers). The resource page has them first.
+- Push updates in place of the 10-second poll (a stream per page needs a place in the proxy relay, as live watch has).
+- An "Open" button for web apps: the browser address depends on the proxy's public port and app domain, which the console doesn't know. `limen web open` stays the way in.
+- Remembering a dashboard's period by itself: a saved view of the dashboards page does it, explicitly.
+- A rate (errors per session) per resource, and per-protocol failure fields in the sessions table.
 
 ## Consequences
-- One new query (`resource_activity`) replaces `session_counts_by_resource` and adds the latest session per resource; it scopes to one user for non-admins, so it can't leak another person's use.
-- The saved pages in `crates/limen-control-plane/tests/console-pages/` and the browser matrix cover the new markup.
+- One new table, `console_pins`, and new queries: `resource_errors`, the pin reads and writes, and `resource_activity`, which replaces `session_counts_by_resource` and adds the latest session per resource; it scopes to one user for non-admins, so it can't leak another person's use.
+- The saved pages in `crates/limen-control-plane/tests/console-pages/` need regenerating from a dev stack built from this change (runbook: console). Until then the browser job checks the new styles and scripts over the old markup.
 - `limen_core::resource::ResourceKind::access` stays the one place a connect command is defined; the console reads it.
