@@ -5,7 +5,7 @@
 //! Nothing secret is printed, in text or `--json`: no key, no certificate
 //! body, no token. The output is meant for support tickets.
 
-use std::io::Write as _;
+use std::io::{IsTerminal as _, Write as _};
 use std::path::Path;
 use std::time::Duration;
 
@@ -166,7 +166,9 @@ impl Report {
 /// `limen doctor [resource] [--json]`.
 pub async fn run(flag: Option<&str>, resource: Option<&str>, json: bool) -> anyhow::Result<()> {
     let mut report = Report {
-        live: !json && ui::motion(),
+        // The report is on stdout, so stdout must be the terminal too: `doctor > file` gets
+        // the report once, with no cursor codes in it.
+        live: !json && ui::motion() && std::io::stdout().is_terminal(),
         ..Report::default()
     };
     let proxy = diagnose(&mut report, flag, resource).await;
