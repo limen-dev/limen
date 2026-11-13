@@ -245,6 +245,7 @@ pub async fn pkce_login(
     };
     server.abort();
     waiting.finish();
+    crate::ui::exit_on_ctrl_c();
 
     if let Some(error) = callback.error {
         bail!(callback_error_message(

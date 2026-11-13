@@ -310,7 +310,8 @@ pub fn spinner(message: &str) -> Spinner {
                 // Read each frame, so a resize is picked up. The frame, a space, and one
                 // spare column keep the line from wrapping, which `\r` can't undo.
                 let text = fit(&message, columns().saturating_sub(3));
-                anstream::eprint!("\r\x1b[2K{} {text}", accent(frames[i % frames.len()]));
+                clear_line();
+                anstream::eprint!("{} {text}", accent(frames[i % frames.len()]));
                 let _ = std::io::stderr().flush();
                 i += 1;
                 std::thread::sleep(Duration::from_millis(80));
@@ -327,20 +328,59 @@ pub fn spinner(message: &str) -> Spinner {
     }
 }
 
-/// Width assumed when `COLUMNS` is unset or unusable.
+/// Width assumed when neither `COLUMNS` nor the terminal gives a usable one.
 const FALLBACK_COLUMNS: usize = 80;
 
-/// The terminal width from `COLUMNS` (shells set it but often don't export it,
-/// hence the fallback).
-fn columns() -> usize {
-    columns_from(std::env::var("COLUMNS").ok().as_deref())
+/// Return to the start of the line and erase it. Written to stderr directly,
+/// because `anstream` drops escape sequences when colour is off (`NO_COLOR`),
+/// and the line must be erased all the same.
+fn clear_line() {
+    let mut err = std::io::stderr();
+    let _ = err.write_all(b"\r\x1b[2K");
+    let _ = err.flush();
 }
 
-fn columns_from(value: Option<&str>) -> usize {
-    value
+/// The terminal width. `COLUMNS` wins and is read each call; shells rarely
+/// export it, so otherwise the terminal is asked once (`stty size`), then 80.
+fn columns() -> usize {
+    static PROBED: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    columns_from(
+        std::env::var("COLUMNS").ok().as_deref(),
+        *PROBED.get_or_init(probe_columns),
+    )
+}
+
+fn columns_from(variable: Option<&str>, probed: Option<usize>) -> usize {
+    variable
         .and_then(|v| v.trim().parse::<usize>().ok())
+        .or(probed)
         .filter(|&n| n >= 10)
         .unwrap_or(FALLBACK_COLUMNS)
+}
+
+/// Ask the terminal behind stderr for its width with `stty size` (POSIX), which
+/// needs no dependency and no `unsafe`. `None` if that fails for any reason.
+#[cfg(unix)]
+fn probe_columns() -> Option<usize> {
+    use std::os::fd::AsFd;
+    let tty = std::io::stderr().as_fd().try_clone_to_owned().ok()?;
+    let out = std::process::Command::new("stty")
+        .arg("size")
+        .stdin(std::process::Stdio::from(tty))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    parse_stty_size(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(not(unix))]
+fn probe_columns() -> Option<usize> {
+    None
+}
+
+/// `stty size` prints "ROWS COLUMNS".
+fn parse_stty_size(output: &str) -> Option<usize> {
+    output.split_whitespace().nth(1)?.parse().ok()
 }
 
 /// Shorten `text` to at most `width` characters, ending in `…` when it was cut.
@@ -361,10 +401,25 @@ fn fit(text: &str, width: usize) -> String {
 /// Ctrl-C during a wait: erase the spinner, say what happened, and exit 130
 /// (the shell's code for an interrupt). A signal skips `Drop`, so without this
 /// the prompt lands on a half-drawn spinner line.
+///
+/// `tokio::signal::ctrl_c()` replaces the default SIGINT behaviour for the rest
+/// of the process, so once a wait is over, call [`exit_on_ctrl_c`] or a later
+/// Ctrl-C (during a token exchange, say) would be swallowed.
 pub fn interrupted(spinner: Spinner, message: &str) -> ! {
     spinner.finish();
     anstream::eprintln!("{message}");
     std::process::exit(130)
+}
+
+/// After a wait that used `ctrl_c()`: make Ctrl-C end the process again (130).
+/// For commands that run once and finish. A command that installs its own
+/// graceful handler must not call it.
+pub fn exit_on_ctrl_c() {
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            std::process::exit(130);
+        }
+    });
 }
 
 impl Spinner {
@@ -379,8 +434,7 @@ impl Spinner {
             let _ = h.join();
         }
         if self.interactive {
-            anstream::eprint!("\r\x1b[2K");
-            let _ = std::io::stderr().flush();
+            clear_line();
         }
     }
 }
@@ -443,11 +497,20 @@ mod tests {
 
     #[test]
     fn columns_reads_the_variable_with_a_fallback() {
-        assert_eq!(columns_from(Some("120")), 120);
-        assert_eq!(columns_from(Some(" 100 ")), 100);
-        assert_eq!(columns_from(None), FALLBACK_COLUMNS);
-        assert_eq!(columns_from(Some("wide")), FALLBACK_COLUMNS);
-        assert_eq!(columns_from(Some("0")), FALLBACK_COLUMNS);
+        assert_eq!(columns_from(Some("120"), Some(60)), 120);
+        assert_eq!(columns_from(Some(" 100 "), None), 100);
+        // Not exported: the terminal's own answer, then the fallback.
+        assert_eq!(columns_from(None, Some(132)), 132);
+        assert_eq!(columns_from(Some("wide"), Some(132)), 132);
+        assert_eq!(columns_from(None, None), FALLBACK_COLUMNS);
+        assert_eq!(columns_from(Some("0"), None), FALLBACK_COLUMNS);
+    }
+
+    #[test]
+    fn stty_output_is_rows_then_columns() {
+        assert_eq!(parse_stty_size("24 132\n"), Some(132));
+        assert_eq!(parse_stty_size(""), None);
+        assert_eq!(parse_stty_size("stty: not a tty\n"), None);
     }
 
     #[test]

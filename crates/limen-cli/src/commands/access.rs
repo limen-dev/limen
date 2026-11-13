@@ -340,6 +340,7 @@ pub async fn request(proxy: Option<&str>, a: RequestArgs<'_>) -> anyhow::Result<
         ),
     };
     spinner.finish();
+    ui::exit_on_ctrl_c();
     match result {
         Some(r) if r.status == "approved" => {
             ui::success("Approved.");
