@@ -230,8 +230,11 @@ async fn postgres_through_limen() {
     assert_eq!(start["data"]["database"], "orders");
     let statement = events
         .iter()
-        .find(|e| e["kind"] == "db.query" && e["data"]["statement"] == "select 42")
-        .expect("db.query select 42");
+        // Literals are replaced by default (ADR-0033 amendment): the trail holds
+        // `select ?`, flagged as normalized, and never the 42.
+        .find(|e| e["kind"] == "db.query" && e["data"]["statement"] == "select ?")
+        .expect("db.query select ?");
+    assert_eq!(statement["data"]["normalized"], true);
     assert_eq!(statement["producer"]["component"], "worker");
     assert_eq!(statement["data"]["db_role"], ROLE);
     assert!(

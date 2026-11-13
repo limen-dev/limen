@@ -169,7 +169,7 @@ ssh ─ProxyCommand─ limen ssh-proxy ─mTLS(limen-ssh/1)─ proxy ─tunnel�
   - the user, DB role, database, statement text, statement type (first keyword from the `sqlparser` tokenizer, `unknown` if it can't be tokenized), phase, and for prepared statements the `Parse` event id
   - extended protocol: the statement is logged at Parse, and each Execute is logged with its name. **Parameter values are never logged** (the earlier `audit.log_parameters` option is not built)
   - `COPY`, multi-statement messages (one event each), and `CALL` and `DO` blocks are logged as written; row data never is
-  - per-resource `normalize_literals: true` replaces literals with `?`. Full text is the default (clarified with the owner)
+  - literals are replaced with `?` by default (`normalize_literals`, ADR-0033 amendment 2026-11-12); per-resource `normalize_literals: false` logs the full text. This reverses the earlier owner decision that full text is the default
   - the console projects these events into `db_statements` and lists them on the session page (database sessions have no recording)
 - **Aurora**: the same code. The cluster writer and reader endpoints are separate resources.
 - **Limits.** Enforcement inside a session is the database's grants for the role; there is no statement-level allow or deny. Sessions end at `max_session_ttl`, or after an hour with no client activity. A frame the worker must read in full is capped at 64 MiB.

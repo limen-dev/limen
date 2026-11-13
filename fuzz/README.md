@@ -9,6 +9,7 @@ every `cargo test` (for example `crates/limen-worker/src/mongo/robustness.rs`) a
 | Target | Reads |
 |---|---|
 | `redis_frames` | RESP frame and request scanners, `parse_command`, `parse_value` |
+| `sql_normalize` | SQL audit text: `split` and `normalize` on any text; a string literal's content must not survive `normalize` |
 | `mongo_wire` | message framing, `OP_MSG`, `OP_QUERY`, the BSON reader |
 | `amqp_frames` | frame parsing and the field reader |
 | `kafka_header` | request header and the field reader |

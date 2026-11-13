@@ -97,3 +97,10 @@ path = "fuzz_targets/proxy_web.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "sql_normalize"
+path = "fuzz_targets/sql_normalize.rs"
+test = false
+doc = false
+bench = false

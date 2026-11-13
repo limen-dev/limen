@@ -708,8 +708,12 @@ pub struct DbTarget {
     /// with `--allow-insecure-db-targets` (the local compose profile).
     #[serde(default)]
     pub insecure_dev: bool,
-    /// Replace literals in logged statement text with `?` (`audit.normalize_literals`).
-    #[serde(default)]
+    /// Replace literals in logged statement text with `?`. On by default, so
+    /// the trail holds the shape of a statement and not the values in it; set
+    /// `false` to log the full text. Always written to the snapshot (never
+    /// skipped), so a component that reads it sees the setting and does not
+    /// fall back to its own default during an upgrade.
+    #[serde(default = "yes")]
     pub normalize_literals: bool,
     /// Role bootstrap (ADR-0015, ADR-0033): a dedicated admin login and the
     /// file on the worker that holds its password.
