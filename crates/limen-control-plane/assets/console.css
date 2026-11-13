@@ -857,3 +857,66 @@ html.js .palette-open { display: flex; }
   html[data-sidebar="collapsed"] .sidebar .palette-open { justify-content: center; }
 }
 @media (max-width: 900px) { .palette-open { display: none !important; } }
+
+/* ---- session page: related links, share ---- */
+.related { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: -8px 0 18px; font-size: 13.5px; }
+.related a { display: inline-flex; align-items: center; min-height: 24px; }
+.related button.icon-text { padding: 3px 10px; font-size: 13px; }
+.related button.done { color: var(--ok); border-color: var(--ok); }
+@media (pointer: coarse) { .related a { min-height: 44px; min-width: 44px; } }
+
+/* ---- refresh note, row marker ---- */
+.refresh-note { color: var(--text-3); font-size: 12px; padding-top: 18px; }
+.refresh-note button.link { background: none; border: 0; padding: 2px 4px; margin-left: 4px; color: var(--accent-text); font-size: 12px; font-weight: 500; cursor: pointer; min-height: 24px; }
+tbody tr.row-on td { background: var(--accent-soft); }
+tbody tr.row-on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+@media (pointer: coarse) { .refresh-note button.link { min-height: 44px; min-width: 44px; } }
+
+/* ---- pins and saved views (ADR-0055) ---- */
+form.pin-form { display: inline; margin: 0; }
+.icon-btn.pinned, button.pinned { color: var(--warn); }
+.icon-btn.pinned .i, button.pinned .i { fill: currentColor; }
+button.icon-text { display: inline-flex; align-items: center; gap: 6px; }
+.recent-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.saved-views { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.saved-views li { display: inline-flex; align-items: center; background: var(--sunken); border: 1px solid var(--border); border-radius: 999px; padding: 0 2px 0 12px; }
+.saved-views li a { display: inline-flex; align-items: center; min-height: 28px; }
+.save-view { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 18px; }
+.save-view[hidden] { display: none; }
+.save-view label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.save-view input[type=text] { width: 200px; }
+@media (pointer: coarse) { .saved-views li a { min-height: 44px; } }
+
+/* ---- bulk end sessions ---- */
+details.bulk { margin: 16px 0; }
+details.bulk summary { cursor: pointer; font-weight: 550; padding: 6px 0; }
+.bulk-form { display: grid; gap: 10px; padding: 12px 0; }
+.bulk-form p { margin: 0; }
+.bulk-tools { display: flex; gap: 8px; }
+.bulk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 320px; overflow: auto; }
+.bulk-list label { display: flex; align-items: center; gap: 10px; }
+.bulk-list input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+@media (pointer: coarse) { .bulk-list label { min-height: 44px; } }
+
+/* ---- policy change: document diffs ---- */
+.docdiff { margin-bottom: 14px; overflow: hidden; }
+.docdiff-title { padding: 8px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.docdiff-body { margin: 0; padding: 8px 0; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; max-height: 480px; }
+.dl { display: block; padding: 0 14px; white-space: pre; }
+.dl-op { display: inline-block; width: 1.5em; color: var(--text-3); user-select: none; }
+.dl-add { background: var(--ok-soft); color: var(--ok); }
+.dl-del { background: var(--bad-soft); color: var(--bad); }
+.dl-skip { color: var(--text-3); font-style: italic; }
+
+.check-access { padding: 14px 18px; margin-bottom: 18px; display: grid; gap: 8px; }
+.check-access .row input { width: 260px; max-width: 100%; }
+.end-form { margin-left: 8px; }
+
+.js-only { display: none; }
+html.js .js-only { display: inline-flex; }
+.msg-actions { justify-content: center; margin-top: 14px; }
+.msg .hint { margin: 6px 0 0; }
+
+.empty a { text-decoration: underline; display: inline-flex; align-items: center; min-height: 24px; }
+.status-strip a { display: inline-flex; align-items: center; min-height: 24px; }
+@media (pointer: coarse) { .empty a, .status-strip a { min-height: 44px; min-width: 44px; justify-content: center; } }

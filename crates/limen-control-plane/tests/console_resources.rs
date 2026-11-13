@@ -59,6 +59,28 @@ fn get(uri: &str, token: &str, proxy: &Identity) -> Request<Body> {
     request
 }
 
+const ORIGIN: &str = "https://console.test";
+
+fn post(uri: &str, token: &str, form: &str, origin: bool, proxy: &Identity) -> Request<Body> {
+    let mut b = Request::builder()
+        .method("POST")
+        .header(limen_proto::relay::FORWARDED, "1")
+        .uri(uri)
+        .header("cookie", format!("{}={token}", console::SESSION_COOKIE))
+        .header("sec-fetch-site", "same-origin")
+        .header("content-type", "application/x-www-form-urlencoded");
+    if origin {
+        b = b.header("origin", ORIGIN);
+    }
+    let mut request = b.body(Body::from(form.to_owned())).expect("request");
+    request.extensions_mut().insert(limen_tunnel::PeerInfo {
+        remote_addr: None,
+        server_name: None,
+        client_certs: proxy.certs.clone(),
+    });
+    request
+}
+
 async fn session(h: &Harness, token: &str, user: &str, roles: &[&str]) {
     create_console_session(
         &h.state.db,
@@ -75,13 +97,21 @@ async fn session(h: &Harness, token: &str, user: &str, roles: &[&str]) {
     .expect("session");
 }
 
-async fn seed(h: &Harness, user: &str, resource: &str, kind: &str, open: bool, ago_secs: i32) {
+async fn seed(
+    h: &Harness,
+    user: &str,
+    resource: &str,
+    kind: &str,
+    open: bool,
+    ago_secs: i32,
+) -> Uuid {
+    let id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO sessions (session_id, username, kind, resource, login, started_at, ended_at, actor_type)
          VALUES ($1, $2, $3, $4, 'ubuntu', now() - make_interval(secs => $5), \
                  CASE WHEN $6 THEN NULL ELSE now() END, 'user')",
     )
-    .bind(Uuid::new_v4())
+    .bind(id)
     .bind(user)
     .bind(kind)
     .bind(resource)
@@ -90,6 +120,7 @@ async fn seed(h: &Harness, user: &str, resource: &str, kind: &str, open: bool, a
     .execute(&h.state.db)
     .await
     .expect("seed a session");
+    id
 }
 
 /// The text of the table row that holds `name`'s link.
@@ -130,6 +161,26 @@ impl Fixture {
         seed(&h, "root", "db-1", "postgres", false, 90).await;
         let (_, proxy) = h.enroll_proxy().await;
         Some(Self { h, proxy })
+    }
+
+    /// A POST with the right origin and the session's CSRF token (`c`) added to `form`.
+    async fn act(&self, uri: &str, token: &str, form: &str) -> (StatusCode, Option<String>) {
+        let response = console::router(self.h.state.clone())
+            .oneshot(post(
+                uri,
+                token,
+                &format!("csrf=c&{form}"),
+                true,
+                &self.proxy,
+            ))
+            .await
+            .expect("response");
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        (response.status(), location)
     }
 
     async fn page(&self, uri: &str, token: &str) -> (StatusCode, String) {
@@ -335,4 +386,319 @@ async fn the_palette_and_the_overview_follow_the_same_access_rules() {
         .find(|h| h.starts_with("/console/resources?sort=attention"))
         .expect("the card links to the attention view");
     assert!(link.contains("attention=1"), "{link}");
+}
+
+#[tokio::test]
+async fn pins_and_saved_views_are_per_person_checked_and_bounded() {
+    let Some(f) = Fixture::start().await else {
+        return;
+    };
+    // Dana pins a resource she can open, and comes back to where she was.
+    let (status, to) = f
+        .act(
+            "/console/pins",
+            DEV,
+            "kind=resource&target=web-1&action=add&back=%2Fconsole%2Fresources",
+        )
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(to.as_deref(), Some("/console/resources"));
+    let (_, body) = f.page("/console/resources", DEV).await;
+    assert!(row_of(&body, "web-1").contains("aria-pressed=\"true\""));
+    assert!(row_of(&body, "db-1").contains("aria-pressed=\"false\""));
+    let (_, body) = f.page("/console/", DEV).await;
+    assert!(body.contains("Pinned") && body.contains("limen ssh web-1"));
+    // Not anyone else's: the admin's row for the same resource is not pinned.
+    let (_, body) = f.page("/console/resources", ADMIN).await;
+    assert!(row_of(&body, "web-1").contains("aria-pressed=\"false\""));
+
+    // A resource she can't see: no pin, and no hint it exists.
+    let (status, _) = f
+        .act(
+            "/console/pins",
+            DEV,
+            "kind=resource&target=hidden-prod&action=add",
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // An admin may pin it; a member may not save a page they can't open.
+    let (status, _) = f
+        .act(
+            "/console/pins",
+            ADMIN,
+            "kind=resource&target=hidden-prod&action=add",
+        )
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    // The admin sees it on the Overview even though no role of theirs opens it; Dana does not.
+    let (_, body) = f.page("/console/", ADMIN).await;
+    assert!(body.contains("hidden-prod") && body.contains("Not opened by your own roles"));
+    let (_, body) = f.page("/console/", DEV).await;
+    assert!(!body.contains("hidden-prod"));
+    for (who, form, want) in [
+        (
+            ADMIN,
+            "kind=view&action=add&label=Denials&target=%2Fconsole%2Fdashboards%3Fp%3Ddenials",
+            StatusCode::SEE_OTHER,
+        ),
+        (
+            DEV,
+            "kind=view&action=add&label=x&target=%2Fconsole%2Fdashboards",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            DEV,
+            "kind=view&action=add&label=x&target=%2Fconsole%2Faudit",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            DEV,
+            "kind=view&action=add&label=x&target=%2Fconsole%2Fusers",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            DEV,
+            "kind=view&action=add&label=x&target=https%3A%2F%2Fevil.example%2F",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            DEV,
+            "kind=view&action=add&label=x&target=%2Fconsole%2Fresources%2Fweb-1",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            DEV,
+            "kind=nonsense&action=add&target=x",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            DEV,
+            "kind=resource&target=web-1&action=toggle",
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let (status, _) = f.act("/console/pins", who, form).await;
+        assert_eq!(status, want, "{form}");
+    }
+    // A saved view shows on the Overview and on its own page; the admin's does not reach Dana.
+    let (status, _) = f
+        .act(
+            "/console/pins",
+            DEV,
+            "kind=view&action=add&label=Staging+ssh&target=%2Fconsole%2Fresources%3Fkind%3Dssh&back=%2Fconsole%2Fresources",
+        )
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (_, body) = f.page("/console/resources", DEV).await;
+    assert!(body.contains("Staging ssh") && !body.contains("Denials"));
+    let (_, body) = f.page("/console/", ADMIN).await;
+    assert!(body.contains("Denials") && !body.contains("Staging ssh"));
+}
+
+#[tokio::test]
+async fn a_pin_post_needs_the_token_never_redirects_off_site_and_can_always_remove() {
+    let Some(f) = Fixture::start().await else {
+        return;
+    };
+    // The way back is only ever a console address.
+    for back in [
+        "https%3A%2F%2Fevil.example%2F",
+        "%2F%2Fevil.example",
+        "%2Fconsole%2F%0D%0Aset-cookie%3Ax",
+    ] {
+        let (status, to) = f
+            .act(
+                "/console/pins",
+                DEV,
+                &format!("kind=resource&target=web-1&action=add&back={back}"),
+            )
+            .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(to.as_deref(), Some("/console/"), "{back}");
+    }
+
+    // No token, or another origin: nothing changes.
+    let app = console::router(f.h.state.clone());
+    for (form, origin) in [
+        ("kind=resource&target=db-1&action=add", true),
+        ("csrf=wrong&kind=resource&target=db-1&action=add", true),
+        ("csrf=c&kind=resource&target=db-1&action=add", false),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(post("/console/pins", DEV, form, origin, &f.proxy))
+            .await
+            .expect("response");
+        assert_ne!(r.status(), StatusCode::SEE_OTHER, "{form} origin={origin}");
+    }
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM console_pins WHERE username = 'dana' AND target = 'db-1'",
+    )
+    .fetch_one(&f.h.state.db)
+    .await
+    .expect("count");
+    assert_eq!(held, 0);
+
+    // Taking a pin off works even when the resource has gone, or been hidden since.
+    sqlx::query("INSERT INTO console_pins (username, kind, target, label) VALUES ('dana', 'resource', 'gone', 'gone')")
+        .execute(&f.h.state.db)
+        .await
+        .expect("seed");
+    let (status, _) = f
+        .act(
+            "/console/pins",
+            DEV,
+            "kind=resource&target=gone&action=remove",
+        )
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM console_pins WHERE target = 'gone'")
+        .fetch_one(&f.h.state.db)
+        .await
+        .expect("count");
+    assert_eq!(left, 0);
+
+    // A person keeps at most 50.
+    sqlx::query(
+        "INSERT INTO console_pins (username, kind, target, label)
+         SELECT 'dana', 'view', '/console/sessions?n=' || g, 'v' || g FROM generate_series(1, 60) g
+          WHERE (SELECT count(*) FROM console_pins WHERE username = 'dana') + g <= 50",
+    )
+    .execute(&f.h.state.db)
+    .await
+    .expect("fill");
+    let (status, _) = f
+        .act("/console/pins", DEV, "kind=resource&target=db-1&action=add")
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn ending_several_sessions_is_admin_only_and_each_one_is_audited() {
+    let Some(f) = Fixture::start().await else {
+        return;
+    };
+    let a = seed(&f.h, "dana", "web-1", "ssh", true, 30).await;
+    let b = seed(&f.h, "dana", "web-1", "ssh", true, 20).await;
+    let (_, body) = f.page("/console/sessions?filter=active", ADMIN).await;
+    assert!(body.contains("End several sessions"));
+    let (_, body) = f.page("/console/sessions?filter=active", DEV).await;
+    assert!(
+        !body.contains("End several sessions"),
+        "a member can't end sessions"
+    );
+
+    let form = format!("reason=cleanup&id={a}&id={b}");
+    let (status, _) = f.act("/console/sessions/kill", DEV, &form).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    for bad in ["reason=x", &format!("reason=&id={a}")] {
+        let (status, _) = f.act("/console/sessions/kill", ADMIN, bad).await;
+        assert_ne!(status, StatusCode::SEE_OTHER, "{bad}");
+    }
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM session_kills")
+        .fetch_one(&f.h.state.db)
+        .await
+        .expect("count");
+    assert_eq!(before, 0, "nothing was ended by a refused request");
+
+    let (status, to) = f.act("/console/sessions/kill", ADMIN, &form).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        to.as_deref(),
+        Some("/console/sessions?filter=active&done=killed_many")
+    );
+    let kills =
+        f.h.audit_events()
+            .await
+            .iter()
+            .filter(|e| e.kind == limen_audit::EventKind::SessionKill)
+            .count();
+    assert_eq!(
+        kills, 2,
+        "one audit event per session, not one for the batch"
+    );
+    // Ending the same ones again ends nothing new and says so.
+    let (status, to) = f.act("/console/sessions/kill", ADMIN, &form).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        to.as_deref(),
+        Some("/console/sessions?filter=active&done=killed_some")
+    );
+}
+
+#[tokio::test]
+async fn errors_on_a_resource_are_counted_for_admins_only_and_by_exact_name() {
+    let Some(f) = Fixture::start().await else {
+        return;
+    };
+    for (n, resource) in [("web-1", 2), ("web-10", 1)] {
+        for _ in 0..resource {
+            sqlx::query(
+                "INSERT INTO audit_events (event_id, at, kind, username, summary)
+                 VALUES ($1, now(), 'auth.denied', 'mallory', $2)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(format!("resource={n}  reason=no role"))
+            .execute(&f.h.state.db)
+            .await
+            .expect("seed");
+        }
+    }
+    let (_, body) = f.page("/console/resources", ADMIN).await;
+    assert!(
+        row_of(&body, "web-1").contains("title=\"2 refused\""),
+        "web-10's refusals are not web-1's"
+    );
+    assert!(row_of(&body, "db-1").contains("<span class=\"muted\">0</span>"));
+    let (_, body) = f
+        .page("/console/resources?attention=1&sort=attention", ADMIN)
+        .await;
+    assert!(body.contains("/resources/web-1\""));
+    let (_, body) = f.page("/console/resources", DEV).await;
+    assert!(!body.contains("Errors 24 h") && !body.contains("refused"));
+    let (_, body) = f.page("/console/resources/web-1", ADMIN).await;
+    assert!(
+        body.contains("2 refused") && body.contains("/console/audit?kind=auth.denied&amp;q=web-1")
+            || body.contains("2 refused")
+    );
+    let (_, body) = f.page("/console/resources/web-1", DEV).await;
+    assert!(!body.contains("refused"));
+}
+
+#[tokio::test]
+async fn the_overview_warns_of_an_ending_session_and_pages_link_onward() {
+    let Some(f) = Fixture::start().await else {
+        return;
+    };
+    sqlx::query("UPDATE console_sessions SET expires_at = now() + interval '10 minutes' WHERE username = 'dana'")
+        .execute(&f.h.state.db)
+        .await
+        .expect("shorten");
+    let (_, body) = f.page("/console/", DEV).await;
+    assert!(body.contains("Your console session ends in"), "{body}");
+    let (_, body) = f.page("/console/", ADMIN).await;
+    assert!(!body.contains("Your console session ends in"));
+
+    let id = seed(&f.h, "dana", "web-1", "ssh", true, 5).await;
+    let (status, body) = f.page(&format!("/console/sessions/{id}"), ADMIN).await;
+    assert_eq!(status, StatusCode::OK);
+    for want in [
+        "Similar sessions",
+        "Audit trail of this session",
+        "data-copy-link",
+        "data-refresh=\"5\"",
+        "class=\"crumbs\"",
+    ] {
+        assert!(body.contains(want), "{want}");
+    }
+    let (_, body) = f.page(&format!("/console/sessions/{id}"), DEV).await;
+    assert!(
+        !body.contains("Audit trail of this session"),
+        "the audit trail is not Dana's"
+    );
+
+    // A failure says what to do next.
+    let (status, body) = f.page("/console/resources/hidden-prod", DEV).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("Check the address"));
 }

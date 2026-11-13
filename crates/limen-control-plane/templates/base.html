@@ -80,6 +80,13 @@
     <main{% block refresh %}{% endblock %}>
 {% block content %}{% endblock %}
     </main>
+    {% if chrome.saveable %}
+    <form method="post" action="/console/pins" class="save-view" data-save-view hidden>
+      <input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="view"><input type="hidden" name="action" value="add"><input type="hidden" name="target" value=""><input type="hidden" name="back" value="">
+      <label><span class="muted">Save this view as</span> <input type="text" name="label" maxlength="60" placeholder="A name"></label>
+      <button type="submit" class="secondary">Save view</button>
+    </form>
+    {% endif %}
     <div class="foot">Limen {{ chrome.version }} · policy v{{ chrome.policy_version }}</div>
   </div>
 </div>

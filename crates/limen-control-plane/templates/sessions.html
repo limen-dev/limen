@@ -38,6 +38,25 @@
 {% include "filter_feedback.html" %}
 {% if let Some(done) = notice %}<div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#info"/></svg>{{ done }}</div>{% endif %}
 {% include "sessions_table.html" %}
+{% if chrome.is_admin %}{% if has_open %}
+<details class="bulk">
+  <summary>End several sessions</summary>
+  <form method="post" action="/console/sessions/kill" class="bulk-form">
+    <input type="hidden" name="csrf" value="{{ chrome.csrf }}">
+    <p class="hint">The open sessions on this page. Each one is ended and audited on its own, with the same reason.</p>
+    <div class="bulk-tools"><button type="button" class="secondary" data-check="all">Select all</button><button type="button" class="secondary" data-check="none">Clear</button></div>
+    <ul class="bulk-list">
+    {% for s in sessions %}{% if s.active && !s.is_kubectl %}
+      <li><label><input type="checkbox" name="id" value="{{ s.id }}"><span><b>{{ s.resource }}</b> · {{ s.user }} as <span class="mono">{{ s.login }}</span> · {{ s.started }}</span></label></li>
+    {% endif %}{% endfor %}
+    </ul>
+    <div class="danger-zone">
+      <input type="text" name="reason" placeholder="Reason (kept in the audit trail)" required maxlength="500" class="w-360" aria-label="Reason for ending the selected sessions">
+      <button type="submit" class="danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#circle-stop"/></svg>End selected</button>
+    </div>
+  </form>
+</details>
+{% endif %}{% endif %}
 {% if sessions.is_empty() && !chips.is_empty() %}<p class="empty-hint">No sessions match these filters. Remove one above, widen the period, or <a href="{{ clear }}">clear all</a>.</p>{% endif %}
 <p class="pager">
   {% if let Some(n) = newer %}<a href="{{ n }}">← Newer</a>{% endif %}

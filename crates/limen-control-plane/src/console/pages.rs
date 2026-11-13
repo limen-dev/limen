@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
+use super::pins;
 use super::query;
 use super::resource_ui::{self, ResourceSort};
 use super::store::{self, SessionFilter};
@@ -177,7 +178,15 @@ fn notice(code: Option<&str>) -> Option<&'static str> {
         "unlocked" => "User unlocked.",
         "deleted" => "User deleted. Their sessions and audit history stay.",
         "killed" => "The session will end within about 11 seconds.",
+        "killed_many" => "The selected sessions will end within about 11 seconds.",
+        "killed_some" => {
+            "Some of the selected sessions were ended; the rest had already ended or could not be."
+        }
         "revoked" => "Revoked. Proxies drop its tunnels within about 10 seconds.",
+        "revoked_many" => "Revoked. Proxies drop their tunnels within about 10 seconds.",
+        "revoked_some" => {
+            "Some of the selected components were revoked; the rest were already revoked or could not be."
+        }
         _ => return None,
     })
 }
@@ -237,48 +246,121 @@ async fn attention_items(
     auth: &Auth,
     overview: &Stats,
 ) -> Result<Vec<views::AttentionItem>, Response> {
-    let plural =
-        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let mut items = Vec::new();
+    // A console session that is about to end loses an unsaved form and the page you were on.
+    let left = auth.expires_at - time::OffsetDateTime::now_utc();
+    if left < time::Duration::minutes(30) {
+        let minutes = usize::try_from(left.whole_minutes().max(0)).unwrap_or(0);
+        items.push(views::AttentionItem {
+            text: format!(
+                "Your console session ends in {}. Sign in again to keep working",
+                plural(minutes, "minute", "minutes")
+            ),
+            href: "/console/login".to_owned(),
+            tone: "warn",
+        });
+    }
     if auth.is_admin {
-        let (components, tunnels) = db::list_components(&state.db)
-            .await
-            .map_err(|e| db_error("listing components", &e))?;
-        let loaded = state.policy.current();
-        let down = loaded
-            .policy
-            .documents()
-            .iter()
-            .filter_map(|d| match d {
-                Document::Resource(r) => Some(r),
-                _ => None,
-            })
-            .filter(|r| {
-                views::Health::of(&matching_workers(
-                    &components,
-                    &tunnels,
-                    &r.spec.worker_selector,
-                ))
-                .needs_attention()
-            })
-            .count();
-        if down > 0 {
+        items.extend(admin_attention(state, overview).await?);
+    }
+    items.extend(approval_attention(state, auth).await?);
+    Ok(items)
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Admins: resources no worker serves, and disabled accounts.
+async fn admin_attention(
+    state: &AppState,
+    overview: &Stats,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let mut items = Vec::new();
+    let (components, tunnels) = db::list_components(&state.db)
+        .await
+        .map_err(|e| db_error("listing components", &e))?;
+    let loaded = state.policy.current();
+    let down = loaded
+        .policy
+        .documents()
+        .iter()
+        .filter_map(|d| match d {
+            Document::Resource(r) => Some(r),
+            _ => None,
+        })
+        .filter(|r| {
+            views::Health::of(&matching_workers(
+                &components,
+                &tunnels,
+                &r.spec.worker_selector,
+            ))
+            .needs_attention()
+        })
+        .count();
+    if down > 0 {
+        items.push(views::AttentionItem {
+            text: format!(
+                "{} without a connected worker, so sessions will fail",
+                plural(down, "resource", "resources")
+            ),
+            href: "/console/resources?sort=attention&attention=1".to_owned(),
+            tone: "bad",
+        });
+    }
+    if overview.locked > 0 {
+        items.push(views::AttentionItem {
+            text: format!(
+                "{} disabled",
+                plural(overview.locked, "account", "accounts")
+            ),
+            href: "/console/users".to_owned(),
+            tone: "warn",
+        });
+    }
+    Ok(items)
+}
+
+/// Policy changes, access reviews and access requests that wait for this viewer, and their own
+/// requests that still wait for someone else.
+async fn approval_attention(
+    state: &AppState,
+    auth: &Auth,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let mut items = Vec::new();
+    if auth.sees_changes {
+        let waiting = super::policy_edit::waiting_for(state, auth).await;
+        if waiting > 0 {
             items.push(views::AttentionItem {
                 text: format!(
-                    "{} without a connected worker, so sessions will fail",
-                    plural(down, "resource", "resources")
+                    "{} waiting for your review",
+                    plural(waiting, "policy change", "policy changes")
                 ),
-                href: "/console/resources?sort=attention&attention=1".to_owned(),
-                tone: "bad",
+                href: "/console/changes".to_owned(),
+                tone: "warn",
             });
         }
-        if overview.locked > 0 {
+    }
+    if auth.sees_reviews {
+        let who = crate::reviews::Who {
+            username: &auth.username,
+            is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            via: "console",
+        };
+        let open = crate::reviews::list(state, &who, false)
+            .await
+            .map_err(|s| action_error(&s))?
+            .iter()
+            .filter(|r| r.status != "complete")
+            .count();
+        if open > 0 {
             items.push(views::AttentionItem {
                 text: format!(
-                    "{} disabled",
-                    plural(overview.locked, "account", "accounts")
+                    "{} with items for you",
+                    plural(open, "open access review", "open access reviews")
                 ),
-                href: "/console/users".to_owned(),
+                href: "/console/reviews".to_owned(),
                 tone: "warn",
             });
         }
@@ -290,20 +372,21 @@ async fn attention_items(
             is_auditor: auth.is_auditor,
             via: "console",
         };
-        let waiting = crate::access::list_requests(
-            state,
-            &who,
-            &limen_proto::v1::ListAccessRequestsRequest {
-                scope: "approvable".into(),
-                status: String::new(),
-                limit: 100,
-            },
-        )
-        .await
-        .map_err(|s| action_error(&s))?
-        .iter()
-        .filter(|r| r.can_decide)
-        .count();
+        let count = |scope: &'static str, status: &'static str, decidable: bool| async move {
+            crate::access::list_requests(
+                state,
+                &who,
+                &limen_proto::v1::ListAccessRequestsRequest {
+                    scope: scope.into(),
+                    status: status.into(),
+                    limit: 100,
+                },
+            )
+            .await
+            .map(|v| v.iter().filter(|r| !decidable || r.can_decide).count())
+            .map_err(|s| action_error(&s))
+        };
+        let waiting = count("approvable", "", true).await?;
         if waiting > 0 {
             items.push(views::AttentionItem {
                 text: format!(
@@ -314,8 +397,83 @@ async fn attention_items(
                 tone: "warn",
             });
         }
+        let mine = count("mine", "pending", false).await?;
+        if mine > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} still waiting for an approver",
+                    plural(
+                        mine,
+                        "access request of yours is",
+                        "access requests of yours are"
+                    )
+                ),
+                href: "/console/access".to_owned(),
+                tone: "",
+            });
+        }
     }
     Ok(items)
+}
+
+/// The viewer's pinned resources (only those they can still open) and saved views.
+async fn pinned_and_saved(
+    state: &AppState,
+    auth: &Auth,
+    reachable: &[ResourceView],
+) -> Result<(Vec<views::PinnedResource>, Vec<views::SavedView>), Response> {
+    let pins = store::list_pins(&state.db, &auth.username)
+        .await
+        .map_err(|e| db_error("reading your pins", &e))?;
+    // Health is worker state, which is admin-only.
+    let workers = if auth.is_admin {
+        Some(
+            db::list_components(&state.db)
+                .await
+                .map_err(|e| db_error("listing components", &e))?,
+        )
+    } else {
+        None
+    };
+    let loaded = state.policy.current();
+    let mut resources = Vec::new();
+    let mut saved = Vec::new();
+    for pin in pins {
+        if pin.kind == "view" {
+            saved.push(views::SavedView {
+                label: pin.label,
+                href: pin.target,
+            });
+            continue;
+        }
+        // A resource that has gone from policy is skipped; so is one a member can no longer open.
+        let Some(res) = loaded.policy.resource(&pin.target) else {
+            continue;
+        };
+        let mine = reachable.iter().find(|r| r.name == pin.target);
+        if !auth.is_admin && mine.is_none() {
+            continue;
+        }
+        let kind = spec_kind(&res.spec);
+        let (icon, kclass) = views::kind_icon(kind);
+        let health = workers.as_ref().map(|(components, tunnels)| {
+            views::Health::of(&matching_workers(
+                components,
+                tunnels,
+                &res.spec.worker_selector,
+            ))
+        });
+        resources.push(views::PinnedResource {
+            name: pin.target.clone(),
+            path: path_segment(&pin.target),
+            kind: kind.to_owned(),
+            icon,
+            kclass,
+            connect: mine.map(|_| views::connect_for(kind, &pin.target)),
+            health,
+        });
+    }
+    Ok((resources, saved))
 }
 
 /// The resources the viewer used last, among those they can still open. Only their own sessions
@@ -429,6 +587,10 @@ pub async fn home(
         Ok(items) => items,
         Err(r) => return r,
     };
+    let (pinned, saved) = match pinned_and_saved(&state, &auth, &resources).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
     html(
         Home {
             chrome: chrome(&state, &auth, "home"),
@@ -440,6 +602,8 @@ pub async fn home(
             expires: time_text(Some(auth.expires_at)),
             attention,
             recent,
+            pinned,
+            saved,
         }
         .render(),
     )
@@ -510,6 +674,7 @@ pub struct ResourcesQuery {
     q: Option<String>,
     sort: Option<String>,
     attention: Option<String>,
+    pinned: Option<String>,
 }
 
 /// Every `label=key=value` in the query string (repeatable; a value may contain commas).
@@ -546,11 +711,26 @@ async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>
         Ok(a) => a,
         Err(e) => return Err(db_error("counting sessions per resource", &e)),
     };
+    // What went wrong in the last day is audit data: admins only.
+    let errors = if auth.is_admin {
+        store::resource_errors(&state.db)
+            .await
+            .map_err(|e| db_error("counting errors per resource", &e))?
+    } else {
+        std::collections::HashMap::new()
+    };
     // Admins see every resource; everyone else only what their roles allow.
     let accessible = match reachable_for(state, auth).await {
         Ok(r) => r,
         Err(r) => return Err(r),
     };
+    let pinned: std::collections::HashSet<String> = store::list_pins(&state.db, &auth.username)
+        .await
+        .map_err(|e| db_error("reading your pins", &e))?
+        .into_iter()
+        .filter(|p| p.kind == "resource")
+        .map(|p| p.target)
+        .collect();
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
@@ -589,6 +769,9 @@ async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>
             // Only what the viewer can open gets a command to copy.
             connect: mine.map(|_| views::connect_for(kind, &name)),
             last_used: seen.last_started.map(views::Stamp::of),
+            errors: errors.get(&name).copied().unwrap_or_default().total(),
+            errors_text: views::errors_text(errors.get(&name).copied().unwrap_or_default()),
+            pinned: pinned.contains(&name),
             name,
             kind: kind.to_owned(),
             icon,
@@ -622,18 +805,18 @@ pub async fn resources(
     let sort = ResourceSort::parse(q.sort.as_deref(), auth.is_admin);
     // Worker health is admin-only, so the filter is too.
     let attention = auth.is_admin && q.attention.as_deref() == Some("1");
+    let pinned_only = q.pinned.as_deref() == Some("1");
     let total = rows.len();
-    let attention_count = rows
-        .iter()
-        .filter(|r| r.health.is_some_and(views::Health::needs_attention))
-        .count();
+    let pinned_count = rows.iter().filter(|r| r.pinned).count();
+    let attention_count = rows.iter().filter(|r| r.needs_attention()).count();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
     kinds.dedup();
     rows.retain(|r| {
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
             && label_filter.iter().all(|l| r.labels.contains(l))
-            && (!attention || r.health.is_some_and(views::Health::needs_attention))
+            && (!attention || r.needs_attention())
+            && (!pinned_only || r.pinned)
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
@@ -647,8 +830,21 @@ pub async fn resources(
             labels,
             sort,
             attention,
+            pinned: pinned_only,
         }
         .href()
+    };
+    let here = filters(kind_filter.as_deref(), &label_filter, attention);
+    let saved: Vec<views::SavedView> = match store::list_pins(&state.db, &auth.username).await {
+        Ok(p) => p
+            .into_iter()
+            .filter(|p| p.kind == "view" && p.target.starts_with("/console/resources"))
+            .map(|p| views::SavedView {
+                label: p.label,
+                href: p.target,
+            })
+            .collect(),
+        Err(e) => return db_error("reading your saved views", &e),
     };
     html(
         ResourcesPage {
@@ -696,6 +892,19 @@ pub async fn resources(
             attention_on: attention,
             attention_href: filters(kind_filter.as_deref(), &label_filter, !attention),
             attention_count,
+            pinned_on: pinned_only,
+            pinned_href: resource_ui::Filters {
+                kind: kind_filter.as_deref(),
+                q: &query_text,
+                labels: &label_filter,
+                sort,
+                attention,
+                pinned: !pinned_only,
+            }
+            .href(),
+            pinned_count,
+            saved,
+            here,
             total,
             rows: rows
                 .into_iter()
@@ -735,6 +944,7 @@ fn sort_rows(rows: &mut Vec<ResourceRow>, sort: ResourceSort) {
             active: r.active,
             total: r.sessions,
             health: r.health,
+            errors: r.errors,
         })
         .collect();
     resource_ui::sort_keys(&mut keys, sort);
@@ -803,6 +1013,7 @@ async fn live_sessions(
                 since: views::Stamp::of(s.started_at?),
                 // Watching is SSH only, and a separate power from reading the record.
                 watch: can_watch && s.kind.as_deref() == Some("ssh"),
+                endable: s.kind.as_deref() != Some("kubectl"),
             })
         })
         .collect())
@@ -832,6 +1043,36 @@ fn who_can_rows(policy: &limen_policy::Policy, name: &str) -> Vec<WhoRow> {
             }
         })
         .collect()
+}
+
+/// What went wrong on a resource in the last 24 hours, one part per kind that is not zero, each
+/// with where to look at it. For admins: it is audit data.
+async fn error_parts(state: &AppState, name: &str) -> Result<Vec<views::ErrorPart>, Response> {
+    let seen = store::resource_errors(&state.db)
+        .await
+        .map_err(|e| db_error("counting errors on a resource", &e))?
+        .remove(name)
+        .unwrap_or_default();
+    let encoded: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
+    let sessions = format!("/console/sessions?resource={encoded}");
+    Ok([
+        (
+            "refused",
+            seen.denied,
+            format!("/console/audit?kind=auth.denied&q={encoded}"),
+        ),
+        ("statement errors", seen.db, sessions.clone()),
+        ("web 5xx", seen.web, sessions),
+        (
+            "Kubernetes errors",
+            seen.kube,
+            "/console/audit/kubernetes".to_owned(),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, n, _)| *n > 0)
+    .map(|(label, count, href)| views::ErrorPart { label, count, href })
+    .collect())
 }
 
 #[derive(Deserialize)]
@@ -911,13 +1152,29 @@ pub async fn resource_detail(
         Vec::new()
     };
     let health = auth.is_admin.then(|| views::Health::of(&workers));
+    let errors = if auth.is_admin {
+        match error_parts(&state, &name).await {
+            Ok(parts) => parts,
+            Err(r) => return r,
+        }
+    } else {
+        Vec::new()
+    };
     let who_can = if auth.reads_record() && tab == "access" {
         who_can_rows(&loaded.policy, &name)
     } else {
         Vec::new()
     };
     let principals = mine.map(|m| m.principals.clone()).unwrap_or_default();
+    let starred = match store::list_pins(&state.db, &auth.username).await {
+        Ok(p) => p.iter().any(|p| p.kind == "resource" && p.target == name),
+        Err(e) => return db_error("reading your pins", &e),
+    };
     let encoded = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
+    let here = tabs
+        .iter()
+        .find(|t| t.current)
+        .map_or_else(String::new, |t| t.href.clone());
     html(
         ResourcePage {
             can_request: may_ask && mine.is_none(),
@@ -957,6 +1214,9 @@ pub async fn resource_detail(
             health,
             last_used,
             live,
+            errors,
+            starred,
+            here,
             sessions_href: format!("/console/sessions?resource={}", encoded(&name)),
             audit_href: auth
                 .reads_record()
@@ -1086,6 +1346,9 @@ pub async fn sessions(
             chrome: chrome(&state, &auth, "sessions"),
             notice: notice(q.done.as_deref()),
             sessions: rows.iter().map(SessionView::from).collect(),
+            has_open: rows
+                .iter()
+                .any(|s| s.active && s.kind.as_deref() != Some("kubectl")),
             active_only,
             user_filter: auth.reads_record().then(|| user_filter.clone()).flatten(),
             filter: views::SessionFilterView {
@@ -1340,6 +1603,186 @@ pub async fn kill_session(
     match ops::kill_session(&state, actor(&auth), &id, &form.reason).await {
         Ok(_) => Redirect::to("/console/sessions?filter=active&done=killed").into_response(),
         Err(s) => action_error(&s),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PinForm {
+    csrf: String,
+    kind: String,
+    target: String,
+    /// `add` or `remove`.
+    action: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    back: String,
+}
+
+/// `POST /console/pins`: pin a resource or save a view (`action=add`), or take it off again
+/// (`action=remove`). Only the signed-in
+/// person's own list. A resource must be one they can see; a view must be one of the listed
+/// console pages, and for a page they may open. Nothing here is audited: it is a preference, not
+/// access, and it grants nothing.
+pub async fn pin_toggle(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Form(form): Form<PinForm>,
+) -> Response {
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    let back = pins::local_back(&form.back);
+    let bad = |what: &str| error_page(StatusCode::BAD_REQUEST, "Not saved", what);
+    let (kind, target, label) = match form.kind.as_str() {
+        "resource" => {
+            // Taking a pin off always works, even for a resource that has gone or been hidden
+            // since: otherwise it could never be removed. Adding needs a resource they can see.
+            let known = state
+                .policy
+                .current()
+                .policy
+                .resource(&form.target)
+                .is_some();
+            let visible = auth.is_admin
+                || match reachable_for(&state, &auth).await {
+                    Ok(r) => r.iter().any(|a| a.name == form.target),
+                    Err(r) => return r,
+                };
+            if form.action == "add" && (!known || !visible) {
+                return error_page(
+                    StatusCode::NOT_FOUND,
+                    "Not found",
+                    "There is no such resource.",
+                );
+            }
+            ("resource", form.target.clone(), form.target.clone())
+        }
+        "view" => {
+            if !pins::valid_view_target(&form.target) {
+                return bad("That page can't be saved as a view.");
+            }
+            let allowed = match pins::required_power(&form.target) {
+                pins::Power::Anyone => true,
+                pins::Power::ReadsRecord => auth.reads_record(),
+                pins::Power::Admin => auth.is_admin,
+            };
+            if form.action == "add" && !allowed {
+                return error_page(
+                    StatusCode::FORBIDDEN,
+                    "Not allowed",
+                    "You can't open that page, so it can't be saved.",
+                );
+            }
+            (
+                "view",
+                form.target.clone(),
+                pins::clean_label(&form.label, "Saved view"),
+            )
+        }
+        _ => return bad("Pin a resource or save a view."),
+    };
+    if form.action == "remove" {
+        return match store::remove_pin(&state.db, &auth.username, kind, &target).await {
+            Ok(()) => Redirect::to(&back).into_response(),
+            Err(e) => db_error("removing your pin", &e),
+        };
+    }
+    if form.action != "add" {
+        return bad("Add it or remove it.");
+    }
+    match store::add_pin(&state.db, &auth.username, kind, &target, &label).await {
+        Ok(true) => Redirect::to(&back).into_response(),
+        Ok(false) => error_page(
+            StatusCode::CONFLICT,
+            "Too many pins",
+            &format!(
+                "You can keep {} pins and saved views. Remove one first.",
+                store::PIN_LIMIT
+            ),
+        ),
+        Err(e) => db_error("saving your pin", &e),
+    }
+}
+
+/// A bulk form: the CSRF token, the reason, and every `id`. A field repeated (`id=..&id=..`) is not
+/// a struct, so the pairs are read by hand.
+fn read_bulk(body: &[u8]) -> (String, String, Vec<String>) {
+    let (mut csrf, mut reason, mut ids) = (String::new(), String::new(), Vec::new());
+    for (k, v) in url::form_urlencoded::parse(body) {
+        match k.as_ref() {
+            "csrf" => csrf = v.into_owned(),
+            "reason" => reason = v.into_owned(),
+            "id" => ids.push(v.into_owned()),
+            _ => {}
+        }
+    }
+    (csrf, reason, ids)
+}
+
+/// Most sessions one bulk request may end. Each is its own audited kill.
+const BULK_KILL_LIMIT: usize = 50;
+
+/// `POST /console/sessions/kill`: end the selected sessions (`id`, repeated) with one reason. Each
+/// goes through the same code as ending one, so each has its own audit event; there is no bulk
+/// shortcut around the audit. Admins only.
+pub async fn kill_sessions(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let (csrf, reason, mut ids) = read_bulk(&body);
+    if let Err(r) = auth.check_post(console, &headers, &csrf) {
+        return r;
+    }
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Nothing selected",
+            "Tick the sessions to end, then try again.",
+        );
+    }
+    if ids.len() > BULK_KILL_LIMIT {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Too many sessions",
+            &format!("End at most {BULK_KILL_LIMIT} sessions at once."),
+        );
+    }
+    let (mut ended, mut missed) = (0_usize, 0_usize);
+    let mut first_error = None;
+    for id in &ids {
+        match ops::kill_session(&state, actor(&auth), id, &reason).await {
+            Ok(true) => ended += 1,
+            Ok(false) => missed += 1,
+            Err(s) => {
+                missed += 1;
+                first_error.get_or_insert(s);
+            }
+        }
+    }
+    match (ended, missed, first_error) {
+        // Nothing ended and something was wrong with the request itself (no reason, say): say so.
+        (0, _, Some(s)) => action_error(&s),
+        (_, 0, _) => {
+            Redirect::to("/console/sessions?filter=active&done=killed_many").into_response()
+        }
+        _ => Redirect::to("/console/sessions?filter=active&done=killed_some").into_response(),
     }
 }
 
@@ -1891,12 +2334,24 @@ pub async fn workers(
         Ok(pair) => pair,
         Err(e) => return db_error("listing components", &e),
     };
+    let loaded = state.policy.current();
     let components: Vec<ComponentView> = components
         .into_iter()
         .map(|c| {
             let labels: BTreeMap<String, String> =
                 serde_json::from_value(c.labels).unwrap_or_default();
+            let (serves, serves_more) = if c.kind == "worker" {
+                views::resources_served(&loaded.policy, &labels, 6)
+            } else {
+                (Vec::new(), 0)
+            };
+            let now = time::OffsetDateTime::now_utc();
             ComponentView {
+                quiet: c.revoked_at.is_none() && now - c.last_seen_at > time::Duration::minutes(5),
+                cert_expired: c.revoked_at.is_none() && c.cert_expires_at.is_some_and(|t| t < now),
+                serves,
+                serves_more,
+                last_seen_iso: views::iso_text(Some(c.last_seen_at)),
                 tunnels: tunnels
                     .iter()
                     .filter(|t| t.worker_id == c.id || t.proxy_id == c.id)
@@ -1968,6 +2423,7 @@ pub async fn workers(
             chrome: chrome(&state, &auth, "workers"),
             notice: notice(q.done.as_deref()),
             query,
+            has_enrolled: components.iter().any(|c| !c.revoked),
             components,
             pending,
         }
@@ -2087,6 +2543,53 @@ pub async fn revoke(
     match ops::revoke_component(&state, actor(&auth), &id, &form.reason).await {
         Ok(_) => Redirect::to("/console/workers?done=revoked").into_response(),
         Err(s) => action_error(&s),
+    }
+}
+
+/// `POST /console/workers/revoke`: revoke the selected components (`id`, repeated) with one
+/// reason, each through the same code, and so with its own audit event, as revoking one. Admins only.
+pub async fn revoke_components(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let (csrf, reason, mut ids) = read_bulk(&body);
+    if let Err(r) = auth.check_post(console, &headers, &csrf) {
+        return r;
+    }
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() || ids.len() > BULK_KILL_LIMIT {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Nothing to revoke",
+            &format!("Tick between 1 and {BULK_KILL_LIMIT} components, then try again."),
+        );
+    }
+    let (mut done, mut missed) = (0_usize, 0_usize);
+    let mut first_error = None;
+    for id in &ids {
+        match ops::revoke_component(&state, actor(&auth), id, &reason).await {
+            Ok(true) => done += 1,
+            Ok(false) => missed += 1,
+            Err(s) => {
+                missed += 1;
+                first_error.get_or_insert(s);
+            }
+        }
+    }
+    match (done, missed, first_error) {
+        (0, _, Some(s)) => action_error(&s),
+        (_, 0, _) => Redirect::to("/console/workers?done=revoked_many").into_response(),
+        _ => Redirect::to("/console/workers?done=revoked_some").into_response(),
     }
 }
 
@@ -3168,6 +3671,7 @@ mod label_filter_tests {
             labels: &labels,
             sort: ResourceSort::Name,
             attention: false,
+            pinned: false,
         }
         .href();
         let (_, query) = href.split_once('?').expect("query string");

@@ -188,6 +188,12 @@ pub async fn delete_disabled_user(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("deleting user", e))?;
+    // Their console pins and saved views go with them.
+    sqlx::query("DELETE FROM console_pins WHERE lower(username) = lower($1)")
+        .bind(username)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("deleting user", e))?;
     // And out of the groups SCIM pushed, which have no foreign key to users.
     sqlx::query("DELETE FROM scim_group_members WHERE user_scim_id = $1")
         .bind(scim_id)

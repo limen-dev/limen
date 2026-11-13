@@ -110,6 +110,15 @@
 
     // Copy buttons: <button data-copy="text">. Delegated, so buttons that
     // arrive with an auto-refresh keep working.
+    // "Copy link": the address of this page, as it is now.
+    document.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-copy-link]');
+      if (!b || !navigator.clipboard) return;
+      navigator.clipboard.writeText(location.href).then(function () {
+        b.classList.add('done');
+        setTimeout(function () { b.classList.remove('done'); }, 1200);
+      }, function () {});
+    });
     document.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-copy]');
       if (!b) return;
@@ -143,8 +152,35 @@
         return el.value !== el.defaultValue;
       });
     }
-    function tick() {
-      if (document.hidden || busy()) return;
+    // A line under the page says when it last changed, and lets you pause it or refresh now. The
+    // line sits outside <main>, so a refresh never replaces it.
+    var paused = false, updated = Date.now();
+    var note = document.createElement('div');
+    note.className = 'refresh-note';
+    var label = document.createElement('span');
+    var pause = document.createElement('button');
+    pause.type = 'button';
+    pause.className = 'link';
+    var now = document.createElement('button');
+    now.type = 'button';
+    now.className = 'link';
+    now.textContent = 'Refresh now';
+    note.appendChild(label);
+    note.appendChild(pause);
+    note.appendChild(now);
+    main.insertAdjacentElement('afterend', note);
+    function paint() {
+      var ago = Math.max(0, Math.round((Date.now() - updated) / 1000));
+      label.textContent = paused ? 'Updates paused. ' : 'Updates every ' + secs + ' s, last ' + (ago < 5 ? 'just now' : ago + ' s ago') + '. ';
+      pause.textContent = paused ? 'Resume' : 'Pause';
+      pause.setAttribute('aria-pressed', String(paused));
+    }
+    pause.addEventListener('click', function () { paused = !paused; if (!paused) tick(true); paint(); });
+    now.addEventListener('click', function () { tick(true); });
+    paint();
+    setInterval(paint, 5000);
+    function tick(force) {
+      if (document.hidden || (paused && force !== true) || (force !== true && busy())) return;
       fetch(location.href, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'refresh' } })
         .then(function (r) {
           // A redirect means the session ended: leave the page as it is.
@@ -153,12 +189,14 @@
         })
         .then(function (text) {
           if (!text || busy()) return;
+          updated = Date.now();
           var next = new DOMParser().parseFromString(text, 'text/html').querySelector('main');
           if (next && next.innerHTML !== main.innerHTML) main.innerHTML = next.innerHTML;
+          paint();
         })
         .catch(function () { /* offline: try again next tick */ });
     }
-    setInterval(tick, secs * 1000);
+    setInterval(function () { tick(); }, secs * 1000);
   });
 })();
 
@@ -566,3 +604,63 @@ document.addEventListener('DOMContentLoaded', function () {
     armed = e.key === 'g' ? Date.now() : 0;
   });
 })();
+
+// Rows with the keyboard: j and k move a marker down and up the first table on the page, Enter or o
+// opens the marked row's main link. Not while typing, and never when a dialog is open.
+(function () {
+  var cur = -1;
+  function rows() { return Array.prototype.slice.call(document.querySelectorAll('main table tbody tr')); }
+  function mark(list, i) {
+    list.forEach(function (r) { r.classList.remove('row-on'); });
+    cur = Math.max(0, Math.min(list.length - 1, i));
+    var r = list[cur];
+    r.classList.add('row-on');
+    if (r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (document.querySelector('.palette-backdrop:not([hidden])')) return;
+    var list = rows();
+    if (!list.length) return;
+    if (e.key === 'j') { e.preventDefault(); mark(list, cur + 1); }
+    else if (e.key === 'k') { e.preventDefault(); mark(list, cur < 0 ? 0 : cur - 1); }
+    else if ((e.key === 'Enter' || e.key === 'o') && cur >= 0 && list[cur] && list[cur].classList.contains('row-on')) {
+      var a = list[cur].querySelector('a[href]');
+      if (a && !(t && t.tagName === 'A') && !(t && t.tagName === 'BUTTON')) { e.preventDefault(); a.click(); }
+    }
+  });
+  // The refresh replaces the rows: forget the marker rather than point at a stale one.
+  document.addEventListener('DOMContentLoaded', function () {
+    var main = document.querySelector('main');
+    if (main && window.MutationObserver) new MutationObserver(function () { cur = -1; }).observe(main, { childList: true });
+  });
+})();
+
+// "Save this view": the form under a list page. It is shown only where the address is exactly one
+// of the pages a view can be saved for; the address (without the one-off notices) goes in with the
+// post, and the server checks it again. Without script the form stays hidden.
+(function () {
+  var PAGES = ['/console/resources', '/console/sessions', '/console/audit', '/console/dashboards'];
+  document.addEventListener('DOMContentLoaded', function () {
+    var form = document.querySelector('form[data-save-view]');
+    if (!form || PAGES.indexOf(location.pathname.replace(/\/$/, '')) === -1) return;
+    var params = new URLSearchParams(location.search);
+    ['done', 'err', 'offset'].forEach(function (k) { params.delete(k); });
+    var query = params.toString();
+    var address = location.pathname.replace(/\/$/, '') + (query ? '?' + query : '');
+    form.elements.target.value = address;
+    form.elements.back.value = address;
+    var h1 = document.querySelector('main h1');
+    if (h1 && !form.elements.label.value) form.elements.label.placeholder = h1.textContent.trim().slice(0, 60);
+    form.hidden = false;
+  });
+})();
+
+// The buttons on a message page: back, and try again.
+document.addEventListener('click', function (e) {
+  var t = e.target.closest && e.target.closest('[data-back],[data-reload]');
+  if (!t) return;
+  if (t.hasAttribute('data-reload')) location.reload(); else history.back();
+});

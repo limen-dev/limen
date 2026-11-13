@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Session{% endblock %}
+{% block refresh %}{% if s.active && !s.has_recording %} data-refresh="5"{% endif %}{% endblock %}
 {% block head %}{% if s.has_recording %}<link rel="stylesheet" href="/console/static/asciinema-player.css?v={{ chrome.assets }}">{% endif %}{% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/console/sessions">Sessions</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><span aria-current="page">{{ s.resource }}</span></nav>
 <div class="page-head">
   <div>
     <div class="title-row"><span class="kind lg {{ s.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ s.icon }}"/></svg></span><div><h1>{{ s.resource }} <span class="pill {{ s.status_class }} v-mid">{{ s.status }}</span></h1>
@@ -11,6 +13,14 @@
 </div>
 
 
+<div class="related" aria-label="Related">
+  {% if let Some(rp) = s.resource_path %}<a href="/console/resources/{{ rp }}">The resource</a>{% endif %}
+  {% if chrome.is_admin && s.user_known %}<a href="/console/users/{{ s.user_path }}">{{ s.user }}</a>{% endif %}
+  {% if let Some(rp) = s.resource_path %}<a href="/console/sessions?{% if chrome.reads_record && s.user_known %}user={{ s.user_path }}&amp;{% endif %}resource={{ rp }}">Similar sessions</a>{% endif %}
+  {% if chrome.reads_record %}<a href="/console/audit?session={{ s.id }}">Audit trail of this session</a>{% endif %}
+  <button type="button" class="secondary icon-text" data-copy-link><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg>Copy link</button>
+  {% if s.has_recording %}<button type="button" class="secondary icon-text" data-copy-moment><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#clock"/></svg>Copy link to this moment</button>{% endif %}
+</div>
 
 {% if can_watch && s.active && s.kind == "ssh" %}
 <div class="notice"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#eye"/></svg><span>This session is live. Watching is read-only, and it is recorded in the audit trail.</span><a class="button" href="/console/sessions/{{ s.id }}/watch">Watch it live</a></div>

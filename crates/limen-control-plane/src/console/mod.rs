@@ -19,9 +19,11 @@ mod assets;
 mod auth;
 mod controls;
 mod dashboards;
+mod doc_diff;
 mod integrations;
 pub mod oidc_flow;
 mod pages;
+mod pins;
 mod policy_edit;
 mod query;
 mod resource_ui;
@@ -95,6 +97,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/sessions/{id}", get(pages::session_detail))
         .route("/console/sessions/{id}/recording", get(pages::recording))
         .route("/console/sessions/{id}/kill", post(pages::kill_session))
+        .route("/console/sessions/kill", post(pages::kill_sessions))
         .route("/console/bots", get(pages::bots))
         .route("/console/users", get(pages::users))
         .route("/console/users/{name}", get(pages::user_detail))
@@ -104,6 +107,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/workers", get(pages::workers))
         .route("/console/workers/tokens", post(pages::create_token))
         .route("/console/workers/{id}/revoke", post(pages::revoke))
+        .route("/console/workers/revoke", post(pages::revoke_components))
         .route("/console/audit", get(pages::audit))
         .route("/console/audit/kubernetes", get(pages::kube_requests))
         .route("/console/dashboards", get(dashboards::dashboards))
@@ -116,6 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/simulator", get(pages::simulator))
         .route("/console/simulator/suggest", get(pages::simulator_suggest))
         .route("/console/suggest/resources", get(pages::resource_suggest))
+        .route("/console/pins", post(pages::pin_toggle))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

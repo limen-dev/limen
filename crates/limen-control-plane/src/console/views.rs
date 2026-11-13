@@ -24,6 +24,8 @@ pub struct Chrome {
     pub sees_reviews: bool,
     pub sees_changes: bool,
     pub csrf: String,
+    /// This page can be saved as a view (and the viewer may open the page).
+    pub saveable: bool,
     pub active: &'static str,
     pub version: &'static str,
     pub assets: &'static str,
@@ -48,6 +50,8 @@ impl Chrome {
             sees_reviews: auth.sees_reviews,
             sees_changes: auth.sees_changes,
             csrf: auth.csrf.clone(),
+            // The script shows the control only where the address is exactly one of these pages.
+            saveable: matches!(active, "resources" | "sessions" | "audit" | "dashboards"),
             active,
             version: limen_core::VERSION,
             assets: super::assets::version(),
@@ -807,6 +811,24 @@ pub struct AttentionItem {
     pub tone: &'static str,
 }
 
+/// A view someone saved: a console page with its filters.
+pub struct SavedView {
+    pub label: String,
+    pub href: String,
+}
+
+/// A resource someone pinned, still reachable for them.
+pub struct PinnedResource {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    /// `None` for an admin who can see the resource but has no principal on it.
+    pub connect: Option<Connect>,
+    pub health: Option<Health>,
+}
+
 /// A resource the viewer used lately, with the command to use it again.
 pub struct RecentResource {
     pub name: String,
@@ -841,6 +863,8 @@ pub struct Home {
     pub expires: String,
     pub attention: Vec<AttentionItem>,
     pub recent: Vec<RecentResource>,
+    pub pinned: Vec<PinnedResource>,
+    pub saved: Vec<SavedView>,
 }
 
 #[derive(Template)]
@@ -849,6 +873,8 @@ pub struct SessionsPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub sessions: Vec<SessionView>,
+    /// At least one listed session can be ended (open, and not a kubectl login).
+    pub has_open: bool,
     pub active_only: bool,
     pub user_filter: Option<String>,
     pub filter: SessionFilterView,
@@ -1129,16 +1155,55 @@ pub struct ComponentView {
     pub tunnels: usize,
     pub cert_expires: String,
     pub revoked: bool,
+    /// Not seen for over five minutes (the dashboards' "gone quiet" line).
+    pub quiet: bool,
+    /// The certificate is past its end and was not renewed: the component has stopped.
+    pub cert_expired: bool,
+    /// Workers: the resources whose selector this worker's labels satisfy.
+    pub serves: Vec<ServedResource>,
+    pub serves_more: usize,
+    pub last_seen_iso: String,
+}
+
+/// A resource a worker can serve, as a link.
+pub struct ServedResource {
+    pub name: String,
+    pub path: String,
+}
+
+/// The resources a worker can serve, up to `limit`, and how many more there are.
+#[must_use]
+pub fn resources_served(
+    policy: &limen_policy::Policy,
+    labels: &std::collections::BTreeMap<String, String>,
+    limit: usize,
+) -> (Vec<ServedResource>, usize) {
+    let mut all: Vec<ServedResource> = policy
+        .documents()
+        .iter()
+        .filter_map(|d| match d {
+            limen_policy::Document::Resource(r) => Some(r),
+            _ => None,
+        })
+        .filter(|r| {
+            r.spec
+                .worker_selector
+                .iter()
+                .all(|(k, v)| labels.get(k).is_some_and(|actual| actual == v))
+        })
+        .map(|r| ServedResource {
+            name: r.metadata.name.clone(),
+            path: path_segment(&r.metadata.name),
+        })
+        .collect();
+    all.sort_by(|a, b| a.name.cmp(&b.name));
+    let more = all.len().saturating_sub(limit);
+    all.truncate(limit);
+    (all, more)
 }
 
 impl ComponentView {
     /// The day and the clock time of a "2026-10-25 09:27:38 UTC" text, for a two-line cell.
-    pub fn last_seen_day(&self) -> &str {
-        split_when(&self.last_seen).0
-    }
-    pub fn last_seen_clock(&self) -> &str {
-        split_when(&self.last_seen).1
-    }
     pub fn cert_day(&self) -> &str {
         split_when(&self.cert_expires).0
     }
@@ -1169,6 +1234,8 @@ pub struct Workers {
     pub notice: Option<&'static str>,
     pub query: String,
     pub components: Vec<ComponentView>,
+    /// At least one listed component is not revoked.
+    pub has_enrolled: bool,
     pub pending: Vec<PendingTokenView>,
 }
 
@@ -1545,6 +1612,18 @@ pub struct ResourceRow {
     pub last_used: Option<Stamp>,
     /// What to run to open it; `None` when the viewer has no access to copy a command for.
     pub connect: Option<Connect>,
+    /// Admins: errors in the last 24 hours, and what they were (for the tooltip).
+    pub errors: i64,
+    pub errors_text: String,
+    pub pinned: bool,
+}
+
+impl ResourceRow {
+    /// Unreachable, or reachable and failing.
+    #[must_use]
+    pub fn needs_attention(&self) -> bool {
+        self.health.is_some_and(Health::needs_attention) || self.errors > 0
+    }
 }
 
 /// One entry of the sort menu.
@@ -1575,6 +1654,12 @@ pub struct ResourcesPage {
     pub attention_href: String,
     /// How many resources (before filters) need attention, for the filter's badge.
     pub attention_count: usize,
+    pub pinned_on: bool,
+    pub pinned_href: String,
+    pub pinned_count: usize,
+    /// Views saved for this page, and the address a new one would be saved for.
+    pub saved: Vec<SavedView>,
+    pub here: String,
     /// Everything below the filters is empty because nothing matched, not because there is nothing.
     pub total: usize,
 }
@@ -1587,6 +1672,8 @@ pub struct LiveSession {
     pub since: Stamp,
     /// The viewer may watch it (SSH only, and only with the separate power).
     pub watch: bool,
+    /// It can be ended from here: not a kubectl login, which has no connection to end.
+    pub endable: bool,
 }
 
 pub struct DetailTab {
@@ -1627,6 +1714,37 @@ pub struct ResourcePage {
     pub live: Vec<LiveSession>,
     pub sessions_href: String,
     pub audit_href: Option<String>,
+    /// The viewer pinned this resource.
+    pub starred: bool,
+    /// Where to come back to after pinning.
+    pub here: String,
+    /// Admins: what went wrong here in the last 24 hours, by where it was recorded.
+    pub errors: Vec<ErrorPart>,
+}
+
+/// One kind of error on a resource, with where to look at it.
+pub struct ErrorPart {
+    pub label: &'static str,
+    pub count: i64,
+    pub href: String,
+}
+
+/// "2 refused, 1 statement error": the parts that are not zero, for a tooltip.
+#[must_use]
+pub fn errors_text(e: super::store::ResourceErrors) -> String {
+    // (count, one, many): "refused" and "web 5xx" read the same either way.
+    let parts = [
+        (e.denied, "refused", "refused"),
+        (e.db, "statement error", "statement errors"),
+        (e.web, "web 5xx", "web 5xx"),
+        (e.kube, "Kubernetes error", "Kubernetes errors"),
+    ];
+    parts
+        .iter()
+        .filter(|(n, _, _)| *n > 0)
+        .map(|(n, one, many)| format!("{n} {}", if *n == 1 { one } else { many }))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Template)]
@@ -1647,7 +1765,24 @@ pub struct SigninPage {
 struct MessagePage<'a> {
     title: &'a str,
     message: &'a str,
+    /// What to do next, by kind of failure; empty for none.
+    next: &'static str,
+    /// The failure is on our side, so trying again may work.
+    retry: bool,
     assets: &'static str,
+}
+
+/// What a person can do about a failure, by status. Short and about their next move.
+fn next_step(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::NOT_FOUND => "Check the address, or start again from the console.",
+        StatusCode::FORBIDDEN => {
+            "If you need this, ask an admin, or ask for access from the Access page."
+        }
+        StatusCode::BAD_REQUEST | StatusCode::CONFLICT => "Go back, change it, and try again.",
+        s if s.is_server_error() => "This is on our side. Try again in a moment.",
+        _ => "",
+    }
 }
 
 /// A plain page with a status code, for errors and confirmations. It has no
@@ -1658,6 +1793,8 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
         MessagePage {
             title,
             message,
+            next: next_step(status),
+            retry: status.is_server_error(),
             assets: super::assets::version(),
         }
         .render(),
@@ -1936,6 +2073,36 @@ mod resource_ui_tests {
         assert!(Health::NoWorker.needs_attention());
         assert!(Health::Offline.needs_attention());
         assert!(!Health::Up.needs_attention());
+    }
+
+    #[test]
+    fn error_counts_read_naturally_and_skip_zeros() {
+        use super::super::store::ResourceErrors;
+        assert_eq!(errors_text(ResourceErrors::default()), "");
+        let e = ResourceErrors {
+            denied: 2,
+            db: 1,
+            web: 3,
+            kube: 2,
+        };
+        assert_eq!(
+            errors_text(e),
+            "2 refused, 1 statement error, 3 web 5xx, 2 Kubernetes errors"
+        );
+        assert_eq!(e.total(), 8);
+        let one = ResourceErrors {
+            denied: 1,
+            ..ResourceErrors::default()
+        };
+        assert_eq!(errors_text(one), "1 refused");
+    }
+
+    #[test]
+    fn a_worker_serves_the_resources_whose_selector_its_labels_satisfy() {
+        let policy = limen_policy::Policy::default();
+        let labels = std::collections::BTreeMap::new();
+        let (served, more) = resources_served(&policy, &labels, 6);
+        assert!(served.is_empty() && more == 0);
     }
 
     #[test]

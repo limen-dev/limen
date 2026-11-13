@@ -66,14 +66,18 @@ pub struct SortKey<'a> {
     pub active: i64,
     pub total: i64,
     pub health: Option<Health>,
+    /// Errors in the last 24 hours (admins; zero otherwise).
+    pub errors: i64,
 }
 
-/// Rank for "needs attention first": offline before no worker before fine.
-fn attention_rank(health: Option<Health>) -> u8 {
+/// Rank for "needs attention first": offline, then no worker, then reachable but erroring, then
+/// fine.
+fn attention_rank(health: Option<Health>, errors: i64) -> u8 {
     match health {
         Some(Health::Offline) => 0,
         Some(Health::NoWorker) => 1,
-        Some(Health::Up) | None => 2,
+        Some(Health::Up) | None if errors > 0 => 2,
+        Some(Health::Up) | None => 3,
     }
 }
 
@@ -94,8 +98,9 @@ pub fn sort_keys(keys: &mut [SortKey<'_>], sort: ResourceSort) {
                 .then_with(|| a.name.cmp(b.name))
         }),
         ResourceSort::Attention => keys.sort_by(|a, b| {
-            attention_rank(a.health)
-                .cmp(&attention_rank(b.health))
+            attention_rank(a.health, a.errors)
+                .cmp(&attention_rank(b.health, b.errors))
+                .then_with(|| b.errors.cmp(&a.errors))
                 .then_with(|| a.name.cmp(b.name))
         }),
     }
@@ -108,6 +113,7 @@ pub struct Filters<'a> {
     pub labels: &'a [String],
     pub sort: ResourceSort,
     pub attention: bool,
+    pub pinned: bool,
 }
 
 impl Filters<'_> {
@@ -131,6 +137,9 @@ impl Filters<'_> {
         if self.attention {
             ser.append_pair("attention", "1");
         }
+        if self.pinned {
+            ser.append_pair("pinned", "1");
+        }
         let query = ser.finish();
         if query.is_empty() {
             "/console/resources".to_owned()
@@ -152,6 +161,7 @@ mod tests {
             active: 0,
             total: 0,
             health: None,
+            errors: 0,
         }
     }
 
@@ -223,14 +233,17 @@ mod tests {
     }
 
     #[test]
-    fn attention_puts_offline_then_no_worker_ahead_of_the_rest() {
-        let mut keys = vec![key("a"), key("b"), key("c"), key("d")];
+    fn attention_puts_offline_then_no_worker_then_erroring_ahead_of_the_rest() {
+        let mut keys = vec![key("a"), key("b"), key("c"), key("d"), key("e")];
         keys[0].health = Some(Health::Up);
         keys[1].health = Some(Health::NoWorker);
         keys[2].health = Some(Health::Offline);
         keys[3].health = Some(Health::Up);
+        keys[3].errors = 4;
+        keys[4].health = Some(Health::Up);
+        keys[4].errors = 9;
         sort_keys(&mut keys, ResourceSort::Attention);
-        assert_eq!(names(&keys), ["c", "b", "a", "d"]);
+        assert_eq!(names(&keys), ["c", "b", "e", "d", "a"]);
     }
 
     #[test]
@@ -241,6 +254,7 @@ mod tests {
             labels: &[],
             sort: ResourceSort::Name,
             attention: false,
+            pinned: false,
         };
         assert_eq!(f.href(), "/console/resources");
     }
@@ -254,10 +268,11 @@ mod tests {
             labels: &labels,
             sort: ResourceSort::Recent,
             attention: true,
+            pinned: true,
         };
         assert_eq!(
             f.href(),
-            "/console/resources?kind=ssh&q=a%26b+c&label=env%3Dprod&sort=recent&attention=1"
+            "/console/resources?kind=ssh&q=a%26b+c&label=env%3Dprod&sort=recent&attention=1&pinned=1"
         );
     }
 }

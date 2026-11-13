@@ -2,6 +2,7 @@
 {% block title %}{{ review.name }}{% endblock %}
 {% block head %}<script defer src="/console/static/review-init.js?v={{ chrome.assets }}"></script>{% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/console/reviews">Reviews</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><span aria-current="page">{{ review.name }}</span></nav>
 <div class="page-head">
   <div>
     <h1>{{ review.name }} {% if review.overdue %}<span class="pill bad v-mid">overdue</span>{% else if review.status == "complete" %}<span class="pill ok v-mid">complete</span>{% endif %}</h1>
