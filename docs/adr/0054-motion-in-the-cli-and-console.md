@@ -4,7 +4,7 @@
 - Date: 2026-11-13
 
 ## Context
-Both surfaces already have a little motion: the CLI's braille spinner (`ui::spinner`, stderr, silent when piped), the console's pulsing "live" dot, and the 0.22 s sidebar collapse that runs only on a click (documented in `docs/guides/console.md`). Four concrete gaps remain:
+Both surfaces already have a little motion: the CLI's braille spinner (`ui::spinner`, stderr, a plain line when stderr is not a terminal), the console's pulsing "live" dot, and the 0.22 s sidebar collapse that runs only on a click (documented in `docs/guides/console.md`). Four concrete gaps remain:
 - **The console sidebar scrolls without saying so.** `.nav` scrolls inside the sidebar when the menu is taller than the window, and the thin scrollbar is easy to miss. Nothing tells you whether there is more above or below.
 - **The CLI's slow steps leave no trace.** `Spinner::finish()` erases its line, so a step that took four seconds looks like nothing happened. `limen request --wait` and the browser wait in `limen login` can run for minutes with no sign that the command has not hung. `limen doctor` is silent until it prints its whole report.
 - **The CLI spinner can corrupt the terminal.** A message longer than the terminal wraps, and `\r` only returns to the last row, so every frame leaves a row behind. `limen request --wait` has no Ctrl-C handler (its own text says "Ctrl-C to stop waiting"), so the default action ends the process, `Drop` never runs, and the shell prompt lands on a half-drawn line.
@@ -33,11 +33,11 @@ Constraints that decide most of the rest:
 - The phone strip scrolls sideways and gets a right-edge fade by the same technique, which must not cover the last link or clip its focus ring.
 - *Partly verified.* The local-attachment technique was tried on a standalone page with 24 links in one Chrome: the shadows show at the top and bottom while mid-scroll and clear at the ends. `animation-timeline: scroll()` is supported in that Chrome (`CSS.supports`), but the scroll-driven path itself was not exercised. Not tried in Safari or Firefox, nor in the real sidebar (hover states, the collapsed mode, `margin: -2px`). The implementation PR must show the real sidebar in more than one browser, in both themes.
 
-**2. Page changes that don't blink (its own PR).** `@view-transition { navigation: auto; }`, with the sidebar given `view-transition-name: sidebar` so a click cross-fades the main column while the sidebar stays put. The default root cross-fade is 0.25 s, so the PR sets `::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s }`.
+**2. Page changes that don't blink (its own PR, and the one taste call).** It answers "what changed?": the sidebar stays still while only the content swaps, so a click reads as a change of page, not a reload. `@view-transition { navigation: auto; }`, with the sidebar given `view-transition-name: sidebar` so a click cross-fades the main column while the sidebar stays put. The browser's default root cross-fade is believed to be 0.25 s (unverified), so the PR sets `::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s }`.
 - It applies to every full navigation: link clicks, POST-redirects, auto-submitted filters and back/forward. The sign-in and error pages have no sidebar, so only the root fades. `/watch` pages start with a blank player, so the live-region fix (item 3) ships first or with it.
 - Open risk, to be tested: `console.js` restores the menu's scroll position in a `DOMContentLoaded` handler. If the browser captures the new page before that runs, the sidebar snapshot shows the menu at the top and then jumps. If so, the fix is to restore it earlier or drop the sidebar's own name.
 - The theme script in `<head>` stays render-blocking, so there is no flash. Snapshots cover the viewport, so the cost does not grow with table size. `.sidebar` appears once per page, so the name is unique.
-- Not supported in Firefox at the time of writing: the rule is ignored and behaviour is as today. One line to revert if it misbehaves.
+- Browser support varies and is checked when it is built (unverified here); where it is missing the rule is ignored and behaviour is as today. The base rule must come before the reduced-motion override in the cascade. One line to revert if it misbehaves.
 - Under `prefers-reduced-motion` the PR also sets `@view-transition { navigation: none }`; setting `animation: none` on the pseudo-elements alone still runs the capture.
 
 **3. Announce the connecting state.** `watch.html` already shows "Connecting…" (`#watch-state`) until the stream starts, but not as a live region, so a screen reader never hears it change. Give it `role="status"`. The recording player's loading state is checked in the same PR. No new motion.
@@ -45,55 +45,50 @@ Constraints that decide most of the rest:
 **4. One reduced-motion block.** Today three separate `prefers-reduced-motion` blocks each switch off one animation. A single block replaces the need to remember:
 ```css
 @media (prefers-reduced-motion: reduce) {
-  *:not(.ap-player, .ap-player *), *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  *:not(.ap-player, .ap-player *), *:not(.ap-player, .ap-player *)::before, *:not(.ap-player, .ap-player *)::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   @view-transition { navigation: none; }
 }
 ```
-The vendored asciinema player is excluded, because forcing its own loader and transitions to `.01ms` can freeze or hide them. Existing `animation: none` opt-outs stay where they are stricter. The Rust test reads `console.css` and checks the block is present with its view-transition line. That protects the block from being removed or weakened; new rules are covered by the block itself, since it applies to everything.
+The vendored asciinema player is excluded, because forcing its own loader and transitions to `.01ms` can freeze or hide them. Existing `animation: none` opt-outs stay where they are stricter. The live dot's pulse is also cut to one iteration, which is the intended reduced-motion result. The Rust test reads `console.css` and checks the block is present with its view-transition line. That protects the block from being removed or weakened; new rules are covered by the block itself, since it applies to everything.
 
-**Cut after review, and why.** Chart draw-in: the server draws plain bars (`<rect>`) with no lines to draw, a bar growing from zero delays the data that audit dashboards exist to show (rules 1 and 3), the 30 s auto-refresh would need a script to stop it replaying, and the corners of a scaled `rx` bar distort. Folding nav groups with a height animation: it needs a new wrapper in `base.html`, `visibility: hidden` on folded links (or they stay in the tab order) and click-only gating, to animate something that is a snap today. Button press states, eased flash messages and a fade on the copy icon: none answers a rule 1 question. Also not wanted: skeleton loaders (the server renders pages whole), count-up numbers (these are audit figures), parallax, and anything animating rows as they sort or filter.
-
-**Possible later, not in scope:** a brief highlight on a live session that ends or is killed (this needs the live pages to push state; today they re-fetch every few seconds), and a confirmation state after lock or kill.
+**Not in the console:** chart draw-in (the server draws plain bars, and growing them delays the data), animated nav-group folds, button, flash and copy-icon polish, skeleton loaders, count-up numbers, and animating rows as they sort or filter. None answers a rule 1 question.
 
 ### CLI
 Everything goes through `crates/limen-cli/src/ui.rs`, on **stderr**, hand-written, with no new dependency.
 
-**1. One gate, with explicit inputs.** `motion_enabled(stderr_is_tty, term, ci, opted_out)` is true only when stderr is a terminal, `TERM` is not `dumb`, `CI` is unset and `LIMEN_NO_ANIMATION` is unset. Only stderr is looked at (as the banner does), so `limen ls > file` still animates on the terminal and `2>/dev/null` shows nothing. `NO_COLOR` and `--color never` strip colour but do not stop motion. **This also regates the existing spinner**, which today animates on any terminal: a user in a CI-flagged terminal or `TERM=dumb` (an Emacs shell) now gets the plain `›` line. The spinner's `interactive` flag becomes the gate's result, and it also decides whether the line is erased. Stdout is never written to by motion, so `--json` and tables are unchanged. The gate is a pure function and tested on its four inputs.
+**1. One gate, with explicit inputs.** `motion_enabled(stderr_is_tty, term, ci, opted_out)` is true only when stderr is a terminal, `TERM` is not `dumb`, `CI` is unset and `LIMEN_NO_ANIMATION` is unset. Only stderr is looked at (as the banner does), so `limen ls > file` still animates on the terminal and `2>/dev/null` shows nothing. `NO_COLOR` and `--color never` strip colour but do not stop motion. **This also regates the existing spinner**, which today animates on any terminal: a user in a CI-flagged terminal or `TERM=dumb` (an Emacs shell) now gets the plain `›` line. The spinner's `interactive` flag becomes the gate's result. Stdout is never written to by motion, so `--json` and tables are unchanged. The gate is a pure function and tested on its four inputs.
 
-**2. Start late, so quick commands show nothing.** The spinner is drawn only after 300 ms. A step that finishes before that prints no spinner and, in `succeed`, no elapsed time. This is what rule 3 requires; today the spinner appears at once.
+**2. Start late, so quick commands show nothing.** The spinner is drawn only after 300 ms. A step that finishes before that prints no spinner. This is what rule 3 requires; today the spinner appears at once.
 
-**3. A spinner that ends in a result.** `Spinner::succeed(msg)` and `Spinner::fail(msg)` replace the animated line with `✔ msg` or `✘ msg`, plus the elapsed time when it was over a second (`✔ Signed in as ana  1.4s`), and the line stays in the scrollback. They are for the call sites that today do `finish()` and then print a result: the result moves into `succeed`, so it is not printed twice, and, as motion is on stderr, such a result line moves from stdout to stderr. That is acceptable only where the line is a status for a person; a command whose result is data keeps printing it on stdout and calls `finish()`. Each call site is decided in the implementation PR. `finish()` keeps its meaning.
+**3. A spinner that ends in a result.** `Spinner::succeed(msg)` and `Spinner::fail(msg)` replace the animated line with `✔ msg` or `✘ msg`, plus the elapsed time when it was over a second (`✔ Signed in to <proxy> as ana  1.4s`); the line stays in the scrollback. `finish()` keeps its meaning. Used only where the line is a status for a person: the one site that prints a result right after `finish()` is `request --wait` (`ui::success("Approved.")`, access.rs). `selftest` drops its spinner and prints a verdict to stdout, and the `login` spinner (in `oidc.rs`) is far from its success line (`login.rs`), so those keep their output and streams. With motion off, a result prints the same line to the same stream as today; a command whose result is data keeps printing it on stdout. Each call site is decided in the implementation PR.
 
-**4. Waiting that shows it is waiting, and ends cleanly.** After 5 s the waiting spinners show a dimmed elapsed time (`⠋ Waiting for an approver · 2m14s`). It is a timer, not a bar, because the wait has no known length. `limen request --wait`, the `limen login` browser wait and `limen selftest` run in loops that today have no Ctrl-C handler, so SIGINT ends the process and leaves a half-drawn line (`Drop` does not run on a signal). The PR selects on `tokio::signal::ctrl_c()` in those loops, finishes the spinner and exits 130. No raw signal code and no `unsafe`.
+**4. Waiting that shows it is waiting, and ends cleanly.** After 5 s the waiting spinners show a dimmed elapsed time (`⠋ Waiting for an approver · 2m14s`). It is a timer, not a bar, because the wait has no known length. The waits in `limen request --wait` (up to 1 h), `limen login` (a 5 min timeout) and `limen selftest` have no Ctrl-C handler today, so SIGINT ends the process and leaves a half-drawn line (`Drop` does not run on a signal). The PR selects on `tokio::signal::ctrl_c()` in those waits, finishes the spinner and exits 130. The exit code is a new convention (the CLI exits 1 on error, and `tcp` exits 0 on Ctrl-C), so it is documented in the CLI reference. No raw signal code and no `unsafe`.
 
 **5. Other output never lands mid-spinner.** Tracing logs and `ui::warn` write to stderr, and `ui::success`/`info` to stdout, while the spinner thread rewrites its line every 80 ms. While a spinner is live, output goes through `Spinner::println` (clear the line, print, redraw), or the spinner is finished first. A spinner is always finished, not left to drop later, before a command spawns a child process with inherited stdio.
 
-**6. Fit the terminal (ships on its own).** Truncate the message to the terminal width minus the frame and a space, with `…`, **before** styling, never on a string that already has escape codes. The width is `COLUMNS` with an 80-column fallback, re-read each frame so a resize is picked up; no dependency. Truncation counts `char`s, so wide (CJK, emoji) text can overshoot by a column; messages today are static ASCII. Server-supplied text goes through `plain_line` first. A pure `fit(text, width)` function is unit tested. It fixes a bug today, so it does not wait for the rest.
+**6. Fit the terminal (ships on its own).** Truncate the message to the terminal width minus the frame and a space, with `…`, **before** styling, never on a string that already has escape codes. The width is `COLUMNS` with an 80-column fallback, re-read each frame so a resize is picked up; no dependency. Truncation counts `char`s; messages are static ASCII. Server-supplied text goes through `plain_line` first. A pure `fit(text, width)` function is unit tested. It fixes a bug today, so it does not wait for the rest.
 
 **7. `limen doctor` streaming (its own PR, last).** On a terminal, print each check as it finishes with a spinner on the line below naming the running one, instead of one report after a silent wait. This is a real change in how `doctor` produces output, not a styling change: `diagnose` pushes checks into a `Report`, skips are added in bulk and after the fact, `render` pads names to the widest name, and a `fix` hint is a second line belonging to its check. The design is a sink on `Report::add`, a fixed name column taken from the list of check names, and multi-line entries printed whole (no in-place redraw). The text, `--json` and the output with motion off must equal today's, tested by comparing the streamed lines with `render`.
 
 **Not in the CLI.** An animated banner (it would delay every interactive command; the banner stays static, opt-out `LIMEN_NO_BANNER`). Progress bars for work with no known length. Hiding the cursor: restoring it after a signal or panic without `unsafe` is the bug users remember. Motion on stdout, or in `ssh`, `connect`, `exec` and other commands that hand the terminal to another program. **Platforms:** macOS and Linux. Windows Terminal and ConPTY are unverified; `\r\x1b[2K` on older conhost is untested.
 
-**Possible later:** a terminal bell when a long `--wait` resolves.
-
 ## Rollout
-Independent PRs, each needing the owner's go-ahead:
+Three sets of PRs, each needing the owner's go-ahead, in this order:
 1. **Console foundation:** sidebar scroll cue, the reduced-motion block and its test, the live-region fix.
-2. **Console view transitions.**
-3. **CLI spinner:** the gate, delayed start, `succeed`/`fail`, elapsed time, Ctrl-C handling, `Spinner::println`, width truncation. The truncation fix may go first on its own.
-4. **`limen doctor` streaming.**
+2. **CLI:** truncation and the Ctrl-C handling first (both fix bugs today), then the gate, delayed start, `succeed`/`fail`, elapsed time and `Spinner::println`; `limen doctor` streaming last, on its own.
+3. **Console view transitions**, last, because it changes how every page change feels and is a matter of taste.
 
 ## Verification, per PR
 Console: the real pages from the compose stack in more than one browser, both themes, with and without reduced motion, and the CSP report empty; browsers lacking a feature are checked, not assumed. CLI: unit tests on rendered lines with colour stripped, the gate's four inputs, `fit` at narrow widths; a run under a pseudo-terminal (`script`) and one with stderr redirected, both manual, since the repo has no pty harness. Anything seen in one browser or terminal only is labelled `unverified`.
 
 ## Consequences
-- Roughly a few dozen lines of CSS and no script for the console, and on the order of 150 lines in `ui.rs` plus changes at the three spinner call sites (estimates).
-- The existing spinner changes behaviour in CI-flagged and `TERM=dumb` terminals (CLI 1), and a status result may move from stdout to stderr where `succeed` is adopted (CLI 3).
-- With motion off the console and the CLI look and print what they do today, so the saved pages in `crates/limen-control-plane/tests/console-pages/` should need no change for the foundation PR (to be confirmed by running them).
-- Risk: view transitions change how every page change feels, hence their own PR.
+- The existing spinner changes in CI-flagged and `TERM=dumb` terminals: they get the plain `›` line instead of the animation (CLI 1). Nothing else prints differently with motion off.
+- Ctrl-C during a wait now exits 130 instead of being killed by the signal.
+- The saved pages in `crates/limen-control-plane/tests/console-pages/` should need no change for the foundation PR (to be confirmed by running them).
+- Risk: view transitions change how every page change feels, hence last and separate.
 
 ## Open questions for the owner
-1. **Order and scope.** All four PRs, or the console foundation and the CLI truncation and Ctrl-C fixes first, to judge the feel before adding more? (Recommended: that smaller start.)
-2. **Windows.** Is the Windows terminal in scope for the CLI, or macOS and Linux only? (Recommended: macOS and Linux, Windows labelled unverified.)
+1. **View transitions:** worth having, or is a hard page change fine? (Recommended: try them last, behind the other PRs.)
+2. **Windows:** is the Windows terminal in scope for the CLI? (Recommended: no; macOS and Linux, Windows unverified.)
 
-Decided here, not asked: view transitions are included as their own revertible PR; the CLI switch is `LIMEN_NO_ANIMATION`; the terminal width comes from `COLUMNS` with no new dependency.
+Decided here: the CLI switch is `LIMEN_NO_ANIMATION`, and the terminal width comes from `COLUMNS` with no new dependency.
