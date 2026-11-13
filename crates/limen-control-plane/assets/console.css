@@ -737,25 +737,32 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   .sidebar-head .brand { flex: 1; min-width: 0; }
   .nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 2px; margin: -2px; }
   .sidebar-foot { flex: none; margin-top: 0; }
-  /* Collapsed, the page uses the room the sidebar gave up. */
-  html[data-sidebar="collapsed"] .main { max-width: none; }
-  html[data-sidebar="collapsed"] .shell { grid-template-columns: 64px 1fr; }
-  html[data-sidebar="collapsed"] .sidebar { padding: 16px 8px; align-items: center; }
-  html[data-sidebar="collapsed"] .sidebar-head { flex-direction: column; align-items: center; gap: 4px; }
-  html[data-sidebar="collapsed"] .sidebar-head .brand { flex: none; padding: 6px 0 4px; justify-content: center; }
-  html[data-sidebar="collapsed"] .nav { width: 100%; }
-  /* Icons only. The text stays in the page for screen readers and as a tooltip (set by console.js). */
-  html[data-sidebar="collapsed"] .brand span,
-  html[data-sidebar="collapsed"] .nav a span,
-  html[data-sidebar="collapsed"] .me-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  html[data-sidebar="collapsed"] .nav a { justify-content: center; padding: 9px 0; }
+  /* Collapsed: a narrow column of icons, and the page uses the room the sidebar gave up. Every
+     rule is scoped to the sidebar and the shell, because the flag sits on <html> and the sign-in
+     page has its own theme buttons and logo that must not change. The icons stay where they are, so
+     only the width moves. */
+  .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { white-space: nowrap; transition: opacity .15s ease; }
+  html[data-sidebar="collapsed"] .shell { grid-template-columns: 60px minmax(0, 1fr); }
+  html[data-sidebar="collapsed"] .shell .main { max-width: 100vw; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: flex-start; gap: 0; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; }
+  /* Icons only. The names stay in the page for screen readers and as tooltips (set by console.js). */
+  html[data-sidebar="collapsed"] .sidebar .brand span,
+  html[data-sidebar="collapsed"] .sidebar .nav a span { opacity: 0; }
+  html[data-sidebar="collapsed"] .sidebar .me-text { display: none; }
   /* Group labels have no room; the groups stay apart by a rule, and all their links show. */
-  html[data-sidebar="collapsed"] .nav-toggle { display: none; }
-  html[data-sidebar="collapsed"] .nav-items { display: block !important; }
-  html[data-sidebar="collapsed"] .nav-group { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
-  html[data-sidebar="collapsed"] .sidebar-foot { width: 100%; align-items: center; }
-  html[data-sidebar="collapsed"] .theme { flex-direction: column; }
-  html[data-sidebar="collapsed"] .me { flex-direction: column; gap: 6px; }
+  html[data-sidebar="collapsed"] .sidebar .nav-toggle { display: none; }
+  html[data-sidebar="collapsed"] .sidebar .nav-items { display: block !important; }
+  html[data-sidebar="collapsed"] .sidebar .nav-group { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-foot { align-items: center; }
+  html[data-sidebar="collapsed"] .sidebar .theme { flex-direction: column; }
+  html[data-sidebar="collapsed"] .sidebar .me { flex-direction: column; gap: 6px; }
+  /* Animate only when someone clicks the toggle (console.js adds nav-anim then), never on load. */
+  html.nav-anim .shell { transition: grid-template-columns .22s ease; }
+  html.nav-anim .shell .main { transition: max-width .22s ease; }
+}
+@media (min-width: 901px) and (prefers-reduced-motion: reduce) {
+  html.nav-anim .shell, html.nav-anim .shell .main, .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { transition: none; }
 }
 /* The phone and tablet strip has no groups to fold and nothing to collapse. */
 @media (max-width: 900px) {

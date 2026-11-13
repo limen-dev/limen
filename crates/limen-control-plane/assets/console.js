@@ -49,6 +49,26 @@
       });
     });
 
+    // Keep the menu where it was scrolled. Each click loads a new page, so without this the menu
+    // jumps back to the top and the end of a long list is out of sight again. Per tab, so another
+    // window starts at the top.
+    var nav = document.querySelector('.nav');
+    if (nav) {
+      var SCROLL_KEY = 'limen-nav-scroll';
+      try {
+        var at = (sessionStorage.getItem(SCROLL_KEY) || '').split(',');
+        nav.scrollTop = Number(at[0]) || 0;
+        nav.scrollLeft = Number(at[1]) || 0;
+      } catch (e) { /* storage blocked: starts at the top */ }
+      var remember = function () {
+        try { sessionStorage.setItem(SCROLL_KEY, nav.scrollTop + ',' + nav.scrollLeft); } catch (e) { /* private mode */ }
+      };
+      nav.addEventListener('scroll', remember, { passive: true });
+      // A click on a link navigates at once: record the position first.
+      nav.addEventListener('click', remember);
+      window.addEventListener('pagehide', remember);
+    }
+
     // Collapse the sidebar to icons. Each link gets its name as a tooltip while the text is hidden.
     var side = document.querySelector('.sidebar-toggle');
     if (side) {
@@ -66,6 +86,7 @@
       paintSide();
       side.addEventListener('click', function () {
         var collapsed = root.getAttribute('data-sidebar') === 'collapsed';
+        root.classList.add('nav-anim');
         if (collapsed) root.removeAttribute('data-sidebar'); else root.setAttribute('data-sidebar', 'collapsed');
         store(SIDEBAR_KEY, collapsed ? '' : 'collapsed');
         paintSide();
