@@ -204,7 +204,9 @@ print(f"  db.query={len(queries)} db.query.end={len(qends)} db.bootstrap={len(bo
 for e in (pg, my):
     print(f"  {e['data']['protocol']:8} {e['user']} {e['data']['db_role']}@{e['data']['database']}: {e['data']['statement']}")
 PY
-if "${compose[@]}" logs worker 2>&1 | grep -qF "$pw_pg"; then fail "a password is in the worker log"; fi
+# Capture first: under pipefail an early grep match makes `logs | grep -q` fail with SIGPIPE.
+worker_logs="$("${compose[@]}" logs worker 2>&1)"
+if grep -qF -- "$pw_pg" <<<"$worker_logs"; then fail "a password is in the worker log"; fi
 pass "sessions, statements, outcomes, and bootstrap changes are in the trail, linked by id; no password anywhere"
 
 printf '\n\033[32mPhase 6 demo passed.\033[0m\n'
