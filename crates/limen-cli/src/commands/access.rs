@@ -226,7 +226,7 @@ fn show(r: &AccessRequestInfo) {
             ),
         ));
     }
-    anstream::println!("{}", ui::key_values(&rows));
+    ui::reveal(&ui::key_values(&rows));
     for a in &r.approvals {
         anstream::println!(
             "  {} {}{}",

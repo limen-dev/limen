@@ -67,7 +67,7 @@ pub fn run(args: &Args) -> anyhow::Result<()> {
         apply(&mut current, args);
         settings::save_to(&path, &current)?;
     }
-    anstream::println!("{}", render(&current, &path.display().to_string()));
+    ui::reveal(&render(&current, &path.display().to_string()));
     if args.changes() {
         // What was just set, so it can be judged: the logo plays at the chosen speed.
         if current.animations && ui::motion_off_reason().is_none() {

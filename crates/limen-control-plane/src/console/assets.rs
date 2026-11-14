@@ -174,6 +174,8 @@ mod tests {
         assert!(on < off, "the override must come later in the cascade");
         // The sidebar stays put while the content fades.
         assert!(CSS.contains("view-transition-name: sidebar"));
+        assert!(CSS.contains("view-transition-name: content"));
+        assert!(CSS.contains("@keyframes settle-in"));
     }
 
     #[test]

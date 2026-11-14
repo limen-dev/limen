@@ -150,7 +150,7 @@
         .then(function (text) {
           if (!text || busy()) return;
           var next = new DOMParser().parseFromString(text, 'text/html').querySelector('main');
-          if (next && next.innerHTML !== main.innerHTML) main.innerHTML = next.innerHTML;
+          if (next && next.innerHTML !== main.innerHTML) { main.classList.add('refreshed'); main.innerHTML = next.innerHTML; }
         })
         .catch(function () { /* offline: try again next tick */ });
     }

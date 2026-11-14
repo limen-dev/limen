@@ -32,6 +32,24 @@ impl Speed {
         }
     }
 
+    /// Time between lines when a table or a list is revealed.
+    pub fn reveal_ms(self) -> u64 {
+        match self {
+            Self::Slow => 40,
+            Self::Normal => 22,
+            Self::Fast => 10,
+        }
+    }
+
+    /// Time between one `doctor` check and the next.
+    pub fn pace_ms(self) -> u64 {
+        match self {
+            Self::Slow => 90,
+            Self::Normal => 50,
+            Self::Fast => 20,
+        }
+    }
+
     /// Time between spinner frames, in whole tens of milliseconds.
     pub fn frame_tens(self) -> u32 {
         match self {

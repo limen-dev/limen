@@ -114,15 +114,12 @@ pub fn status(proxy: Option<&str>, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let roles: Vec<String> = profile.meta.roles.iter().map(|r| ui::role(r)).collect();
-    anstream::println!(
-        "{}",
-        ui::key_values(&[
-            ("Server", profile.meta.proxy.clone()),
-            ("User", ui::bold(&profile.meta.username)),
-            ("Roles", roles.join(", ")),
-            ("Expires", ui::expiry(remaining)),
-        ])
-    );
+    ui::reveal(&ui::key_values(&[
+        ("Server", profile.meta.proxy.clone()),
+        ("User", ui::bold(&profile.meta.username)),
+        ("Roles", roles.join(", ")),
+        ("Expires", ui::expiry(remaining)),
+    ]));
     if remaining.is_positive() {
         ui::hint("Next: `limen ls` to see what you can reach.");
     } else {
@@ -431,7 +428,7 @@ pub async fn show(proxy: Option<&str>, name: &str, json: bool) -> anyhow::Result
         rows.push(("Address", r.web_url.clone()));
     }
     rows.push(("Connect", format!("`{connect}`")));
-    anstream::println!("{}", ui::key_values(&rows));
+    ui::reveal(&ui::key_values(&rows));
     Ok(())
 }
 

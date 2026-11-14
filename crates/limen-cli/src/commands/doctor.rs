@@ -71,8 +71,9 @@ struct Report {
     live: bool,
     /// How many checks have been printed already.
     printed: usize,
-    /// A "checking ..." line is on screen and must be erased before the next output.
-    pending: bool,
+    /// A spinner is waiting on a slow check. It draws only if the check takes a moment, and erases
+    /// itself when dropped, before the next line is printed.
+    pending: Option<ui::Spinner>,
 }
 
 impl Report {
@@ -88,11 +89,8 @@ impl Report {
 
     /// A slow check is about to run: show its name, so a wait isn't mistaken for a hang.
     fn begin(&mut self, name: &str) {
-        if self.live && !self.pending {
-            // Through `anstream`, so colour is stripped under NO_COLOR like the rest.
-            anstream::print!("{}", ui::dim(&format!("… {name}")));
-            let _ = std::io::stdout().flush();
-            self.pending = true;
+        if self.live && self.pending.is_none() {
+            self.pending = Some(ui::spinner(&format!("Checking {name}")));
         }
     }
 
@@ -111,16 +109,14 @@ impl Report {
             return;
         }
         let text = self.take_new();
-        let mut out = std::io::stdout();
-        if self.pending {
-            // Erased by a raw write: `anstream` would drop the escape under NO_COLOR.
-            let _ = out.write_all(b"\r\x1b[2K");
-            self.pending = false;
-        }
+        // Stops the spinner and erases its line, if it drew one.
+        drop(self.pending.take());
         if !text.is_empty() {
             anstream::println!("{text}");
+            let _ = std::io::stdout().flush();
+            // A beat before the next check, so the list builds up instead of landing at once.
+            ui::pace();
         }
-        let _ = out.flush();
     }
 
     fn pass(&mut self, name: &'static str, summary: impl Into<String>) {

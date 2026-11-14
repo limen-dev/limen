@@ -80,7 +80,7 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .brand:hover { text-decoration: none; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); padding: 14px 10px 6px; }
-.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--text-2); font-weight: 500; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--text-2); font-weight: 500; transition: background .12s, color .12s; }
 .nav a:hover { background: var(--sunken); color: var(--text); text-decoration: none; }
 .nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
@@ -813,6 +813,25 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
 @view-transition { navigation: auto; }
 .sidebar { view-transition-name: sidebar; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s; }
+
+/* The content area is its own layer: the old page fades out, the new one fades in and rises a few
+   pixels. The layer's own size change is not animated (pages differ in height), so nothing stretches. */
+.main { view-transition-name: content; }
+::view-transition-group(content) { animation: none; }
+::view-transition-old(content) { animation: vt-out .1s ease both; }
+::view-transition-new(content) { animation: vt-in .2s ease both; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* Cards and the first rows of a table settle in one after another, on a page load, not when the page refreshes itself (console.js marks `main` as refreshed first, so
+   changed rows don't replay it). At most
+   about a tenth of a second between the first and the last, so a long list never feels slow. */
+@keyframes settle-in { from { opacity: 0; transform: translateY(6px); } }
+main:not(.refreshed) :is(.stats > *, .int-card, tbody tr:nth-child(-n+10)) { animation: settle-in .22s ease both; }
+main:not(.refreshed) :is(.stats > :nth-child(2), tbody tr:nth-child(2)) { animation-delay: .03s; }
+main:not(.refreshed) :is(.stats > :nth-child(3), tbody tr:nth-child(3)) { animation-delay: .06s; }
+main:not(.refreshed) :is(.stats > :nth-child(4), tbody tr:nth-child(4)) { animation-delay: .09s; }
+main:not(.refreshed) :is(.stats > :nth-child(n+5), tbody tr:nth-child(n+5)) { animation-delay: .12s; }
 
 /* Reduced motion, once and for everything: any animation or transition, present or added later,
    runs to its end state at once. The vendored player is left alone, because forcing its loader and

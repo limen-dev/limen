@@ -301,7 +301,38 @@ pub fn table<const N: usize>(header: [&str; N], rows: &[[String; N]]) -> String 
 }
 
 pub fn print_table<const N: usize>(header: [&str; N], rows: &[[String; N]]) {
-    anstream::println!("{}", table(header, rows));
+    reveal(&table(header, rows));
+}
+
+/// The most time a reveal may take, however long the list.
+const REVEAL_BUDGET: Duration = Duration::from_millis(400);
+
+/// Print `text` and a newline. On a terminal with motion on, the lines appear one after another
+/// (the whole thing never takes longer than [`REVEAL_BUDGET`]); anywhere else, all at once, so
+/// pipes, logs and scripts see exactly the same bytes either way.
+pub fn reveal(text: &str) {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() < 2 || !motion() || !std::io::stdout().is_terminal() {
+        anstream::println!("{text}");
+        return;
+    }
+    let each = Duration::from_millis(crate::settings::get().speed.reveal_ms());
+    let step = each.min(REVEAL_BUDGET / u32::try_from(lines.len()).unwrap_or(u32::MAX));
+    for line in lines {
+        anstream::println!("{line}");
+        let _ = std::io::stdout().flush();
+        std::thread::sleep(step);
+    }
+}
+
+/// A beat between two steps that are shown one by one (the `doctor` checks), when motion is on
+/// and the output is a terminal. Nothing otherwise.
+pub fn pace() {
+    if motion() && std::io::stdout().is_terminal() {
+        std::thread::sleep(Duration::from_millis(
+            crate::settings::get().speed.pace_ms(),
+        ));
+    }
 }
 
 // ---- resource kinds and roles ---------------------------------------------------------
@@ -440,6 +471,7 @@ fn elapsed_text(d: Duration) -> String {
 /// motion is off (see [`motion_off_reason_for`]), so scripts and logs stay clean.
 /// Output from other code while one is live would land in the middle of it:
 /// finish it first (every current caller does).
+#[derive(Debug)]
 pub struct Spinner {
     /// An explicit spinner (not the per-call one), which the per-call one steps aside for.
     counted: bool,
