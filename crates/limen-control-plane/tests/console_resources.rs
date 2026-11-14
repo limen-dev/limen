@@ -331,8 +331,9 @@ async fn a_members_list_has_only_their_resources_and_their_own_use() {
         "a resource her roles don't open is not listed"
     );
     assert!(
-        row_of(&body, "web-1").contains("data-copy=\"limen ssh web-1\""),
-        "a row she can open has its command to copy"
+        row_of(&body, "web-1").contains("data-copy=\"limen ssh ubuntu@web-1\"")
+            && row_of(&body, "web-1").contains("<code title=\"limen ssh ubuntu@web-1\">"),
+        "a row she can open shows its command, with a button to copy it"
     );
     assert!(
         row_of(&body, "web-1").contains("<time datetime="),
@@ -955,6 +956,38 @@ async fn favourites_lead_the_list_and_the_overview_cards_give_a_command_that_run
         !cards.contains("data-copy=\"limen db connect db-many\""),
         "no command that needs a role and names none"
     );
+    // The list shows the way in on each row too: the command when it runs as it is, a link to the
+    // builder when it needs a choice, and nothing to run for an admin whose own roles don't open it.
+    let (_, list) = f.page("/console/resources", ERIN).await;
+    assert!(row_of(&list, "web-1").contains("data-copy=\"limen ssh ubuntu@web-1\""));
+    let many = row_of(&list, "db-many");
+    assert!(many.contains("href=\"/console/resources/db-many#build\""));
+    assert!(
+        !many.contains("data-copy="),
+        "no command that names no role"
+    );
+    let (_, admin) = f.page("/console/resources", ADMIN).await;
+    let theirs = row_of(&admin, "db-many");
+    assert!(!theirs.contains("data-copy=") && !theirs.contains("#build"));
+    // An admin who does hold the roles gets compact controls: the copy button, or an arrow to the
+    // builder, never the command text in the narrow table.
+    session(
+        &f.h,
+        "test-console-token-res-root2",
+        "root2",
+        &[
+            limen_core::identity::ADMIN_ROLE,
+            "builder-many",
+            "dev-readonly",
+        ],
+    )
+    .await;
+    let (_, both) = f
+        .page("/console/resources", "test-console-token-res-root2")
+        .await;
+    assert!(row_of(&both, "web-1").contains("data-copy=\"limen ssh ubuntu@web-1\""));
+    assert!(!row_of(&both, "web-1").contains("<code title="));
+    assert!(row_of(&both, "db-many").contains("href=\"/console/resources/db-many#build\""));
     // A saved view says which page it opens.
     assert!(body.contains("Live ones") && body.contains("class=\"saved-page\">Sessions<"));
 }

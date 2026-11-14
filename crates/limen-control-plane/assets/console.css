@@ -1033,3 +1033,19 @@ main:not(.refreshed) :is(.stats > :nth-child(n+5), tbody tr:nth-child(n+5)) { an
    window is too narrow for them, instead of scrolling sideways. */
 .tabs.kinds { flex-wrap: wrap; overflow: visible; max-width: 100%; }
 .tabs.kinds a { flex: none; }
+
+/* How to get in, on the Resources list: the command with its copy button, or a link to where each
+   choice has its own command. A column for members; for admins, whose table is already wide, a copy
+   button (or an arrow to the builder) in the actions cell, and only when their own roles open it. */
+.connect-cell { min-width: 150px; }
+.cmd { max-width: 100%; }
+.connect-cell .cmd { align-items: flex-start; }
+.connect-cell .cmd code { overflow-wrap: anywhere; min-width: 0; padding-top: 2px; }
+a.choose-link { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; font-weight: 500; }
+a.choose-link:hover { text-decoration: none; }
+a.choose-link .i { flex: none; }
+@media (pointer: coarse) { a.choose-link { min-height: 44px; } }
+
+/* A narrow numeric column whose header may wrap ("Errors" over "24 h") instead of setting the width. */
+th.wrap-head { white-space: normal; width: 1%; }
+.nobr { white-space: nowrap; }

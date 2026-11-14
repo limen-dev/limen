@@ -1632,8 +1632,9 @@ pub struct ResourceRow {
     pub health: Option<Health>,
     /// The latest session on it: anyone's for an admin, your own for everyone else.
     pub last_used: Option<Stamp>,
-    /// What to run to open it; `None` when the viewer has no access to copy a command for.
-    pub connect: Option<Connect>,
+    /// How to get in: the command, or a link to where each choice has its own. `None` when the
+    /// viewer's own roles don't open it (or nothing serves the kind yet).
+    pub connect: Option<CardConnect>,
     /// Admins: errors in the last 24 hours, and what they were (for the tooltip).
     pub errors: i64,
     pub errors_text: String,

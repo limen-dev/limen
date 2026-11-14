@@ -772,7 +772,9 @@ async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>
             },
             path: path_segment(&name),
             // Only what the viewer can open gets a command to copy.
-            connect: mine.map(|_| views::connect_for(kind, &name)),
+            connect: mine
+                .filter(|_| views::connect_for(kind, &name).planned.is_none())
+                .map(|m| views::card_connect(kind, &name, &m.principals)),
             last_used: seen.last_started.map(views::Stamp::of),
             errors: errors.get(&name).copied().unwrap_or_default().total(),
             errors_text: views::errors_text(errors.get(&name).copied().unwrap_or_default()),
