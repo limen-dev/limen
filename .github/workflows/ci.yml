@@ -35,6 +35,7 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       workflows: ${{ steps.filter.outputs.workflows }}
       website: ${{ steps.filter.outputs.website }}
+      browser-tests: ${{ steps.filter.outputs.browser-tests }}
     steps:
       - name: Check out the commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,12 +53,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$PR" ]; then
-            printf '%s=true\n' rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
+            printf '%s=true\n' rust audit infra workflows website browser-tests | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
           echo "changed files: $(wc -l < "$RUNNER_TEMP/changed.txt")"
-          python3 scripts/ci-changes.py "$RUNNER_TEMP/changed.txt" rust audit infra workflows website | tee -a "$GITHUB_OUTPUT"
+          python3 scripts/ci-changes.py "$RUNNER_TEMP/changed.txt" rust audit infra workflows website browser-tests | tee -a "$GITHUB_OUTPUT"
 
   rust:
     name: rust
@@ -102,12 +103,20 @@ jobs:
       pages: write
       id-token: write
 
+  browser-tests:
+    name: browser-tests
+    needs: changes
+    if: needs.changes.outputs.browser-tests == 'true'
+    uses: ./.github/workflows/browser-tests.yml
+    permissions:
+      contents: read
+
   ci-ok:
     name: ci-ok
     # always(), so a failed need fails this job instead of skipping it. `changes` is a need too:
     # if the filter breaks, every area is skipped and the gate must not pass.
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [changes, rust, audit, infra, workflows, website]
+    needs: [changes, rust, audit, infra, workflows, website, browser-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
