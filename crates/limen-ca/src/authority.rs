@@ -218,6 +218,15 @@ impl CertificateAuthority {
     pub async fn issue_component(&self, req: ComponentCertRequest) -> Result<IssuedCert, CaError> {
         self.require(CaPurpose::Internal)?;
         validate_name("component id", &req.id)?;
+        for (key, value) in &req.labels {
+            validate_name("label key", key)?;
+            // As for CI facts: an empty value would write a label SAN that
+            // does not parse, so the certificate could never verify.
+            if value.is_empty() || value.len() > MAX_CI_VALUE || value.chars().any(char::is_control)
+            {
+                return Err(CaError::InvalidRequest(format!("invalid label {key}")));
+            }
+        }
         let csr = parse_csr(&req.csr_der)?;
 
         let mut params = leaf_params(req.ttl)?;
@@ -545,6 +554,30 @@ mod tests {
             let mut b = bot.clone();
             b.ci = Some(facts);
             assert!(is_invalid(&users.issue_user(b).await));
+        }
+    }
+
+    #[tokio::test]
+    async fn component_labels_must_round_trip_through_the_certificate() {
+        let internal = ca(CaPurpose::Internal).await;
+        let mut ok = component("w1", &[]);
+        ok.labels = [("zone".to_owned(), "eu-west-1a".to_owned())].into();
+        let issued = internal.issue_component(ok).await.expect("issue");
+        let identity = crate::verify::verify_component(&issued.der, internal.cert_der(), false)
+            .expect("a labelled component cert verifies");
+        assert_eq!(
+            identity.labels.get("zone").map(String::as_str),
+            Some("eu-west-1a")
+        );
+        for (key, value) in [
+            ("zone", String::new()),
+            ("zone", "a\nb".to_owned()),
+            ("zone", "a".repeat(MAX_CI_VALUE + 1)),
+            ("", "x".to_owned()),
+        ] {
+            let mut bad = component("w1", &[]);
+            bad.labels = [(key.to_owned(), value)].into();
+            assert!(is_invalid(&internal.issue_component(bad).await), "{key:?}");
         }
     }
 
