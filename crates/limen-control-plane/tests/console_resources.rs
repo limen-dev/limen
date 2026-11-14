@@ -59,6 +59,72 @@ fn get(uri: &str, token: &str, proxy: &Identity) -> Request<Body> {
     request
 }
 
+/// One resource of each kind the command builder covers, and a role that opens each as several
+/// identities, so the choices have something to choose from.
+const BUILDER_POLICY: &str = "\
+kind: resource
+version: v1
+metadata: { name: db-many, labels: { env: dev } }
+spec:
+  postgres: { endpoint: \"db-many:5432\", iam_auth: false, default_database: orders, password_dir: /tmp/none, admin_user: limen_admin, admin_password_file: /tmp/none }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: redis-many, labels: { env: dev } }
+spec:
+  redis: { endpoint: \"redis-many:6379\", iam_auth: false, tls: false }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: mongo-many, labels: { env: dev } }
+spec:
+  mongodb: { endpoint: \"mongo-many:27017\", credentials_dir: /c, tls_ca_file: /ca.pem }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: search-many, labels: { env: dev } }
+spec:
+  elasticsearch: { endpoint: \"search-many:9200\", tls: false }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: mq-many, labels: { env: dev } }
+spec:
+  rabbitmq: { endpoint: \"mq-many:5672\", tls: false }
+  worker_selector: { pool: dev }
+---
+kind: resource
+version: v1
+metadata: { name: kafka-many, labels: { env: dev } }
+spec:
+  kafka: { endpoint: \"kafka-many:9092\", tls: false, sasl: plain }
+  worker_selector: { pool: dev }
+---
+kind: role
+version: v1
+metadata: { name: builder-many }
+spec:
+  allow:
+    - resources: { kind: [postgres], labels: { env: [dev] } }
+      db: { roles: [limen_ro, limen_rw], databases: [orders, billing] }
+    - resources: { kind: [redis], labels: { env: [dev] } }
+      redis: { users: [cache_ro, cache_rw], keys: [\"app:*\"] }
+    - resources: { kind: [mongodb], labels: { env: [dev] } }
+      mongo: { roles: [ro, rw], databases: [\"*\"] }
+    - resources: { kind: [elasticsearch], labels: { env: [dev] } }
+      search: { roles: [r1, r2], classes: [read, write], indices: [\"app-*\"] }
+    - resources: { kind: [rabbitmq], labels: { env: [dev] } }
+      mq: { users: [w, r], vhosts: [jobs, \"billing-*\"] }
+    - resources: { kind: [kafka], labels: { env: [dev] } }
+      kafka: { users: [c, p], topics: [\"orders.*\"] }
+";
+
+const ERIN: &str = "test-console-token-res-erin";
+
 const ORIGIN: &str = "https://console.test";
 
 fn post(uri: &str, token: &str, form: &str, origin: bool, proxy: &Identity) -> Request<Body> {
@@ -148,12 +214,18 @@ struct Fixture {
 
 impl Fixture {
     async fn start() -> Option<Self> {
+        Self::start_with(&[]).await
+    }
+
+    async fn start_with(extra: &[(&str, &str)]) -> Option<Self> {
         let h = Harness::start_with(&[
             "--console-public-url=https://console.test".to_owned(),
             "--console-oidc-client-secret=s3cr3t".to_owned(),
         ])
         .await?;
-        h.set_policy(&[("roles.yaml", ROLES), ("resources.yaml", RESOURCES)]);
+        let mut files = vec![("roles.yaml", ROLES), ("resources.yaml", RESOURCES)];
+        files.extend_from_slice(extra);
+        h.set_policy(&files);
         session(&h, ADMIN, "root", &[limen_core::identity::ADMIN_ROLE]).await;
         session(&h, DEV, "dana", &["dev-readonly"]).await;
         seed(&h, "dana", "web-1", "ssh", true, 120).await;
@@ -701,4 +773,124 @@ async fn the_overview_warns_of_an_ending_session_and_pages_link_onward() {
     let (status, body) = f.page("/console/resources/hidden-prod", DEV).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(body.contains("Check the address"));
+}
+
+#[tokio::test]
+async fn the_command_builder_offers_only_what_access_allows_and_never_a_bad_value() {
+    let Some(f) = Fixture::start_with(&[("builder.yaml", BUILDER_POLICY)]).await else {
+        return;
+    };
+    session(&f.h, ERIN, "erin", &["builder-many"]).await;
+    let page = |uri: &'static str| {
+        let f = &f;
+        async move { f.page(uri, ERIN).await }
+    };
+
+    // Several identities: nothing to run until one is chosen, and the choice is listed.
+    let (status, body) = page("/console/resources/db-many").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Build your command"));
+    assert!(body.contains("Choose a database role to see the command."));
+    assert!(body.contains("<option value=\"limen_rw\">limen_rw</option>"));
+    assert!(
+        body.contains("limen db connect db-many --db-role limen_ro"),
+        "the quick commands name each role"
+    );
+
+    // A role and one of its databases.
+    let (_, body) =
+        page("/console/resources/db-many?who=limen_rw&database=billing&port=6543").await;
+    assert!(
+        body.contains(
+            "<code>limen db connect db-many --db-role limen_rw --database billing --listen 127.0.0.1:6543</code>"
+        ),
+        "{body}"
+    );
+    assert!(body.contains("Databases") && body.contains("billing, orders"));
+
+    // A database the role may not open, a name that is not plain, and a bad port: no command.
+    for (uri, says) in [
+        (
+            "/console/resources/db-many?who=limen_rw&database=secret",
+            "may not open secret",
+        ),
+        (
+            "/console/resources/db-many?who=limen_rw&database=a%20b%3Brm%20-rf",
+            "letters, digits",
+        ),
+        (
+            "/console/resources/db-many?who=limen_rw&port=80",
+            "number from 1024",
+        ),
+        (
+            "/console/resources/db-many?who=root",
+            "include root as a database role",
+        ),
+    ] {
+        let (status, body) = f.page(uri, ERIN).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(body.contains(says), "{uri}: {says}");
+        assert!(
+            !body.contains("<div class=\"built\">"),
+            "{uri}: a refused choice gives no command"
+        );
+    }
+    // What was typed is escaped when it is echoed.
+    let (_, body) = page("/console/resources/db-many?who=%3Cscript%3Ealert(1)%3C/script%3E").await;
+    assert!(!body.contains("<script>alert(1)"));
+    assert!(body.contains("&#60;script&#62;alert(1)"), "{body}");
+
+    // Each protocol has its own flag.
+    for (uri, command) in [
+        (
+            "/console/resources/redis-many?who=cache_rw",
+            "limen redis connect redis-many --user cache_rw",
+        ),
+        (
+            "/console/resources/mongo-many?who=rw&database=orders",
+            "limen mongo connect mongo-many --role rw --database orders",
+        ),
+        (
+            "/console/resources/search-many?who=r2",
+            "limen search connect search-many --role r2",
+        ),
+        (
+            "/console/resources/mq-many?who=w&vhost=billing-eu",
+            "limen mq connect mq-many --user w --vhost billing-eu",
+        ),
+        (
+            "/console/resources/kafka-many?who=c&port=9199",
+            "limen kafka connect kafka-many --user c --listen 127.0.0.1:9199",
+        ),
+    ] {
+        let (status, body) = f.page(uri, ERIN).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(body.contains(&format!("<code>{command}</code>")), "{uri}");
+    }
+    // The quick commands use the same flags.
+    let (_, body) = page("/console/resources/mongo-many").await;
+    assert!(body.contains("limen mongo connect mongo-many --role ro"));
+    // What each identity may do is shown.
+    let (_, body) = page("/console/resources/search-many?who=r1").await;
+    assert!(body.contains("read, write") && body.contains("app-*"));
+    let (_, body) = page("/console/resources/kafka-many?who=p").await;
+    assert!(body.contains("orders.*") && body.contains("Consumer groups"));
+    let (_, body) = page("/console/resources/mq-many?who=r").await;
+    assert!(body.contains("billing-*, jobs"));
+
+    // Not for people who hold none of it: a member without the role gets a 404, and an admin sees
+    // no builder for access they don't hold themselves.
+    let (status, _) = f.page("/console/resources/db-many?who=limen_rw", DEV).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, body) = f
+        .page("/console/resources/db-many?who=limen_rw", ADMIN)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.contains("Build your command"));
+    assert!(!body.contains("--db-role limen_rw"));
+
+    // Dana's single identity needs no flag; the wildcard database is a text box.
+    let (_, body) = f.page("/console/resources/db-1", DEV).await;
+    assert!(body.contains("<code>limen db connect db-1</code>"));
+    assert!(body.contains("any database"));
 }

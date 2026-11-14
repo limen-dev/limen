@@ -236,18 +236,18 @@ fn plain_principal(p: &str) -> bool {
 
 /// The commands that open `name` for someone who may use `principals`.
 ///
-/// Only two kinds let the command name a principal, and only as the CLI documents it: SSH takes
-/// `login@resource`, and the database kinds take `--db-role` (required only when policy allows
-/// several, so one role gets the plain command). Every other kind has one command. Nothing here
-/// invents a flag.
+/// SSH takes `login@resource`; the database, MongoDB, Redis, search, `RabbitMQ` and Kafka kinds each
+/// take one flag for who you act as (required only when policy allows several, so one identity gets
+/// the plain command). Every other kind has one command. Nothing here invents a flag.
 #[must_use]
 pub fn connect_options(kind: &str, name: &str, principals: &[String]) -> Vec<ConnectOption> {
     let base = connect_for(kind, name);
     let plain: Vec<&String> = principals.iter().filter(|p| plain_principal(p)).collect();
+    let flag = super::connect_builder::who_flag(kind);
     let per_principal = match kind {
         "ssh" => !plain.is_empty(),
-        "postgres" | "mysql" | "redshift" => principals.len() > 1 && !plain.is_empty(),
-        _ => false,
+        // Optional when policy allows one identity, so only several need naming.
+        _ => flag.is_some() && principals.len() > 1 && !plain.is_empty(),
     };
     if !per_principal {
         return vec![ConnectOption {
@@ -259,10 +259,9 @@ pub fn connect_options(kind: &str, name: &str, principals: &[String]) -> Vec<Con
         .into_iter()
         .map(|p| ConnectOption {
             principal: Some(p.clone()),
-            command: if kind == "ssh" {
-                format!("limen ssh {p}@{name}")
-            } else {
-                format!("{} --db-role {p}", base.command)
+            command: match flag {
+                None => format!("limen ssh {p}@{name}"),
+                Some(flag) => format!("{} {flag} {p}", base.command),
             },
         })
         .collect()
@@ -1693,6 +1692,8 @@ pub struct ResourcePage {
     pub connect: Connect,
     /// One command per principal where the kind takes one, else a single command.
     pub options: Vec<ConnectOption>,
+    /// The builder under the Connect card: what the viewer may act as, and the command for it.
+    pub builder: Option<super::connect_builder::Builder>,
     pub name: String,
     pub kind: String,
     pub icon: &'static str,
@@ -2017,13 +2018,36 @@ mod resource_ui_tests {
     }
 
     #[test]
-    fn other_kinds_have_one_command_and_no_invented_flag() {
-        assert_eq!(
-            commands("redis", &["a", "b"]),
-            ["limen redis connect bastion"]
-        );
+    fn each_kind_that_takes_an_identity_uses_its_own_flag_when_there_are_several() {
+        for (kind, command, flag) in [
+            ("redis", "limen redis connect", "--user"),
+            ("mongodb", "limen mongo connect", "--role"),
+            ("opensearch", "limen search connect", "--role"),
+            ("elasticsearch", "limen search connect", "--role"),
+            ("rabbitmq", "limen mq connect", "--user"),
+            ("kafka", "limen kafka connect", "--user"),
+        ] {
+            assert_eq!(
+                commands(kind, &["a", "b"]),
+                [
+                    format!("{command} bastion {flag} a"),
+                    format!("{command} bastion {flag} b")
+                ],
+                "{kind}"
+            );
+            assert_eq!(commands(kind, &["a"]), [format!("{command} bastion")]);
+        }
+    }
+
+    #[test]
+    fn kinds_with_nothing_to_choose_have_one_command_and_no_invented_flag() {
         assert_eq!(commands("kubernetes", &["a"]), ["limen kube login bastion"]);
+        assert_eq!(
+            commands("kubernetes", &["a", "b"]),
+            ["limen kube login bastion"]
+        );
         assert_eq!(commands("web", &["a", "b"]), ["limen web open bastion"]);
+        assert_eq!(commands("tcp", &["a", "b"]), ["limen tcp bastion"]);
     }
 
     #[test]

@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
+use super::connect_builder;
 use super::pins;
 use super::query;
 use super::resource_ui::{self, ResourceSort};
@@ -1078,6 +1079,33 @@ async fn error_parts(state: &AppState, name: &str) -> Result<Vec<views::ErrorPar
 #[derive(Deserialize)]
 pub struct ResourceTabQuery {
     tab: Option<String>,
+    // The command builder's choices (all optional, all checked against what the viewer may do).
+    who: Option<String>,
+    database: Option<String>,
+    vhost: Option<String>,
+    port: Option<String>,
+}
+
+/// The command builder under the Connect card: what the viewer may act as on this resource, and
+/// the command for what they picked. Only for what their own roles open, never for an admin's
+/// view of someone else's access.
+async fn command_builder(
+    state: &AppState,
+    auth: &Auth,
+    kind: &str,
+    name: &str,
+    q: &ResourceTabQuery,
+) -> Result<Option<connect_builder::Builder>, Response> {
+    let scopes = crate::access::scopes_for(state, &auth.username, &auth.roles, name)
+        .await
+        .map_err(|e| db_error("reading access grants", &e))?;
+    let picks = connect_builder::Picks {
+        who: q.who.clone(),
+        database: q.database.clone(),
+        vhost: q.vhost.clone(),
+        port: q.port.clone(),
+    };
+    Ok(connect_builder::build(kind, name, &scopes, &picks))
 }
 
 pub async fn resource_detail(
@@ -1166,6 +1194,13 @@ pub async fn resource_detail(
         Vec::new()
     };
     let principals = mine.map(|m| m.principals.clone()).unwrap_or_default();
+    let builder = match mine {
+        Some(_) => match command_builder(&state, &auth, kind, &name, &tab_query).await {
+            Ok(b) => b,
+            Err(r) => return r,
+        },
+        None => None,
+    };
     let starred = match store::list_pins(&state.db, &auth.username).await {
         Ok(p) => p.iter().any(|p| p.kind == "resource" && p.target == name),
         Err(e) => return db_error("reading your pins", &e),
@@ -1182,6 +1217,7 @@ pub async fn resource_detail(
             chrome: chrome(&state, &auth, "resources"),
             connect: views::connect_for(kind, &name),
             options: views::connect_options(kind, &name, &principals),
+            builder,
             name: name.clone(),
             kind: kind.to_owned(),
             icon,

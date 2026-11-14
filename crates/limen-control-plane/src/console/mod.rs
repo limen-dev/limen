@@ -17,6 +17,7 @@
 
 mod assets;
 mod auth;
+mod connect_builder;
 mod controls;
 mod dashboards;
 mod doc_diff;

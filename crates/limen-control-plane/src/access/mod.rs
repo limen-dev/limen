@@ -1003,6 +1003,40 @@ pub async fn reachable(
     Ok(out.into_values().collect())
 }
 
+/// What `username` may do as each identity on `resource` right now: the roles in their certificate
+/// and in active grants for that resource, less any an access review took away, the same roles
+/// [`reachable`] counts. For the console's command builder.
+pub async fn scopes_for(
+    state: &AppState,
+    username: &str,
+    cert_roles: &[String],
+    resource: &str,
+) -> Result<Vec<limen_policy::GrantScope>, sqlx::Error> {
+    let denied: Vec<String> = crate::reviews::active_denies(&state.db)
+        .await?
+        .into_iter()
+        .filter(|d| d.username == username)
+        .map(|d| d.role)
+        .collect();
+    let mut roles: Vec<String> = cert_roles
+        .iter()
+        .filter(|r| !denied.contains(r))
+        .cloned()
+        .collect();
+    roles.extend(
+        store::active_grants(&state.db)
+            .await?
+            .into_iter()
+            .filter(|g| {
+                g.username == username && g.resource == resource && !denied.contains(&g.role)
+            })
+            .map(|g| g.role),
+    );
+    roles.sort();
+    roles.dedup();
+    Ok(state.policy.current().policy.grant_scopes(&roles, resource))
+}
+
 /// What the user could get by asking, for `limen ls`.
 pub async fn requestable_for(
     state: &AppState,

@@ -920,3 +920,22 @@ html.js .js-only { display: inline-flex; }
 .empty a { text-decoration: underline; display: inline-flex; align-items: center; min-height: 24px; }
 .status-strip a { display: inline-flex; align-items: center; min-height: 24px; }
 @media (pointer: coarse) { .empty a, .status-strip a { min-height: 44px; min-width: 44px; justify-content: center; } }
+
+/* Build your command */
+.builder { padding: 16px 20px; margin-bottom: 20px; }
+.builder h2 { margin: 0 0 4px; font-size: 16px; }
+.builder > .hint { margin: 0 0 12px; }
+.builder-form { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; margin-bottom: 14px; }
+.builder-form > button { margin-top: 23px; }
+.builder-form .field { display: grid; gap: 4px; min-width: 180px; max-width: 100%; }
+.builder-form .field > span:first-child { font-size: 13px; color: var(--text-2); }
+.builder-form .field .hint { max-width: 280px; }
+.builder .built { margin: 4px 0 10px; }
+.builder .built .cmd { max-width: 100%; }
+.builder .built .cmd code { overflow-wrap: anywhere; }
+.builder-problem { color: var(--bad); margin: 4px 0 10px; font-size: 14px; }
+.builder .hint { margin: 4px 0 10px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; margin: 10px 0 0; }
+.facts div { min-width: 0; }
+.facts dt { font-size: 12px; color: var(--text-3); text-transform: none; }
+.facts dd { margin: 2px 0 0; overflow-wrap: anywhere; }
