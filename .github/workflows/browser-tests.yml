@@ -6,23 +6,25 @@ name: browser-tests
 #
 # - Console: needs no running stack. The pages are fixtures captured from a dev stack
 #   (crates/limen-control-plane/tests/console-pages) and the CSS and scripts are the repository's
-#   own, so it runs on a pull request that touches them (Chromium and WebKit, quick).
+#   own, so it runs on a pull request or push that touches them (Chromium and WebKit, quick).
 #   Regenerate the fixtures after changing a template: docs/runbooks/console.md.
 # - Website: builds the site and serves it. Slow, so never on a pull request.
-# Weekly and by hand (gh workflow run browser-tests.yml) both run, with Firefox.
+# Weekly and by hand (gh workflow run browser-tests.yml) both run, with Firefox. Run from ci.yml
+# (github.workflow is then "ci") it is always the quick console run.
 
 on:
-  # A draft pull request runs nothing; marking it ready for review starts the run.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
     paths:
       - "crates/limen-control-plane/assets/**"
       - "crates/limen-control-plane/templates/**"
       - "crates/limen-control-plane/tests/console-pages/**"
       - "deploy/compose/scripts/console-snapshot-matrix.mjs"
       - ".github/workflows/browser-tests.yml"
+  # Pull requests run through ci.yml, which reads the paths above.
   schedule:
     - cron: "30 4 * * 1"
+  workflow_call:
   # A manual run ignores the path filter.
   workflow_dispatch:
 
@@ -40,8 +42,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      # A pull request is quick (two engines); the weekly and manual runs add Firefox.
-      BROWSERS: ${{ github.event_name == 'pull_request' && 'chromium,webkit' || 'chromium,webkit,firefox' }}
+      # Quick (two engines) except the weekly and manual runs, which add Firefox.
+      BROWSERS: ${{ (github.workflow == 'browser-tests' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) && 'chromium,webkit,firefox' || 'chromium,webkit' }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +79,7 @@ jobs:
 
   website:
     name: Website browser matrix (${{ matrix.theme }} theme)
-    if: github.event_name != 'pull_request'
+    if: ${{ github.workflow == 'browser-tests' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
