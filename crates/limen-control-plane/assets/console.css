@@ -826,8 +826,9 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
 /* Cards and the first rows of a table settle in one after another, on a page load, not when the page refreshes itself (console.js marks `main` as refreshed first, so
    changed rows don't replay it). At most
    about a tenth of a second between the first and the last, so a long list never feels slow. */
+/* `backwards`, not `both`: once it ends nothing is held, so a card's own hover lift still works. */
 @keyframes settle-in { from { opacity: 0; transform: translateY(6px); } }
-main:not(.refreshed) :is(.stats > *, .int-card, tbody tr:nth-child(-n+10)) { animation: settle-in .22s ease both; }
+main:not(.refreshed) :is(.stats > *, .int-card, tbody tr:nth-child(-n+10)) { animation: settle-in .22s ease backwards; }
 main:not(.refreshed) :is(.stats > :nth-child(2), tbody tr:nth-child(2)) { animation-delay: .03s; }
 main:not(.refreshed) :is(.stats > :nth-child(3), tbody tr:nth-child(3)) { animation-delay: .06s; }
 main:not(.refreshed) :is(.stats > :nth-child(4), tbody tr:nth-child(4)) { animation-delay: .09s; }

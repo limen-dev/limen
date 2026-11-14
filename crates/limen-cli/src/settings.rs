@@ -125,11 +125,11 @@ pub fn save_to(path: &Path, settings: &Settings) -> anyhow::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let tmp = path.with_extension("json.tmp");
     let mut text = serde_json::to_string_pretty(settings)?;
     text.push('\n');
-    std::fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+    // The same crash-safe write the login profile uses: a fresh temp file, then a rename.
+    crate::profile::atomic_write(path, text.as_bytes(), 0o600)
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// The settings for this run. Read once; a missing or unreadable file means the defaults, with a
@@ -139,7 +139,11 @@ pub fn get() -> &'static Settings {
     SETTINGS.get_or_init(|| {
         let loaded = path().and_then(|p| load_from(&p));
         loaded.unwrap_or_else(|e| {
-            crate::ui::warn(&format!("ignoring the CLI settings: {e:#}"));
+            // Said to a person at a terminal. A script or an agent's tool call (which captures
+            // stderr) gets the defaults without the extra line.
+            if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+                crate::ui::warn(&format!("ignoring the CLI settings: {e:#}"));
+            }
             Settings::default()
         })
     })
