@@ -189,8 +189,11 @@ print("  denials:", dict(reasons))
 denied = next(e for e in events if e["kind"] == "auth.denied" and e["data"].get("reason") == "no bot matches this token" and e["data"]["ci"].get("ref") == "refs/heads/feature")
 print("  the refused run is recorded:", denied["data"]["ci"]["repository"], denied["data"]["ci"]["ref"])
 PY
+# Capture the logs first: with pipefail, `logs | grep -q` returns SIGPIPE's
+# 141 when grep finds a match early, and the leak would go unreported.
+service_logs="$("${compose[@]}" logs --no-color control-plane proxy worker 2>&1)"
 for f in "$state"/phase4/token-*.jwt; do
-  if "${compose[@]}" logs --no-color control-plane proxy worker 2>&1 | grep -qF "$(cat "$f")"; then fail "a token appears in the service logs: $f"; fi
+  if grep -qF -- "$(cat "$f")" <<<"$service_logs"; then fail "a token appears in the service logs: $f"; fi
 done
 pass "audited with the CI run; no token in the trail or in the logs"
 
