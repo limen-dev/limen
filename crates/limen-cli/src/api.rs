@@ -33,7 +33,14 @@ impl tower::Service<GrpcRequest> for Channel {
     fn call(&mut self, request: GrpcRequest) -> Self::Future {
         // Held until the response arrives, so the spinner covers the wait and is gone before the
         // command prints anything.
-        let busy = ui::busy(&ui::method_label(request.uri().path()));
+        // A stream stays open for a whole session (a database client, a recording upload), so a
+        // spinner for it would sit on top of the user's terminal. Only calls with one answer.
+        let path = request.uri().path();
+        let busy = if is_stream(path) {
+            None
+        } else {
+            ui::busy(&ui::method_label(path))
+        };
         let call = self.0.call(request);
         Box::pin(async move {
             let response = call.await;
@@ -41,6 +48,14 @@ impl tower::Service<GrpcRequest> for Channel {
             response
         })
     }
+}
+
+/// The calls that stay open for a whole session (see the `.proto` files).
+fn is_stream(path: &str) -> bool {
+    matches!(
+        path.rsplit('/').next(),
+        Some("OpenSession" | "UploadRecording" | "Handoff")
+    )
 }
 
 /// Port used when the server is given as a bare host name.
@@ -188,6 +203,14 @@ pub fn status_error(status: &tonic::Status) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
+    use super::is_stream;
+
+    #[test]
+    fn only_session_long_calls_are_streams() {
+        assert!(is_stream("/limen.v1.Tunnel/OpenSession"));
+        assert!(!is_stream("/limen.v1.Resources/ListResources"));
+    }
+
     #[test]
     fn explains_untrusted_server_certificates() {
         let status = tonic::Status::unavailable("invalid peer certificate: UnknownIssuer");

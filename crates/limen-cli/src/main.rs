@@ -97,6 +97,7 @@ enum ColorWhen {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Log in through the identity provider and get short-lived credentials.
+    #[command(display_order = 0)]
     Login {
         /// Use the device code flow, for machines without a browser.
         #[arg(long)]
@@ -135,8 +136,10 @@ enum Command {
         audience: Option<String>,
     },
     /// Delete local credentials.
+    #[command(display_order = 32)]
     Logout,
     /// Find out why access doesn't work: proxy, CA, network, clock, login, and (with a name) one resource.
+    #[command(display_order = 5)]
     Doctor {
         /// Also check access to this resource.
         resource: Option<String>,
@@ -145,12 +148,14 @@ enum Command {
         json: bool,
     },
     /// Show the current identity, roles, and when the credentials expire.
+    #[command(display_order = 4)]
     Status {
         /// Output JSON instead of text.
         #[arg(long)]
         json: bool,
     },
     /// List resources you are allowed to access.
+    #[command(display_order = 1)]
     Ls {
         #[command(flatten)]
         args: ListArgs,
@@ -159,6 +164,7 @@ enum Command {
         kind: Option<String>,
     },
     /// Ask for access to a resource for a limited time, with a reason.
+    #[command(display_order = 2)]
     Request {
         resource: String,
         /// Which requestable role, when more than one reaches the resource.
@@ -181,6 +187,7 @@ enum Command {
     },
     /// Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours.
     #[command(args_conflicts_with_subcommands = true)]
+    #[command(display_order = 12)]
     Requests {
         #[command(flatten)]
         list: commands::access::RequestsListArgs,
@@ -205,6 +212,7 @@ enum Command {
     #[command(hide = true)]
     Cancel { id: String },
     /// Say why you can or cannot reach a resource.
+    #[command(display_order = 11)]
     Explain {
         resource: String,
         /// What you would use on it, such as login=ubuntu or db_role=limen_read.
@@ -220,21 +228,25 @@ enum Command {
         json: bool,
     },
     /// Access reviews waiting for you: `limen review ls`, `certify`, `flag`.
+    #[command(display_order = 13)]
     Review {
         #[command(subcommand)]
         command: commands::review::ReviewCommand,
     },
     /// Search the audit trail (limen:admin or limen:auditor).
+    #[command(display_order = 14)]
     Audit {
         #[command(subcommand)]
         command: commands::audit::AuditCommand,
     },
     /// Ask a policy questions: test it, who can reach what, what changes.
+    #[command(display_order = 15)]
     Policy {
         #[command(subcommand)]
         command: commands::policy::PolicyCommand,
     },
     /// Open any resource by name: picks `ssh`, `db connect`, `redis connect`, ... from its type.
+    #[command(display_order = 3)]
     Connect {
         resource: String,
         /// Options passed to the command it picks, e.g. `--listen 127.0.0.1:6380` or `--role readonly`.
@@ -242,6 +254,7 @@ enum Command {
         args: Vec<String>,
     },
     /// List and stop connections started with `--detach`.
+    #[command(display_order = 16)]
     Conns {
         #[command(subcommand)]
         command: ConnsCommand,
@@ -260,6 +273,7 @@ enum Command {
     #[command(hide = true)]
     MarkdownHelp,
     /// Show one resource: type, labels, how you may access it, and the command to connect.
+    #[command(display_order = 10)]
     Show {
         resource: String,
         /// Output JSON instead of text.
@@ -267,6 +281,7 @@ enum Command {
         json: bool,
     },
     /// Open an SSH session: `limen ssh [login@]resource [command...]`.
+    #[command(display_order = 17)]
     Ssh {
         target: String,
         #[arg(trailing_var_arg = true)]
@@ -276,52 +291,62 @@ enum Command {
     #[command(hide = true)]
     SshProxy { login: String, host: String },
     /// Set up other tools and the CLI itself: ssh, mcp, completions, animations.
+    #[command(display_order = 31)]
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
     },
     // Integration command groups.
     /// PostgreSQL, MySQL, Aurora, and Redshift.
+    #[command(display_order = 20)]
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
     /// Redis and Valkey: `limen redis connect <resource>`.
+    #[command(display_order = 21)]
     Redis {
         #[command(subcommand)]
         command: RedisCommand,
     },
     /// Kubernetes and EKS.
+    #[command(display_order = 22)]
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
     },
     /// MongoDB, Atlas, and DocumentDB: `limen mongo connect <resource>`.
+    #[command(display_order = 23)]
     Mongo {
         #[command(subcommand)]
         command: MongoCommand,
     },
     /// `OpenSearch` and Elasticsearch: `limen search connect <resource>`.
+    #[command(display_order = 24)]
     Search {
         #[command(subcommand)]
         command: SearchCommand,
     },
     /// RabbitMQ and Amazon MQ: `limen mq connect <resource>`.
+    #[command(display_order = 25)]
     Mq {
         #[command(subcommand)]
         command: MqCommand,
     },
     /// Kafka and MSK: `limen kafka connect <resource>`.
+    #[command(display_order = 26)]
     Kafka {
         #[command(subcommand)]
         command: KafkaCommand,
     },
     /// Internal web apps behind browser SSO.
+    #[command(display_order = 27)]
     Web {
         #[command(subcommand)]
         command: WebCommand,
     },
     /// Open a local TCP forward to an authorized resource.
+    #[command(display_order = 28)]
     Tcp {
         resource: String,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.
@@ -329,12 +354,14 @@ enum Command {
         listen: Option<String>,
     },
     /// Administrative commands. These require the limen:admin role.
+    #[command(display_order = 30)]
     Admin {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
     },
     /// The management API: read policy documents and write resources, as an
     /// admin or as a bot with a policy_writer grant.
+    #[command(hide = true)]
     Manage {
         #[command(subcommand)]
         command: commands::manage::ManageCommand,
@@ -735,6 +762,17 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             | Command::Review { .. }
             | Command::Admin { .. }
             | Command::Manage { .. }
+            | Command::Connect { .. }
+            | Command::Conns { .. }
+            | Command::Ssh { .. }
+            | Command::Db { .. }
+            | Command::Redis { .. }
+            | Command::Mongo { .. }
+            | Command::Search { .. }
+            | Command::Mq { .. }
+            | Command::Kafka { .. }
+            | Command::Web { .. }
+            | Command::Tcp { .. }
     ) {
         ui::enable_busy();
     }

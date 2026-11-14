@@ -126,6 +126,8 @@ $ ssh ubuntu@orders-prod.limen
 ```
 
 ## Spinners and animation
+Every `✔` result grows into place (`·`, `•`, `✔`) in about a tenth of a second. The spinner also covers the lookups that `connect`, `db connect`, `redis connect`, `web`, `ssh` and the other protocol commands make before they open the connection; it never runs once the session is open.
+
 `limen doctor` shows a spinner while a check is slow and lists the checks one by one. Tables and details (`ls`, `requests`, `audit`, `status`, `show`) appear a line at a time, in at most 0.4 seconds, only on a terminal; piped output is unchanged and instant.
 
 The logo at the top of `limen`, `limen --help` and `limen login` wipes in over about a second. Any call to the proxy that takes more than a third of a second (in `ls`, `show`, `requests`, `audit`, `admin` and most other commands) shows a spinner named for it, such as `List resources`. Slow steps show a spinner on stderr after about a third of a second, with the elapsed time after five seconds, and finish with a result line. Nothing moves when stderr is not a terminal, when `TERM=dumb`, when `CI` is set, or when `LIMEN_NO_ANIMATION` is set; you then get one plain `›` line per step. `NO_COLOR` removes colour but not the spinner. Ctrl-C during a wait ends it cleanly and exits 130.

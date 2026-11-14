@@ -18,6 +18,12 @@ use crate::ui;
 
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
+    /// The management API: read policy documents and write resources, as an admin or as a bot
+    /// with a policy_writer grant. (Also `limen manage`, which stays for existing scripts.)
+    Manage {
+        #[command(subcommand)]
+        command: super::manage::ManageCommand,
+    },
     /// Validate and apply role, mapping, and resource YAML. Files or directories.
     Apply {
         #[arg(required = true)]
@@ -171,6 +177,8 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
     let (_, channel) = api::authenticated(proxy)?;
     let mut admin = AdminClient::new(channel);
     match command {
+        // Its own client and its own login check: bots may use it too.
+        AdminCommand::Manage { command } => super::manage::run(proxy, command).await?,
         AdminCommand::Apply {
             paths,
             dry_run,

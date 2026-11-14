@@ -185,7 +185,24 @@ fn draw_logo(speed: crate::settings::Speed) {
 
 // ---- messages -------------------------------------------------------------------
 
+/// `✔ message`. On a terminal with motion on, the mark grows into place over about 0.1 s
+/// (`·`, `•`, then `✔`, in the logo's teal turning green); the text is printed once, after.
 pub fn success(message: &str) {
+    if motion() && std::io::stdout().is_terminal() {
+        for (glyph, rgb) in [("·", (13, 148, 136)), ("•", (20, 184, 166))] {
+            let (r, g, b) = rgb;
+            anstream::print!(
+                "\r{} ",
+                paint(
+                    Style::new().fg_color(Some(Color::Rgb(RgbColor(r, g, b)))),
+                    glyph
+                )
+            );
+            let _ = std::io::stdout().flush();
+            std::thread::sleep(Duration::from_millis(45));
+        }
+        anstream::print!("\r");
+    }
     anstream::println!("{} {message}", green("✔"));
 }
 
