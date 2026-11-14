@@ -11,3 +11,9 @@ CREATE TABLE console_pins (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (username, kind, target)
 );
+
+-- The console counts failures in the last 24 hours per resource on every admin Resources and
+-- Overview load. These two tables had no index on `at`, so that was a scan each time. Partial,
+-- so they only hold the rows that are counted.
+CREATE INDEX db_statements_errors_at ON db_statements (at DESC) WHERE error_code IS NOT NULL;
+CREATE INDEX web_requests_5xx_at ON web_requests (at DESC) WHERE status >= 500;
