@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Policy change{% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/console/changes">Policy changes</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><span aria-current="page">{{ change.id }}</span></nav>
 <div class="page-head">
   <div>
     <h1>Policy change <span class="pill{% if change.state == "applied" %} ok{% else if change.state == "pending" %} warn{% else %}{% endif %} v-mid">{{ change.state }}</span></h1>
@@ -29,6 +30,19 @@
 <h2>Who gains standing access</h2>
 {% if change.gains.is_empty() %}<div class="card empty"><div>Nothing listed.</div></div>{% else %}
 <ul class="diff">{% for g in change.gains %}<li class="chg">+ {{ g }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if !diffs.is_empty() %}
+<h2>What changes <span class="count">{{ diffs.len() }}{% if diffs_more > 0 %} of {{ diffs.len() + diffs_more }}{% endif %}</span></h2>
+<p class="hint">Against the active policy. Documents are shown as the control plane holds them (JSON), so formatting and comments in the YAML source don't appear.</p>
+{% for d in diffs %}
+<div class="card docdiff">
+  <div class="docdiff-title mono">{{ d.title }}</div>
+  <pre class="docdiff-body" tabindex="0">{% for l in d.lines %}<span class="dl {% if l.op == '+' %}dl-add{% else if l.op == '-' %}dl-del{% else if l.op == '…' %}dl-skip{% endif %}"><span class="dl-op" aria-hidden="true">{{ l.op }}</span>{{ l.text }}
+</span>{% endfor %}</pre>
+</div>
+{% endfor %}
+{% if diffs_more > 0 %}<p class="hint">{{ diffs_more }} more documents are in "What it writes" below.</p>{% endif %}
 {% endif %}
 
 {% if !writes.is_empty() %}

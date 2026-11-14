@@ -386,28 +386,209 @@ pub async fn session(db: &Db, id: Uuid) -> Result<Option<SessionRow>, sqlx::Erro
 }
 
 /// Sessions per resource: (all time, active now).
-pub async fn session_counts_by_resource(
+/// What the sessions table says about one resource: how many sessions it has had, how many are
+/// open now, and when the latest one started.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResourceActivity {
+    pub total: i64,
+    pub active: i64,
+    pub last_started: Option<OffsetDateTime>,
+}
+
+/// Activity per resource name. With `username` set, only that person's sessions are counted, so a
+/// non-admin sees when *they* last used a resource and nothing about anyone else.
+pub async fn resource_activity(
     db: &Db,
-) -> Result<std::collections::HashMap<String, (i64, i64)>, sqlx::Error> {
+    username: Option<&str>,
+) -> Result<std::collections::HashMap<String, ResourceActivity>, sqlx::Error> {
     let rows = sqlx::query(concat!(
         "SELECT resource, count(*) AS total, count(*) FILTER (WHERE ",
         is_active!(),
-        ") AS active FROM sessions WHERE resource IS NOT NULL GROUP BY resource"
+        ") AS active, max(started_at) AS last_started FROM sessions
+         WHERE resource IS NOT NULL AND ($2::text IS NULL OR username = $2)
+         GROUP BY resource"
     ))
     .bind(ACTIVE_WINDOW_HOURS)
+    .bind(username)
     .fetch_all(db)
     .await?;
     rows.iter()
         .map(|r| {
             Ok((
                 r.try_get::<String, _>("resource")?,
-                (
-                    r.try_get::<i64, _>("total")?,
-                    r.try_get::<i64, _>("active")?,
-                ),
+                ResourceActivity {
+                    total: r.try_get("total")?,
+                    active: r.try_get("active")?,
+                    last_started: r.try_get("last_started")?,
+                },
             ))
         })
         .collect()
+}
+
+/// Favourites and saved views one person may keep.
+pub const FAVOURITE_LIMIT: i64 = 50;
+
+/// A favourite resource, or a saved view (a console address with its filters).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Favourite {
+    pub kind: String,
+    pub target: String,
+    pub label: String,
+}
+
+/// Someone's favourites and saved views, oldest first.
+pub async fn list_favourites(db: &Db, username: &str) -> Result<Vec<Favourite>, sqlx::Error> {
+    sqlx::query(
+        "SELECT kind, target, label FROM console_favourites WHERE username = $1 ORDER BY created_at, target",
+    )
+    .bind(username)
+    .fetch_all(db)
+    .await?
+    .iter()
+    .map(|r| {
+        Ok(Favourite {
+            kind: r.try_get("kind")?,
+            target: r.try_get("target")?,
+            label: r.try_get("label")?,
+        })
+    })
+    .collect()
+}
+
+/// Keep a favourite (or update its label if it is already kept). `false` when the person is at
+/// [`FAVOURITE_LIMIT`] and this would be one more.
+pub async fn add_favourite(
+    db: &Db,
+    username: &str,
+    kind: &str,
+    target: &str,
+    label: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    // One writer per person at a time, so two quick posts can't both pass the limit check.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!("console_favourites:{username}"))
+        .execute(&mut *tx)
+        .await?;
+    let updated = sqlx::query(
+        "UPDATE console_favourites SET label = $4 WHERE username = $1 AND kind = $2 AND target = $3",
+    )
+    .bind(username)
+    .bind(kind)
+    .bind(target)
+    .bind(label)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        let held: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM console_favourites WHERE username = $1")
+                .bind(username)
+                .fetch_one(&mut *tx)
+                .await?;
+        if held >= FAVOURITE_LIMIT {
+            return Ok(false);
+        }
+        sqlx::query(
+            "INSERT INTO console_favourites (username, kind, target, label) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(username)
+        .bind(kind)
+        .bind(target)
+        .bind(label)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// Drop a favourite. Not being there is fine.
+pub async fn remove_favourite(
+    db: &Db,
+    username: &str,
+    kind: &str,
+    target: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM console_favourites WHERE username = $1 AND kind = $2 AND target = $3")
+        .bind(username)
+        .bind(kind)
+        .bind(target)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// What went wrong on one resource in the last 24 hours, by where it was recorded. These are the
+/// same definitions the dashboards use: refused attempts, statements that came back with an error
+/// code, web responses of 500 and over, and Kubernetes API answers of 400 and over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResourceErrors {
+    pub denied: i64,
+    pub db: i64,
+    pub web: i64,
+    pub kube: i64,
+}
+
+impl ResourceErrors {
+    #[must_use]
+    pub fn total(self) -> i64 {
+        self.denied + self.db + self.web + self.kube
+    }
+}
+
+/// Errors in the last 24 hours, per resource name. Four grouped queries, not one per resource.
+pub async fn resource_errors(
+    db: &Db,
+) -> Result<std::collections::HashMap<String, ResourceErrors>, sqlx::Error> {
+    let mut out: std::collections::HashMap<String, ResourceErrors> =
+        std::collections::HashMap::new();
+    // An audit summary is `key=value` parts joined by two spaces; the resource is one of them.
+    let denied = sqlx::query(
+        "SELECT substring(summary from '(?:^|  )resource=([^ ]+)') AS r, count(*) AS n
+           FROM audit_events
+          WHERE kind = 'auth.denied' AND at >= now() - interval '24 hours'
+          GROUP BY 1",
+    )
+    .fetch_all(db)
+    .await?;
+    let by_db = sqlx::query(
+        "SELECT s.resource AS r, count(*) AS n
+           FROM db_statements d JOIN sessions s ON s.session_id = d.session_id
+          WHERE d.at >= now() - interval '24 hours' AND d.error_code IS NOT NULL
+            AND s.resource IS NOT NULL
+          GROUP BY 1",
+    )
+    .fetch_all(db)
+    .await?;
+    let by_web = sqlx::query(
+        "SELECT resource AS r, count(*) AS n FROM web_requests
+          WHERE at >= now() - interval '24 hours' AND status >= 500 GROUP BY 1",
+    )
+    .fetch_all(db)
+    .await?;
+    let by_kube = sqlx::query(
+        "SELECT cluster AS r, count(*) AS n FROM kube_requests
+          WHERE at >= now() - interval '24 hours' AND status >= 400 GROUP BY 1",
+    )
+    .fetch_all(db)
+    .await?;
+    let mut add = |rows: &[sqlx::postgres::PgRow], set: fn(&mut ResourceErrors, i64)| {
+        for row in rows {
+            if let Ok(Some(name)) = row.try_get::<Option<String>, _>("r") {
+                set(
+                    out.entry(name).or_default(),
+                    row.try_get("n").unwrap_or_default(),
+                );
+            }
+        }
+    };
+    add(&denied, |e, n| e.denied = n);
+    add(&by_db, |e, n| e.db = n);
+    add(&by_web, |e, n| e.web = n);
+    add(&by_kube, |e, n| e.kube = n);
+    Ok(out)
 }
 
 pub async fn active_session_count(db: &Db) -> Result<i64, sqlx::Error> {

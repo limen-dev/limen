@@ -58,6 +58,7 @@ Each ADR's status line gives its approval date.
 | [0051](0051-policy-replay.md) | Replay recorded sessions against a policy change: active versus proposed on the same reconstructed requests, one decision engine, aggregates only, audited and admin-only | Accepted |
 | [0052](0052-requests-command-group.md) | One `limen requests` group for listing, approving, denying and cancelling access requests; old top-level verbs kept as hidden aliases | Accepted |
 | [0053](0053-scheduled-self-test.md) | Scheduled self-test and controls report: a test principal no issuer will vouch for, checks named by the path they exercise, a signed self-attestation anchored in the audit trail, skipped never a pass | Proposed |
-| [0054](0054-motion-in-the-cli-and-console.md) | Motion in the CLI and console: a scroll cue for the sidebar, spinners that end in a result, Ctrl-C-safe waits, optional view transitions; short, reduced-motion safe, never on stdout | Proposed |
+| [0054](0054-motion-in-the-cli-and-console.md) | Motion in the CLI and console: a scroll cue for the sidebar, spinners that end in a result, Ctrl-C-safe waits, optional view transitions; short, reduced-motion safe, never on stdout | Accepted |
+| [0055](0055-console-resource-ux.md) | Console resources and navigation: connect first, status and last use on every resource, tabs, relative times, an attention card, a command palette; no new state, no inline script | Accepted |
 
 ADR-0013 and ADR-0014 are marked Accepted because the owner decided them directly during Phase 0 clarification. ADR-0018 to ADR-0022 and ADR-0025 to ADR-0032 were requested by the owner on 2026-10-14 and initially marked `Proposed`; ADR-0022 was accepted when the owner approved its Phase 12 implementation defaults.

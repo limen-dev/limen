@@ -208,7 +208,9 @@ body.plain { display: grid; place-items: center; min-height: 100vh; padding: 24p
 
 /* ---- responsive ---- */
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
+  /* The menu row is as tall as its content; the page takes what is left. Without the rows, a page
+     shorter than the screen split the spare height with the menu and left a gap above its title. */
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--border); }
   .brand { padding: 0 8px 0 0; }
   .nav { flex-direction: row; flex-wrap: wrap; }
@@ -762,16 +764,18 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   .sidebar-foot { flex: none; margin-top: 0; }
   /* Collapsed: a narrow column of icons, and the page uses the room the sidebar gave up. Every
      rule is scoped to the sidebar and the shell, because the flag sits on <html> and the sign-in
-     page has its own theme buttons and logo that must not change. The icons stay where they are, so
-     only the width moves. */
+     page has its own theme buttons and logo that must not change. Everything in it is centred on one line. */
   .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { white-space: nowrap; transition: opacity .15s ease; }
   html[data-sidebar="collapsed"] .shell { grid-template-columns: 60px minmax(0, 1fr); }
   html[data-sidebar="collapsed"] .shell .main { max-width: 100vw; }
-  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: flex-start; gap: 0; }
-  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; }
-  /* Icons only. The names stay in the page for screen readers and as tooltips (set by console.js). */
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: center; gap: 4px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; width: 100%; justify-content: center; gap: 0; padding: 6px 0 4px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-toggle { margin: 0 auto; }
+  html[data-sidebar="collapsed"] .sidebar .nav a { justify-content: center; gap: 0; padding: 8px 0; }
+  /* Icons only, each one centred in the column. The names leave the layout (so they push nothing
+     sideways) but stay in the page for screen readers and as tooltips (set by console.js). */
   html[data-sidebar="collapsed"] .sidebar .brand span,
-  html[data-sidebar="collapsed"] .sidebar .nav a span { opacity: 0; }
+  html[data-sidebar="collapsed"] .sidebar .nav a span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   html[data-sidebar="collapsed"] .sidebar .me-text { display: none; }
   /* Group labels have no room; the groups stay apart by a rule, and all their links show. */
   html[data-sidebar="collapsed"] .sidebar .nav-toggle { display: none; }
@@ -807,6 +811,182 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   table.history td[data-label]::before { content: attr(data-label); flex: none; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
 }
 
+/* ---- resources: sort, status, connect, tabs (ADR-0055) ---- */
+th.actions { position: relative; } /* so a hidden header label stays in its cell, not at the far end of the page */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.head-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.head-tools form { margin: 0; }
+.sort label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.icon-btn { background: none; border: 0; color: var(--text-3); padding: 4px; border-radius: 6px; display: inline-grid; }
+.icon-btn:hover { color: var(--text); background: var(--sunken); }
+.icon-btn.done { color: var(--ok); }
+.attention-toggle { display: inline-flex; align-items: center; gap: 7px; }
+.attention-toggle .i { color: var(--warn); }
+.crumbs { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; font-size: 13px; color: var(--text-3); }
+.crumbs a { color: var(--text-3); display: inline-flex; align-items: center; min-height: 24px; }
+.crumbs a:hover { color: var(--text); }
+.crumbs .i { width: 14px; height: 14px; }
+.crumbs [aria-current="page"] { color: var(--text-2); overflow-wrap: anywhere; }
+.status-strip { display: flex; flex-wrap: wrap; gap: 8px 32px; align-items: center; padding: 12px 20px; margin-bottom: 20px; }
+.status-strip > div { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.status-strip .muted { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.status-strip .strip-links { flex-direction: row; flex-wrap: wrap; gap: 4px 18px; margin-left: auto; }
+.strip-links a { display: inline-flex; align-items: center; min-height: 24px; }
+.connect-card { padding: 16px 20px; margin-bottom: 20px; }
+.connect-card p { margin: 0; }
+.connect-card .hint { margin-top: 10px; }
+.connect-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.connect-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.connect-as { display: inline-flex; align-items: center; gap: 6px; min-width: 120px; }
+.connect-list .cmd { max-width: 100%; }
+.connect-list .cmd code { overflow-wrap: anywhere; }
+.detail-tabs { margin-top: 24px; }
+@media (pointer: coarse) { .icon-btn { min-width: 44px; min-height: 44px; place-items: center; } .crumbs a { display: inline-flex; align-items: center; min-height: 44px; } }
+
+/* ---- overview: needs you, continue (ADR-0055) ---- */
+.attention { padding: 14px 20px; margin: 18px 0 22px; border-color: var(--warn-soft); }
+.attention h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
+.attention h2 .i { color: var(--warn); }
+.attention ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.attention li a { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--text); max-width: 100%; }
+.attention .pill { white-space: normal; }
+.attention li a:hover { text-decoration: none; }
+.attention li a:hover .pill { filter: brightness(.95); }
+.attention li .i { color: var(--text-3); }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 8px; }
+/* A card on the Overview: who it is on one line (icon, name, what it is, the star on the right),
+   how to get in on the next, always the same two rows so a grid of them lines up. */
+.fav-card { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fav-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.fav-id { flex: 1; min-width: 0; }
+.fav-id .cell-main { display: block; min-height: 24px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fav-id .cell-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fav-head .fav-form { flex: none; display: flex; }
+.fav-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 38px; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 10px; color: var(--text); }
+.fav-cmd code { flex: 1; min-width: 0; background: none; border: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.fav-cmd button { flex: none; background: none; border: 0; color: var(--text-3); cursor: pointer; padding: 6px; border-radius: 6px; display: grid; }
+.fav-cmd button:hover { color: var(--text); background: var(--surface); }
+.fav-cmd button.done { color: var(--ok); }
+a.fav-choose { justify-content: space-between; padding: 3px 10px; font-weight: 500; color: var(--accent-text); }
+a.fav-choose:hover { text-decoration: none; border-color: var(--accent); background: var(--accent-soft); }
+.fav-none { color: var(--text-3); font-size: 13px; padding-left: 10px; }
+@media (pointer: coarse) { .attention li a, .fav-id .cell-main, .strip-links a { min-height: 44px; min-width: 44px; } .fav-cmd { min-height: 44px; } .fav-cmd button { min-width: 44px; min-height: 44px; place-items: center; } }
+
+/* ---- command palette (ADR-0055) ---- */
+.palette-open { display: none; width: 100%; justify-content: flex-start; gap: 10px; color: var(--text-2); font-weight: 500; }
+html.js .palette-open { display: flex; }
+.palette-open kbd { margin-left: auto; font-size: 11px; color: var(--text-3); }
+.palette-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(10, 13, 20, .55); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; }
+.palette-backdrop[hidden] { display: none; }
+.palette { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 16px 48px rgba(0, 0, 0, .3); overflow: hidden; }
+.palette-input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 14px 16px; font-size: 15px; background: transparent; color: var(--text); }
+.palette-input:focus-visible { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -2px; }
+.palette-list { list-style: none; margin: 0; padding: 6px; max-height: min(50vh, 420px); overflow: auto; }
+.palette-list li a { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 8px; color: var(--text); }
+.palette-list li a:hover { text-decoration: none; }
+.palette-list li.on a { background: var(--accent-soft); color: var(--accent-text); }
+.palette-kind { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.palette-none { padding: 14px 10px; color: var(--text-3); }
+.palette-hint { padding: 8px 14px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
+@media (pointer: coarse) { .palette-list li a { min-height: 44px; align-items: center; } }
+@media (min-width: 901px) {
+  html[data-sidebar="collapsed"] .sidebar .palette-open span, html[data-sidebar="collapsed"] .sidebar .palette-open kbd { display: none; }
+  html[data-sidebar="collapsed"] .sidebar .palette-open { justify-content: center; }
+}
+@media (max-width: 900px) { .palette-open { display: none !important; } }
+
+/* ---- session page: related links, share ---- */
+.related { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: -8px 0 18px; font-size: 13.5px; }
+.related a { display: inline-flex; align-items: center; min-height: 24px; }
+.related button.icon-text { padding: 3px 10px; font-size: 13px; }
+.related button.done { color: var(--ok); border-color: var(--ok); }
+@media (pointer: coarse) { .related a { min-height: 44px; min-width: 44px; } }
+
+/* ---- refresh note, row marker ---- */
+.refresh-note { color: var(--text-3); font-size: 12px; padding-top: 18px; }
+.refresh-note button.link { background: none; border: 0; padding: 2px 4px; margin-left: 4px; color: var(--accent-text); font-size: 12px; font-weight: 500; cursor: pointer; min-height: 24px; }
+tbody tr.row-on td { background: var(--accent-soft); }
+tbody tr.row-on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+@media (pointer: coarse) { .refresh-note button.link { min-height: 44px; min-width: 44px; } }
+
+/* ---- favourites and saved views (ADR-0055) ---- */
+form.fav-form { display: inline; margin: 0; }
+.icon-btn.favourite, button.favourite { color: var(--warn); }
+.icon-btn.favourite .i, button.favourite .i { fill: currentColor; }
+button.icon-text { display: inline-flex; align-items: center; gap: 6px; }
+.saved-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 0 0 16px; }
+.saved-title { color: var(--text-3); font-size: 13px; font-weight: 550; }
+.saved-views { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.saved-row .saved-views { margin: 0; }
+/* One saved view: the page's icon and the name you gave it, then a quiet remove button behind a rule. */
+.saved-views li { display: inline-flex; align-items: stretch; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); transition: border-color .15s; }
+.saved-views li:hover { border-color: var(--accent); }
+.saved-views li a { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 34px; padding: 0 10px 0 11px; color: var(--text); border-radius: 7px 0 0 7px; }
+.saved-views li a:hover { text-decoration: none; color: var(--accent-text); }
+.saved-views li a .i { color: var(--text-3); flex: none; }
+.saved-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.saved-page { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.saved-views li .fav-form { display: flex; border-left: 1px solid var(--border); }
+.saved-views li .icon-btn { border-radius: 0 7px 7px 0; padding: 0 8px; align-content: center; }
+.saved-views li .icon-btn:hover { background: var(--bad-soft); color: var(--bad); }
+.save-view { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 18px; }
+.save-view[hidden] { display: none; }
+.save-view label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.save-view input[type=text] { width: 200px; }
+@media (pointer: coarse) { .saved-views li a { min-height: 44px; } .saved-views li .icon-btn { min-width: 44px; } }
+
+/* ---- bulk end sessions ---- */
+details.bulk { margin: 16px 0; }
+details.bulk summary { cursor: pointer; font-weight: 550; padding: 6px 0; }
+.bulk-form { display: grid; gap: 10px; padding: 12px 0; }
+.bulk-form p { margin: 0; }
+.bulk-tools { display: flex; gap: 8px; }
+.bulk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 320px; overflow: auto; }
+.bulk-list label { display: flex; align-items: center; gap: 10px; }
+.bulk-list input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+@media (pointer: coarse) { .bulk-list label { min-height: 44px; } }
+
+/* ---- policy change: document diffs ---- */
+.docdiff { margin-bottom: 14px; overflow: hidden; }
+.docdiff-title { padding: 8px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.docdiff-body { margin: 0; padding: 8px 0; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; max-height: 480px; }
+.dl { display: block; padding: 0 14px; white-space: pre; }
+.dl-op { display: inline-block; width: 1.5em; color: var(--text-3); user-select: none; }
+.dl-add { background: var(--ok-soft); color: var(--ok); }
+.dl-del { background: var(--bad-soft); color: var(--bad); }
+.dl-skip { color: var(--text-3); font-style: italic; }
+
+.check-access { padding: 14px 18px; margin-bottom: 18px; display: grid; gap: 8px; }
+.check-access .row input { width: 260px; max-width: 100%; }
+.end-form { margin-left: 8px; }
+
+.js-only { display: none; }
+html.js .js-only { display: inline-flex; }
+.msg-actions { justify-content: center; margin-top: 14px; }
+.msg .hint { margin: 6px 0 0; }
+
+.empty a { text-decoration: underline; display: inline-flex; align-items: center; min-height: 24px; }
+.status-strip a { display: inline-flex; align-items: center; min-height: 24px; }
+@media (pointer: coarse) { .empty a, .status-strip a { min-height: 44px; min-width: 44px; justify-content: center; } }
+
+/* Build your command */
+.builder { padding: 16px 20px; margin-bottom: 20px; }
+.builder h2 { margin: 0 0 4px; font-size: 16px; }
+.builder > .hint { margin: 0 0 12px; }
+.builder-form { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; margin-bottom: 14px; }
+.builder-form > button { margin-top: 23px; }
+.builder-form .field { display: grid; gap: 4px; min-width: 180px; max-width: 100%; }
+.builder-form .field > span:first-child { font-size: 13px; color: var(--text-2); }
+.builder-form .field .hint { max-width: 280px; }
+.builder .built { margin: 4px 0 10px; }
+.builder .built .cmd { max-width: 100%; }
+.builder .built .cmd code { overflow-wrap: anywhere; }
+.builder-problem { color: var(--bad); margin: 4px 0 10px; font-size: 14px; }
+.builder .hint { margin: 4px 0 10px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; margin: 10px 0 0; }
+.facts div { min-width: 0; }
+.facts dt { font-size: 12px; color: var(--text-3); text-transform: none; }
+.facts dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 /* Page changes cross-fade instead of blinking. The sidebar has its own name, so it stays where it is
    and only the content changes: a click reads as a new page, not a reload. Browsers without view
    transitions ignore all of this. The default fade is 0.25 s; 0.15 s keeps a click feeling instant. */
@@ -848,3 +1028,24 @@ main:not(.refreshed) :is(.stats > :nth-child(n+5), tbody tr:nth-child(n+5)) { an
   }
   @view-transition { navigation: none; }
 }
+
+/* The kind filters, the favourites toggle and the attention toggle wrap onto the next line when the
+   window is too narrow for them, instead of scrolling sideways. */
+.tabs.kinds { flex-wrap: wrap; overflow: visible; max-width: 100%; }
+.tabs.kinds a { flex: none; }
+
+/* How to get in, on the Resources list: the command with its copy button, or a link to where each
+   choice has its own command. A column for members; for admins, whose table is already wide, a copy
+   button (or an arrow to the builder) in the actions cell, and only when their own roles open it. */
+.connect-cell { min-width: 150px; }
+.cmd { max-width: 100%; }
+.connect-cell .cmd { align-items: flex-start; }
+.connect-cell .cmd code { overflow-wrap: anywhere; min-width: 0; padding-top: 2px; }
+a.choose-link { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; font-weight: 500; }
+a.choose-link:hover { text-decoration: none; }
+a.choose-link .i { flex: none; }
+@media (pointer: coarse) { a.choose-link { min-height: 44px; } }
+
+/* A narrow numeric column whose header may wrap ("Errors" over "24 h") instead of setting the width. */
+th.wrap-head { white-space: normal; width: 1%; }
+.nobr { white-space: nowrap; }

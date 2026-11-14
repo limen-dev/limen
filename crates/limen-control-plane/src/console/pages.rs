@@ -13,9 +13,14 @@ use limen_core::names::NAME_LABEL;
 use limen_policy::Document;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
+use super::connect_builder;
+use super::favourites;
 use super::query;
+use super::resource_ui::{self, ResourceSort};
 use super::store::{self, SessionFilter};
 use super::views::{
     self, AuditPage, BotView, BotsPage, Chip, Chrome, ComponentView, EventView, HitView, Home,
@@ -174,7 +179,15 @@ fn notice(code: Option<&str>) -> Option<&'static str> {
         "unlocked" => "User unlocked.",
         "deleted" => "User deleted. Their sessions and audit history stay.",
         "killed" => "The session will end within about 11 seconds.",
+        "killed_many" => "The selected sessions will end within about 11 seconds.",
+        "killed_some" => {
+            "Some of the selected sessions were ended; the rest had already ended or could not be."
+        }
         "revoked" => "Revoked. Proxies drop its tunnels within about 10 seconds.",
+        "revoked_many" => "Revoked. Proxies drop their tunnels within about 10 seconds.",
+        "revoked_some" => {
+            "Some of the selected components were revoked; the rest were already revoked or could not be."
+        }
         _ => return None,
     })
 }
@@ -226,6 +239,283 @@ pub async fn signin() -> Response {
 
 // ---- overview ------------------------------------------------------------------------
 
+/// What is waiting for this viewer, most urgent first. Each line links to where it is dealt with.
+/// Counts are of things the viewer may already see on those pages; a line with nothing behind it
+/// is left out, so an empty card is no card.
+async fn attention_items(
+    state: &AppState,
+    auth: &Auth,
+    overview: &Stats,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let mut items = Vec::new();
+    // A console session that is about to end loses an unsaved form and the page you were on.
+    let left = auth.expires_at - time::OffsetDateTime::now_utc();
+    if left < time::Duration::minutes(30) {
+        let minutes = usize::try_from(left.whole_minutes().max(0)).unwrap_or(0);
+        items.push(views::AttentionItem {
+            text: format!(
+                "Your console session ends in {}. Sign in again to keep working",
+                plural(minutes, "minute", "minutes")
+            ),
+            href: "/console/login".to_owned(),
+            tone: "warn",
+        });
+    }
+    if auth.is_admin {
+        items.extend(admin_attention(state, overview).await?);
+    }
+    items.extend(approval_attention(state, auth).await?);
+    Ok(items)
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Admins: resources no worker serves, and disabled accounts.
+async fn admin_attention(
+    state: &AppState,
+    overview: &Stats,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let mut items = Vec::new();
+    let (components, tunnels) = db::list_components(&state.db)
+        .await
+        .map_err(|e| db_error("listing components", &e))?;
+    let loaded = state.policy.current();
+    let down = loaded
+        .policy
+        .documents()
+        .iter()
+        .filter_map(|d| match d {
+            Document::Resource(r) => Some(r),
+            _ => None,
+        })
+        .filter(|r| {
+            views::Health::of(&matching_workers(
+                &components,
+                &tunnels,
+                &r.spec.worker_selector,
+            ))
+            .needs_attention()
+        })
+        .count();
+    if down > 0 {
+        items.push(views::AttentionItem {
+            text: format!(
+                "{} without a connected worker, so sessions will fail",
+                plural(down, "resource", "resources")
+            ),
+            href: "/console/resources?sort=attention&attention=1".to_owned(),
+            tone: "bad",
+        });
+    }
+    if overview.locked > 0 {
+        items.push(views::AttentionItem {
+            text: format!(
+                "{} disabled",
+                plural(overview.locked, "account", "accounts")
+            ),
+            href: "/console/users".to_owned(),
+            tone: "warn",
+        });
+    }
+    Ok(items)
+}
+
+/// Policy changes, access reviews and access requests that wait for this viewer, and their own
+/// requests that still wait for someone else.
+async fn approval_attention(
+    state: &AppState,
+    auth: &Auth,
+) -> Result<Vec<views::AttentionItem>, Response> {
+    let mut items = Vec::new();
+    if auth.sees_changes {
+        let waiting = super::policy_edit::waiting_for(state, auth).await;
+        if waiting > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} waiting for your review",
+                    plural(waiting, "policy change", "policy changes")
+                ),
+                href: "/console/changes".to_owned(),
+                tone: "warn",
+            });
+        }
+    }
+    if auth.sees_reviews {
+        let who = crate::reviews::Who {
+            username: &auth.username,
+            is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            via: "console",
+        };
+        let open = crate::reviews::list(state, &who, false)
+            .await
+            .map_err(|s| action_error(&s))?
+            .iter()
+            .filter(|r| r.status != "complete")
+            .count();
+        if open > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} with items for you",
+                    plural(open, "open access review", "open access reviews")
+                ),
+                href: "/console/reviews".to_owned(),
+                tone: "warn",
+            });
+        }
+    }
+    if auth.sees_access {
+        let who = crate::access::Who {
+            username: &auth.username,
+            is_admin: auth.is_admin,
+            is_auditor: auth.is_auditor,
+            via: "console",
+        };
+        let count = |scope: &'static str, status: &'static str, decidable: bool| async move {
+            crate::access::list_requests(
+                state,
+                &who,
+                &limen_proto::v1::ListAccessRequestsRequest {
+                    scope: scope.into(),
+                    status: status.into(),
+                    limit: 100,
+                },
+            )
+            .await
+            .map(|v| v.iter().filter(|r| !decidable || r.can_decide).count())
+            .map_err(|s| action_error(&s))
+        };
+        let waiting = count("approvable", "", true).await?;
+        if waiting > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} waiting for your decision",
+                    plural(waiting, "access request", "access requests")
+                ),
+                href: "/console/access?tab=approvals".to_owned(),
+                tone: "warn",
+            });
+        }
+        let mine = count("mine", "pending", false).await?;
+        if mine > 0 {
+            items.push(views::AttentionItem {
+                text: format!(
+                    "{} still waiting for an approver",
+                    plural(
+                        mine,
+                        "access request of yours is",
+                        "access requests of yours are"
+                    )
+                ),
+                href: "/console/access".to_owned(),
+                tone: "",
+            });
+        }
+    }
+    Ok(items)
+}
+
+/// The viewer's favourite resources (only those they can still open) and saved views.
+async fn favourites_and_saved(
+    state: &AppState,
+    auth: &Auth,
+    reachable: &[ResourceView],
+) -> Result<(Vec<views::FavouriteResource>, Vec<views::SavedView>), Response> {
+    let saved_items = store::list_favourites(&state.db, &auth.username)
+        .await
+        .map_err(|e| db_error("reading your favourites", &e))?;
+    // Health is worker state, which is admin-only.
+    let workers = if auth.is_admin {
+        Some(
+            db::list_components(&state.db)
+                .await
+                .map_err(|e| db_error("listing components", &e))?,
+        )
+    } else {
+        None
+    };
+    let loaded = state.policy.current();
+    let mut resources = Vec::new();
+    let mut saved = Vec::new();
+    for item in saved_items {
+        if item.kind == "view" {
+            let (page, icon) = favourites::view_page(&item.target);
+            saved.push(views::SavedView {
+                label: item.label,
+                href: item.target,
+                page,
+                icon,
+            });
+            continue;
+        }
+        // A resource that has gone from policy is skipped; so is one a member can no longer open.
+        let Some(res) = loaded.policy.resource(&item.target) else {
+            continue;
+        };
+        let mine = reachable.iter().find(|r| r.name == item.target);
+        if !auth.is_admin && mine.is_none() {
+            continue;
+        }
+        let kind = spec_kind(&res.spec);
+        let (icon, kclass) = views::kind_icon(kind);
+        let health = workers.as_ref().map(|(components, tunnels)| {
+            views::Health::of(&matching_workers(
+                components,
+                tunnels,
+                &res.spec.worker_selector,
+            ))
+        });
+        resources.push(views::FavouriteResource {
+            name: item.target.clone(),
+            path: path_segment(&item.target),
+            kind: kind.to_owned(),
+            icon,
+            kclass,
+            connect: mine.map(|m| views::card_connect(kind, &item.target, &m.principals)),
+            health,
+        });
+    }
+    Ok((resources, saved))
+}
+
+/// The resources the viewer used last, among those they can still open. Only their own sessions
+/// count, for admins too: this is "where *you* left off".
+async fn recent_resources(
+    state: &AppState,
+    auth: &Auth,
+    reachable: &[ResourceView],
+) -> Result<Vec<views::RecentResource>, Response> {
+    let used = store::resource_activity(&state.db, Some(&auth.username))
+        .await
+        .map_err(|e| db_error("reading your recent resources", &e))?;
+    let mut recent: Vec<views::RecentResource> = reachable
+        .iter()
+        .filter(|r| r.connect.planned.is_none())
+        .filter_map(|r| {
+            let at = used.get(&r.name)?.last_started?;
+            Some(views::RecentResource {
+                name: r.name.clone(),
+                path: r.path.clone(),
+                kind: r.kind.clone(),
+                icon: r.icon,
+                kclass: r.kclass,
+                connect: views::card_connect(&r.kind, &r.name, &r.principals),
+                last: views::Stamp::of(at),
+            })
+        })
+        .collect();
+    recent.sort_by(|a, b| {
+        b.last
+            .iso
+            .cmp(&a.last.iso)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    recent.truncate(4);
+    Ok(recent)
+}
+
 pub async fn home(
     State(state): State<AppState>,
     auth: Auth,
@@ -235,7 +525,7 @@ pub async fn home(
         Ok(r) => r,
         Err(r) => return r,
     };
-    let resources = reach
+    let resources: Vec<ResourceView> = reach
         .into_iter()
         .map(|r| ResourceView {
             connect: views::connect_for(r.kind.as_str(), &r.name),
@@ -293,6 +583,18 @@ pub async fn home(
             Err(e) => return db_error("counting for the overview", &e),
         }
     }
+    let attention = match attention_items(&state, &auth, &overview).await {
+        Ok(items) => items,
+        Err(r) => return r,
+    };
+    let recent = match recent_resources(&state, &auth, &resources).await {
+        Ok(items) => items,
+        Err(r) => return r,
+    };
+    let (favourites, saved) = match favourites_and_saved(&state, &auth, &resources).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
     html(
         Home {
             chrome: chrome(&state, &auth, "home"),
@@ -302,6 +604,10 @@ pub async fn home(
             sessions,
             roles_text: format!("the roles {}", list_text(&auth.roles)),
             expires: time_text(Some(auth.expires_at)),
+            attention,
+            recent,
+            favourites,
+            saved,
         }
         .render(),
     )
@@ -370,6 +676,9 @@ fn matching_workers(
 pub struct ResourcesQuery {
     kind: Option<String>,
     q: Option<String>,
+    sort: Option<String>,
+    attention: Option<String>,
+    favourites: Option<String>,
 }
 
 /// Every `label=key=value` in the query string (repeatable; a value may contain commas).
@@ -383,53 +692,50 @@ fn label_filters(raw: Option<&str>) -> Vec<String> {
     labels
 }
 
-/// A `/console/resources` link for one filter combination, so every filter is shareable.
-fn resources_href(kind: Option<&str>, q: &str, labels: &[String]) -> String {
-    let mut ser = url::form_urlencoded::Serializer::new(String::new());
-    if let Some(k) = kind {
-        ser.append_pair("kind", k);
-    }
-    if !q.is_empty() {
-        ser.append_pair("q", q);
-    }
-    for l in labels {
-        ser.append_pair("label", l);
-    }
-    let query = ser.finish();
-    if query.is_empty() {
-        "/console/resources".to_owned()
-    } else {
-        format!("/console/resources?{query}")
-    }
-}
-
-pub async fn resources(
-    State(state): State<AppState>,
-    auth: Auth,
-    Query(q): Query<ResourcesQuery>,
-    RawQuery(raw): RawQuery,
-) -> Response {
+/// Every resource the viewer may see, with what the list shows about each. Admins see every
+/// resource and everyone's activity; anyone else sees only what their roles open and only their
+/// own last use. Filters and sorting come after this, so they can't reveal anything.
+async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>, Response> {
     let loaded = state.policy.current();
     let (components, tunnels) = if auth.is_admin {
         match db::list_components(&state.db).await {
             Ok(pair) => pair,
-            Err(e) => return db_error("listing components", &e),
+            Err(e) => return Err(db_error("listing components", &e)),
         }
     } else {
         (Vec::new(), Vec::new())
     };
-    let counts = if auth.is_admin {
-        store::session_counts_by_resource(&state.db)
+    // Admins see everyone's sessions; anyone else only learns when they last used a resource.
+    let activity = match store::resource_activity(
+        &state.db,
+        (!auth.is_admin).then_some(auth.username.as_str()),
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => return Err(db_error("counting sessions per resource", &e)),
+    };
+    // What went wrong in the last day is audit data: admins only.
+    let errors = if auth.is_admin {
+        store::resource_errors(&state.db)
             .await
-            .unwrap_or_default()
+            .map_err(|e| db_error("counting errors per resource", &e))?
     } else {
         std::collections::HashMap::new()
     };
     // Admins see every resource; everyone else only what their roles allow.
-    let accessible = match reachable_for(&state, &auth).await {
+    let accessible = match reachable_for(state, auth).await {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(r) => return Err(r),
     };
+    let favourite_names: std::collections::HashSet<String> =
+        store::list_favourites(&state.db, &auth.username)
+            .await
+            .map_err(|e| db_error("reading your favourites", &e))?
+            .into_iter()
+            .filter(|p| p.kind == "resource")
+            .map(|p| p.target)
+            .collect();
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
@@ -440,14 +746,18 @@ pub async fn resources(
         }
         let kind = spec_kind(&r.spec);
         let (icon, kclass) = views::kind_icon(kind);
-        let (total, active) = counts.get(&name).copied().unwrap_or((0, 0));
+        let seen = activity.get(&name).copied().unwrap_or_default();
+        let workers = auth
+            .is_admin
+            .then(|| matching_workers(&components, &tunnels, &r.spec.worker_selector));
         rows.push(ResourceRow {
             roles: if auth.is_admin {
                 access_roles(&loaded.policy, &name)
             } else {
                 Vec::new()
             },
-            workers: matching_workers(&components, &tunnels, &r.spec.worker_selector).len(),
+            workers: workers.as_ref().map_or(0, Vec::len),
+            health: workers.as_deref().map(views::Health::of),
             labels: r
                 .metadata
                 .labels
@@ -461,14 +771,36 @@ pub async fn resources(
                 String::new()
             },
             path: path_segment(&name),
+            // Only what the viewer can open gets a command to copy.
+            connect: mine
+                .filter(|_| views::connect_for(kind, &name).planned.is_none())
+                .map(|m| views::card_connect(kind, &name, &m.principals)),
+            last_used: seen.last_started.map(views::Stamp::of),
+            errors: errors.get(&name).copied().unwrap_or_default().total(),
+            errors_text: views::errors_text(errors.get(&name).copied().unwrap_or_default()),
+            favourite: favourite_names.contains(&name),
             name,
             kind: kind.to_owned(),
             icon,
             kclass,
-            sessions: total,
-            active,
+            // Counts of everyone's sessions are admin-only; the query above is scoped otherwise.
+            sessions: if auth.is_admin { seen.total } else { 0 },
+            active: if auth.is_admin { seen.active } else { 0 },
         });
     }
+    Ok(rows)
+}
+
+pub async fn resources(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<ResourcesQuery>,
+    RawQuery(raw): RawQuery,
+) -> Response {
+    let mut rows = match resource_rows(&state, &auth).await {
+        Ok(rows) => rows,
+        Err(r) => return r,
+    };
     // Filters apply after access control, so a filter can't reveal anything.
     let needle =
         q.q.as_deref()
@@ -477,17 +809,59 @@ pub async fn resources(
     let kind_filter = q.kind.clone().filter(|k| !k.is_empty());
     let label_filter = label_filters(raw.as_deref());
     let query_text = q.q.clone().unwrap_or_default();
+    let sort = ResourceSort::parse(q.sort.as_deref(), auth.is_admin);
+    // Worker health is admin-only, so the filter is too.
+    let attention = auth.is_admin && q.attention.as_deref() == Some("1");
+    let favourites_only = q.favourites.as_deref() == Some("1");
+    let total = rows.len();
+    let favourite_count = rows.iter().filter(|r| r.favourite).count();
+    let attention_count = rows.iter().filter(|r| r.needs_attention()).count();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
     kinds.dedup();
     rows.retain(|r| {
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
             && label_filter.iter().all(|l| r.labels.contains(l))
+            && (!attention || r.needs_attention())
+            && (!favourites_only || r.favourite)
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
             })
     });
+    sort_rows(&mut rows, sort);
+    // Favourites come first whatever the sort is; the sort still orders each group (the sort above
+    // is stable under this one).
+    rows.sort_by_key(|r| !r.favourite);
+    let filters = |kind: Option<&str>, labels: &[String], attention: bool| {
+        resource_ui::Filters {
+            kind,
+            q: &query_text,
+            labels,
+            sort,
+            attention,
+            favourites: favourites_only,
+        }
+        .href()
+    };
+    let here = filters(kind_filter.as_deref(), &label_filter, attention);
+    let saved: Vec<views::SavedView> = match store::list_favourites(&state.db, &auth.username).await
+    {
+        Ok(p) => p
+            .into_iter()
+            .filter(|p| p.kind == "view" && p.target.starts_with("/console/resources"))
+            .map(|p| {
+                let (page, icon) = favourites::view_page(&p.target);
+                views::SavedView {
+                    label: p.label,
+                    href: p.target,
+                    page,
+                    icon,
+                }
+            })
+            .collect(),
+        Err(e) => return db_error("reading your saved views", &e),
+    };
     html(
         ResourcesPage {
             chrome: chrome(&state, &auth, "resources"),
@@ -496,7 +870,7 @@ pub async fn resources(
                 .map(|k| {
                     let (icon, kclass) = views::kind_icon(&k);
                     KindTab {
-                        href: resources_href(Some(&k), &query_text, &label_filter),
+                        href: filters(Some(&k), &label_filter, attention),
                         current: kind_filter.as_deref() == Some(k.as_str()),
                         icon,
                         kclass,
@@ -505,26 +879,49 @@ pub async fn resources(
                 })
                 .collect(),
             all_selected: kind_filter.is_none(),
-            all_href: resources_href(None, &query_text, &label_filter),
+            all_href: filters(None, &label_filter, attention),
             active_labels: label_filter
                 .iter()
                 .map(|l| LabelLink {
                     text: l.clone(),
-                    href: resources_href(
+                    href: filters(
                         kind_filter.as_deref(),
-                        &query_text,
                         &label_filter
                             .iter()
                             .filter(|o| *o != l)
                             .cloned()
                             .collect::<Vec<_>>(),
+                        attention,
                     ),
                 })
                 .collect(),
-            clear_href: resources_href(kind_filter.as_deref(), &query_text, &[]),
+            clear_href: filters(kind_filter.as_deref(), &[], attention),
             kind_value: kind_filter.clone().unwrap_or_default(),
             label_values: label_filter.clone(),
             query: query_text.clone(),
+            sorts: sort.options(auth.is_admin),
+            sort_value: if sort == ResourceSort::Name {
+                String::new()
+            } else {
+                sort.value().to_owned()
+            },
+            attention_on: attention,
+            attention_href: filters(kind_filter.as_deref(), &label_filter, !attention),
+            attention_count,
+            favourites_on: favourites_only,
+            favourites_href: resource_ui::Filters {
+                kind: kind_filter.as_deref(),
+                q: &query_text,
+                labels: &label_filter,
+                sort,
+                attention,
+                favourites: !favourites_only,
+            }
+            .href(),
+            favourite_count,
+            saved,
+            here,
+            total,
             rows: rows
                 .into_iter()
                 .map(|r| {
@@ -538,7 +935,7 @@ pub async fn resources(
                             }
                             LabelLink {
                                 text: l.clone(),
-                                href: resources_href(kind_filter.as_deref(), &query_text, &next),
+                                href: filters(kind_filter.as_deref(), &next, attention),
                             }
                         })
                         .collect();
@@ -550,10 +947,187 @@ pub async fn resources(
     )
 }
 
+/// Lay the rows out in the order the pure rules give, so the ordering lives in one tested place.
+fn sort_rows(rows: &mut Vec<ResourceRow>, sort: ResourceSort) {
+    let mut keys: Vec<resource_ui::SortKey<'_>> = rows
+        .iter()
+        .map(|r| resource_ui::SortKey {
+            name: &r.name,
+            last_used: r
+                .last_used
+                .as_ref()
+                .and_then(|s| OffsetDateTime::parse(&s.iso, &Rfc3339).ok()),
+            active: r.active,
+            total: r.sessions,
+            health: r.health,
+            errors: r.errors,
+        })
+        .collect();
+    resource_ui::sort_keys(&mut keys, sort);
+    let order: Vec<String> = keys.iter().map(|k| k.name.to_owned()).collect();
+    let mut taken: Vec<Option<ResourceRow>> = std::mem::take(rows).into_iter().map(Some).collect();
+    for name in order {
+        if let Some(slot) = taken
+            .iter_mut()
+            .find(|r| r.as_ref().is_some_and(|r| r.name == name))
+        {
+            rows.extend(slot.take());
+        }
+    }
+}
+
+/// The detail page's sections, as plain links. The access table is for readers of the record.
+fn detail_tabs(name: &str, current: &str, reads_record: bool) -> Vec<views::DetailTab> {
+    let href = |t: &str| {
+        if t == "overview" {
+            format!("/console/resources/{}", path_segment(name))
+        } else {
+            format!("/console/resources/{}?tab={t}", path_segment(name))
+        }
+    };
+    let mut tabs = vec![("overview", "Overview")];
+    if reads_record {
+        tabs.push(("access", "Access"));
+    }
+    tabs.push(("activity", "Activity"));
+    tabs.into_iter()
+        .map(|(t, label)| views::DetailTab {
+            href: href(t),
+            label,
+            current: t == current,
+        })
+        .collect()
+}
+
+/// Sessions open on a resource now, for readers of the record; nobody else sees who is on it.
+async fn live_sessions(
+    state: &AppState,
+    auth: &Auth,
+    name: &str,
+) -> Result<Vec<views::LiveSession>, Response> {
+    if !auth.reads_record() {
+        return Ok(Vec::new());
+    }
+    let open = SessionFilter {
+        resource: Some(name.to_owned()),
+        active_only: true,
+        limit: 10,
+        ..SessionFilter::default()
+    };
+    let can_watch = crate::live::may_watch(state, auth.is_admin, auth.is_auditor);
+    let rows = store::list_sessions(&state.db, &open)
+        .await
+        .map_err(|e| db_error("listing the sessions open on a resource", &e))?;
+    Ok(rows
+        .iter()
+        .take(10)
+        .filter_map(|s| {
+            Some(views::LiveSession {
+                id: s.session_id.to_string(),
+                user: s.username.clone().unwrap_or_else(|| "—".to_owned()),
+                login: s.login.clone().unwrap_or_else(|| "—".to_owned()),
+                since: views::Stamp::of(s.started_at?),
+                // Watching is SSH only, and a separate power from reading the record.
+                watch: can_watch && s.kind.as_deref() == Some("ssh"),
+                endable: s.kind.as_deref() != Some("kubectl"),
+            })
+        })
+        .collect())
+}
+
+/// Who can reach a resource, and how (ADR-0028).
+fn who_can_rows(policy: &limen_policy::Policy, name: &str) -> Vec<WhoRow> {
+    policy
+        .who_can(name)
+        .into_iter()
+        .map(|e| {
+            let mut who: Vec<String> = e.groups.iter().map(|g| format!("group {g}")).collect();
+            who.extend(e.bots.iter().map(|b| format!("bot {b}")));
+            WhoRow {
+                role: Chip {
+                    c: views::chip_color(&e.role),
+                    text: e.role,
+                },
+                how: match e.via {
+                    limen_policy::tooling::Via::Standing => "standing",
+                    limen_policy::tooling::Via::Request => "by request",
+                    limen_policy::tooling::Via::BreakGlass => "break-glass",
+                },
+                principals: e.principals.join(", "),
+                who: who.join(", "),
+                approvers: e.approvers.join(", "),
+            }
+        })
+        .collect()
+}
+
+/// What went wrong on a resource in the last 24 hours, one part per kind that is not zero, each
+/// with where to look at it. For admins: it is audit data.
+async fn error_parts(state: &AppState, name: &str) -> Result<Vec<views::ErrorPart>, Response> {
+    let seen = store::resource_errors(&state.db)
+        .await
+        .map_err(|e| db_error("counting errors on a resource", &e))?
+        .remove(name)
+        .unwrap_or_default();
+    let encoded: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
+    let sessions = format!("/console/sessions?resource={encoded}");
+    Ok([
+        (
+            "refused",
+            seen.denied,
+            format!("/console/audit?kind=auth.denied&q={encoded}"),
+        ),
+        ("statement errors", seen.db, sessions.clone()),
+        ("web 5xx", seen.web, sessions),
+        (
+            "Kubernetes errors",
+            seen.kube,
+            "/console/audit/kubernetes".to_owned(),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, n, _)| *n > 0)
+    .map(|(label, count, href)| views::ErrorPart { label, count, href })
+    .collect())
+}
+
+#[derive(Deserialize)]
+pub struct ResourceTabQuery {
+    tab: Option<String>,
+    // The command builder's choices (all optional, all checked against what the viewer may do).
+    who: Option<String>,
+    database: Option<String>,
+    vhost: Option<String>,
+    port: Option<String>,
+}
+
+/// The command builder under the Connect card: what the viewer may act as on this resource, and
+/// the command for what they picked. Only for what their own roles open, never for an admin's
+/// view of someone else's access.
+async fn command_builder(
+    state: &AppState,
+    auth: &Auth,
+    kind: &str,
+    name: &str,
+    q: &ResourceTabQuery,
+) -> Result<Option<connect_builder::Builder>, Response> {
+    let scopes = crate::access::scopes_for(state, &auth.username, &auth.roles, name)
+        .await
+        .map_err(|e| db_error("reading access grants", &e))?;
+    let picks = connect_builder::Picks {
+        who: q.who.clone(),
+        database: q.database.clone(),
+        vhost: q.vhost.clone(),
+        port: q.port.clone(),
+    };
+    Ok(connect_builder::build(kind, name, &scopes, &picks))
+}
+
 pub async fn resource_detail(
     State(state): State<AppState>,
     auth: Auth,
     Path(name): Path<String>,
+    Query(tab_query): Query<ResourceTabQuery>,
 ) -> Response {
     let not_found = || {
         error_page(
@@ -580,15 +1154,36 @@ pub async fn resource_detail(
     }
     let kind = spec_kind(&r.spec);
     let (icon, kclass) = views::kind_icon(kind);
+    // The tab is a plain link, so it can be bookmarked. The access table is for people who may
+    // read the record; an unknown tab, or one the viewer can't have, is the overview.
+    let tab = match tab_query.tab.as_deref() {
+        Some("access") if auth.reads_record() => "access",
+        Some("activity") => "activity",
+        _ => "overview",
+    };
+    let tabs = detail_tabs(&name, tab, auth.reads_record());
+    let own = (!auth.reads_record()).then(|| auth.username.clone());
+    let shown: usize = if tab == "activity" { 25 } else { 10 };
     let filter = SessionFilter {
-        username: (!auth.reads_record()).then(|| auth.username.clone()),
+        username: own.clone(),
         resource: Some(name.clone()),
-        limit: 10,
+        limit: i64::try_from(shown).unwrap_or(10),
         ..SessionFilter::default()
     };
     let sessions = match store::list_sessions(&state.db, &filter).await {
-        Ok(rows) => rows.iter().take(10).map(SessionView::from).collect(),
+        Ok(rows) => rows.iter().take(shown).map(SessionView::from).collect(),
         Err(e) => return db_error("listing a resource's sessions", &e),
+    };
+    let last_used = match store::resource_activity(&state.db, own.as_deref()).await {
+        Ok(a) => a
+            .get(&name)
+            .and_then(|a| a.last_started)
+            .map(views::Stamp::of),
+        Err(e) => return db_error("reading a resource's activity", &e),
+    };
+    let live = match live_sessions(&state, &auth, &name).await {
+        Ok(v) => v,
+        Err(r) => return r,
     };
     let workers = if auth.is_admin {
         let (components, tunnels) = match db::list_components(&state.db).await {
@@ -599,39 +1194,45 @@ pub async fn resource_detail(
     } else {
         Vec::new()
     };
-    let who_can = if auth.reads_record() {
-        loaded
-            .policy
-            .who_can(&name)
-            .into_iter()
-            .map(|e| {
-                let mut who: Vec<String> = e.groups.iter().map(|g| format!("group {g}")).collect();
-                who.extend(e.bots.iter().map(|b| format!("bot {b}")));
-                WhoRow {
-                    role: Chip {
-                        c: views::chip_color(&e.role),
-                        text: e.role,
-                    },
-                    how: match e.via {
-                        limen_policy::tooling::Via::Standing => "standing",
-                        limen_policy::tooling::Via::Request => "by request",
-                        limen_policy::tooling::Via::BreakGlass => "break-glass",
-                    },
-                    principals: e.principals.join(", "),
-                    who: who.join(", "),
-                    approvers: e.approvers.join(", "),
-                }
-            })
-            .collect()
+    let health = auth.is_admin.then(|| views::Health::of(&workers));
+    let errors = if auth.is_admin {
+        match error_parts(&state, &name).await {
+            Ok(parts) => parts,
+            Err(r) => return r,
+        }
     } else {
         Vec::new()
     };
+    let who_can = if auth.reads_record() && tab == "access" {
+        who_can_rows(&loaded.policy, &name)
+    } else {
+        Vec::new()
+    };
+    let principals = mine.map(|m| m.principals.clone()).unwrap_or_default();
+    let builder = match mine {
+        Some(_) => match command_builder(&state, &auth, kind, &name, &tab_query).await {
+            Ok(b) => b,
+            Err(r) => return r,
+        },
+        None => None,
+    };
+    let starred = match store::list_favourites(&state.db, &auth.username).await {
+        Ok(p) => p.iter().any(|p| p.kind == "resource" && p.target == name),
+        Err(e) => return db_error("reading your favourites", &e),
+    };
+    let encoded = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
+    let here = tabs
+        .iter()
+        .find(|t| t.current)
+        .map_or_else(String::new, |t| t.href.clone());
     html(
         ResourcePage {
             can_request: may_ask && mine.is_none(),
             who_can,
             chrome: chrome(&state, &auth, "resources"),
             connect: views::connect_for(kind, &name),
+            options: views::connect_options(kind, &name, &principals),
+            builder,
             name: name.clone(),
             kind: kind.to_owned(),
             icon,
@@ -656,9 +1257,21 @@ pub async fn resource_detail(
             },
             pinned: r.spec.ssh.as_ref().is_some_and(|s| s.host_key.is_some()),
             description: r.metadata.description.clone().unwrap_or_default(),
-            principals: mine.map(|m| m.principals.clone()).unwrap_or_default(),
+            principals,
             workers,
             sessions,
+            tab,
+            tabs,
+            health,
+            last_used,
+            live,
+            errors,
+            starred,
+            here,
+            sessions_href: format!("/console/sessions?resource={}", encoded(&name)),
+            audit_href: auth
+                .reads_record()
+                .then(|| format!("/console/audit?q={}", encoded(&name))),
         }
         .render(),
     )
@@ -784,6 +1397,9 @@ pub async fn sessions(
             chrome: chrome(&state, &auth, "sessions"),
             notice: notice(q.done.as_deref()),
             sessions: rows.iter().map(SessionView::from).collect(),
+            has_open: rows
+                .iter()
+                .any(|s| s.active && s.kind.as_deref() != Some("kubectl")),
             active_only,
             user_filter: auth.reads_record().then(|| user_filter.clone()).flatten(),
             filter: views::SessionFilterView {
@@ -1038,6 +1654,186 @@ pub async fn kill_session(
     match ops::kill_session(&state, actor(&auth), &id, &form.reason).await {
         Ok(_) => Redirect::to("/console/sessions?filter=active&done=killed").into_response(),
         Err(s) => action_error(&s),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct FavouriteForm {
+    csrf: String,
+    kind: String,
+    target: String,
+    /// `add` or `remove`.
+    action: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    back: String,
+}
+
+/// `POST /console/favourites`: favourite a resource or save a view (`action=add`), or take it off again
+/// (`action=remove`). Only the signed-in
+/// person's own list. A resource must be one they can see; a view must be one of the listed
+/// console pages, and for a page they may open. Nothing here is audited: it is a preference, not
+/// access, and it grants nothing.
+pub async fn favourite_toggle(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Form(form): Form<FavouriteForm>,
+) -> Response {
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
+        return r;
+    }
+    let back = favourites::local_back(&form.back);
+    let bad = |what: &str| error_page(StatusCode::BAD_REQUEST, "Not saved", what);
+    let (kind, target, label) = match form.kind.as_str() {
+        "resource" => {
+            // Taking a favourite off always works, even for a resource that has gone or been hidden
+            // since: otherwise it could never be removed. Adding needs a resource they can see.
+            let known = state
+                .policy
+                .current()
+                .policy
+                .resource(&form.target)
+                .is_some();
+            let visible = auth.is_admin
+                || match reachable_for(&state, &auth).await {
+                    Ok(r) => r.iter().any(|a| a.name == form.target),
+                    Err(r) => return r,
+                };
+            if form.action == "add" && (!known || !visible) {
+                return error_page(
+                    StatusCode::NOT_FOUND,
+                    "Not found",
+                    "There is no such resource.",
+                );
+            }
+            ("resource", form.target.clone(), form.target.clone())
+        }
+        "view" => {
+            if !favourites::valid_view_target(&form.target) {
+                return bad("That page can't be saved as a view.");
+            }
+            let allowed = match favourites::required_power(&form.target) {
+                favourites::Power::Anyone => true,
+                favourites::Power::ReadsRecord => auth.reads_record(),
+                favourites::Power::Admin => auth.is_admin,
+            };
+            if form.action == "add" && !allowed {
+                return error_page(
+                    StatusCode::FORBIDDEN,
+                    "Not allowed",
+                    "You can't open that page, so it can't be saved.",
+                );
+            }
+            (
+                "view",
+                form.target.clone(),
+                favourites::clean_label(&form.label, "Saved view"),
+            )
+        }
+        _ => return bad("Favourite a resource or save a view."),
+    };
+    if form.action == "remove" {
+        return match store::remove_favourite(&state.db, &auth.username, kind, &target).await {
+            Ok(()) => Redirect::to(&back).into_response(),
+            Err(e) => db_error("removing your favourite", &e),
+        };
+    }
+    if form.action != "add" {
+        return bad("Add it or remove it.");
+    }
+    match store::add_favourite(&state.db, &auth.username, kind, &target, &label).await {
+        Ok(true) => Redirect::to(&back).into_response(),
+        Ok(false) => error_page(
+            StatusCode::CONFLICT,
+            "Too many favourites",
+            &format!(
+                "You can keep {} favourites and saved views. Remove one first.",
+                store::FAVOURITE_LIMIT
+            ),
+        ),
+        Err(e) => db_error("saving your favourite", &e),
+    }
+}
+
+/// A bulk form: the CSRF token, the reason, and every `id`. A field repeated (`id=..&id=..`) is not
+/// a struct, so the pairs are read by hand.
+fn read_bulk(body: &[u8]) -> (String, String, Vec<String>) {
+    let (mut csrf, mut reason, mut ids) = (String::new(), String::new(), Vec::new());
+    for (k, v) in url::form_urlencoded::parse(body) {
+        match k.as_ref() {
+            "csrf" => csrf = v.into_owned(),
+            "reason" => reason = v.into_owned(),
+            "id" => ids.push(v.into_owned()),
+            _ => {}
+        }
+    }
+    (csrf, reason, ids)
+}
+
+/// Most sessions one bulk request may end. Each is its own audited kill.
+const BULK_KILL_LIMIT: usize = 50;
+
+/// `POST /console/sessions/kill`: end the selected sessions (`id`, repeated) with one reason. Each
+/// goes through the same code as ending one, so each has its own audit event; there is no bulk
+/// shortcut around the audit. Admins only.
+pub async fn kill_sessions(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let (csrf, reason, mut ids) = read_bulk(&body);
+    if let Err(r) = auth.check_post(console, &headers, &csrf) {
+        return r;
+    }
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Nothing selected",
+            "Tick the sessions to end, then try again.",
+        );
+    }
+    if ids.len() > BULK_KILL_LIMIT {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Too many sessions",
+            &format!("End at most {BULK_KILL_LIMIT} sessions at once."),
+        );
+    }
+    let (mut ended, mut missed) = (0_usize, 0_usize);
+    let mut first_error = None;
+    for id in &ids {
+        match ops::kill_session(&state, actor(&auth), id, &reason).await {
+            Ok(true) => ended += 1,
+            Ok(false) => missed += 1,
+            Err(s) => {
+                missed += 1;
+                first_error.get_or_insert(s);
+            }
+        }
+    }
+    match (ended, missed, first_error) {
+        // Nothing ended and something was wrong with the request itself (no reason, say): say so.
+        (0, _, Some(s)) => action_error(&s),
+        (_, 0, _) => {
+            Redirect::to("/console/sessions?filter=active&done=killed_many").into_response()
+        }
+        _ => Redirect::to("/console/sessions?filter=active&done=killed_some").into_response(),
     }
 }
 
@@ -1589,12 +2385,24 @@ pub async fn workers(
         Ok(pair) => pair,
         Err(e) => return db_error("listing components", &e),
     };
+    let loaded = state.policy.current();
     let components: Vec<ComponentView> = components
         .into_iter()
         .map(|c| {
             let labels: BTreeMap<String, String> =
                 serde_json::from_value(c.labels).unwrap_or_default();
+            let (serves, serves_more) = if c.kind == "worker" {
+                views::resources_served(&loaded.policy, &labels, 6)
+            } else {
+                (Vec::new(), 0)
+            };
+            let now = time::OffsetDateTime::now_utc();
             ComponentView {
+                quiet: c.revoked_at.is_none() && now - c.last_seen_at > time::Duration::minutes(5),
+                cert_expired: c.revoked_at.is_none() && c.cert_expires_at.is_some_and(|t| t < now),
+                serves,
+                serves_more,
+                last_seen_iso: views::iso_text(Some(c.last_seen_at)),
                 tunnels: tunnels
                     .iter()
                     .filter(|t| t.worker_id == c.id || t.proxy_id == c.id)
@@ -1666,6 +2474,7 @@ pub async fn workers(
             chrome: chrome(&state, &auth, "workers"),
             notice: notice(q.done.as_deref()),
             query,
+            has_enrolled: components.iter().any(|c| !c.revoked),
             components,
             pending,
         }
@@ -1785,6 +2594,53 @@ pub async fn revoke(
     match ops::revoke_component(&state, actor(&auth), &id, &form.reason).await {
         Ok(_) => Redirect::to("/console/workers?done=revoked").into_response(),
         Err(s) => action_error(&s),
+    }
+}
+
+/// `POST /console/workers/revoke`: revoke the selected components (`id`, repeated) with one
+/// reason, each through the same code, and so with its own audit event, as revoking one. Admins only.
+pub async fn revoke_components(
+    State(state): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(r) = auth.admin() {
+        return r;
+    }
+    let console = match console(&state) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let (csrf, reason, mut ids) = read_bulk(&body);
+    if let Err(r) = auth.check_post(console, &headers, &csrf) {
+        return r;
+    }
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() || ids.len() > BULK_KILL_LIMIT {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Nothing to revoke",
+            &format!("Tick between 1 and {BULK_KILL_LIMIT} components, then try again."),
+        );
+    }
+    let (mut done, mut missed) = (0_usize, 0_usize);
+    let mut first_error = None;
+    for id in &ids {
+        match ops::revoke_component(&state, actor(&auth), id, &reason).await {
+            Ok(true) => done += 1,
+            Ok(false) => missed += 1,
+            Err(s) => {
+                missed += 1;
+                first_error.get_or_insert(s);
+            }
+        }
+    }
+    match (done, missed, first_error) {
+        (0, _, Some(s)) => action_error(&s),
+        (_, 0, _) => Redirect::to("/console/workers?done=revoked_many").into_response(),
+        _ => Redirect::to("/console/workers?done=revoked_some").into_response(),
     }
 }
 
@@ -2136,6 +2992,82 @@ pub async fn simulator_suggest(
         "group",
         groups_max,
     ));
+    (
+        [(CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::Value::Array(out)),
+    )
+        .into_response()
+}
+
+/// The resources named in a palette answer, at most.
+const PALETTE_RESOURCES: usize = 8;
+
+/// How well a resource matches what was typed: its name starts with it, contains it, or one of its
+/// labels does. `None` is no match. An empty needle matches everything alike.
+fn palette_rank(needle: &str, name: &str, labels: &[String]) -> Option<u8> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let n = name.to_lowercase();
+    if n.starts_with(needle) {
+        Some(0)
+    } else if n.contains(needle) {
+        Some(1)
+    } else if labels.iter().any(|l| l.to_lowercase().contains(needle)) {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+/// `GET /console/suggest/resources?q=`: the command palette's resources, as JSON
+/// `[{name, kind, href}]`. The same set as the Resources page (admins: every resource; everyone
+/// else: only what their roles open), so the palette never names a resource the page would hide.
+pub async fn resource_suggest(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(q): Query<SuggestQuery>,
+) -> Response {
+    let accessible = match reachable_for(&state, &auth).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let needle: String =
+        q.q.trim()
+            .chars()
+            .take(100)
+            .collect::<String>()
+            .to_lowercase();
+    let loaded = state.policy.current();
+    let mut hits: Vec<(u8, String, &'static str)> = Vec::new();
+    for doc in loaded.policy.documents() {
+        let Document::Resource(r) = doc else { continue };
+        let name = &r.metadata.name;
+        if !auth.is_admin && !accessible.iter().any(|a| &a.name == name) {
+            continue;
+        }
+        let labels: Vec<String> = r
+            .metadata
+            .labels
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        if let Some(rank) = palette_rank(&needle, name, &labels) {
+            hits.push((rank, name.clone(), spec_kind(&r.spec)));
+        }
+    }
+    hits.sort();
+    let out: Vec<serde_json::Value> = hits
+        .into_iter()
+        .take(PALETTE_RESOURCES)
+        .map(|(_, name, kind)| {
+            serde_json::json!({
+                "name": name,
+                "kind": kind,
+                "href": format!("/console/resources/{}", path_segment(&name)),
+            })
+        })
+        .collect();
     (
         [(CACHE_CONTROL, "no-store")],
         axum::Json(serde_json::Value::Array(out)),
@@ -2757,6 +3689,22 @@ mod label_filter_tests {
     use super::*;
 
     #[test]
+    fn palette_ranks_names_before_labels_and_hides_nonmatches() {
+        let labels = vec!["env=prod".to_owned()];
+        assert_eq!(palette_rank("", "bastion", &labels), Some(0));
+        assert_eq!(palette_rank("bas", "bastion", &labels), Some(0));
+        assert_eq!(palette_rank("tion", "bastion", &labels), Some(1));
+        assert_eq!(palette_rank("prod", "bastion", &labels), Some(2));
+        assert_eq!(palette_rank("nope", "bastion", &labels), None);
+        // The needle arrives lowercased; the name and labels are folded here.
+        assert_eq!(palette_rank("bas", "Bastion", &labels), Some(0));
+        assert_eq!(
+            palette_rank("env=prod", "x", &["ENV=PROD".to_owned()]),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn collects_repeated_labels_and_keeps_commas() {
         let got = label_filters(Some(
             "kind=ssh&label=env%3Dprod&label=note%3Da%2Cb&label=bad&label=env%3Dprod",
@@ -2767,7 +3715,16 @@ mod label_filter_tests {
 
     #[test]
     fn href_round_trips() {
-        let href = resources_href(Some("ssh"), "web", &["note=a,b".into(), "env=prod".into()]);
+        let labels = ["note=a,b".to_owned(), "env=prod".to_owned()];
+        let href = resource_ui::Filters {
+            kind: Some("ssh"),
+            q: "web",
+            labels: &labels,
+            sort: ResourceSort::Name,
+            attention: false,
+            favourites: false,
+        }
+        .href();
         let (_, query) = href.split_once('?').expect("query string");
         assert_eq!(label_filters(Some(query)), ["env=prod", "note=a,b"]);
     }

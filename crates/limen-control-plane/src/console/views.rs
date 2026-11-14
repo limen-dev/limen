@@ -24,6 +24,8 @@ pub struct Chrome {
     pub sees_reviews: bool,
     pub sees_changes: bool,
     pub csrf: String,
+    /// This page can be saved as a view (and the viewer may open the page).
+    pub saveable: bool,
     pub active: &'static str,
     pub version: &'static str,
     pub assets: &'static str,
@@ -48,6 +50,8 @@ impl Chrome {
             sees_reviews: auth.sees_reviews,
             sees_changes: auth.sees_changes,
             csrf: auth.csrf.clone(),
+            // The script shows the control only where the address is exactly one of these pages.
+            saveable: matches!(active, "resources" | "sessions" | "audit" | "dashboards"),
             active,
             version: limen_core::VERSION,
             assets: super::assets::version(),
@@ -210,6 +214,128 @@ pub fn connect_for(kind: &str, name: &str) -> Connect {
             planned: Some("planned"),
         },
     }
+}
+
+/// One way in to a resource: the principal it opens as (when the kind lets you choose one) and the
+/// command that does it.
+pub struct ConnectOption {
+    pub principal: Option<String>,
+    pub command: String,
+}
+
+/// A principal goes on a command line only when it is plain: letters, digits, `_`, `.` and `-`,
+/// not starting with `-`. Anything else is left off and the generic command is shown instead, so
+/// a command copied from the console never needs quoting or can be read as an option.
+fn plain_principal(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 64
+        && !p.starts_with('-')
+        && p.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// The commands that open `name` for someone who may use `principals`.
+///
+/// SSH takes `login@resource`; the database, MongoDB, Redis, search, `RabbitMQ` and Kafka kinds each
+/// take one flag for who you act as (required only when policy allows several, so one identity gets
+/// the plain command). Every other kind has one command. Nothing here invents a flag.
+#[must_use]
+pub fn connect_options(kind: &str, name: &str, principals: &[String]) -> Vec<ConnectOption> {
+    let base = connect_for(kind, name);
+    let plain: Vec<&String> = principals.iter().filter(|p| plain_principal(p)).collect();
+    let flag = super::connect_builder::who_flag(kind);
+    let per_principal = match kind {
+        "ssh" => !plain.is_empty(),
+        // Optional when policy allows one identity, so only several need naming.
+        _ => flag.is_some() && principals.len() > 1 && !plain.is_empty(),
+    };
+    if !per_principal {
+        return vec![ConnectOption {
+            principal: None,
+            command: base.command,
+        }];
+    }
+    plain
+        .into_iter()
+        .map(|p| ConnectOption {
+            principal: Some(p.clone()),
+            command: match flag {
+                None => format!("limen ssh {p}@{name}"),
+                Some(flag) => format!("{} {flag} {p}", base.command),
+            },
+        })
+        .collect()
+}
+
+/// Whether a resource can be reached right now, from the workers that match its selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Health {
+    /// At least one matching worker holds a tunnel.
+    Up,
+    /// Matching workers are enrolled but none holds a tunnel, so a session would fail.
+    Offline,
+    /// No enrolled worker matches the selector at all.
+    NoWorker,
+}
+
+impl Health {
+    #[must_use]
+    pub fn of(workers: &[WorkerMatch]) -> Self {
+        if workers.is_empty() {
+            Self::NoWorker
+        } else if workers.iter().any(|w| w.tunnels > 0) {
+            Self::Up
+        } else {
+            Self::Offline
+        }
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Up => "reachable",
+            Self::Offline => "offline",
+            Self::NoWorker => "no worker",
+        }
+    }
+
+    #[must_use]
+    pub fn pill(self) -> &'static str {
+        match self {
+            Self::Up => "ok",
+            Self::Offline => "bad",
+            Self::NoWorker => "warn",
+        }
+    }
+
+    /// What it means for the person looking at it.
+    #[must_use]
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Up => "A matching worker holds a tunnel.",
+            Self::Offline => {
+                "Matching workers are enrolled but none is connected, so sessions will fail."
+            }
+            Self::NoWorker => "No enrolled worker matches the selector, so sessions will fail.",
+        }
+    }
+
+    #[must_use]
+    pub fn needs_attention(self) -> bool {
+        self != Self::Up
+    }
+}
+
+/// A time as RFC 3339, for `<time datetime>`: the script turns it into "5 minutes ago" and keeps
+/// the absolute UTC text as the tooltip.
+#[must_use]
+pub fn iso_text(t: Option<OffsetDateTime>) -> String {
+    t.and_then(|t| {
+        t.to_offset(time::UtcOffset::UTC)
+            .format(&time::format_description::well_known::Rfc3339)
+            .ok()
+    })
+    .unwrap_or_default()
 }
 
 /// A role or group shown as a coloured chip.
@@ -676,6 +802,66 @@ pub struct Stats {
     pub workers_up: usize,
 }
 
+/// One line of the Overview's "needs you" card: what is waiting, and where to deal with it.
+pub struct AttentionItem {
+    pub text: String,
+    pub href: String,
+    /// `bad`, `warn` or empty, as a pill class.
+    pub tone: &'static str,
+}
+
+/// A view someone saved: a console page with its filters.
+pub struct SavedView {
+    pub label: String,
+    pub href: String,
+    /// The page it opens ("Resources") and that page's icon.
+    pub page: &'static str,
+    pub icon: &'static str,
+}
+
+/// How a card on the Overview gets you in. One command when the kind needs no choice; when there
+/// are several logins, roles or users, a command with none of them named would not run, so the card
+/// leads to the resource page, where each choice has its own command.
+pub struct CardConnect {
+    pub command: Option<String>,
+}
+
+/// The card's way in for someone who may act as `principals` on `name`.
+#[must_use]
+pub fn card_connect(kind: &str, name: &str, principals: &[String]) -> CardConnect {
+    let mut options = connect_options(kind, name, principals);
+    CardConnect {
+        command: if options.len() == 1 {
+            options.pop().map(|o| o.command)
+        } else {
+            None
+        },
+    }
+}
+
+/// A resource someone marked as a favourite, still reachable for them.
+pub struct FavouriteResource {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    /// `None` for an admin who can see the resource but has no principal on it.
+    pub connect: Option<CardConnect>,
+    pub health: Option<Health>,
+}
+
+/// A resource the viewer used lately, with the command to use it again.
+pub struct RecentResource {
+    pub name: String,
+    pub path: String,
+    pub kind: String,
+    pub icon: &'static str,
+    pub kclass: &'static str,
+    pub connect: CardConnect,
+    pub last: Stamp,
+}
+
 pub struct ResourceView {
     pub name: String,
     pub path: String,
@@ -697,6 +883,10 @@ pub struct Home {
     pub sessions: Vec<SessionView>,
     pub roles_text: String,
     pub expires: String,
+    pub attention: Vec<AttentionItem>,
+    pub recent: Vec<RecentResource>,
+    pub favourites: Vec<FavouriteResource>,
+    pub saved: Vec<SavedView>,
 }
 
 #[derive(Template)]
@@ -705,6 +895,8 @@ pub struct SessionsPage {
     pub chrome: Chrome,
     pub notice: Option<&'static str>,
     pub sessions: Vec<SessionView>,
+    /// At least one listed session can be ended (open, and not a kubectl login).
+    pub has_open: bool,
     pub active_only: bool,
     pub user_filter: Option<String>,
     pub filter: SessionFilterView,
@@ -985,16 +1177,55 @@ pub struct ComponentView {
     pub tunnels: usize,
     pub cert_expires: String,
     pub revoked: bool,
+    /// Not seen for over five minutes (the dashboards' "gone quiet" line).
+    pub quiet: bool,
+    /// The certificate is past its end and was not renewed: the component has stopped.
+    pub cert_expired: bool,
+    /// Workers: the resources whose selector this worker's labels satisfy.
+    pub serves: Vec<ServedResource>,
+    pub serves_more: usize,
+    pub last_seen_iso: String,
+}
+
+/// A resource a worker can serve, as a link.
+pub struct ServedResource {
+    pub name: String,
+    pub path: String,
+}
+
+/// The resources a worker can serve, up to `limit`, and how many more there are.
+#[must_use]
+pub fn resources_served(
+    policy: &limen_policy::Policy,
+    labels: &std::collections::BTreeMap<String, String>,
+    limit: usize,
+) -> (Vec<ServedResource>, usize) {
+    let mut all: Vec<ServedResource> = policy
+        .documents()
+        .iter()
+        .filter_map(|d| match d {
+            limen_policy::Document::Resource(r) => Some(r),
+            _ => None,
+        })
+        .filter(|r| {
+            r.spec
+                .worker_selector
+                .iter()
+                .all(|(k, v)| labels.get(k).is_some_and(|actual| actual == v))
+        })
+        .map(|r| ServedResource {
+            name: r.metadata.name.clone(),
+            path: path_segment(&r.metadata.name),
+        })
+        .collect();
+    all.sort_by(|a, b| a.name.cmp(&b.name));
+    let more = all.len().saturating_sub(limit);
+    all.truncate(limit);
+    (all, more)
 }
 
 impl ComponentView {
     /// The day and the clock time of a "2026-10-25 09:27:38 UTC" text, for a two-line cell.
-    pub fn last_seen_day(&self) -> &str {
-        split_when(&self.last_seen).0
-    }
-    pub fn last_seen_clock(&self) -> &str {
-        split_when(&self.last_seen).1
-    }
     pub fn cert_day(&self) -> &str {
         split_when(&self.cert_expires).0
     }
@@ -1025,6 +1256,8 @@ pub struct Workers {
     pub notice: Option<&'static str>,
     pub query: String,
     pub components: Vec<ComponentView>,
+    /// At least one listed component is not revoked.
+    pub has_enrolled: bool,
     pub pending: Vec<PendingTokenView>,
 }
 
@@ -1366,6 +1599,22 @@ pub struct LabelLink {
     pub href: String,
 }
 
+/// A time shown relative ("5 minutes ago") with the absolute UTC text as its tooltip.
+pub struct Stamp {
+    pub text: String,
+    pub iso: String,
+}
+
+impl Stamp {
+    #[must_use]
+    pub fn of(t: OffsetDateTime) -> Self {
+        Self {
+            text: time_text(Some(t)),
+            iso: iso_text(Some(t)),
+        }
+    }
+}
+
 pub struct ResourceRow {
     pub name: String,
     pub path: String,
@@ -1379,6 +1628,32 @@ pub struct ResourceRow {
     pub workers: usize,
     pub sessions: i64,
     pub active: i64,
+    /// Admins only: whether a worker can serve it right now.
+    pub health: Option<Health>,
+    /// The latest session on it: anyone's for an admin, your own for everyone else.
+    pub last_used: Option<Stamp>,
+    /// How to get in: the command, or a link to where each choice has its own. `None` when the
+    /// viewer's own roles don't open it (or nothing serves the kind yet).
+    pub connect: Option<CardConnect>,
+    /// Admins: errors in the last 24 hours, and what they were (for the tooltip).
+    pub errors: i64,
+    pub errors_text: String,
+    pub favourite: bool,
+}
+
+impl ResourceRow {
+    /// Unreachable, or reachable and failing.
+    #[must_use]
+    pub fn needs_attention(&self) -> bool {
+        self.health.is_some_and(Health::needs_attention) || self.errors > 0
+    }
+}
+
+/// One entry of the sort menu.
+pub struct SortOption {
+    pub value: &'static str,
+    pub label: &'static str,
+    pub selected: bool,
 }
 
 #[derive(Template)]
@@ -1394,6 +1669,40 @@ pub struct ResourcesPage {
     pub label_values: Vec<String>,
     pub query: String,
     pub rows: Vec<(ResourceRow, Vec<LabelLink>)>,
+    pub sorts: Vec<SortOption>,
+    /// The sort in effect when it isn't the default, so a filter link keeps it.
+    pub sort_value: String,
+    /// Admins: the "needs attention" filter, whether it is on, and the link that flips it.
+    pub attention_on: bool,
+    pub attention_href: String,
+    /// How many resources (before filters) need attention, for the filter's badge.
+    pub attention_count: usize,
+    pub favourites_on: bool,
+    pub favourites_href: String,
+    pub favourite_count: usize,
+    /// Views saved for this page, and the address a new one would be saved for.
+    pub saved: Vec<SavedView>,
+    pub here: String,
+    /// Everything below the filters is empty because nothing matched, not because there is nothing.
+    pub total: usize,
+}
+
+/// A session that is open on the resource now.
+pub struct LiveSession {
+    pub id: String,
+    pub user: String,
+    pub login: String,
+    pub since: Stamp,
+    /// The viewer may watch it (SSH only, and only with the separate power).
+    pub watch: bool,
+    /// It can be ended from here: not a kubectl login, which has no connection to end.
+    pub endable: bool,
+}
+
+pub struct DetailTab {
+    pub href: String,
+    pub label: &'static str,
+    pub current: bool,
 }
 
 #[derive(Template)]
@@ -1405,6 +1714,10 @@ pub struct ResourcePage {
     /// Who can reach it, for admins and auditors (ADR-0028).
     pub who_can: Vec<WhoRow>,
     pub connect: Connect,
+    /// One command per principal where the kind takes one, else a single command.
+    pub options: Vec<ConnectOption>,
+    /// The builder under the Connect card: what the viewer may act as, and the command for it.
+    pub builder: Option<super::connect_builder::Builder>,
     pub name: String,
     pub kind: String,
     pub icon: &'static str,
@@ -1417,6 +1730,46 @@ pub struct ResourcePage {
     pub principals: Vec<String>,
     pub workers: Vec<WorkerMatch>,
     pub sessions: Vec<SessionView>,
+    pub tab: &'static str,
+    pub tabs: Vec<DetailTab>,
+    /// Admins: whether a worker can serve it right now.
+    pub health: Option<Health>,
+    pub last_used: Option<Stamp>,
+    /// Admins and auditors: sessions open on it now.
+    pub live: Vec<LiveSession>,
+    pub sessions_href: String,
+    pub audit_href: Option<String>,
+    /// The viewer marked this resource as a favourite.
+    pub starred: bool,
+    /// Where to come back to after changing a favourite.
+    pub here: String,
+    /// Admins: what went wrong here in the last 24 hours, by where it was recorded.
+    pub errors: Vec<ErrorPart>,
+}
+
+/// One kind of error on a resource, with where to look at it.
+pub struct ErrorPart {
+    pub label: &'static str,
+    pub count: i64,
+    pub href: String,
+}
+
+/// "2 refused, 1 statement error": the parts that are not zero, for a tooltip.
+#[must_use]
+pub fn errors_text(e: super::store::ResourceErrors) -> String {
+    // (count, one, many): "refused" and "web 5xx" read the same either way.
+    let parts = [
+        (e.denied, "refused", "refused"),
+        (e.db, "statement error", "statement errors"),
+        (e.web, "web 5xx", "web 5xx"),
+        (e.kube, "Kubernetes error", "Kubernetes errors"),
+    ];
+    parts
+        .iter()
+        .filter(|(n, _, _)| *n > 0)
+        .map(|(n, one, many)| format!("{n} {}", if *n == 1 { one } else { many }))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Template)]
@@ -1437,7 +1790,24 @@ pub struct SigninPage {
 struct MessagePage<'a> {
     title: &'a str,
     message: &'a str,
+    /// What to do next, by kind of failure; empty for none.
+    next: &'static str,
+    /// The failure is on our side, so trying again may work.
+    retry: bool,
     assets: &'static str,
+}
+
+/// What a person can do about a failure, by status. Short and about their next move.
+fn next_step(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::NOT_FOUND => "Check the address, or start again from the console.",
+        StatusCode::FORBIDDEN => {
+            "If you need this, ask an admin, or ask for access from the Access page."
+        }
+        StatusCode::BAD_REQUEST | StatusCode::CONFLICT => "Go back, change it, and try again.",
+        s if s.is_server_error() => "This is on our side. Try again in a moment.",
+        _ => "",
+    }
 }
 
 /// A plain page with a status code, for errors and confirmations. It has no
@@ -1448,6 +1818,8 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
         MessagePage {
             title,
             message,
+            next: next_step(status),
+            retry: status.is_server_error(),
             assets: super::assets::version(),
         }
         .render(),
@@ -1631,5 +2003,160 @@ mod user_filter_tests {
         assert_eq!(idp_check_text("offboarded", None, false).1, "bad");
         assert_eq!(idp_check_text("ok", None, false).1, "ok");
         assert_eq!(idp_check_text("ok", None, true).0, "not applicable");
+    }
+}
+
+#[cfg(test)]
+mod resource_ui_tests {
+    use super::*;
+
+    fn principals(p: &[&str]) -> Vec<String> {
+        p.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn commands(kind: &str, p: &[&str]) -> Vec<String> {
+        connect_options(kind, "bastion", &principals(p))
+            .into_iter()
+            .map(|o| o.command)
+            .collect()
+    }
+
+    #[test]
+    fn ssh_names_the_login_for_each_principal() {
+        assert_eq!(
+            commands("ssh", &["deploy", "root"]),
+            ["limen ssh deploy@bastion", "limen ssh root@bastion"]
+        );
+    }
+
+    #[test]
+    fn databases_name_the_role_only_when_there_are_several() {
+        assert_eq!(commands("postgres", &["app"]), ["limen db connect bastion"]);
+        assert_eq!(
+            commands("postgres", &["app", "ro"]),
+            [
+                "limen db connect bastion --db-role app",
+                "limen db connect bastion --db-role ro"
+            ]
+        );
+    }
+
+    #[test]
+    fn each_kind_that_takes_an_identity_uses_its_own_flag_when_there_are_several() {
+        for (kind, command, flag) in [
+            ("redis", "limen redis connect", "--user"),
+            ("mongodb", "limen mongo connect", "--role"),
+            ("opensearch", "limen search connect", "--role"),
+            ("elasticsearch", "limen search connect", "--role"),
+            ("rabbitmq", "limen mq connect", "--user"),
+            ("kafka", "limen kafka connect", "--user"),
+        ] {
+            assert_eq!(
+                commands(kind, &["a", "b"]),
+                [
+                    format!("{command} bastion {flag} a"),
+                    format!("{command} bastion {flag} b")
+                ],
+                "{kind}"
+            );
+            assert_eq!(commands(kind, &["a"]), [format!("{command} bastion")]);
+        }
+    }
+
+    #[test]
+    fn kinds_with_nothing_to_choose_have_one_command_and_no_invented_flag() {
+        assert_eq!(commands("kubernetes", &["a"]), ["limen kube login bastion"]);
+        assert_eq!(
+            commands("kubernetes", &["a", "b"]),
+            ["limen kube login bastion"]
+        );
+        assert_eq!(commands("web", &["a", "b"]), ["limen web open bastion"]);
+        assert_eq!(commands("tcp", &["a", "b"]), ["limen tcp bastion"]);
+    }
+
+    #[test]
+    fn a_principal_that_needs_quoting_never_reaches_a_command_line() {
+        for bad in [
+            "a b",
+            "x;rm -rf",
+            "$(id)",
+            "-oProxyCommand=x",
+            "a'b",
+            "",
+            "é",
+        ] {
+            let ssh = commands("ssh", &[bad]);
+            assert_eq!(ssh, ["limen ssh bastion"], "{bad:?}");
+            let db = commands("mysql", &[bad, "ok"]);
+            assert_eq!(db, ["limen db connect bastion --db-role ok"], "{bad:?}");
+        }
+        // Over the length cap too.
+        assert_eq!(commands("ssh", &[&"a".repeat(65)]), ["limen ssh bastion"]);
+    }
+
+    #[test]
+    fn no_principals_is_the_generic_command() {
+        assert_eq!(commands("ssh", &[]), ["limen ssh bastion"]);
+        assert!(
+            connect_options("ssh", "bastion", &[])
+                .iter()
+                .all(|o| o.principal.is_none())
+        );
+    }
+
+    fn worker(tunnels: usize) -> WorkerMatch {
+        WorkerMatch {
+            id: "w".into(),
+            name: None,
+            tunnels,
+            last_seen: String::new(),
+        }
+    }
+
+    #[test]
+    fn health_follows_workers_and_tunnels() {
+        assert_eq!(Health::of(&[]), Health::NoWorker);
+        assert_eq!(Health::of(&[worker(0), worker(0)]), Health::Offline);
+        assert_eq!(Health::of(&[worker(0), worker(2)]), Health::Up);
+        assert!(Health::NoWorker.needs_attention());
+        assert!(Health::Offline.needs_attention());
+        assert!(!Health::Up.needs_attention());
+    }
+
+    #[test]
+    fn error_counts_read_naturally_and_skip_zeros() {
+        use super::super::store::ResourceErrors;
+        assert_eq!(errors_text(ResourceErrors::default()), "");
+        let e = ResourceErrors {
+            denied: 2,
+            db: 1,
+            web: 3,
+            kube: 2,
+        };
+        assert_eq!(
+            errors_text(e),
+            "2 refused, 1 statement error, 3 web 5xx, 2 Kubernetes errors"
+        );
+        assert_eq!(e.total(), 8);
+        let one = ResourceErrors {
+            denied: 1,
+            ..ResourceErrors::default()
+        };
+        assert_eq!(errors_text(one), "1 refused");
+    }
+
+    #[test]
+    fn a_worker_serves_the_resources_whose_selector_its_labels_satisfy() {
+        let policy = limen_policy::Policy::default();
+        let labels = std::collections::BTreeMap::new();
+        let (served, more) = resources_served(&policy, &labels, 6);
+        assert!(served.is_empty() && more == 0);
+    }
+
+    #[test]
+    fn iso_text_is_utc_rfc3339_or_empty() {
+        let t = time::macros::datetime!(2026-11-13 12:30:05 +2);
+        assert_eq!(iso_text(Some(t)), "2026-11-13T10:30:05Z");
+        assert_eq!(iso_text(None), "");
     }
 }

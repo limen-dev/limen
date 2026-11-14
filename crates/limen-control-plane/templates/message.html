@@ -16,7 +16,12 @@
   <img class="logo-dark" src="/console/static/logo-mark-dark.svg?v={{ assets }}" alt="Limen" width="48" height="48">
   <h1>{{ title }}</h1>
   <p>{{ message }}</p>
-  <a class="button" href="/console/">Open the console</a>
+  {% if !next.is_empty() %}<p class="hint">{{ next }}</p>{% endif %}
+  <div class="row msg-actions">
+    <a class="button" href="/console/">Open the console</a>
+    <button type="button" class="secondary js-only" data-back>Go back</button>
+    {% if retry %}<button type="button" class="secondary js-only" data-reload>Try again</button>{% endif %}
+  </div>
 </main>
 </body>
 </html>

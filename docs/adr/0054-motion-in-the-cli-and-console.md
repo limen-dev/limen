@@ -1,6 +1,6 @@
 # ADR-0054: Motion in the CLI and the console
 
-- Status: Proposed (owner request, 2026-11-13; no issue yet). Built in the same PR at the owner's request, as listed under Built; the decisions under Open for review are not approved until the status changes.
+- Status: Accepted (the owner approved it on 2026-11-14, having asked for it on 2026-11-13; no issue). Built in the same PR at the owner's request, as listed under Built. Approving it approves the decisions that were listed under Open for review.
 - Date: 2026-11-13
 
 ## Context
@@ -98,6 +98,8 @@ Console: the real pages from the compose stack in more than one browser, both th
 - A result from `succeed` still goes to stdout; on a terminal it may end with the elapsed time.
 
 ## Open for review
+Approved with the ADR on 2026-11-14.
+
 1. **View transitions** are in, behind one CSS line to revert. Keep them? (Recommended: yes, if they feel right in the real console.)
 2. **Windows:** not in scope; the CLI targets macOS and Linux and Windows terminals are unverified.
 

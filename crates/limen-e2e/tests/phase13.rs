@@ -1085,7 +1085,8 @@ async fn the_console_pages_for_the_workflows() {
     );
 
     // ---- admins and auditors: who can reach it, search, grants ------------
-    let page = admin.get("/console/resources/web-prod").await;
+    // Who can reach it is the resource page's Access tab (ADR-0055).
+    let page = admin.get("/console/resources/web-prod?tab=access").await;
     assert!(page.body.contains("Who can reach it") && page.body.contains("by request"));
     assert!(page.body.contains("prod-ssh"));
     let grants = admin.get("/console/access?tab=grants").await;

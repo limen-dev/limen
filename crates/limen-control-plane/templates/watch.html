@@ -2,6 +2,7 @@
 {% block title %}Watching {{ resource }}{% endblock %}
 {% block head %}<link rel="stylesheet" href="/console/static/asciinema-player.css?v={{ chrome.assets }}"><script defer src="/console/static/asciinema-player.min.js?v={{ chrome.assets }}"></script><script defer src="/console/static/watch-init.js?v={{ chrome.assets }}"></script>{% endblock %}
 {% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/console/sessions">Sessions</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><a href="/console/sessions/{{ id }}">{{ resource }}</a><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#chevron-right"/></svg><span aria-current="page">Watch</span></nav>
 <div class="page-head">
   <div>
     <h1>Watching {{ resource }} <span class="pill live v-mid">live</span></h1>

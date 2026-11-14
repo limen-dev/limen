@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::doc_diff::{DiffLine, line_diff, with_context};
 use super::pages::console;
 use super::views::{Chrome, error_page};
 use super::{Auth, html};
@@ -443,6 +444,16 @@ pub struct ChangePage {
     pub cant_decide: String,
     pub is_author: bool,
     pub error: Option<String>,
+    /// What it changes, document by document, against what is active.
+    pub diffs: Vec<DocDiff>,
+    /// Documents beyond the ones shown.
+    pub diffs_more: usize,
+}
+
+/// One document's change.
+pub struct DocDiff {
+    pub title: String,
+    pub lines: Vec<DiffLine>,
 }
 
 async fn viewer(state: &AppState, auth: &Auth) -> Result<Viewer, Response> {
@@ -464,6 +475,24 @@ async fn viewer(state: &AppState, auth: &Auth) -> Result<Viewer, Response> {
         ));
     }
     Ok(viewer)
+}
+
+/// How many pending policy changes someone else made that this viewer may decide. Zero for anyone
+/// who decides none, and when the list can't be read: this feeds a hint, never a decision.
+pub(super) async fn waiting_for(state: &AppState, auth: &Auth) -> usize {
+    let Ok(viewer) = Viewer::person(state, &auth.username, auth.is_admin).await else {
+        return 0;
+    };
+    if !viewer.approves_any() {
+        return 0;
+    }
+    match changes::list(state, &viewer, ChangeState::Pending, None, 100).await {
+        Ok((rows, _)) => rows
+            .iter()
+            .filter(|h| !h.author.eq_ignore_ascii_case(&auth.username))
+            .count(),
+        Err(_) => 0,
+    }
 }
 
 fn chrome(state: &AppState, auth: &Auth) -> Chrome {
@@ -544,6 +573,71 @@ fn write_lines(held: &Held) -> Vec<String> {
         .collect()
 }
 
+/// Most documents a change page shows a diff for.
+const MAX_DIFFS: usize = 12;
+/// Unchanged lines kept around a change.
+const DIFF_CONTEXT: usize = 3;
+
+/// The change as a diff per document, against the active policy. A document the active policy
+/// doesn't have is all additions. Moves change no content and say so; a replaced source shows the
+/// documents it writes (what it drops is in "What it writes").
+fn doc_diffs(state: &AppState, held: &Held) -> (Vec<DocDiff>, usize) {
+    let active = state.policy.current();
+    let documents = active.policy.documents();
+    let pretty = |v: &serde_json::Value| serde_json::to_string_pretty(v).unwrap_or_default();
+    let current = |kind: &str, name: &str| {
+        documents
+            .iter()
+            .find(|d| d.kind() == kind && d.name() == name)
+            .and_then(|d| serde_json::to_value(d).ok())
+            .map(|v| pretty(&v))
+            .unwrap_or_default()
+    };
+    let diff = |title: String, old: &str, new: &str| DocDiff {
+        title,
+        lines: with_context(line_diff(old, new), DIFF_CONTEXT),
+    };
+    let mut out = Vec::new();
+    for c in &held.plan.changes {
+        match c {
+            Change::Create { input, .. } => out.push(diff(
+                format!("create {}/{}", input.kind, input.name),
+                "",
+                &pretty(&input.value),
+            )),
+            Change::Update { input, .. } => out.push(diff(
+                format!("update {}/{}", input.kind, input.name),
+                &current(&input.kind, &input.name),
+                &pretty(&input.value),
+            )),
+            Change::Delete { key, .. } => out.push(diff(
+                format!("delete {}/{}", key.0, key.1),
+                &current(&key.0, &key.1),
+                "",
+            )),
+            Change::Transfer { key, to, .. } => out.push(DocDiff {
+                title: format!("move {}/{} to {}", key.0, key.1, to.describe()),
+                lines: vec![DiffLine {
+                    op: '…',
+                    text: "only the owner changes".to_owned(),
+                }],
+            }),
+            Change::ReplaceSource { documents, .. } => {
+                for input in documents {
+                    out.push(diff(
+                        format!("write {}/{}", input.kind, input.name),
+                        &current(&input.kind, &input.name),
+                        &pretty(&input.value),
+                    ));
+                }
+            }
+        }
+    }
+    let more = out.len().saturating_sub(MAX_DIFFS);
+    out.truncate(MAX_DIFFS);
+    (out, more)
+}
+
 async fn change_page_for(
     state: &AppState,
     auth: &Auth,
@@ -560,8 +654,11 @@ async fn change_page_for(
         .err()
         .map(|r| r.message())
         .unwrap_or_default();
+    let (diffs, diffs_more) = doc_diffs(state, &held);
     html(
         ChangePage {
+            diffs,
+            diffs_more,
             chrome: chrome(state, auth),
             ci: held
                 .author_ci
