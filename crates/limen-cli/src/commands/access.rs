@@ -82,9 +82,7 @@ async fn list_requests(proxy: Option<&str>, a: &RequestsListArgs) -> anyhow::Res
     requests(proxy, scope, a.status.as_deref(), a.json).await
 }
 
-fn client(
-    proxy: Option<&str>,
-) -> anyhow::Result<AccessClient<limen_tunnel::connect::TracedChannel>> {
+fn client(proxy: Option<&str>) -> anyhow::Result<AccessClient<crate::api::Channel>> {
     let (_, channel) = api::authenticated(proxy)?;
     Ok(AccessClient::new(channel))
 }
@@ -228,7 +226,7 @@ fn show(r: &AccessRequestInfo) {
             ),
         ));
     }
-    anstream::println!("{}", ui::key_values(&rows));
+    ui::reveal(&ui::key_values(&rows));
     for a in &r.approvals {
         anstream::println!(
             "  {} {}{}",
@@ -310,35 +308,53 @@ pub async fn request(proxy: Option<&str>, a: RequestArgs<'_>) -> anyhow::Result<
     let spinner =
         ui::spinner("Waiting for an approver (Ctrl-C to stop waiting; the request stays open)");
     let started = std::time::Instant::now();
-    let result = loop {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        let current = access
-            .list_access_requests(ListAccessRequestsRequest {
-                scope: "mine".into(),
-                status: String::new(),
-                limit: 50,
-            })
-            .await
-            .map_err(|s| api::status_error(&s))?
-            .into_inner()
-            .requests
-            .into_iter()
-            .find(|r| r.id == id);
-        match current {
-            Some(r) if r.status != "pending" => break Some(r),
-            _ if started.elapsed() > WAIT_LIMIT => break None,
-            _ => {}
-        }
+    let polled = async {
+        Ok::<_, anyhow::Error>(loop {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let current = access
+                .list_access_requests(ListAccessRequestsRequest {
+                    scope: "mine".into(),
+                    status: String::new(),
+                    limit: 50,
+                })
+                .await
+                .map_err(|s| api::status_error(&s))?
+                .into_inner()
+                .requests
+                .into_iter()
+                .find(|r| r.id == id);
+            match current {
+                Some(r) if r.status != "pending" => break Some(r),
+                _ if started.elapsed() > WAIT_LIMIT => break None,
+                _ => {}
+            }
+        })
     };
-    spinner.finish();
+    let result = tokio::select! {
+        polled = polled => polled?,
+        _ = tokio::signal::ctrl_c() => ui::interrupted(
+            spinner,
+            "Stopped waiting. The request is still open (`limen requests`).",
+        ),
+    };
+    // The spinner goes first: a Ctrl-C while it is being stopped must not leave its line behind.
     match result {
         Some(r) if r.status == "approved" => {
-            ui::success("Approved.");
+            spinner.succeed("Approved.");
+            ui::exit_on_ctrl_c();
             granted_hint(&r);
             Ok(())
         }
-        Some(r) => bail!("the request was {}", r.status),
-        None => bail!("gave up waiting; the request is still open (`limen requests`)"),
+        Some(r) => {
+            spinner.finish();
+            ui::exit_on_ctrl_c();
+            bail!("the request was {}", r.status)
+        }
+        None => {
+            spinner.finish();
+            ui::exit_on_ctrl_c();
+            bail!("gave up waiting; the request is still open (`limen requests`)")
+        }
     }
 }
 

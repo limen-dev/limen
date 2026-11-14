@@ -198,7 +198,7 @@
           if (!text || busy()) return;
           updated = Date.now();
           var next = new DOMParser().parseFromString(text, 'text/html').querySelector('main');
-          if (next && next.innerHTML !== main.innerHTML) main.innerHTML = next.innerHTML;
+          if (next && next.innerHTML !== main.innerHTML) { main.classList.add('refreshed'); main.innerHTML = next.innerHTML; }
           paint();
         })
         .catch(function () { /* offline: try again next tick */ });

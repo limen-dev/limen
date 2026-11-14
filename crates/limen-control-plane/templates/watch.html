@@ -11,7 +11,7 @@
   <a class="button secondary" href="/console/sessions/{{ id }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>The session</a>
 </div>
 <div id="watch" data-src="/console/sessions/{{ id }}/watch/stream"></div>
-<p class="hint" id="watch-state">Connecting…</p>
+<p class="hint" id="watch-state" role="status">Connecting…</p>
 {% if chrome.is_admin %}
 <form method="post" action="/console/sessions/{{ id }}/kill" class="danger-zone">
   <input type="hidden" name="csrf" value="{{ chrome.csrf }}">

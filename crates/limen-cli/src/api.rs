@@ -1,13 +1,62 @@
 //! Connections to the proxy.
 
 use anyhow::{Context as _, bail};
-use limen_tunnel::connect::TracedChannel as Channel;
-use limen_tunnel::connect::{SharedClientConfig, channel};
+use limen_tunnel::connect::{SharedClientConfig, TracedChannel, channel};
 use limen_tunnel::tls::{Identity, client_config};
 use rustls::ClientConfig;
 use rustls_platform_verifier::BuilderVerifierExt as _;
 
 use crate::profile::{self, Profile};
+use crate::ui;
+
+/// The channel every command talks to the proxy over: the traced channel, plus a spinner while a
+/// call is slow (see [`ui::busy`]). It adds nothing to the request or the response.
+#[derive(Debug, Clone)]
+pub struct Channel(TracedChannel);
+
+type GrpcRequest = http::Request<tonic::body::Body>;
+
+impl tower::Service<GrpcRequest> for Channel {
+    type Response = <TracedChannel as tower::Service<GrpcRequest>>::Response;
+    type Error = <TracedChannel as tower::Service<GrpcRequest>>::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: GrpcRequest) -> Self::Future {
+        // Held until the response arrives, so the spinner covers the wait and is gone before the
+        // command prints anything.
+        // A stream stays open for a whole session (a database client, a recording upload), so a
+        // spinner for it would sit on top of the user's terminal. Only calls with one answer.
+        let path = request.uri().path();
+        let busy = if is_stream(path) {
+            None
+        } else {
+            ui::busy(&ui::method_label(path))
+        };
+        let call = self.0.call(request);
+        Box::pin(async move {
+            let response = call.await;
+            drop(busy);
+            response
+        })
+    }
+}
+
+/// The calls that stay open for a whole session (see the `.proto` files).
+fn is_stream(path: &str) -> bool {
+    matches!(
+        path.rsplit('/').next(),
+        Some("OpenSession" | "UploadRecording" | "Handoff")
+    )
+}
 
 /// Port used when the server is given as a bare host name.
 pub const DEFAULT_PORT: u16 = 443;
@@ -90,11 +139,11 @@ fn platform_tls_config(identity: Option<Identity>, alpn: &[&[u8]]) -> anyhow::Re
 /// A channel to `server`, presenting `identity` if given.
 pub fn connect(server: &str, identity: Option<Identity>) -> anyhow::Result<Channel> {
     let tls = tls_config(server, identity, &[limen_tunnel::alpn::H2])?;
-    Ok(channel(
+    Ok(Channel(channel(
         server,
         server_name(server)?,
         SharedClientConfig::new(tls),
-    ))
+    )))
 }
 
 /// The server to use: `--server`, else the current profile.
@@ -154,6 +203,14 @@ pub fn status_error(status: &tonic::Status) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
+    use super::is_stream;
+
+    #[test]
+    fn only_session_long_calls_are_streams() {
+        assert!(is_stream("/limen.v1.Tunnel/OpenSession"));
+        assert!(!is_stream("/limen.v1.Resources/ListResources"));
+    }
+
     #[test]
     fn explains_untrusted_server_certificates() {
         let status = tonic::Status::unavailable("invalid peer certificate: UnknownIssuer");

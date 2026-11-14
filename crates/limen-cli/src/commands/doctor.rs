@@ -5,6 +5,7 @@
 //! Nothing secret is printed, in text or `--json`: no key, no certificate
 //! body, no token. The output is meant for support tickets.
 
+use std::io::{IsTerminal as _, Write as _};
 use std::path::Path;
 use std::time::Duration;
 
@@ -43,9 +44,36 @@ struct Check {
     fix: Option<String>,
 }
 
+/// Every check name, for the width of the name column when the report is printed as it is made
+/// (the widest name isn't known until the end).
+#[cfg(test)]
+const NAMES: [&str; 13] = [
+    "server",
+    "proxy",
+    "ca",
+    "network",
+    "tls",
+    "clock",
+    "login",
+    "ssh-config",
+    "kubeconfig",
+    "session",
+    "access",
+    "worker",
+    "client",
+];
+const NAME_WIDTH: usize = 10;
+
 #[derive(Debug, Default)]
 struct Report {
     checks: Vec<Check>,
+    /// Print each check as it is added (on a terminal), instead of the whole report at the end.
+    live: bool,
+    /// How many checks have been printed already.
+    printed: usize,
+    /// A spinner is waiting on a slow check. It draws only if the check takes a moment, and erases
+    /// itself when dropped, before the next line is printed.
+    pending: Option<ui::Spinner>,
 }
 
 impl Report {
@@ -56,6 +84,39 @@ impl Report {
             summary: summary.into(),
             fix: None,
         });
+        self.flush();
+    }
+
+    /// A slow check is about to run: show its name, so a wait isn't mistaken for a hang.
+    fn begin(&mut self, name: &str) {
+        if self.live && self.pending.is_none() {
+            self.pending = Some(ui::spinner(&format!("Checking {name}")));
+        }
+    }
+
+    /// The lines of the checks not printed yet, in the streaming layout.
+    fn take_new(&mut self) -> String {
+        let lines: Vec<String> = self.checks[self.printed..]
+            .iter()
+            .flat_map(|c| render_check(c, NAME_WIDTH))
+            .collect();
+        self.printed = self.checks.len();
+        lines.join("\n")
+    }
+
+    fn flush(&mut self) {
+        if !self.live {
+            return;
+        }
+        let text = self.take_new();
+        // Stops the spinner and erases its line, if it drew one.
+        drop(self.pending.take());
+        if !text.is_empty() {
+            anstream::println!("{text}");
+            let _ = std::io::stdout().flush();
+            // A beat before the next check, so the list builds up instead of landing at once.
+            ui::pace();
+        }
     }
 
     fn pass(&mut self, name: &'static str, summary: impl Into<String>) {
@@ -79,6 +140,7 @@ impl Report {
             summary: summary.into(),
             fix: Some(fix.into()),
         });
+        self.flush();
     }
 
     fn fail(&mut self, name: &'static str, summary: impl Into<String>, fix: impl Into<String>) {
@@ -99,8 +161,14 @@ impl Report {
 
 /// `limen doctor [resource] [--json]`.
 pub async fn run(flag: Option<&str>, resource: Option<&str>, json: bool) -> anyhow::Result<()> {
-    let mut report = Report::default();
+    let mut report = Report {
+        // The report is on stdout, so stdout must be the terminal too: `doctor > file` gets
+        // the report once, with no cursor codes in it.
+        live: !json && ui::motion() && std::io::stdout().is_terminal(),
+        ..Report::default()
+    };
     let proxy = diagnose(&mut report, flag, resource).await;
+    report.flush();
     if json {
         println!(
             "{}",
@@ -112,7 +180,7 @@ pub async fn run(flag: Option<&str>, resource: Option<&str>, json: bool) -> anyh
                 "checks": report.checks,
             }))?
         );
-    } else {
+    } else if !report.live {
         anstream::println!("{}", render(&report));
     }
     match report.failures() {
@@ -140,9 +208,13 @@ async fn diagnose(
         return None;
     };
     let ca_ok = check_ca(report, &proxy);
+    report.begin("network");
     let reachable = check_network(report, &proxy).await;
     let tls_ok = match (ca_ok, reachable) {
-        (true, true) => check_tls(report, &proxy).await,
+        (true, true) => {
+            report.begin("tls");
+            check_tls(report, &proxy).await
+        }
         (false, _) => {
             report.skip("tls", "the pinned CA is unusable");
             false
@@ -153,6 +225,7 @@ async fn diagnose(
         }
     };
     if tls_ok {
+        report.begin("clock");
         check_server(report, &proxy).await;
     } else {
         report.skip("clock", "no TLS connection to the proxy");
@@ -160,9 +233,11 @@ async fn diagnose(
     let login = check_login(report, &proxy);
     match (login, tls_ok) {
         (Some(profile), true) => {
+            report.begin("session");
             if check_session(report, &proxy, &profile).await
                 && let Some(name) = resource
             {
+                report.begin("access");
                 check_resource(report, &proxy, name).await;
             }
         }
@@ -815,35 +890,68 @@ fn render(report: &Report) -> String {
         .map(|c| c.name.len())
         .max()
         .unwrap_or(0);
-    let mut out = Vec::new();
-    for c in &report.checks {
-        let (glyph, summary) = match c.status {
-            Status::Pass => (ui::green("✔"), c.summary.clone()),
-            Status::Warn => (ui::yellow("!"), c.summary.clone()),
-            Status::Fail => (ui::red("✖"), ui::bold(&c.summary)),
-            Status::Skip => (ui::dim("–"), ui::dim(&c.summary)),
-        };
-        out.push(format!(
-            "{glyph} {}  {summary}",
-            ui::dim(&format!("{:<width$}", c.name))
-        ));
-        if let Some(fix) = &c.fix {
-            for (i, line) in fix.lines().enumerate() {
-                let arrow = if i == 0 { "→" } else { " " };
-                out.push(format!(
-                    "  {}  {}",
-                    " ".repeat(width),
-                    ui::dim(&format!("{arrow} {line}"))
-                ));
-            }
+    report
+        .checks
+        .iter()
+        .flat_map(|c| render_check(c, width))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One check as its lines: the result, then its fix, one line each.
+fn render_check(c: &Check, width: usize) -> Vec<String> {
+    let (glyph, summary) = match c.status {
+        Status::Pass => (ui::green("✔"), c.summary.clone()),
+        Status::Warn => (ui::yellow("!"), c.summary.clone()),
+        Status::Fail => (ui::red("✖"), ui::bold(&c.summary)),
+        Status::Skip => (ui::dim("–"), ui::dim(&c.summary)),
+    };
+    let mut out = vec![format!(
+        "{glyph} {}  {summary}",
+        ui::dim(&format!("{:<width$}", c.name))
+    )];
+    if let Some(fix) = &c.fix {
+        for (i, line) in fix.lines().enumerate() {
+            let arrow = if i == 0 { "→" } else { " " };
+            out.push(format!(
+                "  {}  {}",
+                " ".repeat(width),
+                ui::dim(&format!("{arrow} {line}"))
+            ));
         }
     }
-    out.join("\n")
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_name_column_fits_every_check() {
+        assert_eq!(NAMES.iter().map(|n| n.len()).max(), Some(NAME_WIDTH));
+    }
+
+    #[test]
+    fn streamed_lines_are_the_report() {
+        let mut r = Report::default();
+        r.pass("server", "limen.example.com");
+        r.fail(
+            "network",
+            "unreachable",
+            "check the address\nand the firewall",
+        );
+        let first = r.take_new();
+        r.skip("tls", "proxy unreachable");
+        let second = r.take_new();
+        assert_eq!(r.take_new(), "", "nothing is printed twice");
+        // Same lines as the final report, apart from the name column's width.
+        let streamed = ui::plain(&format!("{first}\n{second}"));
+        let at_once = ui::plain(&render(&r));
+        let squeeze = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(squeeze(&streamed), squeeze(&at_once));
+        assert!(streamed.lines().last().is_some_and(|l| l.contains("tls")));
+    }
 
     #[test]
     fn http_dates_parse() {
