@@ -176,6 +176,8 @@ mod tests {
         assert!(CSS.contains("view-transition-name: sidebar"));
         assert!(CSS.contains("view-transition-name: content"));
         assert!(CSS.contains("@keyframes settle-in"));
+        // A fade would put text at partial opacity, which the contrast audit measures.
+        assert!(!CSS.contains("@keyframes settle-in { from { opacity"));
     }
 
     #[test]
