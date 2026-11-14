@@ -525,14 +525,17 @@ async fn console_end_to_end() {
         "admins see targets"
     );
     assert!(
-        all.body.contains("none"),
+        all.body.contains("no worker"),
         "a resource no worker can serve is flagged"
     );
     let only_pg = admin_user.get("/console/resources?kind=postgres").await;
     assert!(only_pg.body.contains("secret-db") && !only_pg.body.contains("web-1"));
     let none = admin_user.get("/console/resources?q=does-not-exist").await;
     assert!(none.body.contains("No resources match"));
-    let detail = admin_user.get("/console/resources/secret-db").await;
+    // Who can reach it is the Access tab (ADR-0055), not the page's first view.
+    let detail = admin_user
+        .get("/console/resources/secret-db?tab=access")
+        .await;
     assert_eq!(detail.status, 200);
     assert!(
         detail.body.contains("Nobody. No role that selects it"),
@@ -540,7 +543,9 @@ async fn console_end_to_end() {
         detail.body
     );
     let web = admin_user.get("/console/resources/web-1").await;
-    assert!(web.body.contains("ops") && web.body.contains("pool=dev"));
+    assert!(web.body.contains("pool=dev"), "the worker selector");
+    let web = admin_user.get("/console/resources/web-1?tab=access").await;
+    assert!(web.body.contains("ops"), "the roles that reach it");
     let mine = dev_user.get("/console/resources").await;
     assert!(mine.body.contains("web-1"));
     assert!(
@@ -563,7 +568,10 @@ async fn console_end_to_end() {
     let bobs = dev_user.get("/console/resources/web-1").await;
     assert_eq!(bobs.status, 200);
     assert!(!bobs.body.contains(&target.addr.to_string()));
-    assert!(bobs.body.contains("limen ssh web-1"));
+    assert!(
+        bobs.body.contains("limen ssh ubuntu@web-1"),
+        "the command names the login the role allows"
+    );
 
     // ---- CSRF and origin checks --------------------------------------------------
     let home = admin_user.get("/console/users").await;
