@@ -160,13 +160,21 @@ pub async fn note_user(
     .map(|_| ())
 }
 
+/// How long a claim holds its rows, in seconds. It must outlast a whole
+/// batch of slow calls, so it is spread only upward (by up to 10%): a
+/// downward spread could let another replica re-claim the tail of a batch
+/// still being checked.
+fn claim_secs(interval: Duration) -> f64 {
+    let claim_for = interval.max(CALL_TIMEOUT * u32::try_from(BATCH).unwrap_or(50) + CALL_TIMEOUT);
+    claim_for.as_secs_f64() * (1.0 + rand::random::<f64>() * 0.1)
+}
+
 /// Claim the logins due for a check, pushing their next check out first, so
 /// replicas never take the same login and a crash mid-check only delays it.
 async fn claim_due(db: &Db, interval: Duration) -> Result<Vec<Tracked>, sqlx::Error> {
     // Long enough that a whole batch of slow calls finishes before another
     // replica can claim the same rows: two redemptions of one rotating token
     // would make the second look like a refusal.
-    let claim_for = interval.max(CALL_TIMEOUT * u32::try_from(BATCH).unwrap_or(50) + CALL_TIMEOUT);
     sqlx::query(
         "UPDATE idp_logins SET next_check_at = now() + make_interval(secs => $2)
          WHERE login_id IN (
@@ -175,7 +183,7 @@ async fn claim_due(db: &Db, interval: Duration) -> Result<Vec<Tracked>, sqlx::Er
          RETURNING login_id, username, refresh_token, groups, expires_at, last_ok_at",
     )
     .bind(BATCH)
-    .bind(jittered_secs(claim_for))
+    .bind(claim_secs(interval))
     .fetch_all(db)
     .await?
     .iter()
@@ -853,6 +861,23 @@ mod tests {
     use super::*;
 
     const KEY: [u8; 32] = [7; 32];
+
+    #[test]
+    fn a_claim_always_outlasts_a_whole_batch_of_slow_calls() {
+        let batch =
+            (CALL_TIMEOUT * u32::try_from(BATCH).expect("batch") + CALL_TIMEOUT).as_secs_f64();
+        for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
+            for _ in 0..1000 {
+                let c = claim_secs(interval);
+                assert!(c >= batch && c <= batch * 1.1, "{c} for {interval:?}");
+            }
+        }
+        // A longer interval is the floor when it exceeds the batch time.
+        let long = Duration::from_secs(3600);
+        for _ in 0..1000 {
+            assert!(claim_secs(long) >= long.as_secs_f64());
+        }
+    }
 
     #[test]
     fn a_sealed_token_opens_only_with_its_key_and_login() {
