@@ -1160,6 +1160,211 @@ impl Policy {
         let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
         granted_principals(&roles, resource).into_iter().collect()
     }
+
+    /// For each principal `roles` let someone use on resource `name`, what it may do there: the
+    /// databases of a role, the vhosts and classes of a broker user, and so on. The principals are
+    /// exactly those `accessible` gives (a deny rule that names one removes it); the detail is the
+    /// union of the allow rules, so it can say a little more than a deny narrowed to one database
+    /// refuses. Empty if the resource is unknown or the roles give nothing on it.
+    #[must_use]
+    pub fn grant_scopes(&self, roles: &[String], name: &str) -> Vec<GrantScope> {
+        let Some(resource) = self.resources.get(name) else {
+            return Vec::new();
+        };
+        let kind = resource_kind(resource);
+        let roles: Vec<&RoleDoc> = roles.iter().filter_map(|r| self.roles.get(r)).collect();
+        let allowed = granted_principals(&roles, resource);
+        let mut sets: BTreeMap<String, ScopeSets> = BTreeMap::new();
+        for rule in roles.iter().flat_map(|r| r.spec.enforced_allow()) {
+            if selector_matches(&rule.resources, resource) {
+                rule_scopes(rule, kind, &mut sets);
+            }
+        }
+        sets.into_iter()
+            .filter(|(principal, _)| allowed.contains(principal))
+            .map(|(principal, s)| s.into_scope(principal))
+            .collect()
+    }
+}
+
+/// What one principal (an SSH login, a database role, a broker user, ...) may do on a resource,
+/// merged over every allow rule the held roles give it. Every list is a set of allowed values;
+/// `"*"` means no restriction beyond what the kind always keeps back (hidden indices, internal
+/// topics, `amq.*` names). For showing someone which exact command to run, not for deciding: the
+/// proxy and workers decide each request.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantScope {
+    pub principal: String,
+    /// Databases a database or MongoDB role may open.
+    pub databases: Vec<String>,
+    /// Redis logical databases (`SELECT n`).
+    pub numbers: Vec<u32>,
+    /// `RabbitMQ` virtual hosts (`*` patterns).
+    pub vhosts: Vec<String>,
+    /// What it may do: search, broker or web request classes (`read`, `write`, ...), or HTTP methods.
+    pub classes: Vec<String>,
+    /// Redis key patterns, search indices, broker names, Kafka topics, or web path prefixes.
+    pub patterns: Vec<String>,
+    /// Kafka consumer group patterns.
+    pub groups: Vec<String>,
+}
+
+fn union(into: &mut BTreeSet<String>, items: impl IntoIterator<Item = String>) {
+    into.extend(items);
+}
+
+/// A list where empty means "no restriction": `*` stands for that, so merging stays a union.
+fn open_list(items: &[String]) -> Vec<String> {
+    if items.is_empty() {
+        vec!["*".to_owned()]
+    } else {
+        items.to_vec()
+    }
+}
+
+/// One principal's lists while rules are merged.
+#[derive(Default)]
+struct ScopeSets {
+    databases: BTreeSet<String>,
+    numbers: BTreeSet<u32>,
+    vhosts: BTreeSet<String>,
+    classes: BTreeSet<String>,
+    patterns: BTreeSet<String>,
+    groups: BTreeSet<String>,
+}
+
+impl ScopeSets {
+    fn into_scope(self, principal: String) -> GrantScope {
+        // A `*` swallows the rest of its list.
+        let list = |s: BTreeSet<String>| {
+            if s.contains("*") {
+                vec!["*".to_owned()]
+            } else {
+                s.into_iter().collect()
+            }
+        };
+        GrantScope {
+            principal,
+            databases: list(self.databases),
+            numbers: self.numbers.into_iter().collect(),
+            vhosts: list(self.vhosts),
+            classes: self.classes.into_iter().collect(),
+            patterns: list(self.patterns),
+            groups: list(self.groups),
+        }
+    }
+}
+
+/// What `rule` adds for each principal it names, on a resource of `kind`.
+fn rule_scopes(rule: &Rule, kind: ResourceKind, out: &mut BTreeMap<String, ScopeSets>) {
+    let class_names = |c: &[String]| c.to_vec();
+    match kind {
+        ResourceKind::Ssh => {
+            for login in rule.ssh.iter().flat_map(|g| &g.logins) {
+                out.entry(login.clone()).or_default();
+            }
+        }
+        ResourceKind::Postgres | ResourceKind::Mysql | ResourceKind::Redshift => {
+            if let Some(g) = &rule.db {
+                for role in &g.roles {
+                    union(
+                        &mut out.entry(role.clone()).or_default().databases,
+                        g.databases.clone(),
+                    );
+                }
+            }
+        }
+        ResourceKind::Mongodb => {
+            if let Some(g) = &rule.mongo {
+                for role in &g.roles {
+                    union(
+                        &mut out.entry(role.clone()).or_default().databases,
+                        g.databases.clone(),
+                    );
+                }
+            }
+        }
+        ResourceKind::Redis => {
+            if let Some(g) = &rule.redis {
+                for user in &g.users {
+                    let e = out.entry(user.clone()).or_default();
+                    union(&mut e.patterns, open_list(&g.keys));
+                    // Empty means only database 0.
+                    if g.databases.is_empty() {
+                        e.numbers.insert(0);
+                    } else {
+                        e.numbers.extend(g.databases.iter().copied());
+                    }
+                }
+            }
+        }
+        ResourceKind::Opensearch | ResourceKind::Elasticsearch => {
+            if let Some(g) = &rule.search {
+                for role in &g.roles {
+                    let e = out.entry(role.clone()).or_default();
+                    union(
+                        &mut e.classes,
+                        g.allowed_classes().iter().map(|c| c.as_str().to_owned()),
+                    );
+                    union(&mut e.patterns, open_list(&g.indices));
+                }
+            }
+        }
+        ResourceKind::Rabbitmq => {
+            if let Some(g) = &rule.mq {
+                for user in &g.users {
+                    let e = out.entry(user.clone()).or_default();
+                    union(&mut e.vhosts, g.effective_vhosts());
+                    union(
+                        &mut e.classes,
+                        g.effective_classes()
+                            .iter()
+                            .map(|c| format!("{c:?}").to_lowercase()),
+                    );
+                    union(&mut e.patterns, open_list(&g.names));
+                }
+            }
+        }
+        ResourceKind::Kafka => {
+            if let Some(g) = &rule.kafka {
+                for user in &g.users {
+                    let e = out.entry(user.clone()).or_default();
+                    union(
+                        &mut e.classes,
+                        g.effective_classes()
+                            .iter()
+                            .map(|c| format!("{c:?}").to_lowercase()),
+                    );
+                    union(&mut e.patterns, open_list(&g.topics));
+                    union(&mut e.groups, open_list(&g.groups));
+                }
+            }
+        }
+        ResourceKind::Kubernetes => {
+            for group in rule.kube.iter().flat_map(|g| &g.groups) {
+                out.entry(group.clone()).or_default();
+            }
+        }
+        ResourceKind::Web => {
+            if let Some(g) = &rule.web {
+                let e = out.entry("access".to_owned()).or_default();
+                union(
+                    &mut e.classes,
+                    if g.methods.is_empty() {
+                        vec!["*".to_owned()]
+                    } else {
+                        class_names(&g.methods)
+                    },
+                );
+                union(&mut e.patterns, open_list(&g.path_prefixes));
+            }
+        }
+        ResourceKind::Tcp => {
+            if rule.tcp.is_some() {
+                out.entry("access".to_owned()).or_default();
+            }
+        }
+    }
 }
 
 /// What `roles` grant on one resource: every allowed principal, less the ones
@@ -2121,6 +2326,8 @@ fn validate_resource(resource: &ResourceDoc) -> Result<(), PolicyError> {
 
 #[cfg(test)]
 mod replay_tests;
+#[cfg(test)]
+mod scope_tests;
 #[cfg(test)]
 mod shadow_tests;
 #[cfg(test)]
