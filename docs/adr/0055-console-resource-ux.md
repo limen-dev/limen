@@ -1,6 +1,6 @@
 # ADR-0055: Console resources and navigation
 
-- Status: Proposed
+- Status: Accepted (the owner approved it on 2026-11-14)
 
 ## Context
 The Overview page lets you act: it lists what you can reach with a command to copy next to each row, and shows live counts. The Resources pages, where people actually go to enter a resource, give less. The list has no command and no sense of state, and the detail page is a facts table with the connect command buried below it (and shown only when you already hold a principal). It doesn't say whether the resource is reachable, who is on it, or when it was last used, and it ends in a table of ten sessions with no way on.
