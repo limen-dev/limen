@@ -13,7 +13,7 @@ claude mcp add --scope user limen -- limen mcp
 
 `--scope user` makes it available in every project. Without it, Claude Code adds the server only to the directory you ran the command in.
 
-For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
+For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. (`limen mcp` itself is the server an agent starts; typed in a terminal it prints a hint and exits.) It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
 
 Logins are short-lived. When yours expires, every tool answers `run limen login`. The agent cannot sign in for you, and that is deliberate.
 
