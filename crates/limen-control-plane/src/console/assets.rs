@@ -120,3 +120,68 @@ pub async fn serve(Path(name): Path<String>, Query(q): Query<Versioned>) -> Resp
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    const CSS: &str = include_str!("../../assets/console.css");
+    const WATCH: &str = include_str!("../../templates/watch.html");
+
+    /// The text of the last `prefers-reduced-motion` block, which must be the global one.
+    fn global_reduced_motion_block() -> &'static str {
+        let at = CSS
+            .rfind("@media (prefers-reduced-motion: reduce) {\n")
+            .expect("console.css has a reduced-motion block");
+        &CSS[at..]
+    }
+
+    #[test]
+    fn reduced_motion_ends_every_animation_and_transition() {
+        let block = global_reduced_motion_block();
+        for needle in [
+            "animation-duration: .01ms !important",
+            "animation-iteration-count: 1 !important",
+            "transition-duration: .01ms !important",
+            "scroll-behavior: auto !important",
+            "@view-transition { navigation: none; }",
+            "::before",
+            "::after",
+        ] {
+            assert!(
+                block.contains(needle),
+                "the reduced-motion block lost `{needle}`"
+            );
+        }
+        // The vendored player is excluded, with its own pseudo-elements' parents.
+        assert!(block.contains(":not(.ap-player, .ap-player *)"));
+    }
+
+    #[test]
+    fn the_sidebar_scroll_cue_is_defined_for_both_themes() {
+        // One shadow colour per theme block (light, dark, and dark by system preference).
+        assert_eq!(CSS.matches("--nav-shadow:").count(), 3);
+        // The cue exists for the sidebar and for the phone strip.
+        assert!(CSS.matches("no-repeat local").count() >= 4);
+    }
+
+    #[test]
+    fn view_transitions_come_before_the_reduced_motion_override() {
+        let on = CSS
+            .find("@view-transition { navigation: auto; }")
+            .expect("page changes cross-fade");
+        let off = CSS
+            .rfind("@view-transition { navigation: none; }")
+            .expect("reduced motion turns them off");
+        assert!(on < off, "the override must come later in the cascade");
+        // The sidebar stays put while the content fades.
+        assert!(CSS.contains("view-transition-name: sidebar"));
+        assert!(CSS.contains("view-transition-name: content"));
+        assert!(CSS.contains("@keyframes settle-in"));
+        // A fade would put text at partial opacity, which the contrast audit measures.
+        assert!(!CSS.contains("@keyframes settle-in { from { opacity"));
+    }
+
+    #[test]
+    fn the_watch_state_is_announced() {
+        assert!(WATCH.contains("id=\"watch-state\" role=\"status\""));
+    }
+}

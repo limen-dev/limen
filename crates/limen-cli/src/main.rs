@@ -13,6 +13,7 @@ mod commands;
 mod oidc;
 mod profile;
 mod reference;
+mod settings;
 mod ui;
 
 use std::path::PathBuf;
@@ -96,6 +97,7 @@ enum ColorWhen {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Log in through the identity provider and get short-lived credentials.
+    #[command(display_order = 0)]
     Login {
         /// Use the device code flow, for machines without a browser.
         #[arg(long)]
@@ -134,8 +136,10 @@ enum Command {
         audience: Option<String>,
     },
     /// Delete local credentials.
+    #[command(display_order = 32)]
     Logout,
     /// Find out why access doesn't work: proxy, CA, network, clock, login, and (with a name) one resource.
+    #[command(display_order = 5)]
     Doctor {
         /// Also check access to this resource.
         resource: Option<String>,
@@ -144,12 +148,14 @@ enum Command {
         json: bool,
     },
     /// Show the current identity, roles, and when the credentials expire.
+    #[command(display_order = 4)]
     Status {
         /// Output JSON instead of text.
         #[arg(long)]
         json: bool,
     },
     /// List resources you are allowed to access.
+    #[command(display_order = 1)]
     Ls {
         #[command(flatten)]
         args: ListArgs,
@@ -158,6 +164,7 @@ enum Command {
         kind: Option<String>,
     },
     /// Ask for access to a resource for a limited time, with a reason.
+    #[command(display_order = 2)]
     Request {
         resource: String,
         /// Which requestable role, when more than one reaches the resource.
@@ -180,6 +187,7 @@ enum Command {
     },
     /// Your access requests, and deciding them: `ls`, `approve`, `deny`, `cancel`. Bare `limen requests` lists yours.
     #[command(args_conflicts_with_subcommands = true)]
+    #[command(display_order = 12)]
     Requests {
         #[command(flatten)]
         list: commands::access::RequestsListArgs,
@@ -204,6 +212,7 @@ enum Command {
     #[command(hide = true)]
     Cancel { id: String },
     /// Say why you can or cannot reach a resource.
+    #[command(display_order = 11)]
     Explain {
         resource: String,
         /// What you would use on it, such as login=ubuntu or db_role=limen_read.
@@ -219,21 +228,25 @@ enum Command {
         json: bool,
     },
     /// Access reviews waiting for you: `limen review ls`, `certify`, `flag`.
+    #[command(display_order = 13)]
     Review {
         #[command(subcommand)]
         command: commands::review::ReviewCommand,
     },
     /// Search the audit trail (limen:admin or limen:auditor).
+    #[command(display_order = 14)]
     Audit {
         #[command(subcommand)]
         command: commands::audit::AuditCommand,
     },
     /// Ask a policy questions: test it, who can reach what, what changes.
+    #[command(display_order = 15)]
     Policy {
         #[command(subcommand)]
         command: commands::policy::PolicyCommand,
     },
     /// Open any resource by name: picks `ssh`, `db connect`, `redis connect`, ... from its type.
+    #[command(display_order = 3)]
     Connect {
         resource: String,
         /// Options passed to the command it picks, e.g. `--listen 127.0.0.1:6380` or `--role readonly`.
@@ -241,6 +254,7 @@ enum Command {
         args: Vec<String>,
     },
     /// List and stop connections started with `--detach`.
+    #[command(display_order = 16)]
     Conns {
         #[command(subcommand)]
         command: ConnsCommand,
@@ -248,13 +262,18 @@ enum Command {
     /// Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
     ///
     /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+    /// Agents run this; to set one up, see `limen config mcp`.
+    #[command(hide = true)]
     Mcp,
     /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
+    /// Also `limen config completions`.
+    #[command(hide = true)]
     Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
     #[command(hide = true)]
     MarkdownHelp,
     /// Show one resource: type, labels, how you may access it, and the command to connect.
+    #[command(display_order = 10)]
     Show {
         resource: String,
         /// Output JSON instead of text.
@@ -262,6 +281,7 @@ enum Command {
         json: bool,
     },
     /// Open an SSH session: `limen ssh [login@]resource [command...]`.
+    #[command(display_order = 19)]
     Ssh {
         target: String,
         #[arg(trailing_var_arg = true)]
@@ -270,53 +290,63 @@ enum Command {
     /// OpenSSH ProxyCommand used by `limen ssh` and `limen config ssh`.
     #[command(hide = true)]
     SshProxy { login: String, host: String },
-    /// Print configuration snippets for other tools.
+    /// Set up other tools and the CLI itself: ssh, mcp, completions, animations.
+    #[command(display_order = 31)]
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
     },
     // Integration command groups.
     /// PostgreSQL, MySQL, Aurora, and Redshift.
+    #[command(display_order = 20)]
     Db {
         #[command(subcommand)]
         command: DbCommand,
     },
     /// Redis and Valkey: `limen redis connect <resource>`.
+    #[command(display_order = 21)]
     Redis {
         #[command(subcommand)]
         command: RedisCommand,
     },
     /// Kubernetes and EKS.
+    #[command(display_order = 22)]
     Kube {
         #[command(subcommand)]
         command: KubeCommand,
     },
     /// MongoDB, Atlas, and DocumentDB: `limen mongo connect <resource>`.
+    #[command(display_order = 23)]
     Mongo {
         #[command(subcommand)]
         command: MongoCommand,
     },
     /// `OpenSearch` and Elasticsearch: `limen search connect <resource>`.
+    #[command(display_order = 24)]
     Search {
         #[command(subcommand)]
         command: SearchCommand,
     },
     /// RabbitMQ and Amazon MQ: `limen mq connect <resource>`.
+    #[command(display_order = 25)]
     Mq {
         #[command(subcommand)]
         command: MqCommand,
     },
     /// Kafka and MSK: `limen kafka connect <resource>`.
+    #[command(display_order = 26)]
     Kafka {
         #[command(subcommand)]
         command: KafkaCommand,
     },
     /// Internal web apps behind browser SSO.
+    #[command(display_order = 27)]
     Web {
         #[command(subcommand)]
         command: WebCommand,
     },
     /// Open a local TCP forward to an authorized resource.
+    #[command(display_order = 28)]
     Tcp {
         resource: String,
         /// Local address to listen on. Defaults to a free port on 127.0.0.1.
@@ -324,12 +354,14 @@ enum Command {
         listen: Option<String>,
     },
     /// Administrative commands. These require the limen:admin role.
+    #[command(display_order = 30)]
     Admin {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
     },
     /// The management API: read policy documents and write resources, as an
     /// admin or as a bot with a policy_writer grant.
+    #[command(hide = true)]
     Manage {
         #[command(subcommand)]
         command: commands::manage::ManageCommand,
@@ -402,6 +434,32 @@ enum ConfigCommand {
     },
     /// Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
     Mcp,
+    /// Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`.
+    Completions { shell: clap_complete::Shell },
+    /// Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
+    ///
+    /// Saved in `~/.limen/settings.json` (or `$LIMEN_HOME`). `LIMEN_NO_ANIMATION` and `LIMEN_NO_BANNER`
+    /// still turn things off for one run, and nothing animates when stderr is not a terminal or `CI` is set.
+    Animations {
+        /// Turn animations on.
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        /// Turn animations off: spinners and the logo print plain lines.
+        #[arg(long)]
+        off: bool,
+        /// How fast the logo and spinners move.
+        #[arg(long, value_enum)]
+        speed: Option<settings::Speed>,
+        /// Show the logo at the top of `limen`, `limen --help` and `limen login`.
+        #[arg(long, value_enum)]
+        logo: Option<settings::Switch>,
+        /// Show a spinner while a call to the proxy is slow.
+        #[arg(long, value_enum)]
+        call_spinner: Option<settings::Switch>,
+        /// Back to the defaults.
+        #[arg(long)]
+        reset: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -612,6 +670,17 @@ async fn main() {
             }
             ui::banner();
         }
+        if e.kind() == ErrorKind::InvalidSubcommand
+            && let Some((word, now)) = moved_suggestion(&args)
+        {
+            // clap's own guess goes by spelling (`animations` -> `completions`); these are known.
+            <Cli as clap::CommandFactory>::command()
+                .error(
+                    ErrorKind::InvalidSubcommand,
+                    format!("unrecognized subcommand '{word}'\n\n  tip: did you mean `{now}`?"),
+                )
+                .exit();
+        }
         e.exit()
     });
     anstream::ColorChoice::write_global(match cli.color {
@@ -664,6 +733,46 @@ fn opens_listener(command: &Command) -> bool {
     )
 }
 
+/// Words people try that live under another command: the first word that isn't a flag, and
+/// where it is. clap only suggests by spelling, which gets these wrong.
+fn moved_suggestion(args: &[String]) -> Option<(&str, &'static str)> {
+    let word = args.iter().find(|a| !a.starts_with('-'))?.as_str();
+    let now = match word {
+        "animations" | "animation" | "settings" => "limen config animations",
+        "completion" => "limen config completions",
+        _ => return None,
+    };
+    Some((word, now))
+}
+
+/// A command that moved. Typed in a terminal it answers like any unknown command and names the
+/// new one. Run by a script or an agent (stdin or stdout is not a terminal) it still works, so
+/// existing agent configs (`limen mcp`) and CI jobs (`limen manage`) don't break.
+fn moved(name: &str, now: &str) {
+    use std::io::IsTerminal as _;
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        <Cli as clap::CommandFactory>::command()
+            .error(
+                clap::error::ErrorKind::InvalidSubcommand,
+                format!("unrecognized subcommand '{name}'\n\n  tip: did you mean `{now}`?"),
+            )
+            .exit();
+    }
+}
+
+/// The completion script for `shell`, on stdout.
+fn print_completions(shell: clap_complete::Shell) {
+    // Render first: writing straight to a closed pipe (`| head`) would panic.
+    let mut script = Vec::new();
+    clap_complete::generate(
+        shell,
+        &mut <Cli as clap::CommandFactory>::command(),
+        "limen",
+        &mut script,
+    );
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
+}
+
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.server.as_deref();
@@ -673,6 +782,37 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             "--detach applies to commands that open a local listener, such as `limen redis connect`"
         );
         return commands::conns::detach(proxy).await;
+    }
+    // A spinner while a call to the proxy is slow, for the commands that print once it returns.
+    // Not for ones that serve a protocol on stdout (`mcp`, `ssh-proxy`) or are long-lived.
+    if matches!(
+        cli.command,
+        Command::Ls { .. }
+            | Command::Show { .. }
+            | Command::Request { .. }
+            | Command::Requests { .. }
+            | Command::Approve { .. }
+            | Command::Deny { .. }
+            | Command::Cancel { .. }
+            | Command::Explain { .. }
+            | Command::Policy { .. }
+            | Command::Audit { .. }
+            | Command::Review { .. }
+            | Command::Admin { .. }
+            | Command::Manage { .. }
+            | Command::Connect { .. }
+            | Command::Conns { .. }
+            | Command::Ssh { .. }
+            | Command::Db { .. }
+            | Command::Redis { .. }
+            | Command::Mongo { .. }
+            | Command::Search { .. }
+            | Command::Mq { .. }
+            | Command::Kafka { .. }
+            | Command::Web { .. }
+            | Command::Tcp { .. }
+    ) {
+        ui::enable_busy();
     }
     match cli.command {
         Command::Login {
@@ -723,17 +863,15 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
-        Command::Mcp => commands::mcp::serve(proxy).await,
-        Command::Completions { shell } => {
-            // Render first: writing straight to a closed pipe (`| head`) would panic.
-            let mut script = Vec::new();
-            clap_complete::generate(
-                shell,
-                &mut <Cli as clap::CommandFactory>::command(),
-                "limen",
-                &mut script,
-            );
-            let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
+        Command::Mcp => {
+            moved("mcp", "limen config mcp");
+            commands::mcp::serve(proxy).await
+        }
+        Command::Completions { shell }
+        | Command::Config {
+            command: ConfigCommand::Completions { shell },
+        } => {
+            print_completions(shell);
             Ok(())
         }
         Command::MarkdownHelp => {
@@ -817,7 +955,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Review { command } => commands::review::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
-        Command::Manage { command } => commands::manage::run(proxy, command).await,
+        Command::Manage { command } => {
+            moved("manage", "limen admin manage");
+            commands::manage::run(proxy, command).await
+        }
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
@@ -840,6 +981,24 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config {
             command: ConfigCommand::Mcp,
         } => commands::mcp::config(proxy),
+        Command::Config {
+            command:
+                ConfigCommand::Animations {
+                    on,
+                    off,
+                    speed,
+                    logo,
+                    call_spinner,
+                    reset,
+                },
+        } => commands::animations::run(&commands::animations::Args {
+            on,
+            off,
+            speed,
+            logo,
+            call_spinner,
+            reset,
+        }),
         Command::Db {
             command:
                 DbCommand::Connect {

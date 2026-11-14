@@ -172,7 +172,7 @@ pub async fn run(proxy: Option<&str>, command: SelftestCommand) -> anyhow::Resul
                 );
                 return Ok(());
             }
-            anstream::print!("{}", runs_table(&runs));
+            ui::reveal(&runs_table(&runs));
             Ok(())
         }
         SelftestCommand::Report { id, out } => {

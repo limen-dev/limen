@@ -281,7 +281,7 @@ h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700; letter-spacing: -0
 .copy { background: var(--lm-surface-2); border: 1px solid var(--lm-line); border-radius: 8px; padding: 0.25rem 0.7rem; cursor: pointer; font-family: var(--lm-mono); font-size: 0.78rem; }
 .copy:hover { border-color: var(--lm-accent); color: var(--lm-accent-strong); }
 .install pre { margin: 0; padding: 1.2rem 1.3rem; font-size: 0.85rem; line-height: 1.85; overflow-x: auto; color: var(--lm-text); }
-.install .p { color: var(--lm-accent-strong); user-select: none; }
+.install .p { color: var(--lm-accent-strong); user-select: none; } .install .c { color: var(--lm-muted); }
 .fineprint { margin-top: 1rem; font-size: 0.88rem; color: var(--lm-muted); }
 .fineprint code { color: var(--lm-text-dim); }
 .start .cta { justify-content: center; }

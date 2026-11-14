@@ -301,7 +301,7 @@ pub async fn run(proxy: Option<&str>, command: ManageCommand) -> anyhow::Result<
     Ok(())
 }
 
-type Api = ManagementServiceClient<limen_tunnel::connect::TracedChannel>;
+type Api = ManagementServiceClient<crate::api::Channel>;
 
 async fn whoami(api: &mut Api) -> anyhow::Result<Value> {
     let me = api

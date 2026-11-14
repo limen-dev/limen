@@ -516,28 +516,6 @@ Options:
 
 - `--all`: End all of them.
 
-### `limen mcp`
-
-Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
-
-Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
-
-```text
-Usage: limen mcp [OPTIONS]
-```
-
-### `limen completions`
-
-Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`
-
-```text
-Usage: limen completions [OPTIONS] <SHELL>
-```
-
-Arguments:
-
-- `<SHELL>` Values: bash, elvish, fish, powershell, zsh.
-
 ### `limen show`
 
 Show one resource: type, labels, how you may access it, and the command to connect
@@ -569,7 +547,7 @@ Arguments:
 
 ### `limen config`
 
-Print configuration snippets for other tools
+Set up other tools and the CLI itself: ssh, mcp, completions, animations
 
 ```text
 Usage: limen config [OPTIONS] <COMMAND>
@@ -596,6 +574,37 @@ Print how to add `limen mcp` to an AI agent (Claude Code and any client that rea
 ```text
 Usage: limen config mcp [OPTIONS]
 ```
+
+#### `limen config completions`
+
+Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`
+
+```text
+Usage: limen config completions [OPTIONS] <SHELL>
+```
+
+Arguments:
+
+- `<SHELL>` Values: bash, elvish, fish, powershell, zsh.
+
+#### `limen config animations`
+
+Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
+
+Saved in `~/.limen/settings.json` (or `$LIMEN_HOME`). `LIMEN_NO_ANIMATION` and `LIMEN_NO_BANNER` still turn things off for one run, and nothing animates when stderr is not a terminal or `CI` is set.
+
+```text
+Usage: limen config animations [OPTIONS]
+```
+
+Options:
+
+- `--on`: Turn animations on.
+- `--off`: Turn animations off: spinners and the logo print plain lines.
+- `--speed <SPEED>`: How fast the logo and spinners move. Values: slow, normal, fast.
+- `--logo <LOGO>`: Show the logo at the top of `limen`, `limen --help` and `limen login`. Values: on, off.
+- `--call-spinner <CALL_SPINNER>`: Show a spinner while a call to the proxy is slow. Values: on, off.
+- `--reset`: Back to the defaults.
 
 ### `limen db`
 
@@ -1006,6 +1015,231 @@ Administrative commands. These require the limen:admin role
 Usage: limen admin [OPTIONS] <COMMAND>
 ```
 
+#### `limen admin manage`
+
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant
+
+```text
+Usage: limen admin manage [OPTIONS] <COMMAND>
+```
+
+##### `limen admin manage whoami`
+
+What you may read and write: admin, or your writer grant
+
+```text
+Usage: limen admin manage whoami [OPTIONS]
+```
+
+##### `limen admin manage schema`
+
+The JSON Schema of one kind's spec, as this server parses it
+
+```text
+Usage: limen admin manage schema [OPTIONS] <KIND>
+```
+
+Arguments:
+
+- `<KIND>`
+
+##### `limen admin manage ls`
+
+List documents of one kind (resource, role, resource_profile, ...)
+
+```text
+Usage: limen admin manage ls [OPTIONS] <KIND>
+```
+
+Arguments:
+
+- `<KIND>`
+
+Options:
+
+- `--namespace <NAMESPACE>`: Only this namespace (a writer's own is implied).
+- `--source <SOURCE>`: Only documents this source manages.
+
+##### `limen admin manage get`
+
+Show one document, with its owner and etag
+
+```text
+Usage: limen admin manage get [OPTIONS] <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--policy-version <POLICY_VERSION>`: Read it from this past policy version. A revision that is no longer current comes without its owner and etag (admins only).
+
+##### `limen admin manage put-resource`
+
+Create a resource, or with --etag replace it. A writer completes a profile: --spec holds only the fields the profile lets it set
+
+```text
+Usage: limen admin manage put-resource [OPTIONS] --spec <SPEC> --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--profile <PROFILE>`: The profile it completes. Required for bot writers.
+- `--spec <SPEC>`: The resource spec as JSON, for example '{"postgres":{"endpoint":"db.internal:5432"}}'.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
+- `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
+- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
+- `--dry-run`: Check everything and show the impact, but change nothing.
+- `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
+
+##### `limen admin manage delete-resource`
+
+Delete a resource you manage
+
+```text
+Usage: limen admin manage delete-resource [OPTIONS] --source <SOURCE> <NAME>
+```
+
+Arguments:
+
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`: Succeed when it's already gone.
+
+##### `limen admin manage put`
+
+Create a document of any kind, or with --etag replace it: a role, role_mapping, policy_test, bot, discovery, resource_profile, or policy_writer. Bot writers write only the kinds their grant names
+
+```text
+Usage: limen admin manage put [OPTIONS] --spec <SPEC> --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--spec <SPEC>`: The spec as JSON (a list for role_mapping), or @file to read it.
+- `--label <LABELS>`: key=value. Repeatable.
+- `--description <DESCRIPTION>`
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`
+- `--dry-run`
+- `--reason <REASON>`: Why, shown to approvers if the write is held.
+
+##### `limen admin manage delete`
+
+Delete a document of any kind you manage
+
+```text
+Usage: limen admin manage delete [OPTIONS] --source <SOURCE> <KIND> <NAME>
+```
+
+Arguments:
+
+- `<KIND>`
+- `<NAME>`
+
+Options:
+
+- `--source <SOURCE>`
+- `--namespace <NAMESPACE>`
+- `--etag <ETAG>`: Required unless --if-exists.
+- `--if-exists`
+
+##### `limen admin manage changes`
+
+Changes held for approval because they widen standing access
+
+```text
+Usage: limen admin manage changes [OPTIONS] <COMMAND>
+```
+
+###### `limen admin manage changes ls`
+
+Held changes, newest first: pending ones unless --state
+
+```text
+Usage: limen admin manage changes ls [OPTIONS]
+```
+
+Options:
+
+- `--state <STATE>`: pending, applied, rejected, cancelled, expired, or superseded.
+
+###### `limen admin manage changes show`
+
+One change: its writes, the access it gives, and the CI run behind it
+
+```text
+Usage: limen admin manage changes show [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+###### `limen admin manage changes approve`
+
+Approve a change and apply it. Not its author, nor whoever started its CI run. If the policy moved so that it would give access you didn't see here, it is superseded instead
+
+```text
+Usage: limen admin manage changes approve [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`
+
+###### `limen admin manage changes deny`
+
+Refuse a change
+
+```text
+Usage: limen admin manage changes deny [OPTIONS] --note <NOTE> <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
+Options:
+
+- `--note <NOTE>`: Why. Required.
+
+###### `limen admin manage changes cancel`
+
+Withdraw a change you made
+
+```text
+Usage: limen admin manage changes cancel [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`
+
 #### `limen admin apply`
 
 Validate and apply role, mapping, and resource YAML. Files or directories
@@ -1393,229 +1627,4 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why. Recorded in the audit trail.
-
-### `limen manage`
-
-The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant
-
-```text
-Usage: limen manage [OPTIONS] <COMMAND>
-```
-
-#### `limen manage whoami`
-
-What you may read and write: admin, or your writer grant
-
-```text
-Usage: limen manage whoami [OPTIONS]
-```
-
-#### `limen manage schema`
-
-The JSON Schema of one kind's spec, as this server parses it
-
-```text
-Usage: limen manage schema [OPTIONS] <KIND>
-```
-
-Arguments:
-
-- `<KIND>`
-
-#### `limen manage ls`
-
-List documents of one kind (resource, role, resource_profile, ...)
-
-```text
-Usage: limen manage ls [OPTIONS] <KIND>
-```
-
-Arguments:
-
-- `<KIND>`
-
-Options:
-
-- `--namespace <NAMESPACE>`: Only this namespace (a writer's own is implied).
-- `--source <SOURCE>`: Only documents this source manages.
-
-#### `limen manage get`
-
-Show one document, with its owner and etag
-
-```text
-Usage: limen manage get [OPTIONS] <KIND> <NAME>
-```
-
-Arguments:
-
-- `<KIND>`
-- `<NAME>`
-
-Options:
-
-- `--policy-version <POLICY_VERSION>`: Read it from this past policy version. A revision that is no longer current comes without its owner and etag (admins only).
-
-#### `limen manage put-resource`
-
-Create a resource, or with --etag replace it. A writer completes a profile: --spec holds only the fields the profile lets it set
-
-```text
-Usage: limen manage put-resource [OPTIONS] --spec <SPEC> --source <SOURCE> <NAME>
-```
-
-Arguments:
-
-- `<NAME>`
-
-Options:
-
-- `--profile <PROFILE>`: The profile it completes. Required for bot writers.
-- `--spec <SPEC>`: The resource spec as JSON, for example '{"postgres":{"endpoint":"db.internal:5432"}}'.
-- `--label <LABELS>`: key=value. Repeatable.
-- `--description <DESCRIPTION>`
-- `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
-- `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
-- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
-- `--dry-run`: Check everything and show the impact, but change nothing.
-- `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
-
-#### `limen manage delete-resource`
-
-Delete a resource you manage
-
-```text
-Usage: limen manage delete-resource [OPTIONS] --source <SOURCE> <NAME>
-```
-
-Arguments:
-
-- `<NAME>`
-
-Options:
-
-- `--source <SOURCE>`
-- `--namespace <NAMESPACE>`
-- `--etag <ETAG>`: Required unless --if-exists.
-- `--if-exists`: Succeed when it's already gone.
-
-#### `limen manage put`
-
-Create a document of any kind, or with --etag replace it: a role, role_mapping, policy_test, bot, discovery, resource_profile, or policy_writer. Bot writers write only the kinds their grant names
-
-```text
-Usage: limen manage put [OPTIONS] --spec <SPEC> --source <SOURCE> <KIND> <NAME>
-```
-
-Arguments:
-
-- `<KIND>`
-- `<NAME>`
-
-Options:
-
-- `--spec <SPEC>`: The spec as JSON (a list for role_mapping), or @file to read it.
-- `--label <LABELS>`: key=value. Repeatable.
-- `--description <DESCRIPTION>`
-- `--source <SOURCE>`
-- `--namespace <NAMESPACE>`
-- `--etag <ETAG>`
-- `--dry-run`
-- `--reason <REASON>`: Why, shown to approvers if the write is held.
-
-#### `limen manage delete`
-
-Delete a document of any kind you manage
-
-```text
-Usage: limen manage delete [OPTIONS] --source <SOURCE> <KIND> <NAME>
-```
-
-Arguments:
-
-- `<KIND>`
-- `<NAME>`
-
-Options:
-
-- `--source <SOURCE>`
-- `--namespace <NAMESPACE>`
-- `--etag <ETAG>`: Required unless --if-exists.
-- `--if-exists`
-
-#### `limen manage changes`
-
-Changes held for approval because they widen standing access
-
-```text
-Usage: limen manage changes [OPTIONS] <COMMAND>
-```
-
-##### `limen manage changes ls`
-
-Held changes, newest first: pending ones unless --state
-
-```text
-Usage: limen manage changes ls [OPTIONS]
-```
-
-Options:
-
-- `--state <STATE>`: pending, applied, rejected, cancelled, expired, or superseded.
-
-##### `limen manage changes show`
-
-One change: its writes, the access it gives, and the CI run behind it
-
-```text
-Usage: limen manage changes show [OPTIONS] <ID>
-```
-
-Arguments:
-
-- `<ID>`
-
-##### `limen manage changes approve`
-
-Approve a change and apply it. Not its author, nor whoever started its CI run. If the policy moved so that it would give access you didn't see here, it is superseded instead
-
-```text
-Usage: limen manage changes approve [OPTIONS] <ID>
-```
-
-Arguments:
-
-- `<ID>`
-
-Options:
-
-- `--note <NOTE>`
-
-##### `limen manage changes deny`
-
-Refuse a change
-
-```text
-Usage: limen manage changes deny [OPTIONS] --note <NOTE> <ID>
-```
-
-Arguments:
-
-- `<ID>`
-
-Options:
-
-- `--note <NOTE>`: Why. Required.
-
-##### `limen manage changes cancel`
-
-Withdraw a change you made
-
-```text
-Usage: limen manage changes cancel [OPTIONS] <ID>
-```
-
-Arguments:
-
-- `<ID>`
 

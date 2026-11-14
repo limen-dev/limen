@@ -258,7 +258,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
         <div class="wrap">
           <div class="eyebrow reveal">AI assistants</div>
           <h2 class="reveal">Ask your assistant what you can reach.</h2>
-          <p class="sub reveal"><code>limen mcp</code> is a read-only MCP server built into the CLI. It uses your own login, so it grants nothing you don't already have.</p>
+          <p class="sub reveal">Limen has a read-only MCP server built into the CLI. It uses your own login, so it grants nothing you don't already have.</p>
           <div class="mcp">
             <div class="mcp-text">
               <div class="mcp-col reveal">
@@ -281,12 +281,13 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
               <div class="install">
                 <div class="install-bar"><span>terminal</span></div>
 <pre tabindex="0"><span class="p">$</span> limen login
-<span class="p">$</span> claude mcp add --scope user \
-    limen -- limen mcp</pre>
+<span class="p">$</span> limen config mcp
+<span class="c"># prints the line to add to your assistant</span></pre>
               </div>
               <ul class="chips tools" aria-label="The five read-only tools">
                 <li>limen_status</li><li>limen_ls</li><li>limen_show</li><li>limen_explain</li><li>limen_requests</li>
               </ul>
+              <p class="mcp-note"><code>limen config mcp</code> prints the command for Claude Code and the JSON block for any client that reads <code>mcpServers</code>. It changes no file.</p>
               <p class="mcp-note">Early and read-only. The audit trail shows you, not the assistant: its calls are your calls.</p>
             </div>
           </div>

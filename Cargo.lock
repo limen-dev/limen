@@ -2732,6 +2732,7 @@ dependencies = [
  "time",
  "tokio",
  "tonic",
+ "tower",
  "tracing",
  "uuid",
  "webbrowser",
