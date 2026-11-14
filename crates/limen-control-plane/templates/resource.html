@@ -9,7 +9,7 @@
     <div><h1>{{ name }}</h1><p class="sub">{{ kind }}{% if !description.is_empty() %} · {{ description }}{% endif %}</p></div>
   </div>
   <div class="row">
-    <form method="post" action="/console/pins" class="pin-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="resource"><input type="hidden" name="target" value="{{ name }}"><input type="hidden" name="action" value="{% if starred %}remove{% else %}add{% endif %}"><input type="hidden" name="back" value="{{ here }}"><button type="submit" class="secondary icon-text{% if starred %} pinned{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#star"/></svg>{% if starred %}Pinned{% else %}Pin{% endif %}</button></form>
+    <form method="post" action="/console/favourites" class="fav-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="resource"><input type="hidden" name="target" value="{{ name }}"><input type="hidden" name="action" value="{% if starred %}remove{% else %}add{% endif %}"><input type="hidden" name="back" value="{{ here }}"><button type="submit" class="secondary icon-text{% if starred %} favourite{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#star"/></svg>Favourite</button></form>
     {% if can_request %}<a class="button" href="/console/access?resource={{ name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#key-round"/></svg>Request access</a>{% endif %}
     <a class="button secondary" href="/console/resources"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-left"/></svg>All resources</a>
   </div>
@@ -46,7 +46,7 @@
   <h2 id="build-h">Build your command</h2>
   <p class="hint">Pick what you need and copy the command. It lists only what your own access allows; the proxy still checks every request.</p>
   {% if !b.fields.is_empty() %}
-  <form method="get" action="/console/resources/{{ name }}#build" class="builder-form" data-autosubmit>
+  <form method="get" action="/console/resources/{{ name }}#build" class="builder-form" data-builder>
     {% for f in b.fields %}
     <label class="field"><span>{{ f.label }}</span>
       {% if f.is_select() %}<select name="{{ f.name }}">{% for o in f.options %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>

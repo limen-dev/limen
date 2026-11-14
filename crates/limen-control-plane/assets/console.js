@@ -671,3 +671,41 @@ document.addEventListener('click', function (e) {
   if (!t) return;
   if (t.hasAttribute('data-reload')) location.reload(); else history.back();
 });
+
+// The command builder on a resource page. Picking something updates the command where it is: the
+// page is not reloaded and does not jump, so the window stays as it was. The form is a plain GET
+// form, so without this script (or if the request fails) it works as a normal page load.
+(function () {
+  function field(form) { var a = document.activeElement; return a && form.contains(a) && a.name ? a.name : ''; }
+  document.addEventListener('change', function (e) {
+    var el = e.target;
+    var form = el.closest && el.closest('form[data-builder]');
+    if (!form || el.tagName !== 'SELECT') return;
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
+  });
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches('form[data-builder]') || !window.fetch || !window.URL) return;
+    e.preventDefault();
+    var url = new URL((form.getAttribute('action') || location.pathname).split('#')[0], location.href);
+    new FormData(form).forEach(function (v, k) {
+      if (typeof v === 'string' && v.trim() !== '') url.searchParams.append(k, v.trim());
+    });
+    var focused = field(form);
+    var current = document.getElementById('build');
+    fetch(url.href, { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Requested-With': 'builder' } })
+      .then(function (r) { if (!r.ok || r.redirected) throw new Error('not ok'); return r.text(); })
+      .then(function (text) {
+        var next = new DOMParser().parseFromString(text, 'text/html').getElementById('build');
+        if (!next || !current || !current.isConnected) throw new Error('no builder');
+        current.replaceWith(next);
+        // Keep the address in step (shareable) without adding a history entry.
+        try { history.replaceState(null, '', url.pathname + url.search); } catch (err) { /* ignore */ }
+        if (focused) {
+          var again = next.querySelector('[name="' + focused + '"]');
+          if (again) { again.focus({ preventScroll: true }); if (again.setSelectionRange && again.type === 'text') { var n = again.value.length; again.setSelectionRange(n, n); } }
+        }
+      })
+      .catch(function () { form.submit(); });
+  });
+})();

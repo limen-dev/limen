@@ -18,7 +18,7 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use super::connect_builder;
-use super::pins;
+use super::favourites;
 use super::query;
 use super::resource_ui::{self, ResourceSort};
 use super::store::{self, SessionFilter};
@@ -417,15 +417,15 @@ async fn approval_attention(
     Ok(items)
 }
 
-/// The viewer's pinned resources (only those they can still open) and saved views.
-async fn pinned_and_saved(
+/// The viewer's favourite resources (only those they can still open) and saved views.
+async fn favourites_and_saved(
     state: &AppState,
     auth: &Auth,
     reachable: &[ResourceView],
-) -> Result<(Vec<views::PinnedResource>, Vec<views::SavedView>), Response> {
-    let pins = store::list_pins(&state.db, &auth.username)
+) -> Result<(Vec<views::FavouriteResource>, Vec<views::SavedView>), Response> {
+    let saved_items = store::list_favourites(&state.db, &auth.username)
         .await
-        .map_err(|e| db_error("reading your pins", &e))?;
+        .map_err(|e| db_error("reading your favourites", &e))?;
     // Health is worker state, which is admin-only.
     let workers = if auth.is_admin {
         Some(
@@ -439,19 +439,22 @@ async fn pinned_and_saved(
     let loaded = state.policy.current();
     let mut resources = Vec::new();
     let mut saved = Vec::new();
-    for pin in pins {
-        if pin.kind == "view" {
+    for item in saved_items {
+        if item.kind == "view" {
+            let (page, icon) = favourites::view_page(&item.target);
             saved.push(views::SavedView {
-                label: pin.label,
-                href: pin.target,
+                label: item.label,
+                href: item.target,
+                page,
+                icon,
             });
             continue;
         }
         // A resource that has gone from policy is skipped; so is one a member can no longer open.
-        let Some(res) = loaded.policy.resource(&pin.target) else {
+        let Some(res) = loaded.policy.resource(&item.target) else {
             continue;
         };
-        let mine = reachable.iter().find(|r| r.name == pin.target);
+        let mine = reachable.iter().find(|r| r.name == item.target);
         if !auth.is_admin && mine.is_none() {
             continue;
         }
@@ -464,13 +467,13 @@ async fn pinned_and_saved(
                 &res.spec.worker_selector,
             ))
         });
-        resources.push(views::PinnedResource {
-            name: pin.target.clone(),
-            path: path_segment(&pin.target),
+        resources.push(views::FavouriteResource {
+            name: item.target.clone(),
+            path: path_segment(&item.target),
             kind: kind.to_owned(),
             icon,
             kclass,
-            connect: mine.map(|_| views::connect_for(kind, &pin.target)),
+            connect: mine.map(|m| views::card_connect(kind, &item.target, &m.principals)),
             health,
         });
     }
@@ -498,7 +501,7 @@ async fn recent_resources(
                 kind: r.kind.clone(),
                 icon: r.icon,
                 kclass: r.kclass,
-                connect: views::connect_for(&r.kind, &r.name),
+                connect: views::card_connect(&r.kind, &r.name, &r.principals),
                 last: views::Stamp::of(at),
             })
         })
@@ -588,7 +591,7 @@ pub async fn home(
         Ok(items) => items,
         Err(r) => return r,
     };
-    let (pinned, saved) = match pinned_and_saved(&state, &auth, &resources).await {
+    let (favourites, saved) = match favourites_and_saved(&state, &auth, &resources).await {
         Ok(p) => p,
         Err(r) => return r,
     };
@@ -603,7 +606,7 @@ pub async fn home(
             expires: time_text(Some(auth.expires_at)),
             attention,
             recent,
-            pinned,
+            favourites,
             saved,
         }
         .render(),
@@ -675,7 +678,7 @@ pub struct ResourcesQuery {
     q: Option<String>,
     sort: Option<String>,
     attention: Option<String>,
-    pinned: Option<String>,
+    favourites: Option<String>,
 }
 
 /// Every `label=key=value` in the query string (repeatable; a value may contain commas).
@@ -725,13 +728,14 @@ async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>
         Ok(r) => r,
         Err(r) => return Err(r),
     };
-    let pinned: std::collections::HashSet<String> = store::list_pins(&state.db, &auth.username)
-        .await
-        .map_err(|e| db_error("reading your pins", &e))?
-        .into_iter()
-        .filter(|p| p.kind == "resource")
-        .map(|p| p.target)
-        .collect();
+    let favourite_names: std::collections::HashSet<String> =
+        store::list_favourites(&state.db, &auth.username)
+            .await
+            .map_err(|e| db_error("reading your favourites", &e))?
+            .into_iter()
+            .filter(|p| p.kind == "resource")
+            .map(|p| p.target)
+            .collect();
     let mut rows: Vec<ResourceRow> = Vec::new();
     for doc in loaded.policy.documents() {
         let Document::Resource(r) = doc else { continue };
@@ -772,7 +776,7 @@ async fn resource_rows(state: &AppState, auth: &Auth) -> Result<Vec<ResourceRow>
             last_used: seen.last_started.map(views::Stamp::of),
             errors: errors.get(&name).copied().unwrap_or_default().total(),
             errors_text: views::errors_text(errors.get(&name).copied().unwrap_or_default()),
-            pinned: pinned.contains(&name),
+            favourite: favourite_names.contains(&name),
             name,
             kind: kind.to_owned(),
             icon,
@@ -806,9 +810,9 @@ pub async fn resources(
     let sort = ResourceSort::parse(q.sort.as_deref(), auth.is_admin);
     // Worker health is admin-only, so the filter is too.
     let attention = auth.is_admin && q.attention.as_deref() == Some("1");
-    let pinned_only = q.pinned.as_deref() == Some("1");
+    let favourites_only = q.favourites.as_deref() == Some("1");
     let total = rows.len();
-    let pinned_count = rows.iter().filter(|r| r.pinned).count();
+    let favourite_count = rows.iter().filter(|r| r.favourite).count();
     let attention_count = rows.iter().filter(|r| r.needs_attention()).count();
     let mut kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
     kinds.sort();
@@ -817,13 +821,16 @@ pub async fn resources(
         kind_filter.as_deref().is_none_or(|k| k == r.kind)
             && label_filter.iter().all(|l| r.labels.contains(l))
             && (!attention || r.needs_attention())
-            && (!pinned_only || r.pinned)
+            && (!favourites_only || r.favourite)
             && needle.as_deref().is_none_or(|n| {
                 r.name.to_lowercase().contains(n)
                     || r.labels.iter().any(|l| l.to_lowercase().contains(n))
             })
     });
     sort_rows(&mut rows, sort);
+    // Favourites come first whatever the sort is; the sort still orders each group (the sort above
+    // is stable under this one).
+    rows.sort_by_key(|r| !r.favourite);
     let filters = |kind: Option<&str>, labels: &[String], attention: bool| {
         resource_ui::Filters {
             kind,
@@ -831,18 +838,24 @@ pub async fn resources(
             labels,
             sort,
             attention,
-            pinned: pinned_only,
+            favourites: favourites_only,
         }
         .href()
     };
     let here = filters(kind_filter.as_deref(), &label_filter, attention);
-    let saved: Vec<views::SavedView> = match store::list_pins(&state.db, &auth.username).await {
+    let saved: Vec<views::SavedView> = match store::list_favourites(&state.db, &auth.username).await
+    {
         Ok(p) => p
             .into_iter()
             .filter(|p| p.kind == "view" && p.target.starts_with("/console/resources"))
-            .map(|p| views::SavedView {
-                label: p.label,
-                href: p.target,
+            .map(|p| {
+                let (page, icon) = favourites::view_page(&p.target);
+                views::SavedView {
+                    label: p.label,
+                    href: p.target,
+                    page,
+                    icon,
+                }
             })
             .collect(),
         Err(e) => return db_error("reading your saved views", &e),
@@ -893,17 +906,17 @@ pub async fn resources(
             attention_on: attention,
             attention_href: filters(kind_filter.as_deref(), &label_filter, !attention),
             attention_count,
-            pinned_on: pinned_only,
-            pinned_href: resource_ui::Filters {
+            favourites_on: favourites_only,
+            favourites_href: resource_ui::Filters {
                 kind: kind_filter.as_deref(),
                 q: &query_text,
                 labels: &label_filter,
                 sort,
                 attention,
-                pinned: !pinned_only,
+                favourites: !favourites_only,
             }
             .href(),
-            pinned_count,
+            favourite_count,
             saved,
             here,
             total,
@@ -1201,9 +1214,9 @@ pub async fn resource_detail(
         },
         None => None,
     };
-    let starred = match store::list_pins(&state.db, &auth.username).await {
+    let starred = match store::list_favourites(&state.db, &auth.username).await {
         Ok(p) => p.iter().any(|p| p.kind == "resource" && p.target == name),
-        Err(e) => return db_error("reading your pins", &e),
+        Err(e) => return db_error("reading your favourites", &e),
     };
     let encoded = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
     let here = tabs
@@ -1643,7 +1656,7 @@ pub async fn kill_session(
 }
 
 #[derive(Deserialize)]
-pub struct PinForm {
+pub struct FavouriteForm {
     csrf: String,
     kind: String,
     target: String,
@@ -1655,16 +1668,16 @@ pub struct PinForm {
     back: String,
 }
 
-/// `POST /console/pins`: pin a resource or save a view (`action=add`), or take it off again
+/// `POST /console/favourites`: favourite a resource or save a view (`action=add`), or take it off again
 /// (`action=remove`). Only the signed-in
 /// person's own list. A resource must be one they can see; a view must be one of the listed
 /// console pages, and for a page they may open. Nothing here is audited: it is a preference, not
 /// access, and it grants nothing.
-pub async fn pin_toggle(
+pub async fn favourite_toggle(
     State(state): State<AppState>,
     auth: Auth,
     headers: HeaderMap,
-    Form(form): Form<PinForm>,
+    Form(form): Form<FavouriteForm>,
 ) -> Response {
     let console = match console(&state) {
         Ok(c) => c,
@@ -1673,11 +1686,11 @@ pub async fn pin_toggle(
     if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
         return r;
     }
-    let back = pins::local_back(&form.back);
+    let back = favourites::local_back(&form.back);
     let bad = |what: &str| error_page(StatusCode::BAD_REQUEST, "Not saved", what);
     let (kind, target, label) = match form.kind.as_str() {
         "resource" => {
-            // Taking a pin off always works, even for a resource that has gone or been hidden
+            // Taking a favourite off always works, even for a resource that has gone or been hidden
             // since: otherwise it could never be removed. Adding needs a resource they can see.
             let known = state
                 .policy
@@ -1700,13 +1713,13 @@ pub async fn pin_toggle(
             ("resource", form.target.clone(), form.target.clone())
         }
         "view" => {
-            if !pins::valid_view_target(&form.target) {
+            if !favourites::valid_view_target(&form.target) {
                 return bad("That page can't be saved as a view.");
             }
-            let allowed = match pins::required_power(&form.target) {
-                pins::Power::Anyone => true,
-                pins::Power::ReadsRecord => auth.reads_record(),
-                pins::Power::Admin => auth.is_admin,
+            let allowed = match favourites::required_power(&form.target) {
+                favourites::Power::Anyone => true,
+                favourites::Power::ReadsRecord => auth.reads_record(),
+                favourites::Power::Admin => auth.is_admin,
             };
             if form.action == "add" && !allowed {
                 return error_page(
@@ -1718,31 +1731,31 @@ pub async fn pin_toggle(
             (
                 "view",
                 form.target.clone(),
-                pins::clean_label(&form.label, "Saved view"),
+                favourites::clean_label(&form.label, "Saved view"),
             )
         }
-        _ => return bad("Pin a resource or save a view."),
+        _ => return bad("Favourite a resource or save a view."),
     };
     if form.action == "remove" {
-        return match store::remove_pin(&state.db, &auth.username, kind, &target).await {
+        return match store::remove_favourite(&state.db, &auth.username, kind, &target).await {
             Ok(()) => Redirect::to(&back).into_response(),
-            Err(e) => db_error("removing your pin", &e),
+            Err(e) => db_error("removing your favourite", &e),
         };
     }
     if form.action != "add" {
         return bad("Add it or remove it.");
     }
-    match store::add_pin(&state.db, &auth.username, kind, &target, &label).await {
+    match store::add_favourite(&state.db, &auth.username, kind, &target, &label).await {
         Ok(true) => Redirect::to(&back).into_response(),
         Ok(false) => error_page(
             StatusCode::CONFLICT,
-            "Too many pins",
+            "Too many favourites",
             &format!(
-                "You can keep {} pins and saved views. Remove one first.",
-                store::PIN_LIMIT
+                "You can keep {} favourites and saved views. Remove one first.",
+                store::FAVOURITE_LIMIT
             ),
         ),
-        Err(e) => db_error("saving your pin", &e),
+        Err(e) => db_error("saving your favourite", &e),
     }
 }
 
@@ -3707,7 +3720,7 @@ mod label_filter_tests {
             labels: &labels,
             sort: ResourceSort::Name,
             attention: false,
-            pinned: false,
+            favourites: false,
         }
         .href();
         let (_, query) = href.split_once('?').expect("query string");

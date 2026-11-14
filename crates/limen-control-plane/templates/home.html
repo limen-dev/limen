@@ -27,16 +27,19 @@
 </section>
 {% endif %}
 
-{% if !pinned.is_empty() %}
-<h2>Pinned <span class="count">{{ pinned.len() }}</span></h2>
+{% if !favourites.is_empty() %}
+<h2>Favourites <span class="count">{{ favourites.len() }}</span></h2>
 <div class="recent">
-  {% for r in pinned %}
-  <div class="card recent-card">
-    <div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }}{% if let Some(h) = r.health %} · <span class="pill {{ h.pill() }}" title="{{ h.hint() }}">{{ h.label() }}</span>{% endif %}</div></div></div>
-    <div class="recent-actions">
-      {% if let Some(c) = r.connect %}<span class="cmd"><code>{{ c.command }}</code><button type="button" class="secondary" data-copy="{{ c.command }}" title="Copy" aria-label="Copy the connect command for {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>{% else %}<span class="hint">Not opened by your own roles</span>{% endif %}
-      <form method="post" action="/console/pins" class="pin-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="resource"><input type="hidden" name="target" value="{{ r.name }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="back" value="/console/"><button type="submit" class="icon-btn pinned" title="Unpin" aria-label="Unpin {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#star"/></svg></button></form>
+  {% for r in favourites %}
+  <div class="card fav-card">
+    <div class="fav-head">
+      <span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span>
+      <div class="fav-id"><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }}{% if let Some(h) = r.health %} · <span class="pill {{ h.pill() }}" title="{{ h.hint() }}">{{ h.label() }}</span>{% endif %}</div></div>
+      <form method="post" action="/console/favourites" class="fav-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="resource"><input type="hidden" name="target" value="{{ r.name }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="back" value="/console/"><button type="submit" class="icon-btn favourite" title="Remove from favourites" aria-label="Remove {{ r.name }} from favourites"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#star"/></svg></button></form>
     </div>
+    {% if let Some(c) = r.connect %}{% if let Some(cmd) = c.command %}<div class="fav-cmd"><code title="{{ cmd }}">{{ cmd }}</code><button type="button" class="secondary" data-copy="{{ cmd }}" title="Copy" aria-label="Copy the connect command for {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></div>
+    {% else %}<a class="fav-cmd fav-choose" href="/console/resources/{{ r.path }}#build"><span>Choose how to connect</span><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-right"/></svg></a>{% endif %}
+    {% else %}<div class="fav-cmd fav-none">Not opened by your own roles</div>{% endif %}
   </div>
   {% endfor %}
 </div>
@@ -45,7 +48,7 @@
 {% if !saved.is_empty() %}
 <h2>Saved views <span class="count">{{ saved.len() }}</span></h2>
 <ul class="saved-views">
-  {% for v in saved %}<li><a href="{{ v.href }}">{{ v.label }}</a><form method="post" action="/console/pins" class="pin-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="view"><input type="hidden" name="target" value="{{ v.href }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="back" value="/console/"><button type="submit" class="icon-btn" title="Remove" aria-label="Remove the saved view {{ v.label }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></button></form></li>{% endfor %}
+  {% for v in saved %}<li><a href="{{ v.href }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ v.icon }}"/></svg><span class="saved-label">{{ v.label }}</span><span class="saved-page">{{ v.page }}</span></a><form method="post" action="/console/favourites" class="fav-form"><input type="hidden" name="csrf" value="{{ chrome.csrf }}"><input type="hidden" name="kind" value="view"><input type="hidden" name="target" value="{{ v.href }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="back" value="/console/"><button type="submit" class="icon-btn" title="Remove this saved view" aria-label="Remove the saved view {{ v.label }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg></button></form></li>{% endfor %}
 </ul>
 {% endif %}
 
@@ -53,9 +56,13 @@
 <h2>Continue where you left off</h2>
 <div class="recent">
   {% for r in recent %}
-  <div class="card recent-card">
-    <div class="kind-cell"><span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span><div><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }} · <time datetime="{{ r.last.iso }}" title="{{ r.last.text }}">{{ r.last.text }}</time></div></div></div>
-    <span class="cmd"><code>{{ r.connect.command }}</code><button type="button" class="secondary" data-copy="{{ r.connect.command }}" title="Copy" aria-label="Copy the connect command for {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></span>
+  <div class="card fav-card">
+    <div class="fav-head">
+      <span class="kind {{ r.kclass }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#{{ r.icon }}"/></svg></span>
+      <div class="fav-id"><a class="cell-main" href="/console/resources/{{ r.path }}">{{ r.name }}</a><div class="cell-sub">{{ r.kind }} · <time datetime="{{ r.last.iso }}" title="{{ r.last.text }}">{{ r.last.text }}</time></div></div>
+    </div>
+    {% if let Some(cmd) = r.connect.command %}<div class="fav-cmd"><code title="{{ cmd }}">{{ cmd }}</code><button type="button" class="secondary" data-copy="{{ cmd }}" title="Copy" aria-label="Copy the connect command for {{ r.name }}"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#copy"/></svg></button></div>
+    {% else %}<a class="fav-cmd fav-choose" href="/console/resources/{{ r.path }}#build"><span>Choose how to connect</span><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#arrow-right"/></svg></a>{% endif %}
   </div>
   {% endfor %}
 </div>

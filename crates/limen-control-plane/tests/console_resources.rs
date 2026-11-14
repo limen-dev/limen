@@ -461,14 +461,14 @@ async fn the_palette_and_the_overview_follow_the_same_access_rules() {
 }
 
 #[tokio::test]
-async fn pins_and_saved_views_are_per_person_checked_and_bounded() {
+async fn favourites_and_saved_views_are_per_person_checked_and_bounded() {
     let Some(f) = Fixture::start().await else {
         return;
     };
-    // Dana pins a resource she can open, and comes back to where she was.
+    // Dana favourites a resource she can open, and comes back to where she was.
     let (status, to) = f
         .act(
-            "/console/pins",
+            "/console/favourites",
             DEV,
             "kind=resource&target=web-1&action=add&back=%2Fconsole%2Fresources",
         )
@@ -479,24 +479,24 @@ async fn pins_and_saved_views_are_per_person_checked_and_bounded() {
     assert!(row_of(&body, "web-1").contains("aria-pressed=\"true\""));
     assert!(row_of(&body, "db-1").contains("aria-pressed=\"false\""));
     let (_, body) = f.page("/console/", DEV).await;
-    assert!(body.contains("Pinned") && body.contains("limen ssh web-1"));
-    // Not anyone else's: the admin's row for the same resource is not pinned.
+    assert!(body.contains("Favourites") && body.contains("limen ssh web-1"));
+    // Not anyone else's: the admin's row for the same resource is not a favourite.
     let (_, body) = f.page("/console/resources", ADMIN).await;
     assert!(row_of(&body, "web-1").contains("aria-pressed=\"false\""));
 
-    // A resource she can't see: no pin, and no hint it exists.
+    // A resource she can't see: no favourite, and no hint it exists.
     let (status, _) = f
         .act(
-            "/console/pins",
+            "/console/favourites",
             DEV,
             "kind=resource&target=hidden-prod&action=add",
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    // An admin may pin it; a member may not save a page they can't open.
+    // An admin may favourite it; a member may not save a page they can't open.
     let (status, _) = f
         .act(
-            "/console/pins",
+            "/console/favourites",
             ADMIN,
             "kind=resource&target=hidden-prod&action=add",
         )
@@ -549,13 +549,13 @@ async fn pins_and_saved_views_are_per_person_checked_and_bounded() {
             StatusCode::BAD_REQUEST,
         ),
     ] {
-        let (status, _) = f.act("/console/pins", who, form).await;
+        let (status, _) = f.act("/console/favourites", who, form).await;
         assert_eq!(status, want, "{form}");
     }
     // A saved view shows on the Overview and on its own page; the admin's does not reach Dana.
     let (status, _) = f
         .act(
-            "/console/pins",
+            "/console/favourites",
             DEV,
             "kind=view&action=add&label=Staging+ssh&target=%2Fconsole%2Fresources%3Fkind%3Dssh&back=%2Fconsole%2Fresources",
         )
@@ -568,7 +568,7 @@ async fn pins_and_saved_views_are_per_person_checked_and_bounded() {
 }
 
 #[tokio::test]
-async fn a_pin_post_needs_the_token_never_redirects_off_site_and_can_always_remove() {
+async fn a_favourite_post_needs_the_token_never_redirects_off_site_and_can_always_remove() {
     let Some(f) = Fixture::start().await else {
         return;
     };
@@ -580,7 +580,7 @@ async fn a_pin_post_needs_the_token_never_redirects_off_site_and_can_always_remo
     ] {
         let (status, to) = f
             .act(
-                "/console/pins",
+                "/console/favourites",
                 DEV,
                 &format!("kind=resource&target=web-1&action=add&back={back}"),
             )
@@ -598,49 +598,54 @@ async fn a_pin_post_needs_the_token_never_redirects_off_site_and_can_always_remo
     ] {
         let r = app
             .clone()
-            .oneshot(post("/console/pins", DEV, form, origin, &f.proxy))
+            .oneshot(post("/console/favourites", DEV, form, origin, &f.proxy))
             .await
             .expect("response");
         assert_ne!(r.status(), StatusCode::SEE_OTHER, "{form} origin={origin}");
     }
     let held: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM console_pins WHERE username = 'dana' AND target = 'db-1'",
+        "SELECT count(*) FROM console_favourites WHERE username = 'dana' AND target = 'db-1'",
     )
     .fetch_one(&f.h.state.db)
     .await
     .expect("count");
     assert_eq!(held, 0);
 
-    // Taking a pin off works even when the resource has gone, or been hidden since.
-    sqlx::query("INSERT INTO console_pins (username, kind, target, label) VALUES ('dana', 'resource', 'gone', 'gone')")
+    // Taking a favourite off works even when the resource has gone, or been hidden since.
+    sqlx::query("INSERT INTO console_favourites (username, kind, target, label) VALUES ('dana', 'resource', 'gone', 'gone')")
         .execute(&f.h.state.db)
         .await
         .expect("seed");
     let (status, _) = f
         .act(
-            "/console/pins",
+            "/console/favourites",
             DEV,
             "kind=resource&target=gone&action=remove",
         )
         .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM console_pins WHERE target = 'gone'")
-        .fetch_one(&f.h.state.db)
-        .await
-        .expect("count");
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM console_favourites WHERE target = 'gone'")
+            .fetch_one(&f.h.state.db)
+            .await
+            .expect("count");
     assert_eq!(left, 0);
 
     // A person keeps at most 50.
     sqlx::query(
-        "INSERT INTO console_pins (username, kind, target, label)
+        "INSERT INTO console_favourites (username, kind, target, label)
          SELECT 'dana', 'view', '/console/sessions?n=' || g, 'v' || g FROM generate_series(1, 60) g
-          WHERE (SELECT count(*) FROM console_pins WHERE username = 'dana') + g <= 50",
+          WHERE (SELECT count(*) FROM console_favourites WHERE username = 'dana') + g <= 50",
     )
     .execute(&f.h.state.db)
     .await
     .expect("fill");
     let (status, _) = f
-        .act("/console/pins", DEV, "kind=resource&target=db-1&action=add")
+        .act(
+            "/console/favourites",
+            DEV,
+            "kind=resource&target=db-1&action=add",
+        )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
@@ -893,4 +898,63 @@ async fn the_command_builder_offers_only_what_access_allows_and_never_a_bad_valu
     let (_, body) = f.page("/console/resources/db-1", DEV).await;
     assert!(body.contains("<code>limen db connect db-1</code>"));
     assert!(body.contains("any database"));
+}
+
+#[tokio::test]
+async fn favourites_lead_the_list_and_the_overview_cards_give_a_command_that_runs() {
+    let Some(f) = Fixture::start_with(&[("builder.yaml", BUILDER_POLICY)]).await else {
+        return;
+    };
+    session(&f.h, ERIN, "erin", &["builder-many", "dev-readonly"]).await;
+    let db = &f.h.state.db;
+    let add = |kind: &'static str, target: &'static str, label: &'static str| async move {
+        limen_control_plane::console::store::add_favourite(db, "erin", kind, target, label)
+            .await
+            .expect("add");
+    };
+    // `db-1` sorts before both favourites by name; as a non-favourite it must come after them.
+    add("resource", "web-1", "web-1").await;
+    add("resource", "db-many", "db-many").await;
+    add("view", "/console/sessions?filter=active", "Live ones").await;
+
+    let (_, body) = f.page("/console/resources", ERIN).await;
+    let at = |name: &str| pos(&body, name);
+    assert!(
+        at("db-many") < at("web-1") && at("web-1") < at("db-1"),
+        "favourites first, each group in the chosen order"
+    );
+    assert!(
+        at("db-1") < at("kafka-many"),
+        "the rest keep the name order"
+    );
+    // A sort changes the order inside each group only.
+    let (_, body) = f.page("/console/resources?sort=recent", ERIN).await;
+    assert!(pos(&body, "web-1") < pos(&body, "kafka-many"));
+    assert!(pos(&body, "db-many") < pos(&body, "kafka-many"));
+    // The filter lists only favourites, and the button comes right after All.
+    let (_, body) = f.page("/console/resources?favourites=1", ERIN).await;
+    assert!(body.contains("/console/resources/web-1\""));
+    assert!(!body.contains("/console/resources/kafka-many\""));
+    let all = body.find(">All</a>").expect("All");
+    let favs = body
+        .find("Only your favourite resources")
+        .expect("favourites");
+    let first_kind = body.find("class=\"kind-dot").expect("a kind");
+    assert!(all < favs && favs < first_kind, "Favourites follows All");
+
+    // The Overview card: a resource that needs no choice shows its command; one with several roles
+    // sends you to where each role has its own, instead of a command that would not run.
+    let (_, body) = f.page("/console/", ERIN).await;
+    let start = body.find("<h2>Favourites").expect("favourites section");
+    let end = start + body[start..].find("<h2>Saved views").expect("next section");
+    let cards = &body[start..end];
+    assert!(cards.contains("data-copy=\"limen ssh ubuntu@web-1\""));
+    assert!(cards.contains("href=\"/console/resources/db-many#build\""));
+    assert!(cards.contains("Choose how to connect"));
+    assert!(
+        !cards.contains("data-copy=\"limen db connect db-many\""),
+        "no command that needs a role and names none"
+    );
+    // A saved view says which page it opens.
+    assert!(body.contains("Live ones") && body.contains("class=\"saved-page\">Sessions<"));
 }

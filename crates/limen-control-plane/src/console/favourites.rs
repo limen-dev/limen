@@ -1,4 +1,4 @@
-//! Pins and saved views: what may be stored, and where a redirect may go. Pure rules, so each has
+//! Favourites and saved views: what may be stored, and where a redirect may go. Pure rules, so each has
 //! a unit test. The data is a person's own preferences; the pages a saved view points at check
 //! access themselves when they are opened, so nothing here grants anything.
 
@@ -60,6 +60,28 @@ pub fn required_power(target: &str) -> Power {
     }
 }
 
+/// The page a saved view opens, in words and as an icon, for the list of saved views. Anything that
+/// is not one of [`VIEW_PAGES`] (it cannot be saved, but old rows could be) is just "Page".
+#[must_use]
+pub fn view_page(target: &str) -> (&'static str, &'static str) {
+    let is = |page: &str| {
+        target
+            .strip_prefix(page)
+            .is_some_and(|r| r.is_empty() || r.starts_with('?'))
+    };
+    if is("/console/resources") {
+        ("Resources", "database")
+    } else if is("/console/sessions") {
+        ("Sessions", "terminal")
+    } else if is("/console/audit") {
+        ("Audit trail", "activity")
+    } else if is("/console/dashboards") {
+        ("Dashboards", "chart-column")
+    } else {
+        ("Page", "bookmark")
+    }
+}
+
 /// A label for a saved view: trimmed, control characters dropped, cut to [`MAX_LABEL`] characters.
 /// Empty becomes `fallback`.
 #[must_use]
@@ -79,7 +101,7 @@ pub fn clean_label(label: &str, fallback: &str) -> String {
     }
 }
 
-/// Where to go back to after pinning: only a console address on this origin. Anything else (another
+/// Where to go back to after saving a favourite: only a console address on this origin. Anything else (another
 /// site, a protocol-relative `//host`, a header-splitting newline) goes to the Overview.
 #[must_use]
 pub fn local_back(back: &str) -> String {
@@ -98,6 +120,21 @@ pub fn local_back(back: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_view_names_its_page() {
+        assert_eq!(
+            view_page("/console/resources?kind=ssh"),
+            ("Resources", "database")
+        );
+        assert_eq!(view_page("/console/sessions"), ("Sessions", "terminal"));
+        assert_eq!(view_page("/console/audit?q=x"), ("Audit trail", "activity"));
+        assert_eq!(
+            view_page("/console/dashboards"),
+            ("Dashboards", "chart-column")
+        );
+        assert_eq!(view_page("/console/resourcesX"), ("Page", "bookmark"));
+    }
 
     #[test]
     fn a_view_is_a_listed_page_with_or_without_a_query() {

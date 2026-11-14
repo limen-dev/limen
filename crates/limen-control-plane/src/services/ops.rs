@@ -188,8 +188,8 @@ pub async fn delete_disabled_user(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("deleting user", e))?;
-    // Their console pins and saved views go with them.
-    sqlx::query("DELETE FROM console_pins WHERE lower(username) = lower($1)")
+    // Their console favourites and saved views go with them.
+    sqlx::query("DELETE FROM console_favourites WHERE lower(username) = lower($1)")
         .bind(username)
         .execute(&mut *tx)
         .await

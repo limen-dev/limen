@@ -426,28 +426,28 @@ pub async fn resource_activity(
         .collect()
 }
 
-/// Pins and saved views one person may keep.
-pub const PIN_LIMIT: i64 = 50;
+/// Favourites and saved views one person may keep.
+pub const FAVOURITE_LIMIT: i64 = 50;
 
-/// A pinned resource, or a saved view (a console address with its filters).
+/// A favourite resource, or a saved view (a console address with its filters).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pin {
+pub struct Favourite {
     pub kind: String,
     pub target: String,
     pub label: String,
 }
 
-/// Someone's pins, oldest first.
-pub async fn list_pins(db: &Db, username: &str) -> Result<Vec<Pin>, sqlx::Error> {
+/// Someone's favourites and saved views, oldest first.
+pub async fn list_favourites(db: &Db, username: &str) -> Result<Vec<Favourite>, sqlx::Error> {
     sqlx::query(
-        "SELECT kind, target, label FROM console_pins WHERE username = $1 ORDER BY created_at, target",
+        "SELECT kind, target, label FROM console_favourites WHERE username = $1 ORDER BY created_at, target",
     )
     .bind(username)
     .fetch_all(db)
     .await?
     .iter()
     .map(|r| {
-        Ok(Pin {
+        Ok(Favourite {
             kind: r.try_get("kind")?,
             target: r.try_get("target")?,
             label: r.try_get("label")?,
@@ -456,9 +456,9 @@ pub async fn list_pins(db: &Db, username: &str) -> Result<Vec<Pin>, sqlx::Error>
     .collect()
 }
 
-/// Keep a pin (or update its label if it is already kept). `false` when the person is at
-/// [`PIN_LIMIT`] and this would be one more.
-pub async fn add_pin(
+/// Keep a favourite (or update its label if it is already kept). `false` when the person is at
+/// [`FAVOURITE_LIMIT`] and this would be one more.
+pub async fn add_favourite(
     db: &Db,
     username: &str,
     kind: &str,
@@ -468,11 +468,11 @@ pub async fn add_pin(
     let mut tx = db.begin().await?;
     // One writer per person at a time, so two quick posts can't both pass the limit check.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
-        .bind(format!("console_pins:{username}"))
+        .bind(format!("console_favourites:{username}"))
         .execute(&mut *tx)
         .await?;
     let updated = sqlx::query(
-        "UPDATE console_pins SET label = $4 WHERE username = $1 AND kind = $2 AND target = $3",
+        "UPDATE console_favourites SET label = $4 WHERE username = $1 AND kind = $2 AND target = $3",
     )
     .bind(username)
     .bind(kind)
@@ -482,15 +482,16 @@ pub async fn add_pin(
     .await?
     .rows_affected();
     if updated == 0 {
-        let held: i64 = sqlx::query_scalar("SELECT count(*) FROM console_pins WHERE username = $1")
-            .bind(username)
-            .fetch_one(&mut *tx)
-            .await?;
-        if held >= PIN_LIMIT {
+        let held: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM console_favourites WHERE username = $1")
+                .bind(username)
+                .fetch_one(&mut *tx)
+                .await?;
+        if held >= FAVOURITE_LIMIT {
             return Ok(false);
         }
         sqlx::query(
-            "INSERT INTO console_pins (username, kind, target, label) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO console_favourites (username, kind, target, label) VALUES ($1, $2, $3, $4)",
         )
         .bind(username)
         .bind(kind)
@@ -503,14 +504,14 @@ pub async fn add_pin(
     Ok(true)
 }
 
-/// Drop a pin. Not being there is fine.
-pub async fn remove_pin(
+/// Drop a favourite. Not being there is fine.
+pub async fn remove_favourite(
     db: &Db,
     username: &str,
     kind: &str,
     target: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM console_pins WHERE username = $1 AND kind = $2 AND target = $3")
+    sqlx::query("DELETE FROM console_favourites WHERE username = $1 AND kind = $2 AND target = $3")
         .bind(username)
         .bind(kind)
         .bind(target)

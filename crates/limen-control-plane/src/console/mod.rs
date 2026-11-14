@@ -21,10 +21,10 @@ mod connect_builder;
 mod controls;
 mod dashboards;
 mod doc_diff;
+mod favourites;
 mod integrations;
 pub mod oidc_flow;
 mod pages;
-mod pins;
 mod policy_edit;
 mod query;
 mod resource_ui;
@@ -121,7 +121,7 @@ pub fn router(state: AppState) -> Router {
         .route("/console/simulator", get(pages::simulator))
         .route("/console/simulator/suggest", get(pages::simulator_suggest))
         .route("/console/suggest/resources", get(pages::resource_suggest))
-        .route("/console/pins", post(pages::pin_toggle))
+        .route("/console/favourites", post(pages::favourite_toggle))
         .route(
             "/console/policy/documents",
             post(policy_edit::save_document),

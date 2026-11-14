@@ -113,7 +113,7 @@ pub struct Filters<'a> {
     pub labels: &'a [String],
     pub sort: ResourceSort,
     pub attention: bool,
-    pub pinned: bool,
+    pub favourites: bool,
 }
 
 impl Filters<'_> {
@@ -137,8 +137,8 @@ impl Filters<'_> {
         if self.attention {
             ser.append_pair("attention", "1");
         }
-        if self.pinned {
-            ser.append_pair("pinned", "1");
+        if self.favourites {
+            ser.append_pair("favourites", "1");
         }
         let query = ser.finish();
         if query.is_empty() {
@@ -254,7 +254,7 @@ mod tests {
             labels: &[],
             sort: ResourceSort::Name,
             attention: false,
-            pinned: false,
+            favourites: false,
         };
         assert_eq!(f.href(), "/console/resources");
     }
@@ -268,11 +268,11 @@ mod tests {
             labels: &labels,
             sort: ResourceSort::Recent,
             attention: true,
-            pinned: true,
+            favourites: true,
         };
         assert_eq!(
             f.href(),
-            "/console/resources?kind=ssh&q=a%26b+c&label=env%3Dprod&sort=recent&attention=1&pinned=1"
+            "/console/resources?kind=ssh&q=a%26b+c&label=env%3Dprod&sort=recent&attention=1&favourites=1"
         );
     }
 }

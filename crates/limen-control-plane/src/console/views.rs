@@ -814,17 +814,40 @@ pub struct AttentionItem {
 pub struct SavedView {
     pub label: String,
     pub href: String,
+    /// The page it opens ("Resources") and that page's icon.
+    pub page: &'static str,
+    pub icon: &'static str,
 }
 
-/// A resource someone pinned, still reachable for them.
-pub struct PinnedResource {
+/// How a card on the Overview gets you in. One command when the kind needs no choice; when there
+/// are several logins, roles or users, a command with none of them named would not run, so the card
+/// leads to the resource page, where each choice has its own command.
+pub struct CardConnect {
+    pub command: Option<String>,
+}
+
+/// The card's way in for someone who may act as `principals` on `name`.
+#[must_use]
+pub fn card_connect(kind: &str, name: &str, principals: &[String]) -> CardConnect {
+    let mut options = connect_options(kind, name, principals);
+    CardConnect {
+        command: if options.len() == 1 {
+            options.pop().map(|o| o.command)
+        } else {
+            None
+        },
+    }
+}
+
+/// A resource someone marked as a favourite, still reachable for them.
+pub struct FavouriteResource {
     pub name: String,
     pub path: String,
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
     /// `None` for an admin who can see the resource but has no principal on it.
-    pub connect: Option<Connect>,
+    pub connect: Option<CardConnect>,
     pub health: Option<Health>,
 }
 
@@ -835,7 +858,7 @@ pub struct RecentResource {
     pub kind: String,
     pub icon: &'static str,
     pub kclass: &'static str,
-    pub connect: Connect,
+    pub connect: CardConnect,
     pub last: Stamp,
 }
 
@@ -862,7 +885,7 @@ pub struct Home {
     pub expires: String,
     pub attention: Vec<AttentionItem>,
     pub recent: Vec<RecentResource>,
-    pub pinned: Vec<PinnedResource>,
+    pub favourites: Vec<FavouriteResource>,
     pub saved: Vec<SavedView>,
 }
 
@@ -1614,7 +1637,7 @@ pub struct ResourceRow {
     /// Admins: errors in the last 24 hours, and what they were (for the tooltip).
     pub errors: i64,
     pub errors_text: String,
-    pub pinned: bool,
+    pub favourite: bool,
 }
 
 impl ResourceRow {
@@ -1653,9 +1676,9 @@ pub struct ResourcesPage {
     pub attention_href: String,
     /// How many resources (before filters) need attention, for the filter's badge.
     pub attention_count: usize,
-    pub pinned_on: bool,
-    pub pinned_href: String,
-    pub pinned_count: usize,
+    pub favourites_on: bool,
+    pub favourites_href: String,
+    pub favourite_count: usize,
     /// Views saved for this page, and the address a new one would be saved for.
     pub saved: Vec<SavedView>,
     pub here: String,
@@ -1715,9 +1738,9 @@ pub struct ResourcePage {
     pub live: Vec<LiveSession>,
     pub sessions_href: String,
     pub audit_href: Option<String>,
-    /// The viewer pinned this resource.
+    /// The viewer marked this resource as a favourite.
     pub starred: bool,
-    /// Where to come back to after pinning.
+    /// Where to come back to after changing a favourite.
     pub here: String,
     /// Admins: what went wrong here in the last 24 hours, by where it was recorded.
     pub errors: Vec<ErrorPart>,

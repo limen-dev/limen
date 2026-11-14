@@ -764,16 +764,18 @@ button.nav-toggle:focus-visible, button.sidebar-toggle:focus-visible { box-shado
   .sidebar-foot { flex: none; margin-top: 0; }
   /* Collapsed: a narrow column of icons, and the page uses the room the sidebar gave up. Every
      rule is scoped to the sidebar and the shell, because the flag sits on <html> and the sign-in
-     page has its own theme buttons and logo that must not change. The icons stay where they are, so
-     only the width moves. */
+     page has its own theme buttons and logo that must not change. Everything in it is centred on one line. */
   .sidebar .brand span, .sidebar .nav a span, .sidebar .me-text { white-space: nowrap; transition: opacity .15s ease; }
   html[data-sidebar="collapsed"] .shell { grid-template-columns: 60px minmax(0, 1fr); }
   html[data-sidebar="collapsed"] .shell .main { max-width: 100vw; }
-  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: flex-start; gap: 0; }
-  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; }
-  /* Icons only. The names stay in the page for screen readers and as tooltips (set by console.js). */
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head { flex-direction: column; align-items: center; gap: 4px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-head .brand { flex: none; width: 100%; justify-content: center; gap: 0; padding: 6px 0 4px; }
+  html[data-sidebar="collapsed"] .sidebar .sidebar-toggle { margin: 0 auto; }
+  html[data-sidebar="collapsed"] .sidebar .nav a { justify-content: center; gap: 0; padding: 8px 0; }
+  /* Icons only, each one centred in the column. The names leave the layout (so they push nothing
+     sideways) but stay in the page for screen readers and as tooltips (set by console.js). */
   html[data-sidebar="collapsed"] .sidebar .brand span,
-  html[data-sidebar="collapsed"] .sidebar .nav a span { opacity: 0; }
+  html[data-sidebar="collapsed"] .sidebar .nav a span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   html[data-sidebar="collapsed"] .sidebar .me-text { display: none; }
   /* Group labels have no room; the groups stay apart by a rule, and all their links show. */
   html[data-sidebar="collapsed"] .sidebar .nav-toggle { display: none; }
@@ -851,12 +853,24 @@ th.actions { position: relative; } /* so a hidden header label stays in its cell
 .attention li a:hover { text-decoration: none; }
 .attention li a:hover .pill { filter: brightness(.95); }
 .attention li .i { color: var(--text-3); }
-.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 8px; }
-.recent-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.recent-card .cell-main { display: inline-flex; align-items: center; min-height: 24px; }
-.recent-card .cmd { align-self: flex-start; max-width: 100%; }
-.recent-card .cmd code { overflow-wrap: anywhere; }
-@media (pointer: coarse) { .attention li a, .recent-card .cell-main, .strip-links a { min-height: 44px; min-width: 44px; } }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 8px; }
+/* A card on the Overview: who it is on one line (icon, name, what it is, the star on the right),
+   how to get in on the next, always the same two rows so a grid of them lines up. */
+.fav-card { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fav-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.fav-id { flex: 1; min-width: 0; }
+.fav-id .cell-main { display: block; min-height: 24px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fav-id .cell-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fav-head .fav-form { flex: none; display: flex; }
+.fav-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 38px; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 10px; color: var(--text); }
+.fav-cmd code { flex: 1; min-width: 0; background: none; border: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.fav-cmd button { flex: none; background: none; border: 0; color: var(--text-3); cursor: pointer; padding: 6px; border-radius: 6px; display: grid; }
+.fav-cmd button:hover { color: var(--text); background: var(--surface); }
+.fav-cmd button.done { color: var(--ok); }
+a.fav-choose { justify-content: space-between; padding: 3px 10px; font-weight: 500; color: var(--accent-text); }
+a.fav-choose:hover { text-decoration: none; border-color: var(--accent); background: var(--accent-soft); }
+.fav-none { color: var(--text-3); font-size: 13px; padding-left: 10px; }
+@media (pointer: coarse) { .attention li a, .fav-id .cell-main, .strip-links a { min-height: 44px; min-width: 44px; } .fav-cmd { min-height: 44px; } .fav-cmd button { min-width: 44px; min-height: 44px; place-items: center; } }
 
 /* ---- command palette (ADR-0055) ---- */
 .palette-open { display: none; width: 100%; justify-content: flex-start; gap: 10px; color: var(--text-2); font-weight: 500; }
@@ -895,20 +909,31 @@ tbody tr.row-on td { background: var(--accent-soft); }
 tbody tr.row-on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 @media (pointer: coarse) { .refresh-note button.link { min-height: 44px; min-width: 44px; } }
 
-/* ---- pins and saved views (ADR-0055) ---- */
-form.pin-form { display: inline; margin: 0; }
-.icon-btn.pinned, button.pinned { color: var(--warn); }
-.icon-btn.pinned .i, button.pinned .i { fill: currentColor; }
+/* ---- favourites and saved views (ADR-0055) ---- */
+form.fav-form { display: inline; margin: 0; }
+.icon-btn.favourite, button.favourite { color: var(--warn); }
+.icon-btn.favourite .i, button.favourite .i { fill: currentColor; }
 button.icon-text { display: inline-flex; align-items: center; gap: 6px; }
-.recent-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.saved-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 0 0 16px; }
+.saved-title { color: var(--text-3); font-size: 13px; font-weight: 550; }
 .saved-views { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.saved-views li { display: inline-flex; align-items: center; background: var(--sunken); border: 1px solid var(--border); border-radius: 999px; padding: 0 2px 0 12px; }
-.saved-views li a { display: inline-flex; align-items: center; min-height: 28px; }
+.saved-row .saved-views { margin: 0; }
+/* One saved view: the page's icon and the name you gave it, then a quiet remove button behind a rule. */
+.saved-views li { display: inline-flex; align-items: stretch; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); transition: border-color .15s; }
+.saved-views li:hover { border-color: var(--accent); }
+.saved-views li a { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 34px; padding: 0 10px 0 11px; color: var(--text); border-radius: 7px 0 0 7px; }
+.saved-views li a:hover { text-decoration: none; color: var(--accent-text); }
+.saved-views li a .i { color: var(--text-3); flex: none; }
+.saved-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.saved-page { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.saved-views li .fav-form { display: flex; border-left: 1px solid var(--border); }
+.saved-views li .icon-btn { border-radius: 0 7px 7px 0; padding: 0 8px; align-content: center; }
+.saved-views li .icon-btn:hover { background: var(--bad-soft); color: var(--bad); }
 .save-view { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 18px; }
 .save-view[hidden] { display: none; }
 .save-view label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .save-view input[type=text] { width: 200px; }
-@media (pointer: coarse) { .saved-views li a { min-height: 44px; } }
+@media (pointer: coarse) { .saved-views li a { min-height: 44px; } .saved-views li .icon-btn { min-width: 44px; } }
 
 /* ---- bulk end sessions ---- */
 details.bulk { margin: 16px 0; }
@@ -1002,4 +1027,18 @@ main:not(.refreshed) :is(.stats > :nth-child(n+5), tbody tr:nth-child(n+5)) { an
     scroll-behavior: auto !important;
   }
   @view-transition { navigation: none; }
+}
+
+/* The kind filters and the favourites and attention toggles stay on one line; a narrow window
+   scrolls the row sideways instead of wrapping it (the scrollbar is hidden, as on other tab rows). */
+.tabs.kinds { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 4px; margin-left: -2px; gap: 4px; }
+.tabs.kinds a { gap: 5px; padding: 4px 8px 4px 5px; }
+.tabs.kinds a:first-child { padding-left: 11px; }
+.tabs.kinds a { flex: none; }
+.tabs.kinds {
+  background:
+    linear-gradient(to right, var(--bg) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 30%, transparent) right / 24px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--nav-shadow), transparent) left / 8px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--nav-shadow), transparent) right / 8px 100% no-repeat scroll;
 }
