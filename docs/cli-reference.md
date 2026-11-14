@@ -1017,7 +1017,7 @@ Usage: limen admin [OPTIONS] <COMMAND>
 
 #### `limen admin manage`
 
-The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant. (Also `limen manage`, which stays for existing scripts.)
+The management API: read policy documents and write resources, as an admin or as a bot with a policy_writer grant
 
 ```text
 Usage: limen admin manage [OPTIONS] <COMMAND>

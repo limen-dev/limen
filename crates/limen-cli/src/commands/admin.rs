@@ -19,7 +19,7 @@ use crate::ui;
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
     /// The management API: read policy documents and write resources, as an admin or as a bot
-    /// with a policy_writer grant. (Also `limen manage`, which stays for existing scripts.)
+    /// with a policy_writer grant.
     Manage {
         #[command(subcommand)]
         command: super::manage::ManageCommand,

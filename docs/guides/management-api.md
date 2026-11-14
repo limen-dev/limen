@@ -26,7 +26,7 @@ Anyone else gets `PERMISSION_DENIED`.
    - `limen.v1.Auth/BotLogin { method: "github_actions" | "gitlab" | "oidc", token, csr_der, bot: "" }` returns `cert_pem` and `expires_at_unix` (at most an hour; no refresh: log in again with a new token).
 3. **Call the API** on a new connection with `cert_pem` and the key as the TLS client certificate.
 
-`limen login --bot github_actions` does steps 1–2 (`crates/limen-cli/src/commands/bot.rs`) and `limen admin manage ...` (the older `limen manage ...` still works, hidden from the menu) does step 3; read them as a reference implementation.
+`limen login --bot github_actions` does steps 1–2 (`crates/limen-cli/src/commands/bot.rs`) and `limen admin manage ...` (the older `limen manage ...` still runs in scripts and CI, but in a terminal it points you here) does step 3; read them as a reference implementation.
 
 ## Mapping a Terraform resource
 

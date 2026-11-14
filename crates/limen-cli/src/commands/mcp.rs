@@ -202,15 +202,6 @@ fn shell_quote(s: &str) -> String {
 
 /// Serve MCP on stdin and stdout until stdin closes.
 pub async fn serve(proxy: Option<&str>) -> anyhow::Result<()> {
-    // Run by hand, this would wait on the keyboard for JSON and look stuck. An
-    // agent starts it with a pipe, so a terminal means a person typed it.
-    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        eprintln!(
-            "limen mcp is a server for AI agents; it talks JSON on stdin and has nothing to show here.\n\
-             To add it to an agent, run `limen config mcp`."
-        );
-        return Ok(());
-    }
     let runner = SelfRunner {
         proxy: proxy.map(str::to_owned),
     };

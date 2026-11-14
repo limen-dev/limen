@@ -281,7 +281,7 @@ enum Command {
         json: bool,
     },
     /// Open an SSH session: `limen ssh [login@]resource [command...]`.
-    #[command(display_order = 17)]
+    #[command(display_order = 19)]
     Ssh {
         target: String,
         #[arg(trailing_var_arg = true)]
@@ -722,6 +722,21 @@ fn opens_listener(command: &Command) -> bool {
     )
 }
 
+/// A command that moved. Typed in a terminal it answers like any unknown command and names the
+/// new one. Run by a script or an agent (stdin or stdout is not a terminal) it still works, so
+/// existing agent configs (`limen mcp`) and CI jobs (`limen manage`) don't break.
+fn moved(name: &str, now: &str) {
+    use std::io::IsTerminal as _;
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        <Cli as clap::CommandFactory>::command()
+            .error(
+                clap::error::ErrorKind::InvalidSubcommand,
+                format!("unrecognized subcommand '{name}'\n\n  tip: did you mean `{now}`?"),
+            )
+            .exit();
+    }
+}
+
 /// The completion script for `shell`, on stdout.
 fn print_completions(shell: clap_complete::Shell) {
     // Render first: writing straight to a closed pipe (`| head`) would panic.
@@ -825,7 +840,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
-        Command::Mcp => commands::mcp::serve(proxy).await,
+        Command::Mcp => {
+            moved("mcp", "limen config mcp");
+            commands::mcp::serve(proxy).await
+        }
         Command::Completions { shell }
         | Command::Config {
             command: ConfigCommand::Completions { shell },
@@ -914,7 +932,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Review { command } => commands::review::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
-        Command::Manage { command } => commands::manage::run(proxy, command).await,
+        Command::Manage { command } => {
+            moved("manage", "limen admin manage");
+            commands::manage::run(proxy, command).await
+        }
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
