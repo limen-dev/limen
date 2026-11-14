@@ -8,12 +8,14 @@ Install the CLI as usual, then sign in and add the server to your agent:
 
 ```sh
 limen login
-claude mcp add --scope user limen -- limen mcp
+limen config mcp
 ```
+
+`limen config mcp` prints the command for Claude Code, which looks like `claude mcp add --scope user limen -- /path/to/limen mcp`, and a JSON block for other clients. Run the command it prints. The `limen mcp` inside it is what your agent starts; you don't type it yourself.
 
 `--scope user` makes it available in every project. Without it, Claude Code adds the server only to the directory you ran the command in.
 
-For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. (`limen mcp` itself is the server an agent starts. Typed in a terminal it answers as an unknown command and points to `limen config mcp`.) It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
+For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. (Typing `limen mcp` in a terminal answers as an unknown command and points here; an agent starting it still works.) It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
 
 Logins are short-lived. When yours expires, every tool answers `run limen login`. The agent cannot sign in for you, and that is deliberate.
 

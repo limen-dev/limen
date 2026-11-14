@@ -670,6 +670,17 @@ async fn main() {
             }
             ui::banner();
         }
+        if e.kind() == ErrorKind::InvalidSubcommand
+            && let Some((word, now)) = moved_suggestion(&args)
+        {
+            // clap's own guess goes by spelling (`animations` -> `completions`); these are known.
+            <Cli as clap::CommandFactory>::command()
+                .error(
+                    ErrorKind::InvalidSubcommand,
+                    format!("unrecognized subcommand '{word}'\n\n  tip: did you mean `{now}`?"),
+                )
+                .exit();
+        }
         e.exit()
     });
     anstream::ColorChoice::write_global(match cli.color {
@@ -720,6 +731,18 @@ fn opens_listener(command: &Command) -> bool {
         } | Command::Tcp { .. }
             | Command::Connect { .. }
     )
+}
+
+/// Words people try that live under another command: the first word that isn't a flag, and
+/// where it is. clap only suggests by spelling, which gets these wrong.
+fn moved_suggestion(args: &[String]) -> Option<(&str, &'static str)> {
+    let word = args.iter().find(|a| !a.starts_with('-'))?.as_str();
+    let now = match word {
+        "animations" | "animation" | "settings" => "limen config animations",
+        "completion" => "limen config completions",
+        _ => return None,
+    };
+    Some((word, now))
 }
 
 /// A command that moved. Typed in a terminal it answers like any unknown command and names the
