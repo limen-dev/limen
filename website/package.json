@@ -10,10 +10,10 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "0.4.7",
+    "@astrojs/markdown-satteri": "0.4.9",
     "@astrojs/starlight": "0.42.10",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
-    "astro": "7.4.7"
+    "astro": "7.4.11"
   }
 }
