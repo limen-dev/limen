@@ -1029,16 +1029,7 @@ main:not(.refreshed) :is(.stats > :nth-child(n+5), tbody tr:nth-child(n+5)) { an
   @view-transition { navigation: none; }
 }
 
-/* The kind filters and the favourites and attention toggles stay on one line; a narrow window
-   scrolls the row sideways instead of wrapping it (the scrollbar is hidden, as on other tab rows). */
-.tabs.kinds { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 4px; margin-left: -2px; gap: 4px; }
-.tabs.kinds a { gap: 5px; padding: 4px 8px 4px 5px; }
-.tabs.kinds a:first-child { padding-left: 11px; }
+/* The kind filters, the favourites toggle and the attention toggle wrap onto the next line when the
+   window is too narrow for them, instead of scrolling sideways. */
+.tabs.kinds { flex-wrap: wrap; overflow: visible; max-width: 100%; }
 .tabs.kinds a { flex: none; }
-.tabs.kinds {
-  background:
-    linear-gradient(to right, var(--bg) 30%, transparent) left / 24px 100% no-repeat local,
-    linear-gradient(to left, var(--bg) 30%, transparent) right / 24px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, var(--nav-shadow), transparent) left / 8px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, var(--nav-shadow), transparent) right / 8px 100% no-repeat scroll;
-}
