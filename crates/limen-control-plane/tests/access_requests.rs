@@ -434,6 +434,58 @@ async fn a_role_that_needs_two_approvers_gets_two_different_ones() {
     );
 }
 
+/// The approver's queue honours `limit`, oldest first, and leaves out the
+/// approver's own requests (filtered in the query, not after a capped read).
+#[tokio::test]
+async fn the_approval_queue_honours_its_limit_and_skips_your_own() {
+    let Some(r) = Rig::start().await else { return };
+    let (_, both) =
+        r.h.login(CONTRACTOR, &["developers", "sre-leads"])
+            .await
+            .expect("a lead who also asks");
+    let first = r
+        .request(&r.dev, "web-prod", "INC-1 disk")
+        .await
+        .expect("ssh");
+    let second = r.request(&r.dev, "orders-prod", "").await.expect("db");
+    let own = r
+        .request(&both, "web-prod", "INC-2 own")
+        .await
+        .expect("own");
+    let queue = |who: CertificateDer<'static>, limit: u32| {
+        let access = r.access();
+        async move {
+            let mut access = access;
+            access
+                .list_access_requests(forwarded(
+                    ListAccessRequestsRequest {
+                        scope: "approvable".into(),
+                        status: String::new(),
+                        limit,
+                    },
+                    Some(&who),
+                ))
+                .await
+                .expect("queue")
+                .into_inner()
+                .requests
+                .into_iter()
+                .map(|q| q.id)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(queue(r.lead.clone(), 1).await, [first.id.clone()]);
+    assert_eq!(
+        queue(r.lead.clone(), 0).await,
+        [first.id.clone(), second.id.clone(), own.id.clone()]
+    );
+    assert_eq!(
+        queue(both, 0).await,
+        [first.id, second.id],
+        "never your own"
+    );
+}
+
 #[tokio::test]
 async fn a_denial_ends_it_and_a_requester_can_withdraw() {
     let Some(r) = Rig::start().await else { return };

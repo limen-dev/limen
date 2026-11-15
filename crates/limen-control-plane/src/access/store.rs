@@ -405,13 +405,26 @@ pub async fn list_requests(
     .collect()
 }
 
-/// Pending requests that have not lapsed.
-pub async fn pending(db: &Db) -> Result<Vec<RequestRow>, sqlx::Error> {
+/// Pending requests that have not lapsed, for `roles` only, oldest first,
+/// leaving out `approver`'s own. Filtered here rather than after a capped
+/// read, so a busy organisation's oldest requests can't hide the rest.
+pub async fn pending_for_roles(
+    db: &Db,
+    roles: &[String],
+    approver: &str,
+    limit: i64,
+) -> Result<Vec<RequestRow>, sqlx::Error> {
     sqlx::query(concat!(
         "SELECT ",
         request_cols!(),
-        " FROM access_requests WHERE status = 'pending' AND expires_at > now() ORDER BY created_at LIMIT 500"
+        " FROM access_requests
+          WHERE status = 'pending' AND expires_at > now()
+            AND role = ANY($1) AND lower(requester) <> lower($2)
+          ORDER BY created_at LIMIT $3"
     ))
+    .bind(roles)
+    .bind(approver)
+    .bind(limit)
     .fetch_all(db)
     .await?
     .iter()
