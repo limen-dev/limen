@@ -156,7 +156,8 @@ impl Tally {
                         missing_to: seq - 1,
                     });
                 }
-                next = seq + 1;
+                // `seq` comes from the bucket, so it may be anything.
+                next = seq.saturating_add(1);
             }
         }
         gaps
@@ -566,6 +567,25 @@ mod tests {
                 instance_id: "p/a".into(),
                 missing_from: 0,
                 missing_to: 2,
+            }]
+        );
+    }
+
+    /// `seq` is read from the bucket, so a tampered or corrupt line can say
+    /// anything, `u64::MAX` included: that is a gap, never a panic.
+    #[test]
+    fn the_largest_seq_is_a_gap_not_an_overflow() {
+        let mut t = Tally::default();
+        for l in [line("p/a", 0), line("p/a", u64::MAX)] {
+            t.add(&l).expect("event");
+        }
+        assert_eq!(
+            t.gaps(),
+            vec![SeqGap {
+                component: "proxy".into(),
+                instance_id: "p/a".into(),
+                missing_from: 1,
+                missing_to: u64::MAX - 1,
             }]
         );
     }

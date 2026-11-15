@@ -162,8 +162,11 @@ step "A broken replacement is refused and the last good certificate stays"
 good_key="$(cat "$pub/key.pem")"
 printf 'not a key\n' >"$pub/key.pem"
 docker kill -s HUP "$proxy_container" >/dev/null
-for _ in $(seq 1 30); do docker logs "$proxy_container" 2>&1 | grep -q "public certificate not reloaded" && break; sleep 1; done
-docker logs "$proxy_container" 2>&1 | grep -q "public certificate not reloaded" || fail "no warning about the bad key"
+# Capture the logs before grepping: under pipefail an early `grep -q` match
+# makes `docker logs | grep -q` exit 141 (SIGPIPE) and read as "not found".
+warned() { grep -q "public certificate not reloaded" <<<"$(docker logs "$proxy_container" 2>&1)"; }
+for _ in $(seq 1 30); do warned && break; sleep 1; done
+warned || fail "no warning about the bad key"
 [ "$(presented serial h2)" = "$after" ] || fail "the certificate changed even though the key was bad"
 limen status >/dev/null || fail "the CLI should still work"
 curl -sf "http://localhost:$LIMEN_PORT_HEALTH/metrics" | grep -q "limen_proxy_public_cert_reload_failures_total" || fail "no failure counter"

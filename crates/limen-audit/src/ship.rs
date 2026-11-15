@@ -133,12 +133,23 @@ pub async fn run_consumer<F, Fut>(
         };
         match outcome {
             Ok(()) => {
-                backoff.reset();
-                if let Err(e) = spool.commit(&config.name, upto) {
-                    tracing::error!(consumer = %config.name, error = %e, "spool commit failed; the batch will be shipped again");
-                }
                 metrics::counter!("limen_audit_shipped_total", "consumer" => config.name.clone())
                     .increment(count as u64);
+                if let Err(e) = spool.commit(&config.name, upto) {
+                    // The offset did not move, so the next read returns the
+                    // same batch. Back off rather than re-send it in a loop.
+                    let mut delay = backoff.next_delay(rand::random());
+                    if *shutdown.borrow() {
+                        delay = delay.min(Duration::from_secs(1));
+                    }
+                    tracing::error!(consumer = %config.name, error = %e, retry_in = ?delay, "spool commit failed; the batch will be shipped again");
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        () = flipped(&mut deadline, false) => {}
+                    }
+                } else {
+                    backoff.reset();
+                }
             }
             Err(ShipError::Retry(reason)) => {
                 let mut delay = backoff.next_delay(rand::random());
@@ -227,6 +238,52 @@ mod tests {
             (0..25).collect::<Vec<u64>>()
         );
         assert_eq!(spool.pending("out"), 0);
+    }
+
+    /// A send that succeeds but can't be committed leaves the offset where
+    /// it was. The batch must then be retried with backoff, not re-sent in a
+    /// tight loop that floods the sink with duplicates. Multi-threaded, so a
+    /// regression (a loop that never yields) fails the assertion instead of
+    /// starving the test's own timer.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_commit_backs_off_instead_of_resending_at_once() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut c = SpoolConfig::new(dir.path(), &["out"]);
+        c.fsync_interval = Duration::from_millis(2);
+        let spool = Spool::open(c).expect("open");
+        spool.start();
+        spool.append(b"one").await.expect("append");
+        // Make the offsets directory unusable, so every commit fails.
+        let offsets = dir.path().join("offsets");
+        std::fs::rename(&offsets, dir.path().join("offsets.moved")).expect("move offsets");
+        std::fs::write(&offsets, b"not a directory").expect("block offsets");
+
+        let sends = Arc::new(AtomicUsize::new(0));
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (deadline_tx, deadline_rx) = tokio::sync::watch::channel(false);
+        let s = Arc::clone(&sends);
+        let task = tokio::spawn(run_consumer(
+            spool.clone(),
+            ConsumerConfig {
+                name: "out".into(),
+                batch_max: 10,
+                linger: Duration::ZERO,
+            },
+            move |_batch| {
+                s.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            },
+            rx,
+            deadline_rx,
+        ));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = deadline_tx.send(true);
+        let _ = task.await;
+        let sent = sends.load(Ordering::SeqCst);
+        // With full-jitter backoff a few early retries can be short, but a
+        // tight loop would send thousands of times in 300ms.
+        assert!((1..=10).contains(&sent), "sent {sent} times");
+        assert_eq!(spool.pending("out"), 1, "the record is still unshipped");
     }
 
     /// The backlog gauge must count records waiting out the linger, not only
