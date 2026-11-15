@@ -35,7 +35,7 @@ limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.
 A browser opens on Dex. Sign in as `admin@example.com` with password `password`. On a machine without a browser, use `limen login --device`.
 
 :::caution[If a command says "user locked" a few seconds later]
-The dev stack checks every login against Dex every 15 seconds, and Dex stops honouring a person's earlier login when they sign in again. `setup.sh` has already signed in as `admin@example.com` itself, so your own sign-in makes Dex refuse the script's. The check reads that as the person being deactivated, and locks the account ("deactivated in the identity provider"). Run `limen logout`, then `limen login` again, or sign in to the console, which lifts the lock too. Seen on this stack with Dex v2.46.0; whether Okta behaves the same is not verified ([#64](https://github.com/limen-dev/limen/issues/64)).
+Dex stops honouring a person's earlier login when they sign in again. `setup.sh` has already signed in as `admin@example.com`, so your sign-in makes Dex refuse the script's, and the dev stack's 15-second check reads that as a deactivation and locks the account. Run `limen logout`, then `limen login` again, or sign in to the console, which lifts the lock. Seen with Dex v2.46.0; Okta is not verified ([#64](https://github.com/limen-dev/limen/issues/64)).
 :::
 
 Your credentials are now a certificate in `~/.limen/` that lasts an hour. Check them:

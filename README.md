@@ -220,7 +220,7 @@ The Helm chart and the Terraform modules have never been applied to AWS or a rea
 
 ## Roadmap
 
-Phases 0 to 14 are done: login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, the database, cache, Kubernetes, search and messaging protocols, internal web apps, access workflows (requests and break-glass, audit search, discovery, policy tooling, access reviews, and watching a live session), and one management API for the CLI, the console and Terraform ([ADR-0042](docs/adr/0042-management-api.md); the Terraform provider is in [its own repository](https://github.com/limen-dev/terraform-provider-limen) and is not released).
+Phases 0 to 13 are done, and Phase 14 is built apart from its last stage: login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, the database, cache, Kubernetes, search and messaging protocols, internal web apps, access workflows (requests and break-glass, audit search, discovery, policy tooling, access reviews, and watching a live session), and, in Phase 14, one management API for the CLI, the console and Terraform ([ADR-0042](docs/adr/0042-management-api.md)). The last stage, the Terraform provider, is in [its own repository](https://github.com/limen-dev/terraform-provider-limen) and is not released.
 
 Since then: IdP-driven offboarding and SCIM, shadow mode for deny rules, policy replay and `limen policy suggest`, OCSF export, the scheduled self-test, and the console's resource pages, overview and command palette.
 
