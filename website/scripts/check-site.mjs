@@ -24,6 +24,13 @@ for (const [src, out] of [['docs/guides', 'docs/guides'], ['docs/runbooks', 'doc
   }
 }
 
+// 1b. Every guide is in the sidebar. Publishing a page nobody can navigate to is how the SCIM guide went unlisted.
+// (Runbooks and decision records are generated into the sidebar, so only the guides are listed by hand.)
+const sidebar = readFileSync(join(site, 'astro.config.mjs'), 'utf8');
+for (const f of readdirSync(join(repo, 'docs/guides')).filter((f) => f.endsWith('.md') && f !== 'README.md')) {
+  if (!sidebar.includes(`'docs/guides/${f.slice(0, -3)}'`)) fail(`docs/guides/${f} is not in the sidebar (website/astro.config.mjs)`);
+}
+
 // 2. No page loads anything from another origin (fonts, scripts, styles, images, frames).
 for (const file of pages) {
   const html = readFileSync(file, 'utf8');
@@ -40,6 +47,15 @@ if (!/unverified/i.test(home)) fail('the homepage no longer says anything is unv
 if (!/not yet been verified against real AWS/i.test(home)) fail('the homepage lost its statement about real-service verification');
 for (const banned of [/access receipts?/i, /more secure than/i, /\bSOC ?2 compliant\b/i, /\bAI agents?\b/i]) {
   if (banned.test(home)) fail(`the homepage makes a claim ADR-0031 forbids: ${banned}`);
+}
+
+// 3b. Every console screenshot the homepage points at is published, in both themes.
+const shots = [...home.matchAll(/data-(?:dark|light)="([^"]*?(console\/[^/"]+\.jpg))"/g)];
+if (!shots.length) fail('the homepage shows no console screenshots');
+for (const [, , file] of shots) if (!existsSync(join(dist, file))) fail(`the homepage points at ${file}, which is not published`);
+for (const [, , file] of shots) {
+  const other = file.endsWith('-dark.jpg') ? file.replace('-dark.jpg', '-light.jpg') : file.replace('-light.jpg', '-dark.jpg');
+  if (!shots.some(([, , f]) => f === other)) fail(`${file} has no ${file.endsWith('-dark.jpg') ? 'light' : 'dark'} counterpart on the homepage`);
 }
 
 // 4. The status page and search index exist.
