@@ -41,6 +41,16 @@ spec:
                 topologyKey: topology.kubernetes.io/zone
                 labelSelector:
                   matchLabels: { app.kubernetes.io/name: limen-control-plane }
+      # The image runs as distroless nonroot (uid 65532). A fresh volume
+      # (EBS, for one) is owned by root, so without fsGroup the spool can't
+      # be written and the control plane, whose audit fails closed, won't
+      # start. Matches the Helm chart's podSecurityContext.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: control-plane
           image: REPLACE/limen-control-plane:REPLACE

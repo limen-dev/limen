@@ -122,4 +122,4 @@ Every call writes a `policy.suggest` audit event (window, policy version, counts
 
 ## In CI
 
-`examples/ci/policy-check.yml` is a GitHub Actions workflow that runs the tests, posts the effective-access diff as a pull request comment (`scripts/policy-pr-comment.sh`), and fails when standing access widens without a label. Copy it into your policy repository.
+`examples/ci/policy-check.yml` is a GitHub Actions workflow that runs the tests, posts the effective-access diff as a pull request comment (`scripts/policy-pr-comment.sh`), and fails when standing access widens without a label. Copy both files into your policy repository: the workflow into `.github/workflows/`, the script into `scripts/`.

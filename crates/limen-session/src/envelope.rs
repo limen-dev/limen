@@ -238,13 +238,36 @@ mod tests {
 
     use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};
 
-    const ALL: [Purpose; 5] = [
+    const ALL: [Purpose; 6] = [
         Purpose::SessionGrant,
         Purpose::PolicySnapshot,
         Purpose::AuditManifest,
         Purpose::WebAppSession,
         Purpose::EvidencePack,
+        Purpose::ControlsReport,
     ];
+
+    /// `ALL` must list every purpose, or the tests below silently skip the
+    /// one left out. This match has no wildcard, so a new variant stops it
+    /// compiling until it is added here and to `ALL`.
+    #[test]
+    fn all_lists_every_purpose_once() {
+        fn index(p: Purpose) -> usize {
+            match p {
+                Purpose::SessionGrant => 0,
+                Purpose::PolicySnapshot => 1,
+                Purpose::AuditManifest => 2,
+                Purpose::WebAppSession => 3,
+                Purpose::EvidencePack => 4,
+                Purpose::ControlsReport => 5,
+            }
+        }
+        let indices: Vec<usize> = ALL.into_iter().map(index).collect();
+        assert_eq!(indices, (0..ALL.len()).collect::<Vec<_>>());
+        let labels: std::collections::BTreeSet<&[u8]> =
+            ALL.into_iter().map(Purpose::label).collect();
+        assert_eq!(labels.len(), ALL.len(), "two purposes share a label");
+    }
 
     async fn internal_ca() -> CertificateAuthority {
         CertificateAuthority::create_self_signed(
@@ -283,7 +306,7 @@ mod tests {
         }
     }
 
-    /// The control plane signs four purposes with one key. Only the label in
+    /// The control plane signs five purposes with one key. Only the label in
     /// the signed message keeps, say, a policy snapshot from being replayed as
     /// a browser's web-app session, so the kind check can't be what stops it.
     #[tokio::test]

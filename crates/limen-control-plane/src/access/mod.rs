@@ -667,7 +667,18 @@ pub async fn list_requests(
                 .map_err(|e| internal("reading groups", e))?
                 .unwrap_or_default();
             let policy = state.policy.current();
-            let pending = store::pending(&state.db).await;
+            let roles: Vec<String> = policy
+                .policy
+                .requestable_roles()
+                .map(|r| r.metadata.name.clone())
+                .filter(|role| {
+                    policy
+                        .policy
+                        .may_approve(role, who.username, groups.iter().map(String::as_str))
+                })
+                .collect();
+            let pending = store::pending_for_roles(&state.db, &roles, who.username, limit).await;
+            // Checked again per row, so the SQL filter is never the only guard.
             pending.map(|rows| {
                 rows.into_iter()
                     .filter(|r| {
