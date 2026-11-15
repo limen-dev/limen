@@ -38,7 +38,7 @@ Keys, passwords and tokens tend to outlive the reason they were handed out. Lime
 |---|---|---|
 | **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in an hour, or sooner if you choose |
 | **Getting into a database** | A password that people copy and share | `limen db connect orders-prod`. Only Limen's worker holds the database credential; no person sees it |
-| **Someone leaves the team** | Find and remove every key and password they had | Deactivate them in your identity provider. At its next check (every 5 minutes by default) Limen ends their logins and open sessions, and with SCIM it happens at once. `limen admin lock` is still there when you can't wait |
+| **Someone leaves the team** | Find and remove every key and password they had | Deactivate them in your identity provider. At its next check (every 5 minutes by default) Limen ends their logins and open sessions, and with SCIM it happens within seconds. `limen admin lock` is still there when you can't wait |
 | **A CI job deploys** | A long-lived secret stored in the CI settings | The job's own OIDC token becomes a short, scoped login |
 | **The network** | Targets reachable from a bastion or a VPN | Limen's worker dials out from your network, so targets need no inbound port |
 | **"Who ran that `DELETE`?"** | Depends on what the database logs, and for how long | Every statement, tied to the person or CI job that ran it, in a hash-chained trail |

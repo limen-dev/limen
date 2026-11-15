@@ -355,6 +355,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
                 <li>A signed, hash-chained trail.</li>
                 <li>Recordings checked before playback.</li>
                 <li>Access reviews with signed evidence packs.</li>
+                <li>Limen's own controls, tested on a schedule, with a signed report.</li>
                 <li>A threat model you can read before you trust it.</li>
               </ul>
               <a class="more" href={docs('architecture/threat-model/')}>The threat model →</a>
@@ -382,7 +383,7 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             <article class="card reveal">
               <div class="pillar">Explainable</div>
               <h3><span class="ico" set:html={ico.test} /> Know why, before anyone asks</h3>
-              <p>Policy is YAML in Git, tested in CI. See how a change widens access before it ships.</p>
+              <p>Policy is YAML in Git, tested in CI. See who gains access before a change ships, and replay last month's sessions against it.</p>
               <pre class="snip one"><span class="p">$</span> limen policy test policy/
 <span class="p">$</span> limen explain orders-prod</pre>
               <a class="more" href={docs('guides/policy-tooling/')}>Policy tooling →</a>
@@ -415,14 +416,14 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
             </article>
             <article class="card mini reveal">
               <h3><span class="ico" set:html={ico.stop} /> Cut access off, and say why</h3>
-              <p>Lock a user and their sessions end within about ten seconds. Or end one live session. The reason is audited.</p>
+              <p>Lock a user and their sessions end within about ten seconds. Deactivate someone in your identity provider and Limen ends their logins at its next check. The reason is audited.</p>
               <a class="more" href={docs('guides/console/')}>The console →</a>
             </article>
             <article class="card full reveal plain">
               <h3><span class="ico" set:html={ico.open} /> The whole thing, in the open</h3>
               <p>Approvals, auditing, discovery and reviews are all in the Apache-2.0 build, with no paid tier.</p>
               <ul class="chips">
-                <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose to try it</li><li>Terraform modules <em>(unverified on AWS)</em></li><li>Prometheus and OpenTelemetry</li>
+                <li>Apache-2.0</li><li>Rust, static binaries</li><li>PostgreSQL only</li><li>Outbound-only workers</li><li>Docker Compose to try it</li><li>Terraform modules <em>(unverified on AWS)</em></li><li>Prometheus and OpenTelemetry</li><li>OCSF export for SIEMs <em>(unverified with a real SIEM)</em></li>
               </ul>
             </article>
           </div>

@@ -24,7 +24,8 @@ npm run preview              # serve dist/ (SITE_BASE=/limen/ npm run build to t
 | `src/styles/docs.css` | Starlight restyled with those tokens |
 | `src/content/docs/docs/*.md(x)` | Pages written by hand: introduction, quickstart, concepts, status |
 | `scripts/sync-docs.mjs` | Publishes `docs/` and `deploy/compose/README.md` into the site at build time. The generated pages are git-ignored. Edit the source documents, not the copies |
-| `scripts/check-links.mjs`, `scripts/check-site.mjs` | Fail the build on a broken link or anchor, a missing guide, a third-party request, or a claim ADR-0031 forbids |
+| `scripts/check-links.mjs`, `scripts/check-site.mjs` | Fail the build on a broken link or anchor, a guide that is missing or not in the sidebar, a homepage screenshot with no file or no twin in the other theme, a third-party request, or a claim ADR-0031 forbids |
+| `scripts/console-shots.mjs`, `public/console/` | Retakes the console screenshots on the homepage (see below). The pictures are named `<tab id>-dark.jpg` and `-light.jpg`, and the tabs are `consolePages` in `src/pages/index.astro` |
 | `astro.config.mjs` | Sidebar and site settings. A new guide must be added to the sidebar |
 
 ## Rules for the copy
@@ -32,6 +33,27 @@ npm run preview              # serve dist/ (SITE_BASE=/limen/ npm run build to t
 - Say what is unverified. Anything tested only against a local stand-in carries the `unverified` label, on the homepage as in the docs (ADR-0031).
 - Do not claim what is planned: no "access receipts", no AI agents, no comparisons with other products.
 - No third-party requests. Fonts are packaged with the site. `check-site.mjs` enforces it.
+
+## Retaking the console screenshots
+
+The homepage shows 15 pages of the real console, in both themes. Retake them when the console changes enough to notice, and say what a picture shows in its caption (`consolePages`), not what you hope it shows.
+
+1. **A dev stack with the features on.** `deploy/compose/setup.sh --stacks ssh,db,redis,mongo,search` (more is fine), then `limen admin apply examples/policy examples/policy-workflows` so `orders-prod` can be requested.
+2. **Give it something to show, as different people.** Sign each dev user in once with the CLI (`deploy/compose/scripts/dev-login.sh`, one `LIMEN_HOME` each) and use them:
+   - a recorded SSH session with some output, from a real terminal sized 100x24 (a script without one records an unusable size), and one with a pause;
+   - SQL, Redis, MongoDB and search sessions, including statements and commands policy refuses (a `delete` as `limen_read`, `FLUSHALL` on Redis);
+   - as `developer`, `limen request orders-prod --for 30m --reason "INC-4211: ..."` (leave it pending), then `limen admin review start --name "Q4 access review"` and `limen admin selftest run` as admin;
+   - a bot, by applying a `bot` document whose `join.issuer` is `http://fake-ci-issuer:8130` and logging in with a token from the fake issuer (see `demos/demo-phase4.sh`).
+
+   Do not sign the same person in twice in the CLI: Dex then refuses the first login, and the IdP check locks them ([offboarding, "Dex"](../docs/guides/offboarding.md)). `limen logout` first.
+3. **Take them.** From a scratch directory with Playwright installed:
+
+   ```sh
+   CONSOLE_CA=<repo>/deploy/compose/.state/internal-ca.pem PREP=1 node <repo>/website/scripts/console-shots.mjs
+   ```
+
+   It signs in as the admin, trusts only the dev CA (no warning is bypassed and no trust store is touched), steps through the pages at 1440x880 and 1.4x, and writes JPEGs into `./console-shots`. `PREP=1` also stars three resources and disables `contractor@example.com`. Name the sessions you want for Replay and Commands with `REPLAY_SESSION` and `COMMANDS_SESSION`.
+4. **Look at every picture**, in both themes: no half-loaded player, nothing cut off, no password or token, no stale worker clutter. Copy them to `public/console/`, and run `npm run build`, which fails on a missing file or a missing twin. If you change the size, change `width` and `height` on the images in `index.astro` too.
 
 ## Checking it in other browsers and on phones
 
