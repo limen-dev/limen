@@ -1,7 +1,8 @@
 # Check a policy change in a pull request (ADR-0028).
 #
 # Copy this into the repository that holds your Limen policy as
-# .github/workflows/policy-check.yml and adjust `policy/` and the install step.
+# .github/workflows/policy-check.yml, copy Limen's scripts/policy-pr-comment.sh
+# into that repository's scripts/, and adjust `policy/` and the install step.
 #
 # What it does:
 #   1. runs the `policy_test` cases in the policy: a failing case fails the check;
@@ -42,6 +43,9 @@ jobs:
       - name: Comment on the pull request
         env:
           GH_TOKEN: ${{ github.token }}
+          # The workspace root is not a git checkout (both are in
+          # subdirectories), so `gh` needs the repository named.
+          GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: head/scripts/policy-pr-comment.sh diff.md
       - name: Standing access widens
