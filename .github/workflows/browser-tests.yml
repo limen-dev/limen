@@ -59,6 +59,9 @@ jobs:
         with:
           install_args: node
 
+      - name: Recording player markers
+        run: node --test crates/limen-control-plane/tests/player-init.test.mjs
+
       # The script resolves Playwright and axe from the directory it runs in, so they are
       # installed in a scratch directory and never become dependencies of the repository.
       - name: Install the browsers
