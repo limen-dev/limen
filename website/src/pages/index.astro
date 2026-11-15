@@ -232,13 +232,13 @@ const logoStrip = groups.flatMap((g) => g.items.flatMap((i) => i.logos.filter((l
           <div class="shotbox reveal">
             <div class="term-bar">
               <span class="lights"><i></i><i></i><i></i></span>
-              <div class="tabs" role="tablist" aria-label="Console pages">
-                {consolePages.map((pg, i) => <button role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-pg={pg.id} type="button">{pg.t}</button>)}
+              <div class="tabs" role="tablist" aria-label="Console pages" hidden>
+                {consolePages.map((pg, i) => <button role="tab" id={`shot-tab-${pg.id}`} aria-controls={`shot-panel-${pg.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1} data-pg={pg.id} type="button">{pg.t}</button>)}
               </div>
             </div>
             {consolePages.map((pg, i) => (
-              <figure class="shot" data-panel={pg.id} hidden={i > 0}>
-                <div class="shot-img" tabindex="0" role="region" aria-label={`${pg.t} screenshot, scrolls sideways`}>
+              <figure class="shot" role="tabpanel" id={`shot-panel-${pg.id}`} aria-labelledby={`shot-tab-${pg.id}`} data-panel={pg.id} hidden={i > 0}>
+                <div class="shot-img" data-name={`${pg.t} screenshot, scrolls sideways`}>
                   {i === 0 && <noscript><img src={`${base}console/${pg.id}-dark.jpg`} width="2016" height="1232" alt={pg.alt} /></noscript>}
                   <img class="shot-pic" data-dark={`${base}console/${pg.id}-dark.jpg`} data-light={`${base}console/${pg.id}-light.jpg`} width="2016" height="1232" loading="lazy" decoding="async" alt={pg.alt} />
                 </div>

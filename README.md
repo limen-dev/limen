@@ -89,7 +89,7 @@ open https://localhost:3443/console/        # on Linux, paste the address into a
 ```
 
 > [!NOTE]
-> Your browser will warn about the console's certificate. That is expected: it comes from a development CA the script just created. Click through the warning on localhost. **Don't** add that CA to your system's trust store. The other test users, and what each one is allowed to see, are listed in [`deploy/compose/README.md`](deploy/compose/README.md). If a command later says `user locked`, run `limen logout` and sign in again: see [the quickstart](website/src/content/docs/docs/quickstart.md#2-install-the-cli-and-sign-in).
+> Your browser will warn about the console's certificate. That is expected: it comes from a development CA the script just created. Click through the warning on localhost. **Don't** add that CA to your system's trust store. The other test users, and what each one is allowed to see, are listed in [`deploy/compose/README.md`](deploy/compose/README.md). If you sign in a second time as the same user and a command says `user locked`, run `limen logout` and sign in again: see [the quickstart](website/src/content/docs/docs/quickstart.md#2-install-the-cli-and-sign-in).
 
 The [quickstart](website/src/content/docs/docs/quickstart.md) walks through the same steps with more explanation.
 

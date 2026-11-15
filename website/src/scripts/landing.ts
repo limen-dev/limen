@@ -445,15 +445,50 @@ const focusShot = (box: HTMLElement | null) => {
 };
 {
   const box = $('.shotbox');
-  box?.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-pg]');
-    if (!b) return;
-    box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
-    box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
-    showPic(box.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+  const tabs = [...(box?.querySelectorAll<HTMLButtonElement>('[role="tab"][data-pg]') ?? [])];
+  // Without script the tabs would do nothing, so they start hidden and the first picture is the <noscript> one.
+  const list = box?.querySelector<HTMLElement>('[role="tablist"]');
+  if (list) list.hidden = false;
+  const select = (b: HTMLButtonElement, focus = false) => {
+    tabs.forEach((t) => {
+      t.setAttribute('aria-selected', String(t === b));
+      t.tabIndex = t === b ? 0 : -1;
+    });
+    box?.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
+    showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+    if (focus) b.focus();
     b.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     focusShot(box);
+  };
+  box?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"][data-pg]');
+    if (b) select(b);
   });
+  // Arrow keys, Home and End move between tabs, as a tab list does; only the selected tab is a tab stop.
+  list?.addEventListener('keydown', (e) => {
+    const at = tabs.indexOf(document.activeElement as HTMLButtonElement);
+    if (at < 0) return;
+    const to = { ArrowRight: (at + 1) % tabs.length, ArrowLeft: (at + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    select(tabs[to], true);
+  });
+  // The picture scrolls sideways only on a phone, so only there is it a focusable, named region.
+  const phone = matchMedia('(max-width: 560px)');
+  const scrollable = () =>
+    box?.querySelectorAll<HTMLElement>('.shot-img').forEach((el) => {
+      if (phone.matches) {
+        el.tabIndex = 0;
+        el.setAttribute('role', 'region');
+        el.setAttribute('aria-label', el.dataset.name ?? 'Console screenshot');
+      } else {
+        el.removeAttribute('tabindex');
+        el.removeAttribute('role');
+        el.removeAttribute('aria-label');
+      }
+    });
+  scrollable();
+  phone.addEventListener('change', scrollable);
   showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'));
   new MutationObserver(() => showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'))).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   focusShot(box);
