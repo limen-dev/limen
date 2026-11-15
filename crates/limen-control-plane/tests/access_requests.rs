@@ -474,7 +474,10 @@ async fn the_approval_queue_honours_its_limit_and_skips_your_own() {
                 .collect::<Vec<_>>()
         }
     };
-    assert_eq!(queue(r.lead.clone(), 1).await, [first.id.clone()]);
+    assert_eq!(
+        queue(r.lead.clone(), 1).await,
+        std::slice::from_ref(&first.id)
+    );
     assert_eq!(
         queue(r.lead.clone(), 0).await,
         [first.id.clone(), second.id.clone(), own.id.clone()]
