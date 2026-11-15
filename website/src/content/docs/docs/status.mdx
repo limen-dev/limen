@@ -53,7 +53,7 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 | Docker Compose stack | <span class="chip ok">built</span> | |
 | Terraform for the audit store | <span class="chip ok">built</span> | |
 | Helm chart, and Terraform modules and examples for ECS, EC2 and Kubernetes | <span class="chip warn">unverified</span> | they pass `terraform validate`, `helm lint` and `helm template`, and nobody has applied them to AWS or installed the chart on a cluster ([deploy guide](../guides/deploy/)) |
-| A publicly trusted certificate on the proxy | <span class="chip ok">built</span> | a certificate from a real public CA or ACM, browsers, and the console and web apps through it |
+| A publicly trusted certificate on the proxy | <span class="chip ok">built</span> | tested with a CA made for the test; not tried with a certificate from a real public CA or ACM, a browser, or the console and web apps through it |
 
 ## Not claimed
 

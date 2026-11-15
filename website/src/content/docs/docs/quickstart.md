@@ -79,8 +79,8 @@ The proxy's certificate comes from the Limen dev CA, so the browser warns about 
 
 | User | Groups | What they see |
 |---|---|---|
-| `developer@example.com` | `developers` | read-only access to the staging resources |
-| `auditor@example.com` | `auditors` | every database, read only, and no shell; the audit trail in the console |
+| `developer@example.com` | `developers` | read-only databases, caches and search, and a shell as `ubuntu` on the staging hosts |
+| `auditor@example.com` | `auditors` | read-only SQL on every database, and no shell |
 | `viewer@example.com` | `viewers` | the staging databases, read only |
 | `oncall@example.com` | `sre-oncall` | the databases, production included, and SSH, for a short window |
 | `contractor@example.com` | `contractors` | one staging host, short-lived and narrow |

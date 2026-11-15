@@ -30,7 +30,7 @@ A *requestable* role grants nothing until someone asks, gives a reason, and an a
 
 ## People, and the machines that act for them
 
-Your identity provider stays the source of truth for who may use Limen. Deactivate a person there and Limen's next check (every 5 minutes by default) ends their logins and locks them; with [SCIM](../guides/scim/) it happens within seconds, and people appear before their first sign-in. See [offboarding](../guides/offboarding/).
+Your identity provider stays the source of truth for who may use Limen. Deactivate a person there and Limen's next check (every 5 minutes by default) ends their logins and locks them; with [SCIM](../guides/scim/) it happens within seconds (unverified with a real Okta), and people appear before their first sign-in. See [offboarding](../guides/offboarding/).
 
 CI jobs are first-class principals. A **bot** joins with a GitHub Actions or GitLab CI token (or any OIDC provider), matched on exact claims, and gets the same short-lived certificates under the same policy. The run (repository, workflow, commit) is in every audit event. See [bots](../guides/bots/).
 

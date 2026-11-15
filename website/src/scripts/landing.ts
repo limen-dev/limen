@@ -199,7 +199,7 @@ const scenarios: Record<string, Step[]> = {
   ssh: [
     { c: 'limen login' },
     { o: '› Opening your browser to sign in…', cls: 'dim' },
-    { o: '✔ Signed in to limen.example.com as admin@example.com\n  Roles    sre\n  Expires  in 1h 0m', cls: 'ok' },
+    { o: '✔ Signed in to limen.example.com as admin@example.com\n  Server   limen.example.com\n  User     admin@example.com\n  Roles    sre\n  Expires  in 1h 0m', cls: 'ok' },
     { ev: { ty: 'auth.login', who: ME, detail: 'oidc, roles=sre' } },
     { c: 'limen ssh web-staging-1' },
     { ev: { ty: 'session.start', who: ME, detail: 'web-staging-1 as ubuntu' } },
@@ -207,7 +207,6 @@ const scenarios: Record<string, Step[]> = {
     { ev: { ty: 'session.recording', who: ME, detail: 'recording sealed with its hash' } },
     { c: 'exit', prompt: 'ubuntu@web-staging-1:~$' },
     { ev: { ty: 'session.end', who: ME, detail: 'web-staging-1 · 41s' } },
-    { o: 'The recording is in the console, with its hash checked before it plays.', cls: 'dim' },
   ],
   pg: [
     { c: 'limen db connect orders-staging' },
@@ -452,6 +451,7 @@ const focusShot = (box: HTMLElement | null) => {
     box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
     box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
     showPic(box.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+    b.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     focusShot(box);
   });
   showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'));

@@ -38,7 +38,7 @@ Keys, passwords and tokens tend to outlive the reason they were handed out. Lime
 |---|---|---|
 | **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in an hour, or sooner if you choose |
 | **Getting into a database** | A password that people copy and share | `limen db connect orders-prod`. Only Limen's worker holds the database credential; no person sees it |
-| **Someone leaves the team** | Find and remove every key and password they had | Deactivate them in your identity provider. At its next check (every 5 minutes by default) Limen ends their logins and open sessions, and with SCIM it happens within seconds. `limen admin lock` is still there when you can't wait |
+| **Someone leaves the team** | Find and remove every key and password they had | Deactivate them in your identity provider. At its next check (every 5 minutes by default) Limen ends their logins and open sessions, and with SCIM it happens within seconds (unverified with a real Okta). `limen admin lock` is still there when you can't wait |
 | **A CI job deploys** | A long-lived secret stored in the CI settings | The job's own OIDC token becomes a short, scoped login |
 | **The network** | Targets reachable from a bastion or a VPN | Limen's worker dials out from your network, so targets need no inbound port |
 | **"Who ran that `DELETE`?"** | Depends on what the database logs, and for how long | Every statement, tied to the person or CI job that ran it, in a hash-chained trail |
@@ -173,8 +173,8 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
     <td width="50%" valign="top">
       <h3>Web console</h3>
       <ul>
-        <li><b>Overview:</b> what needs you first (disabled accounts, resources no worker serves, reviews and requests waiting), then your favourites and where you left off</li>
-        <li><b>Resources:</b> whether a worker serves each one, its recent errors, and a page that leads with the command to connect, with a builder for the exact flags</li>
+        <li><b>Overview:</b> what needs you first (reviews and requests waiting; for admins also disabled accounts and resources no worker serves), then your favourites and where you left off</li>
+        <li><b>Resources:</b> a page that leads with the command to connect, with a builder for the exact flags (admins also see whether a worker serves each one, and its recent errors)</li>
         <li><b>Sessions:</b> live and past, with SSH sessions you can <b>replay</b> or <b>watch live</b> in the browser, statements and commands for the other protocols, and a button to <b>end a session</b></li>
         <li><b>Access:</b> ask for access, and approve or deny requests, seeing what the person did on that resource in the past 30 days</li>
         <li><b>Audit trail and dashboards:</b> search every event, jump from a statement to its session, and chart what happened</li>
@@ -226,7 +226,7 @@ Since then: IdP-driven offboarding and SCIM, shadow mode for deny rules, policy 
 
 Next:
 
-- **Phase 15, production readiness (in progress):** the Helm chart and the ECS, EC2 and Kubernetes Terraform modules are written and unverified; the penetration test and the AWS IAM join are still to do ([milestone](https://github.com/limen-dev/limen/milestone/16))
+- **Phase 15, production readiness (in progress):** the Helm chart and the ECS, EC2 and Kubernetes Terraform modules are written and unverified; a chaos and failure suite, the penetration test and the AWS IAM join are still to do ([milestone](https://github.com/limen-dev/limen/milestone/16))
 - **Verification against real services:** AWS, Okta and Datadog ([milestone](https://github.com/limen-dev/limen/milestone/21))
 - **The documentation site**, built in [`website/`](website/) and published at <https://limen-dev.github.io/limen>; the custom domain is still open (#136)
 

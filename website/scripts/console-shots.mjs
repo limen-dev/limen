@@ -116,7 +116,7 @@ const pages = {
   audit: {
     path: '/console/audit',
     prep: async () => {
-      await page.fill('input[placeholder^="Find a statement"]', 'select');
+      await page.fill('input[placeholder^="Find a statement"]', 'from orders');
       await Promise.all([page.waitForLoadState('networkidle'), page.keyboard.press('Enter')]);
       await settle(1000);
     },
