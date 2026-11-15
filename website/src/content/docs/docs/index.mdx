@@ -28,8 +28,10 @@ When you need more than your roles allow, `limen request` asks an approver for t
 ## What you get
 
 - **No standing credentials.** Certificates last an hour by default, and you can make them shorter per role. Nothing long-lived sits on a laptop or in a CI secret.
-- **Policy you can test.** It is YAML in Git, deny by default. You can [test it in CI](guides/policy-tooling/), see who gains access before a change lands, and ask [why a request was denied](guides/policy-tooling/#who-can-reach-this-and-what-can-they-reach).
+- **Policy you can test.** It is YAML in Git, deny by default. You can [test it in CI](guides/policy-tooling/), see who gains access before a change lands, [replay last month's sessions](guides/policy-tooling/#replay-recorded-sessions-adr-0051) against a change, try a new deny rule in [shadow mode](reference/policy/#shadow-mode) before it is enforced, and ask [why a request was denied](guides/policy-tooling/#who-can-reach-this-and-what-can-they-reach).
 - **Access you ask for.** [Requests with a reason, approvals and break-glass](guides/access-requests/). A grant expires on its own and ends the sessions it allowed.
+- **People managed where they already are.** [Deactivate someone in your identity provider](guides/offboarding/) and Limen ends their logins and sessions at its next check. [SCIM](guides/scim/) adds people, and applies group changes, before anyone signs in. SCIM is built against Okta's published requests and has not met a real Okta.
+- **A console for the browser.** See [what needs you and how to connect](guides/console/), replay sessions, approve requests, run access reviews and read the audit trail, with your roles deciding what each person sees.
 - **An audit trail you can check.** Events go to S3 as a signed hash chain, and to Datadog. [One command verifies it](runbooks/audit-verify/). If a session can't be audited, it doesn't start.
 - **Plain to run.** Static binaries, PostgreSQL as the only required store, and no paid tier: everything on this site is in the Apache-2.0 build.
 
@@ -43,5 +45,7 @@ Limen is tested against local stand-ins: Dex as the identity provider, databases
   <LinkCard title="Quickstart" description="Run the whole stack on your laptop and open a recorded SSH session." href="quickstart/" />
   <LinkCard title="Concepts" description="Certificates, the three programs, policy and the audit chain, on one page." href="concepts/" />
   <LinkCard title="Connect to things" description="The CLI, and one guide per protocol: databases, Redis, MongoDB, search, brokers, Kubernetes, web apps, TCP." href="guides/cli/" />
+  <LinkCard title="The console" description="Every page of the web console: resources, sessions and replay, approvals, reviews, controls and policy." href="guides/console/" />
+  <LinkCard title="Roll it out" description="The whole sequence for your organisation, from the identity provider to developers logging in." href="guides/rollout/" />
   <LinkCard title="Architecture" description="The design, the decision records and the threat model." href="architecture/design/" />
 </CardGrid>
