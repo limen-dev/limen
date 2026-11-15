@@ -229,12 +229,16 @@ body.plain { display: grid; place-items: center; min-height: 100vh; padding: 24p
 form.stack.wide { max-width: none; }
 table.facts tr:last-child th, table.facts tr:last-child td { border-bottom: 0; }
 .nowrap { white-space: nowrap; }
+/* A long pill in a table cell ("checked 2026-11-15 23:50:31 UTC") wraps in two lines instead of stretching the table past its box. */
+.pill.wraps { white-space: normal; min-width: 19ch; max-width: 27ch; border-radius: 14px; line-height: 1.35; }
 /* A statement: keep its line breaks, wrap long lines, and don't let one
    long statement stretch the table. */
 .stmt { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 260px; max-width: 560px; }
 .stmt-detail { margin-top: 4px; max-width: 360px; overflow-wrap: anywhere; }
 .w-120 { width: 120px; }
 td.actions form.inline { flex-wrap: nowrap; }
+/* In a window under 1400px the reason box and Revoke would push the Workers table past its box: stack them. */
+@media (max-width: 1400px) { td.actions form.inline { flex-wrap: wrap; justify-content: flex-end; } }
 
 /* ---- sign-in page ---- */
 .signin { max-width: 400px; padding: 44px 36px 24px; }
@@ -490,7 +494,8 @@ input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--text-3);
 /* Tiles: the unit sits beside the number in a smaller size so wide values keep their padding. */
 .stat b small { font-size: 13px; font-weight: 550; color: var(--text-3); margin-left: 4px; letter-spacing: 0; }
 .stat > div { min-width: 0; }
-.stat span:not(.stat-icon) { white-space: nowrap; }
+/* A label wraps rather than running past its tile ("Workers connected" did at 1280px). */
+.stat span:not(.stat-icon) { white-space: normal; }
 
 /* Audit categories: one tab per service, with the same icons as the resources page. */
 .tabs.cats { flex-wrap: wrap; max-width: 100%; }
