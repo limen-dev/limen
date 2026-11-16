@@ -74,7 +74,7 @@ first="$(limen ls -q | head -1)"
 limen show "$first" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["name"] == sys.argv[1] and d["connect"].startswith("limen "), d' "$first" || fail "limen show $first"
 [ "$(limen ls "${first:0:3}" -q | grep -c .)" -ge 1 ] || fail "limen ls <query> found nothing"
 limen status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["logged_in"] and d["roles"], d' || fail "limen status --json"
-limen completions bash | grep -q _limen || fail "limen completions bash"
+limen config completions bash | grep -q _limen || fail "limen config completions bash"
 pass "limen ls <query>, -q, show, status --json and completions work"
 
 step "A developer sees only what policy allows"

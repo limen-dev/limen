@@ -312,7 +312,7 @@ A static site, built and checked in CI (`website.yml`) and deployed to GitHub Pa
 | T: a retried write applies twice or differently | `request_id` remembered per caller for 24 hours; the same id with a different body is refused |
 | Limit | Limen has no mapping between IdP and CI accounts: a person whose names differ on the two can approve a change their own run produced (residual 9) |
 
-### TB15: AI agent ↔ `limen mcp` (ADR-0032, spike 0)
+### TB15: AI agent ↔ `limen config mcp serve` (ADR-0032, spike 0)
 *Built: a read-only stdio server in the CLI. There is no agent identity yet; the agent borrows the logged-in person's own login. Tested without a live session only.*
 
 | Threat | Mitigation |

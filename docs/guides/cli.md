@@ -7,6 +7,7 @@ limen login                  # sign in (opens a browser); on a machine without o
 limen status                 # who am I, which roles, when does it expire?
 limen ls                     # what can I reach?  --json for scripts
 limen ls --type postgres --label env=staging   # filter by type and label (repeat --label to require several)
+limen ls --watch             # redraw every 2 seconds; -q prints only the names, for scripts
 limen show orders-staging    # type, labels, who you may act as, and how to connect
 limen connect orders-staging # open any resource by name; picks db/redis/ssh/... from its type
 limen ssh ubuntu@web-staging-1 -- uptime   # explicit login, run a command
@@ -37,13 +38,13 @@ web-staging-1    ● ssh       ec2-user, ubuntu          env=staging
 | Connect brokers | `mq connect`, `kafka connect` | [Messaging](messaging.md) |
 | Use Kubernetes | `kube config`, `kube login` | [Kubernetes](kubernetes.md) |
 | Open a web app or a raw TCP target | `web open`, `tcp` | [Web apps](web-apps.md), [TCP](tcp.md) |
-| Let an AI agent see what you can reach (read-only) | `mcp`, `config mcp` | [AI agents](ai-agents.md) |
+| Let an AI agent see what you can reach (read-only) | `config mcp` | [AI agents](ai-agents.md) |
 | Ask for, approve or revoke access | `request`, `requests` (`ls`, `approve`, `deny`, `cancel`), `admin grants` | [Access requests](access-requests.md) |
 | Test and question policy | `policy test`, `who-can`, `what-can`, `diff`, `explain`, `suggest` | [Policy tooling](policy-tooling.md) |
 | Search the audit trail | `audit search` | [Audit search](audit-search.md) |
 | Review access, export evidence | `review …`, `admin evidence` | [Access reviews](access-reviews.md) |
 | Review discovered resources | `admin discovery` | [Discovery](discovery.md) |
-| Administer | `admin apply`, `policy`, `components`, `token create`, `lock`, `kill-session`, `revoke`, `manage` (schema, get, changes) | [Management API](management-api.md), [Runbooks](../runbooks/README.md) |
+| Administer | `admin apply`, `admin policy`, `admin components`, `admin token create`, `admin lock`, `admin unlock`, `admin locks`, `admin kill-session`, `admin revoke`, `admin selftest`, `admin manage` (whoami, schema, ls, get, put, delete, changes) | [Management API](management-api.md), [Runbooks](../runbooks/README.md) |
 | Run connections in the background | `--detach`, `conns ls`, `conns stop` | [ADR-0039](../adr/0039-detached-connections.md) |
 
 Admin commands need the `limen:admin` role and are audited like everything else.
@@ -132,4 +133,4 @@ Every `✔` result grows into place (`·`, `•`, `✔`) in about a tenth of a s
 
 The logo at the top of `limen`, `limen --help` and `limen login` wipes in over about a second. Any call to the proxy that takes more than a third of a second (in `ls`, `show`, `requests`, `audit`, `admin` and most other commands) shows a spinner named for it, such as `List resources`. Slow steps show a spinner on stderr after about a third of a second, with the elapsed time after five seconds, and finish with a result line. Nothing moves when stderr is not a terminal, when `TERM=dumb`, when `CI` is set, or when `LIMEN_NO_ANIMATION` is set; you then get one plain `›` line per step. `NO_COLOR` removes colour but not the spinner. Ctrl-C during a wait ends it cleanly and exits 130.
 
-`limen config animations` shows and changes this, saved in `~/.limen/settings.json` (or `$LIMEN_HOME`): `--off` or `--on`, `--speed slow|normal|fast` (the logo takes about 1.7, 1 or 0.5 seconds), `--logo on|off`, `--call-spinner on|off`, and `--reset`. Each change plays the logo once so you can judge it. The environment variables still win for one run. Shell completions and the agent (MCP) setup live under the same command: `limen config completions zsh > ~/.zfunc/_limen` and `limen config mcp`. `limen completions` still works and is hidden from the menu. `limen mcp` and `limen manage` moved to `limen config mcp` and `limen admin manage`: typed in a terminal they answer as an unknown command and name the new one, and run by an agent or a script (stdin or stdout not a terminal) they still work, so existing agent configs and CI jobs keep running.
+`limen config animations` shows and changes this, saved in `~/.limen/settings.json` (or `$LIMEN_HOME`): `--off` or `--on`, `--speed slow|normal|fast` (the logo takes about 1.8, 1 or 0.4 seconds), `--logo on|off`, `--call-spinner on|off`, and `--reset`. Each change plays the logo once so you can judge it. The environment variables still win for one run. Shell completions and the agent (MCP) setup live under the same command: `limen config completions zsh > ~/.zfunc/_limen` and `limen config mcp`.

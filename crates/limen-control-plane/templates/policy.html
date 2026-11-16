@@ -50,7 +50,7 @@
     <button type="submit" class="secondary danger"><svg class="i"><use href="/console/static/icons.svg?v={{ chrome.assets }}#x"/></svg>Delete {{ d.name }}</button>
   </form>
   {% else %}
-  <p class="hint">Managed by {{ d.owner }}: change it there. A person with the admin role can move it to the console with <code>limen manage</code>.</p>
+  <p class="hint">Managed by {{ d.owner }}: change it there. A person with the admin role can move it to the console with <code>limen admin manage</code>.</p>
   <pre class="yaml">{{ d.yaml }}</pre>
   {% endif %}
 </details>

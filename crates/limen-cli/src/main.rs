@@ -194,23 +194,6 @@ enum Command {
         #[command(subcommand)]
         command: Option<commands::access::RequestsCommand>,
     },
-    /// Approve an access request (the same as `limen requests approve`).
-    #[command(hide = true)]
-    Approve {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
-    },
-    /// Deny an access request (the same as `limen requests deny`).
-    #[command(hide = true)]
-    Deny {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
-    },
-    /// Withdraw an access request (the same as `limen requests cancel`).
-    #[command(hide = true)]
-    Cancel { id: String },
     /// Say why you can or cannot reach a resource.
     #[command(display_order = 11)]
     Explain {
@@ -259,16 +242,6 @@ enum Command {
         #[command(subcommand)]
         command: ConnsCommand,
     },
-    /// Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
-    ///
-    /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
-    /// Agents run this; to set one up, see `limen config mcp`.
-    #[command(hide = true)]
-    Mcp,
-    /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
-    /// Also `limen config completions`.
-    #[command(hide = true)]
-    Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
     #[command(hide = true)]
     MarkdownHelp,
@@ -359,13 +332,15 @@ enum Command {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
     },
-    /// The management API: read policy documents and write resources, as an
-    /// admin or as a bot with a policy_writer grant.
-    #[command(hide = true)]
-    Manage {
-        #[command(subcommand)]
-        command: commands::manage::ManageCommand,
-    },
+}
+
+/// What `limen config mcp` can also do.
+#[derive(Debug, clap::Subcommand)]
+enum McpCommand {
+    /// Serve a read-only Model Context Protocol server on stdin and stdout. Agents run this.
+    ///
+    /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+    Serve,
 }
 
 /// Options shared by every `ls` view.
@@ -432,8 +407,13 @@ enum ConfigCommand {
         #[arg(long, value_name = "FILE")]
         file: Option<PathBuf>,
     },
-    /// Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
-    Mcp,
+    /// Print how to add Limen to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
+    ///
+    /// The agent runs `limen config mcp serve`.
+    Mcp {
+        #[command(subcommand)]
+        command: Option<McpCommand>,
+    },
     /// Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`.
     Completions { shell: clap_complete::Shell },
     /// Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
@@ -671,7 +651,7 @@ async fn main() {
             ui::banner();
         }
         if e.kind() == ErrorKind::InvalidSubcommand
-            && let Some((word, now)) = moved_suggestion(&args)
+            && let Some((word, now)) = suggest_command(&args)
         {
             // clap's own guess goes by spelling (`animations` -> `completions`); these are known.
             <Cli as clap::CommandFactory>::command()
@@ -735,29 +715,72 @@ fn opens_listener(command: &Command) -> bool {
 
 /// Words people try that live under another command: the first word that isn't a flag, and
 /// where it is. clap only suggests by spelling, which gets these wrong.
-fn moved_suggestion(args: &[String]) -> Option<(&str, &'static str)> {
+fn suggest_command(args: &[String]) -> Option<(&str, &'static str)> {
     let word = args.iter().find(|a| !a.starts_with('-'))?.as_str();
-    let now = match word {
-        "animations" | "animation" | "settings" => "limen config animations",
-        "completion" => "limen config completions",
-        _ => return None,
-    };
-    Some((word, now))
+    tip_for(word).map(|now| (word, now))
 }
 
-/// A command that moved. Typed in a terminal it answers like any unknown command and names the
-/// new one. Run by a script or an agent (stdin or stdout is not a terminal) it still works, so
-/// existing agent configs (`limen mcp`) and CI jobs (`limen manage`) don't break.
-fn moved(name: &str, now: &str) {
-    use std::io::IsTerminal as _;
-    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-        <Cli as clap::CommandFactory>::command()
-            .error(
-                clap::error::ErrorKind::InvalidSubcommand,
-                format!("unrecognized subcommand '{name}'\n\n  tip: did you mean `{now}`?"),
-            )
-            .exit();
-    }
+/// The command to suggest for a word that is not one: where a command lives now, and names
+/// people reach for out of habit (other tools, plain English).
+fn tip_for(word: &str) -> Option<&'static str> {
+    Some(match word {
+        // Where it lives.
+        "approve" => "limen requests approve",
+        "deny" | "reject" => "limen requests deny",
+        "cancel" => "limen requests cancel",
+        "manage" => "limen admin manage",
+        "mcp" => "limen config mcp",
+        "completions" | "completion" => "limen config completions",
+        "animations" | "animation" | "settings" => "limen config animations",
+        // The admin commands, typed without `admin`.
+        "apply" | "token" | "components" | "lock" | "unlock" | "locks" | "revoke" | "grants"
+        | "revoke-grant" | "kill-session" | "evidence" | "discovery" | "selftest" => {
+            return admin_command(word);
+        }
+        // Habit.
+        "list" | "resources" => "limen ls",
+        "whoami" | "me" => "limen status",
+        "signin" | "sign-in" | "auth" => "limen login",
+        "signout" | "sign-out" => "limen logout",
+        "ssh-config" => "limen config ssh",
+        "approvals" | "pending" => "limen requests --approvals",
+        "who-can" | "what-can" | "suggest" => return policy_command(word),
+        "psql" | "mysql" | "postgres" | "mysqld" => "limen db connect",
+        "mongosh" | "mongodb" => "limen mongo connect",
+        "valkey" | "redis-cli" => "limen redis connect",
+        "kubeconfig" | "kubectl" | "k8s" | "eks" => "limen kube config",
+        "open" => "limen connect",
+        "help-me" | "diagnose" | "check" => "limen doctor",
+        _ => return None,
+    })
+}
+
+fn admin_command(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "apply" => "limen admin apply",
+        "token" => "limen admin token create",
+        "components" => "limen admin components",
+        "lock" => "limen admin lock",
+        "unlock" => "limen admin unlock",
+        "locks" => "limen admin locks",
+        "revoke" => "limen admin revoke",
+        "grants" => "limen admin grants",
+        "revoke-grant" => "limen admin revoke-grant",
+        "kill-session" => "limen admin kill-session",
+        "evidence" => "limen admin evidence",
+        "discovery" => "limen admin discovery",
+        "selftest" => "limen admin selftest",
+        _ => return None,
+    })
+}
+
+fn policy_command(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "who-can" => "limen policy who-can",
+        "what-can" => "limen policy what-can",
+        "suggest" => "limen policy suggest",
+        _ => return None,
+    })
 }
 
 /// The completion script for `shell`, on stdout.
@@ -784,22 +807,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         return commands::conns::detach(proxy).await;
     }
     // A spinner while a call to the proxy is slow, for the commands that print once it returns.
-    // Not for ones that serve a protocol on stdout (`mcp`, `ssh-proxy`) or are long-lived.
+    // Not for ones that serve a protocol on stdout (`config mcp serve`, `ssh-proxy`) or are long-lived.
     if matches!(
         cli.command,
         Command::Ls { .. }
             | Command::Show { .. }
             | Command::Request { .. }
             | Command::Requests { .. }
-            | Command::Approve { .. }
-            | Command::Deny { .. }
-            | Command::Cancel { .. }
             | Command::Explain { .. }
             | Command::Policy { .. }
             | Command::Audit { .. }
             | Command::Review { .. }
             | Command::Admin { .. }
-            | Command::Manage { .. }
             | Command::Connect { .. }
             | Command::Conns { .. }
             | Command::Ssh { .. }
@@ -863,12 +882,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
-        Command::Mcp => {
-            moved("mcp", "limen config mcp");
-            commands::mcp::serve(proxy).await
-        }
-        Command::Completions { shell }
-        | Command::Config {
+        Command::Config {
             command: ConfigCommand::Completions { shell },
         } => {
             print_completions(shell);
@@ -927,13 +941,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Requests { list, command } => {
             commands::access::requests_command(proxy, list, command).await
         }
-        Command::Approve { id, comment } => {
-            commands::access::decide(proxy, &id, true, comment.as_deref()).await
-        }
-        Command::Deny { id, comment } => {
-            commands::access::decide(proxy, &id, false, comment.as_deref()).await
-        }
-        Command::Cancel { id } => commands::access::cancel(proxy, &id).await,
         Command::Explain {
             resource,
             principal,
@@ -955,10 +962,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Review { command } => commands::review::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
-        Command::Manage { command } => {
-            moved("manage", "limen admin manage");
-            commands::manage::run(proxy, command).await
-        }
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
@@ -979,8 +982,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
         Command::Config {
-            command: ConfigCommand::Mcp,
+            command: ConfigCommand::Mcp { command: None },
         } => commands::mcp::config(proxy),
+        Command::Config {
+            command:
+                ConfigCommand::Mcp {
+                    command: Some(McpCommand::Serve),
+                },
+        } => commands::mcp::serve(proxy).await,
         Command::Config {
             command:
                 ConfigCommand::Animations {
@@ -1160,7 +1169,7 @@ fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, DbCommand, is_top_level};
+    use super::{Cli, Command, DbCommand, is_top_level, tip_for};
 
     /// Resource commands have a stable, parseable CLI shape.
     #[test]
@@ -1202,12 +1211,6 @@ mod tests {
             &["requests", "approve", "id1", "-m", "ok"],
             &["requests", "deny", "id1", "-m", "no"],
             &["requests", "cancel", "id1"],
-            // The old top-level forms stay for one release.
-            &["approve", "id1", "-m", "ok"],
-            &["deny", "id1"],
-            &["cancel", "id1"],
-            &["manage", "changes", "deny", "id1", "--note", "n"],
-            &["manage", "changes", "reject", "id1", "--note", "n"],
         ] {
             let mut full = vec!["limen"];
             full.extend_from_slice(args);
@@ -1215,6 +1218,104 @@ mod tests {
         }
         // Flags of the list do not mix with a subcommand.
         assert!(Cli::try_parse_from(["limen", "requests", "--all", "approve", "id1"]).is_err());
+    }
+
+    #[test]
+    fn unknown_words_get_a_tip() {
+        for (old, new) in [
+            ("approve", "limen requests approve"),
+            ("deny", "limen requests deny"),
+            ("cancel", "limen requests cancel"),
+            ("manage", "limen admin manage"),
+            ("completions", "limen config completions"),
+            ("mcp", "limen config mcp"),
+            ("lock", "limen admin lock"),
+            ("token", "limen admin token create"),
+            ("who-can", "limen policy who-can"),
+            ("psql", "limen db connect"),
+            ("whoami", "limen status"),
+        ] {
+            let err = Cli::try_parse_from(["limen", old, "x"]).expect_err(old);
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::InvalidSubcommand,
+                "{old}"
+            );
+            assert_eq!(tip_for(old), Some(new), "{old}");
+        }
+        // The tip names a command that exists.
+        for word in [
+            "approve",
+            "deny",
+            "reject",
+            "cancel",
+            "manage",
+            "completions",
+            "completion",
+            "animations",
+            "apply",
+            "token",
+            "components",
+            "lock",
+            "unlock",
+            "locks",
+            "revoke",
+            "grants",
+            "revoke-grant",
+            "kill-session",
+            "evidence",
+            "discovery",
+            "selftest",
+            "list",
+            "resources",
+            "whoami",
+            "me",
+            "signin",
+            "sign-in",
+            "auth",
+            "signout",
+            "sign-out",
+            "ssh-config",
+            "kubeconfig",
+            "approvals",
+            "pending",
+            "who-can",
+            "what-can",
+            "suggest",
+            "psql",
+            "mysql",
+            "postgres",
+            "mysqld",
+            "mongosh",
+            "mongodb",
+            "valkey",
+            "redis-cli",
+            "kubectl",
+            "k8s",
+            "eks",
+            "open",
+            "help-me",
+            "diagnose",
+            "check",
+            "settings",
+            "animation",
+        ] {
+            let tip = tip_for(word).unwrap_or_else(|| panic!("no tip for {word}"));
+            let mut argv: Vec<&str> = tip.split_whitespace().collect();
+            argv.push("--help");
+            let err = Cli::try_parse_from(argv).expect_err(tip);
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::DisplayHelp,
+                "{word} -> {tip}"
+            );
+        }
+        // A real command is never shadowed by a tip.
+        for real in [
+            "login", "ls", "request", "requests", "review", "policy", "config", "admin",
+        ] {
+            assert_eq!(tip_for(real), None, "{real}");
+        }
     }
 
     #[test]

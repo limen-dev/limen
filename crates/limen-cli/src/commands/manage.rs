@@ -1,4 +1,4 @@
-//! `limen manage`: the management API (ADR-0042) from the command line, for
+//! `limen admin manage`: the management API (ADR-0042) from the command line, for
 //! admins and for bots with a `policy_writer` grant (log in with
 //! `limen login --bot ...`). Output is JSON, for scripts and CI.
 
@@ -59,7 +59,7 @@ pub enum ManageCommand {
         /// Defaults to a writer's namespace, or `default` for admins.
         #[arg(long)]
         namespace: Option<String>,
-        /// Replace the resource with this etag (from `limen manage get`).
+        /// Replace the resource with this etag (from `limen admin manage get`).
         #[arg(long)]
         etag: Option<String>,
         /// Check everything and show the impact, but change nothing.

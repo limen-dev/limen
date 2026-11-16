@@ -1,6 +1,6 @@
 # Use Limen from an AI agent
 
-`limen mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server built into the CLI. It lets an AI agent ask what you can reach through Limen, and why you can't reach something. It is **read-only**, runs on your machine, and uses your own login, so it grants nothing you don't already have.
+`limen config mcp serve` is a [Model Context Protocol](https://modelcontextprotocol.io) server built into the CLI. It lets an AI agent ask what you can reach through Limen, and why you can't reach something. It is **read-only**, runs on your machine, and uses your own login, so it grants nothing you don't already have.
 
 ## Set it up
 
@@ -11,11 +11,11 @@ limen login
 limen config mcp
 ```
 
-`limen config mcp` prints the command for Claude Code, which looks like `claude mcp add --scope user limen -- /path/to/limen mcp`, and a JSON block for other clients. Run the command it prints. The `limen mcp` inside it is what your agent starts; you don't type it yourself.
+`limen config mcp` prints the command for Claude Code, which looks like `claude mcp add --scope user limen -- /path/to/limen config mcp serve`, and a JSON block for other clients. Run the command it prints. The `limen config mcp serve` inside it is what your agent starts; you don't type it yourself.
 
 `--scope user` makes it available in every project. Without it, Claude Code adds the server only to the directory you ran the command in.
 
-For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. (Typing `limen mcp` in a terminal answers as an unknown command and points here; an agent starting it still works.) It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
+For any other client that reads an `mcpServers` block (a `.mcp.json`, for example), run `limen config mcp`. It prints the Claude Code command and a JSON block with the full path of your `limen`, and changes no file. If you use a proxy other than the last one you signed in to, run `limen --server host:port config mcp` so the snippet carries it.
 
 Logins are short-lived. When yours expires, every tool answers `run limen login`. The agent cannot sign in for you, and that is deliberate.
 

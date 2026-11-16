@@ -1,4 +1,4 @@
-//! `limen mcp` over its real stdin and stdout, with no login.
+//! `limen config mcp serve` over its real stdin and stdout, with no login.
 //!
 //! Guards the invariant that stdout carries protocol messages only.
 
@@ -10,7 +10,7 @@ use serde_json::Value;
 fn session(input: &str) -> (Vec<Value>, std::process::ExitStatus) {
     let home = tempfile::tempdir().expect("temp home");
     let mut child = Command::new(env!("CARGO_BIN_EXE_limen"))
-        .arg("mcp")
+        .args(["config", "mcp", "serve"])
         // An empty home: no profile, so nothing can be reached or logged in.
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
@@ -20,7 +20,7 @@ fn session(input: &str) -> (Vec<Value>, std::process::ExitStatus) {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn limen mcp");
+        .expect("spawn limen config mcp serve");
     child
         .stdin
         .take()

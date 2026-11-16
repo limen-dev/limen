@@ -282,31 +282,43 @@ async fn admin_attention(
         .await
         .map_err(|e| db_error("listing components", &e))?;
     let loaded = state.policy.current();
-    let down = loaded
-        .policy
-        .documents()
-        .iter()
-        .filter_map(|d| match d {
-            Document::Resource(r) => Some(r),
-            _ => None,
-        })
-        .filter(|r| {
-            views::Health::of(&matching_workers(
+    let (mut offline, mut unserved) = (0, 0);
+    for doc in loaded.policy.documents() {
+        if let Document::Resource(r) = doc {
+            match views::Health::of(&matching_workers(
                 &components,
                 &tunnels,
                 &r.spec.worker_selector,
-            ))
-            .needs_attention()
-        })
-        .count();
-    if down > 0 {
+            )) {
+                views::Health::Up => {}
+                views::Health::Offline => offline += 1,
+                views::Health::NoWorker => unserved += 1,
+            }
+        }
+    }
+    // Two causes, two lines. Enrolled workers that lost their tunnel is an outage. No enrolled
+    // worker matching the selector is a deployment fact (a policy can describe resources whose
+    // workers are not run here, such as the example production ones), so it must not raise the
+    // same alarm.
+    let href = "/console/resources?sort=attention&attention=1";
+    if offline > 0 {
         items.push(views::AttentionItem {
             text: format!(
-                "{} without a connected worker, so sessions will fail",
-                plural(down, "resource", "resources")
+                "{} whose workers are offline, so sessions will fail",
+                plural(offline, "resource", "resources")
             ),
-            href: "/console/resources?sort=attention&attention=1".to_owned(),
+            href: href.to_owned(),
             tone: "bad",
+        });
+    }
+    if unserved > 0 {
+        items.push(views::AttentionItem {
+            text: format!(
+                "{} that no enrolled worker serves (no worker matches its selector)",
+                plural(unserved, "resource", "resources")
+            ),
+            href: href.to_owned(),
+            tone: "warn",
         });
     }
     if overview.locked > 0 {

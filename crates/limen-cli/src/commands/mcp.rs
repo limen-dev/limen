@@ -1,4 +1,4 @@
-//! `limen mcp`: a read-only Model Context Protocol server over stdio.
+//! `limen config mcp serve`: a read-only Model Context Protocol server over stdio.
 //!
 //! A useful tool surface with **no agent identity**. Every tool runs this same binary with `--json` as the person who
 //! is logged in, so it grants nothing `limen` doesn't already grant. There is
@@ -168,7 +168,7 @@ fn config_text(exe: &str, proxy: Option<&str>) -> String {
     if let Some(proxy) = proxy {
         args.extend(["--server", proxy]);
     }
-    args.push("mcp");
+    args.extend(["config", "mcp", "serve"]);
     let json = serde_json::to_string_pretty(&json!({
         "mcpServers": { "limen": { "command": exe, "args": args } }
     }))
@@ -836,7 +836,7 @@ mod tests {
     fn config_text_is_valid_json_and_quotes_awkward_paths() {
         let text = config_text("/opt/my tools/limen", Some("limen.example.com:443"));
         assert!(text.contains(
-            "claude mcp add --scope user limen -- '/opt/my tools/limen' --server limen.example.com:443 mcp"
+            "claude mcp add --scope user limen -- '/opt/my tools/limen' --server limen.example.com:443 config mcp serve"
         ));
         let start = text.find('{').unwrap();
         let end = text.rfind('}').unwrap();
@@ -847,11 +847,20 @@ mod tests {
         );
         assert_eq!(
             parsed["mcpServers"]["limen"]["args"],
-            json!(["--server", "limen.example.com:443", "mcp"])
+            json!([
+                "--server",
+                "limen.example.com:443",
+                "config",
+                "mcp",
+                "serve"
+            ])
         );
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
         let plain = config_text("/usr/bin/limen", None);
-        assert!(plain.contains("claude mcp add --scope user limen -- /usr/bin/limen mcp\n"));
+        assert!(
+            plain
+                .contains("claude mcp add --scope user limen -- /usr/bin/limen config mcp serve\n")
+        );
         assert!(!plain.contains("--server"));
     }
 

@@ -569,10 +569,22 @@ Options:
 
 #### `limen config mcp`
 
-Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files
+Print how to add Limen to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
+
+The agent runs `limen config mcp serve`.
 
 ```text
-Usage: limen config mcp [OPTIONS]
+Usage: limen config mcp [OPTIONS] [COMMAND]
+```
+
+##### `limen config mcp serve`
+
+Serve a read-only Model Context Protocol server on stdin and stdout. Agents run this.
+
+Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+
+```text
+Usage: limen config mcp serve [OPTIONS]
 ```
 
 #### `limen config completions`
@@ -1097,7 +1109,7 @@ Options:
 - `--description <DESCRIPTION>`
 - `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
 - `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
-- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
+- `--etag <ETAG>`: Replace the resource with this etag (from `limen admin manage get`).
 - `--dry-run`: Check everything and show the impact, but change nothing.
 - `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
 
