@@ -609,7 +609,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
 
     let status = upstream_response.status();
     let (parts, body) = upstream_response.into_parts();
-    let response_body = AuditResponseBody {
+    let mut response_body = AuditResponseBody {
         inner: body,
         audit: proxy.audit.clone(),
         context: AuditContext {
@@ -634,7 +634,22 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
         audit_started: false,
         done: false,
         pending_error: None,
+        held: None,
     };
+    if response_body.inner.is_end_stream() {
+        // An empty body (HEAD, 204, 304, `Content-Length: 0`) may never be
+        // polled: hyper's HTTP/1 server writes the head and drops it. Audit the
+        // outcome before the head goes out, so a failed emit still refuses.
+        response_body.start_audit("complete");
+        response_body.done = true;
+        let emitted = match response_body.audit_rx.take() {
+            Some(rx) => matches!(rx.await, Ok(Ok(()))),
+            None => false,
+        };
+        if !emitted {
+            return plain(StatusCode::SERVICE_UNAVAILABLE, "audit is unavailable");
+        }
+    }
     Response::from_parts(parts, tonic::body::Body::new(response_body))
 }
 
@@ -1632,6 +1647,11 @@ struct AuditResponseBody {
     audit_started: bool,
     done: bool,
     pending_error: Option<BoxError>,
+    /// The upstream's last frame, held back until the outcome is audited. Once
+    /// a body with a known length has been written in full, hyper's HTTP/1
+    /// server drops it without polling for the end, so waiting for
+    /// `Ready(None)` would leave the audit to `Drop`, which can't fail closed.
+    held: Option<Frame<Bytes>>,
 }
 
 impl AuditResponseBody {
@@ -1689,6 +1709,8 @@ impl HttpBody for AuditResponseBody {
                     this.done = true;
                     if let Some(error) = this.pending_error.take() {
                         Poll::Ready(Some(Err(error)))
+                    } else if let Some(frame) = this.held.take() {
+                        Poll::Ready(Some(Ok(frame)))
                     } else {
                         Poll::Ready(None)
                     }
@@ -1714,6 +1736,11 @@ impl HttpBody for AuditResponseBody {
                 if let Some(data) = frame.data_ref() {
                     this.download
                         .fetch_add(data.len() as u64, Ordering::Relaxed);
+                }
+                if this.inner.is_end_stream() {
+                    this.held = Some(frame);
+                    this.start_audit("complete");
+                    return Pin::new(this).poll_frame(cx);
                 }
                 Poll::Ready(Some(Ok(frame)))
             }
@@ -1794,6 +1821,151 @@ pub mod fuzz {
 
 #[cfg(test)]
 mod tests {
+    /// The outcome of a proxied response is audited as `complete`, and fails
+    /// closed, on HTTP/1 too, where hyper drops a body with a known length as
+    /// soon as it is written, without polling for its end.
+    mod response_audit {
+        use super::super::*;
+        use limen_audit::FailureMode;
+        use limen_audit::sink::MemorySink;
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        /// A response body as the upstream client hands it over: hyper's
+        /// `Incoming`, from an HTTP/1 server that sends `Content-Length`.
+        async fn upstream(body: &'static [u8], method: Method) -> Incoming {
+            let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+            tokio::spawn(async move {
+                let service =
+                    hyper::service::service_fn(move |_req: Request<Incoming>| async move {
+                        Ok::<_, std::convert::Infallible>(Response::new(http_body_util::Full::new(
+                            Bytes::from_static(body),
+                        )))
+                    });
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(server_io), service)
+                    .await;
+            });
+            let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(client_io))
+                .await
+                .expect("handshake");
+            tokio::spawn(conn);
+            let req = Request::builder()
+                .method(method)
+                .uri("/")
+                .body(http_body_util::Empty::<Bytes>::new())
+                .expect("request");
+            sender
+                .send_request(req)
+                .await
+                .expect("response")
+                .into_body()
+        }
+
+        fn body(inner: Incoming, audit: limen_audit::Emitter) -> AuditResponseBody {
+            AuditResponseBody {
+                inner,
+                audit,
+                context: AuditContext {
+                    user: Some("alice".into()),
+                    session_id: None,
+                },
+                event: json!({}),
+                status: StatusCode::OK,
+                session_id: Uuid::nil(),
+                request_started: Instant::now(),
+                upload: Arc::new(AtomicU64::new(0)),
+                download: Arc::new(AtomicU64::new(0)),
+                audit_rx: None,
+                audit_started: false,
+                done: false,
+                pending_error: None,
+                held: None,
+            }
+        }
+
+        /// Serve `body` to a raw HTTP/1 client and return what the client read
+        /// before the connection closed (or 2 s passed).
+        async fn serve(body: AuditResponseBody) -> Vec<u8> {
+            let (server_io, mut client_io) = tokio::io::duplex(64 * 1024);
+            let body = std::sync::Mutex::new(Some(body));
+            let service = hyper::service::service_fn(move |_req: Request<Incoming>| {
+                let body = body.lock().expect("lock").take().expect("one request");
+                async move {
+                    Ok::<_, std::convert::Infallible>(Response::new(tonic::body::Body::new(body)))
+                }
+            });
+            tokio::spawn(
+                hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(server_io), service),
+            );
+            client_io
+                .write_all(b"GET / HTTP/1.1\r\nhost: app\r\n\r\n")
+                .await
+                .expect("write");
+            let mut read = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    client_io.read(&mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(0) | Err(_)) | Err(_) => break,
+                    Ok(Ok(n)) => read.extend_from_slice(&buf[..n]),
+                }
+                if read.ends_with(b"hello world") {
+                    break;
+                }
+            }
+            read
+        }
+
+        #[tokio::test]
+        async fn a_complete_http1_response_is_audited_as_complete() {
+            let sink = Arc::new(MemorySink::default());
+            let audit =
+                limen_audit::Emitter::new("proxy", "p1", sink.clone(), FailureMode::FailClosed);
+            let read = serve(body(upstream(b"hello world", Method::GET).await, audit)).await;
+            assert!(
+                read.ends_with(b"hello world"),
+                "{}",
+                String::from_utf8_lossy(&read)
+            );
+            let events = sink.events();
+            assert_eq!(events.len(), 1, "{events:?}");
+            assert_eq!(events[0].data["reason"], "complete");
+            assert_eq!(events[0].data["bytes_out"], 11);
+        }
+
+        #[tokio::test]
+        async fn a_failed_outcome_audit_withholds_the_end_of_the_response() {
+            let sink = Arc::new(MemorySink::default());
+            sink.set_failing(true);
+            let audit =
+                limen_audit::Emitter::new("proxy", "p1", sink.clone(), FailureMode::FailClosed);
+            let read = serve(body(upstream(b"hello world", Method::GET).await, audit)).await;
+            assert!(
+                !read.ends_with(b"hello world"),
+                "{}",
+                String::from_utf8_lossy(&read)
+            );
+        }
+
+        #[tokio::test]
+        async fn an_empty_upstream_body_reads_as_ended() {
+            // `proxy_request` audits these before the head goes out.
+            let audit = limen_audit::Emitter::new(
+                "proxy",
+                "p1",
+                Arc::new(MemorySink::default()),
+                FailureMode::FailClosed,
+            );
+            let b = body(upstream(b"hello world", Method::HEAD).await, audit);
+            assert!(b.inner.is_end_stream());
+        }
+    }
+
     #[test]
     fn preauth_denials_are_limited_per_source_and_counted() {
         use super::{PreAuth, PreAuthDenials};

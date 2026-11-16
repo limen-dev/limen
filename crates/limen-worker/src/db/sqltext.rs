@@ -127,12 +127,41 @@ fn render(tokens: &[Token]) -> String {
     tokens.iter().map(ToString::to_string).collect()
 }
 
+/// The code inside a MariaDB executable comment (`/*M! ... */`,
+/// `/*M!100100 ... */`), without the marker and version digits. MariaDB runs it
+/// and MySQL ignores it; sqlparser expands only the `/*! ... */` form.
+fn mariadb_code(body: &str) -> Option<&str> {
+    body.strip_prefix("M!")
+        .map(|code| code.trim_start_matches(|c: char| c.is_ascii_digit()))
+}
+
+/// Tokenize `sql`. For MySQL, the content of a MariaDB executable comment is
+/// tokenized as code, so a statement inside one is classified (and refused or
+/// audited) as what the server will run, not hidden as a comment.
+fn tokenize(sql: &str, flavor: Flavor) -> Option<Vec<Token>> {
+    let tokens = Tokenizer::new(flavor.dialect(), sql).tokenize().ok()?;
+    if flavor != Flavor::Mysql {
+        return Some(tokens);
+    }
+    let mut out = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        match &token {
+            Token::Whitespace(Whitespace::MultiLineComment(body)) => match mariadb_code(body) {
+                Some(code) => out.extend(tokenize(code, flavor)?),
+                None => out.push(token),
+            },
+            _ => out.push(token),
+        }
+    }
+    Some(out)
+}
+
 /// Split a simple-protocol message into statements. The common single
 /// statement is returned exactly as written; several are re-rendered from
 /// their tokens.
 #[must_use]
 pub fn split(sql: &str, flavor: Flavor) -> Vec<Statement> {
-    let Ok(tokens) = Tokenizer::new(flavor.dialect(), sql).tokenize() else {
+    let Some(tokens) = tokenize(sql, flavor) else {
         return vec![Statement {
             kind: "unknown",
             text: sql.to_owned(),
@@ -186,15 +215,22 @@ pub fn normalize(sql: &str, flavor: Flavor) -> String {
                 let newline = if comment.ends_with('\n') { "\n" } else { "" };
                 format!("{prefix}?{newline}")
             }
-            Token::Whitespace(Whitespace::MultiLineComment(body)) => match body.strip_prefix('!') {
-                Some(code) if flavor == Flavor::Mysql => {
-                    // Skip the optional version digits, then normalize what runs.
-                    let digits = code.chars().take_while(char::is_ascii_digit).count();
-                    let (version, code) = code.split_at(digits);
-                    format!("/*!{version}{}*/", normalize(code, flavor))
+            Token::Whitespace(Whitespace::MultiLineComment(body)) => {
+                let (marker, code) = match (body.strip_prefix("M!"), body.strip_prefix('!')) {
+                    (Some(code), _) => ("M!", Some(code)),
+                    (None, Some(code)) => ("!", Some(code)),
+                    (None, None) => ("", None),
+                };
+                match code {
+                    Some(code) if flavor == Flavor::Mysql => {
+                        // Skip the optional version digits, then normalize what runs.
+                        let digits = code.chars().take_while(char::is_ascii_digit).count();
+                        let (version, code) = code.split_at(digits);
+                        format!("/*{marker}{version}{}*/", normalize(code, flavor))
+                    }
+                    _ => "/* ? */".to_owned(),
                 }
-                _ => "/* ? */".to_owned(),
-            },
+            }
             Token::Number(..)
             | Token::SingleQuotedString(_)
             | Token::DoubleQuotedString(_)
@@ -306,6 +342,27 @@ mod tests {
         assert!(my("/*! drop table t */").contains("drop table t"));
         // An optimizer hint is an ordinary comment.
         assert_eq!(my("select /*+ tok_9f */ 1"), "select /* ? */ ?");
+        // MariaDB runs `/*M! ... */` too: normalized as SQL, not hidden.
+        let ran = my("/*M!100100 kill 'tok_9f' */");
+        assert!(ran.contains("kill ?") && !ran.contains("tok_9f"), "{ran}");
+        assert_eq!(pg("select /*M! tok_9f */ 1"), "select /* ? */ ?");
+    }
+
+    /// A statement inside a MariaDB executable comment is classified as what
+    /// the server runs, so the worker's `USE` and `KILL` guards see it.
+    #[test]
+    fn mariadb_executable_comments_are_classified_as_code() {
+        let kinds = |q: &str, f: Flavor| split(q, f).iter().map(|s| s.kind).collect::<Vec<_>>();
+        assert_eq!(kinds("/*M!USE secret*/", Flavor::Mysql), ["use"]);
+        assert_eq!(kinds("/*M!100100 KILL 42*/", Flavor::Mysql), ["kill"]);
+        assert_eq!(kinds("/*M!KILL 42*/", Flavor::Mysql), ["kill"]);
+        assert_eq!(
+            kinds("select 1; /*M! use other */", Flavor::Mysql),
+            ["select", "use"]
+        );
+        // An ordinary comment is still a comment, and PostgreSQL has no such form.
+        assert_eq!(kinds("/* M! use x */", Flavor::Mysql), ["empty"]);
+        assert_eq!(kinds("/*M!USE secret*/", Flavor::Postgres), ["empty"]);
     }
 
     /// Whatever is typed, the canary never reaches the normalized text. A
