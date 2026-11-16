@@ -9,7 +9,7 @@ Access requests had five top-level verbs (`request`, `requests`, `approve`, `den
 ## Decision
 - `limen request <resource>` stays: it is the action nearly everyone takes, and it is short.
 - Everything else about requests lives under `limen requests`: `ls` (the default, so bare `limen requests` and `limen requests --approvals` still work), `approve`, `deny`, `cancel`. A group of its own, not subcommands of `request`, because `request` takes a resource name and a resource called `ls` or `approve` would be ambiguous.
-- Top-level `approve`, `deny` and `cancel` remain as hidden aliases for one release, so scripts and habits keep working. `limen admin approve|deny` (hidden duplicates) are removed.
+- Top-level `approve`, `deny` and `cancel` are hidden. Typed in a terminal they answer like any unknown command and name the new one (`did you mean limen requests approve`), the same as `limen mcp` and `limen completions`; run by a script (stdin or stdout not a terminal) they still work, so existing jobs keep running. `limen admin approve|deny` (hidden duplicates) are removed.
 - `limen manage changes reject` is renamed `deny`, to match; `reject` stays as an alias. Server-side states and API names (`rejected`, `RejectChange`) do not change.
 - Help text carries no ADR numbers; they stay in code comments and docs for developers.
 

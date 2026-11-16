@@ -265,8 +265,7 @@ enum Command {
     /// Agents run this; to set one up, see `limen config mcp`.
     #[command(hide = true)]
     Mcp,
-    /// Print a shell completion script: `limen completions zsh > ~/.zfunc/_limen`.
-    /// Also `limen config completions`.
+    /// Moved: use `limen config completions zsh > ~/.zfunc/_limen`.
     #[command(hide = true)]
     Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
@@ -776,6 +775,15 @@ fn print_completions(shell: clap_complete::Shell) {
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.server.as_deref();
+    // Commands that moved: refused with a tip in a terminal, still run from scripts. Before
+    // anything else, so no spinner starts for a command that is about to be refused.
+    match &cli.command {
+        Command::Approve { .. } => moved("approve", "limen requests approve"),
+        Command::Deny { .. } => moved("deny", "limen requests deny"),
+        Command::Cancel { .. } => moved("cancel", "limen requests cancel"),
+        Command::Completions { .. } => moved("completions", "limen config completions"),
+        _ => {}
+    }
     if cli.detach {
         anyhow::ensure!(
             opens_listener(&cli.command),
