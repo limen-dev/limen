@@ -43,11 +43,12 @@ pub fn parse_when(s: &str, end: bool) -> Option<OffsetDateTime> {
     let s = s.trim();
     if let Ok(date) = Date::parse(s, format_description!("[year]-[month]-[day]")) {
         let start = date.midnight().assume_utc();
-        return Some(if end {
-            start + Duration::days(1)
+        // `checked_add`: the day after 9999-12-31 is out of range and `+` panics.
+        return if end {
+            start.checked_add(Duration::days(1))
         } else {
-            start
-        });
+            Some(start)
+        };
     }
     PrimitiveDateTime::parse(
         s,
@@ -131,6 +132,12 @@ mod tests {
         assert_eq!(b - a, Duration::days(1));
         assert!(parse_when("2026-10-24T09:30:15", true).is_some());
         assert!(parse_when("yesterday", false).is_none());
+    }
+
+    #[test]
+    fn the_last_representable_day_does_not_panic() {
+        assert!(parse_when("9999-12-31", false).is_some());
+        assert!(parse_when("9999-12-31", true).is_none());
     }
 
     #[test]
