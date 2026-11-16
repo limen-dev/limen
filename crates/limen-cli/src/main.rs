@@ -194,23 +194,6 @@ enum Command {
         #[command(subcommand)]
         command: Option<commands::access::RequestsCommand>,
     },
-    /// Approve an access request (the same as `limen requests approve`).
-    #[command(hide = true)]
-    Approve {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
-    },
-    /// Deny an access request (the same as `limen requests deny`).
-    #[command(hide = true)]
-    Deny {
-        id: String,
-        #[arg(long, short = 'm')]
-        comment: Option<String>,
-    },
-    /// Withdraw an access request (the same as `limen requests cancel`).
-    #[command(hide = true)]
-    Cancel { id: String },
     /// Say why you can or cannot reach a resource.
     #[command(display_order = 11)]
     Explain {
@@ -265,9 +248,6 @@ enum Command {
     /// Agents run this; to set one up, see `limen config mcp`.
     #[command(hide = true)]
     Mcp,
-    /// Moved: use `limen config completions zsh > ~/.zfunc/_limen`.
-    #[command(hide = true)]
-    Completions { shell: clap_complete::Shell },
     /// Print the CLI reference as Markdown, generated from the command tree.
     #[command(hide = true)]
     MarkdownHelp,
@@ -357,13 +337,6 @@ enum Command {
     Admin {
         #[command(subcommand)]
         command: commands::admin::AdminCommand,
-    },
-    /// The management API: read policy documents and write resources, as an
-    /// admin or as a bot with a policy_writer grant.
-    #[command(hide = true)]
-    Manage {
-        #[command(subcommand)]
-        command: commands::manage::ManageCommand,
     },
 }
 
@@ -736,17 +709,74 @@ fn opens_listener(command: &Command) -> bool {
 /// where it is. clap only suggests by spelling, which gets these wrong.
 fn moved_suggestion(args: &[String]) -> Option<(&str, &'static str)> {
     let word = args.iter().find(|a| !a.starts_with('-'))?.as_str();
-    let now = match word {
+    moved_to(word).map(|now| (word, now))
+}
+
+/// Where a word that is not a command now lives: commands that moved, and names people reach
+/// for out of habit (other tools, plain English).
+fn moved_to(word: &str) -> Option<&'static str> {
+    Some(match word {
+        // Moved.
+        "approve" => "limen requests approve",
+        "deny" | "reject" => "limen requests deny",
+        "cancel" => "limen requests cancel",
+        "manage" => "limen admin manage",
+        "completions" | "completion" => "limen config completions",
         "animations" | "animation" | "settings" => "limen config animations",
-        "completion" => "limen config completions",
+        // The admin commands, typed without `admin`.
+        "apply" | "token" | "components" | "lock" | "unlock" | "locks" | "revoke" | "grants"
+        | "revoke-grant" | "kill-session" | "evidence" | "discovery" | "selftest" => {
+            return admin_command(word);
+        }
+        // Habit.
+        "list" | "resources" => "limen ls",
+        "whoami" | "me" => "limen status",
+        "signin" | "sign-in" | "auth" => "limen login",
+        "signout" | "sign-out" => "limen logout",
+        "ssh-config" => "limen config ssh",
+        "approvals" | "pending" => "limen requests --approvals",
+        "who-can" | "what-can" | "suggest" => return policy_command(word),
+        "psql" | "mysql" | "postgres" | "mysqld" => "limen db connect",
+        "mongosh" | "mongodb" => "limen mongo connect",
+        "valkey" | "redis-cli" => "limen redis connect",
+        "kubeconfig" | "kubectl" | "k8s" | "eks" => "limen kube config",
+        "open" => "limen connect",
+        "help-me" | "diagnose" | "check" => "limen doctor",
         _ => return None,
-    };
-    Some((word, now))
+    })
+}
+
+fn admin_command(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "apply" => "limen admin apply",
+        "token" => "limen admin token create",
+        "components" => "limen admin components",
+        "lock" => "limen admin lock",
+        "unlock" => "limen admin unlock",
+        "locks" => "limen admin locks",
+        "revoke" => "limen admin revoke",
+        "grants" => "limen admin grants",
+        "revoke-grant" => "limen admin revoke-grant",
+        "kill-session" => "limen admin kill-session",
+        "evidence" => "limen admin evidence",
+        "discovery" => "limen admin discovery",
+        "selftest" => "limen admin selftest",
+        _ => return None,
+    })
+}
+
+fn policy_command(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "who-can" => "limen policy who-can",
+        "what-can" => "limen policy what-can",
+        "suggest" => "limen policy suggest",
+        _ => return None,
+    })
 }
 
 /// A command that moved. Typed in a terminal it answers like any unknown command and names the
 /// new one. Run by a script or an agent (stdin or stdout is not a terminal) it still works, so
-/// existing agent configs (`limen mcp`) and CI jobs (`limen manage`) don't break.
+/// existing agent configs (`limen mcp`) don't break.
 fn moved(name: &str, now: &str) {
     use std::io::IsTerminal as _;
     if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
@@ -775,15 +805,6 @@ fn print_completions(shell: clap_complete::Shell) {
 #[allow(clippy::too_many_lines)] // one arm per command
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let proxy = cli.server.as_deref();
-    // Commands that moved: refused with a tip in a terminal, still run from scripts. Before
-    // anything else, so no spinner starts for a command that is about to be refused.
-    match &cli.command {
-        Command::Approve { .. } => moved("approve", "limen requests approve"),
-        Command::Deny { .. } => moved("deny", "limen requests deny"),
-        Command::Cancel { .. } => moved("cancel", "limen requests cancel"),
-        Command::Completions { .. } => moved("completions", "limen config completions"),
-        _ => {}
-    }
     if cli.detach {
         anyhow::ensure!(
             opens_listener(&cli.command),
@@ -799,15 +820,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             | Command::Show { .. }
             | Command::Request { .. }
             | Command::Requests { .. }
-            | Command::Approve { .. }
-            | Command::Deny { .. }
-            | Command::Cancel { .. }
             | Command::Explain { .. }
             | Command::Policy { .. }
             | Command::Audit { .. }
             | Command::Review { .. }
             | Command::Admin { .. }
-            | Command::Manage { .. }
             | Command::Connect { .. }
             | Command::Conns { .. }
             | Command::Ssh { .. }
@@ -875,8 +892,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             moved("mcp", "limen config mcp");
             commands::mcp::serve(proxy).await
         }
-        Command::Completions { shell }
-        | Command::Config {
+        Command::Config {
             command: ConfigCommand::Completions { shell },
         } => {
             print_completions(shell);
@@ -935,13 +951,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Requests { list, command } => {
             commands::access::requests_command(proxy, list, command).await
         }
-        Command::Approve { id, comment } => {
-            commands::access::decide(proxy, &id, true, comment.as_deref()).await
-        }
-        Command::Deny { id, comment } => {
-            commands::access::decide(proxy, &id, false, comment.as_deref()).await
-        }
-        Command::Cancel { id } => commands::access::cancel(proxy, &id).await,
         Command::Explain {
             resource,
             principal,
@@ -963,10 +972,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Audit { command } => commands::audit::run(proxy, command).await,
         Command::Review { command } => commands::review::run(proxy, command).await,
         Command::Admin { command } => commands::admin::run(proxy, command).await,
-        Command::Manage { command } => {
-            moved("manage", "limen admin manage");
-            commands::manage::run(proxy, command).await
-        }
         Command::Ssh { target, command } => commands::ssh::ssh(proxy, &target, &command).await,
         Command::SshProxy { login, host } => commands::ssh::ssh_proxy(proxy, &login, &host).await,
         Command::Config {
@@ -1168,7 +1173,7 @@ fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, DbCommand, is_top_level};
+    use super::{Cli, Command, DbCommand, is_top_level, moved_to};
 
     /// Resource commands have a stable, parseable CLI shape.
     #[test]
@@ -1210,12 +1215,6 @@ mod tests {
             &["requests", "approve", "id1", "-m", "ok"],
             &["requests", "deny", "id1", "-m", "no"],
             &["requests", "cancel", "id1"],
-            // The old top-level forms stay for one release.
-            &["approve", "id1", "-m", "ok"],
-            &["deny", "id1"],
-            &["cancel", "id1"],
-            &["manage", "changes", "deny", "id1", "--note", "n"],
-            &["manage", "changes", "reject", "id1", "--note", "n"],
         ] {
             let mut full = vec!["limen"];
             full.extend_from_slice(args);
@@ -1223,6 +1222,103 @@ mod tests {
         }
         // Flags of the list do not mix with a subcommand.
         assert!(Cli::try_parse_from(["limen", "requests", "--all", "approve", "id1"]).is_err());
+    }
+
+    #[test]
+    fn removed_commands_are_unknown_and_get_a_tip() {
+        for (old, new) in [
+            ("approve", "limen requests approve"),
+            ("deny", "limen requests deny"),
+            ("cancel", "limen requests cancel"),
+            ("manage", "limen admin manage"),
+            ("completions", "limen config completions"),
+            ("lock", "limen admin lock"),
+            ("token", "limen admin token create"),
+            ("who-can", "limen policy who-can"),
+            ("psql", "limen db connect"),
+            ("whoami", "limen status"),
+        ] {
+            let err = Cli::try_parse_from(["limen", old, "x"]).expect_err(old);
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::InvalidSubcommand,
+                "{old}"
+            );
+            assert_eq!(moved_to(old), Some(new), "{old}");
+        }
+        // The tip names a command that exists.
+        for word in [
+            "approve",
+            "deny",
+            "reject",
+            "cancel",
+            "manage",
+            "completions",
+            "completion",
+            "animations",
+            "apply",
+            "token",
+            "components",
+            "lock",
+            "unlock",
+            "locks",
+            "revoke",
+            "grants",
+            "revoke-grant",
+            "kill-session",
+            "evidence",
+            "discovery",
+            "selftest",
+            "list",
+            "resources",
+            "whoami",
+            "me",
+            "signin",
+            "sign-in",
+            "auth",
+            "signout",
+            "sign-out",
+            "ssh-config",
+            "kubeconfig",
+            "approvals",
+            "pending",
+            "who-can",
+            "what-can",
+            "suggest",
+            "psql",
+            "mysql",
+            "postgres",
+            "mysqld",
+            "mongosh",
+            "mongodb",
+            "valkey",
+            "redis-cli",
+            "kubectl",
+            "k8s",
+            "eks",
+            "open",
+            "help-me",
+            "diagnose",
+            "check",
+            "settings",
+            "animation",
+        ] {
+            let tip = moved_to(word).unwrap_or_else(|| panic!("no tip for {word}"));
+            let mut argv: Vec<&str> = tip.split_whitespace().collect();
+            argv.push("--help");
+            let err = Cli::try_parse_from(argv).expect_err(tip);
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::DisplayHelp,
+                "{word} -> {tip}"
+            );
+        }
+        // A real command is never shadowed by a tip.
+        for real in [
+            "login", "ls", "request", "requests", "review", "policy", "config", "admin",
+        ] {
+            assert_eq!(moved_to(real), None, "{real}");
+        }
     }
 
     #[test]
