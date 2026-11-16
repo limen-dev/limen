@@ -116,6 +116,20 @@ pub struct PageQuery {
 }
 
 /// Where a failed form goes back to, with the reason kept short and escaped by the template.
+/// Reads a two-way form decision: `Some(true)` for `yes`, `Some(false)` for
+/// `no`, and `None` for anything else, so a missing or mangled value is refused
+/// instead of being read as the irreversible choice (a deny, or a flag that
+/// ends the subject's sessions).
+fn decision(value: &str, yes: &str, no: &str) -> Option<bool> {
+    if value == yes {
+        Some(true)
+    } else if value == no {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn back_with_error(path: &str, status: &tonic::Status) -> Response {
     let msg: String = status.message().chars().take(200).collect();
     Redirect::to(&format!(
@@ -444,8 +458,10 @@ pub async fn access_decide(
     if let Err(r) = auth.check_post(console, &headers, &f.csrf) {
         return r;
     }
-    let approve = f.decision == "approve";
     let back = format!("/console/access/{}", path_segment(&id));
+    let Some(approve) = decision(&f.decision, "approve", "deny") else {
+        return back_with_error(&back, &tonic::Status::invalid_argument("unknown decision"));
+    };
     match access::decide(&state, &access_who(&auth), &id, approve, &f.comment).await {
         Ok(_) => Redirect::to(&format!(
             "{back}?done={}",
@@ -819,8 +835,10 @@ pub async fn review_decide(
     if let Err(r) = auth.check_post(console, &headers, &f.csrf) {
         return r;
     }
-    let certify = f.decision == "certify";
     let back = format!("/console/reviews/{}", path_segment(&f.review));
+    let Some(certify) = decision(&f.decision, "certify", "flag") else {
+        return back_with_error(&back, &tonic::Status::invalid_argument("unknown decision"));
+    };
     match reviews::decide(&state, &review_who(&auth), &item, certify, &f.comment).await {
         Ok(_) => Redirect::to(&format!(
             "{back}?done={}",
@@ -1291,4 +1309,20 @@ pub async fn session_extras(
     })
     .collect();
     (ids, watched)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decision;
+
+    #[test]
+    fn only_the_two_known_decisions_are_read() {
+        assert_eq!(decision("approve", "approve", "deny"), Some(true));
+        assert_eq!(decision("deny", "approve", "deny"), Some(false));
+        assert_eq!(decision("certify", "certify", "flag"), Some(true));
+        assert_eq!(decision("flag", "certify", "flag"), Some(false));
+        for odd in ["", "Approve", "approve ", "DENY", "certify", "yes"] {
+            assert_eq!(decision(odd, "approve", "deny"), None, "{odd:?}");
+        }
+    }
 }
