@@ -59,7 +59,7 @@ pub enum ManageCommand {
         /// Defaults to a writer's namespace, or `default` for admins.
         #[arg(long)]
         namespace: Option<String>,
-        /// Replace the resource with this etag (from `limen manage get`).
+        /// Replace the resource with this etag (from `limen admin manage get`).
         #[arg(long)]
         etag: Option<String>,
         /// Check everything and show the impact, but change nothing.

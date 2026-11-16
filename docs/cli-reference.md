@@ -1097,7 +1097,7 @@ Options:
 - `--description <DESCRIPTION>`
 - `--source <SOURCE>`: Who you write as, such as terraform/payments-prod.
 - `--namespace <NAMESPACE>`: Defaults to a writer's namespace, or `default` for admins.
-- `--etag <ETAG>`: Replace the resource with this etag (from `limen manage get`).
+- `--etag <ETAG>`: Replace the resource with this etag (from `limen admin manage get`).
 - `--dry-run`: Check everything and show the impact, but change nothing.
 - `--request-id <REQUEST_ID>`: Makes a retry safe: the same id returns the first result.
 
