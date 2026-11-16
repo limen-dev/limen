@@ -20,7 +20,7 @@ fn session(input: &str) -> (Vec<Value>, std::process::ExitStatus) {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn limen mcp");
+        .expect("spawn limen config mcp serve");
     child
         .stdin
         .take()

@@ -651,7 +651,7 @@ async fn main() {
             ui::banner();
         }
         if e.kind() == ErrorKind::InvalidSubcommand
-            && let Some((word, now)) = moved_suggestion(&args)
+            && let Some((word, now)) = suggest_command(&args)
         {
             // clap's own guess goes by spelling (`animations` -> `completions`); these are known.
             <Cli as clap::CommandFactory>::command()
@@ -715,16 +715,16 @@ fn opens_listener(command: &Command) -> bool {
 
 /// Words people try that live under another command: the first word that isn't a flag, and
 /// where it is. clap only suggests by spelling, which gets these wrong.
-fn moved_suggestion(args: &[String]) -> Option<(&str, &'static str)> {
+fn suggest_command(args: &[String]) -> Option<(&str, &'static str)> {
     let word = args.iter().find(|a| !a.starts_with('-'))?.as_str();
-    moved_to(word).map(|now| (word, now))
+    tip_for(word).map(|now| (word, now))
 }
 
-/// Where a word that is not a command now lives: commands that moved, and names people reach
-/// for out of habit (other tools, plain English).
-fn moved_to(word: &str) -> Option<&'static str> {
+/// The command to suggest for a word that is not one: where a command lives now, and names
+/// people reach for out of habit (other tools, plain English).
+fn tip_for(word: &str) -> Option<&'static str> {
     Some(match word {
-        // Moved.
+        // Where it lives.
         "approve" => "limen requests approve",
         "deny" | "reject" => "limen requests deny",
         "cancel" => "limen requests cancel",
@@ -1169,7 +1169,7 @@ fn not_yet(command: &str, what: &str, phase: &str) -> anyhow::Result<()> {
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, DbCommand, is_top_level, moved_to};
+    use super::{Cli, Command, DbCommand, is_top_level, tip_for};
 
     /// Resource commands have a stable, parseable CLI shape.
     #[test]
@@ -1221,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn removed_commands_are_unknown_and_get_a_tip() {
+    fn unknown_words_get_a_tip() {
         for (old, new) in [
             ("approve", "limen requests approve"),
             ("deny", "limen requests deny"),
@@ -1241,7 +1241,7 @@ mod tests {
                 clap::error::ErrorKind::InvalidSubcommand,
                 "{old}"
             );
-            assert_eq!(moved_to(old), Some(new), "{old}");
+            assert_eq!(tip_for(old), Some(new), "{old}");
         }
         // The tip names a command that exists.
         for word in [
@@ -1300,7 +1300,7 @@ mod tests {
             "settings",
             "animation",
         ] {
-            let tip = moved_to(word).unwrap_or_else(|| panic!("no tip for {word}"));
+            let tip = tip_for(word).unwrap_or_else(|| panic!("no tip for {word}"));
             let mut argv: Vec<&str> = tip.split_whitespace().collect();
             argv.push("--help");
             let err = Cli::try_parse_from(argv).expect_err(tip);
@@ -1314,7 +1314,7 @@ mod tests {
         for real in [
             "login", "ls", "request", "requests", "review", "policy", "config", "admin",
         ] {
-            assert_eq!(moved_to(real), None, "{real}");
+            assert_eq!(tip_for(real), None, "{real}");
         }
     }
 
