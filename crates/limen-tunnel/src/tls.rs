@@ -148,3 +148,64 @@ pub fn client_config(
     config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
     Ok(config)
 }
+
+#[cfg(test)]
+mod tests {
+    use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+
+    use super::*;
+
+    /// The 32-byte private scalar in a PKCS#8 P-256 key: the OCTET STRING
+    /// after `ECPrivateKey`'s version (`02 01 01 04 20`). The rest of the key
+    /// (OIDs, the public point) is also in the certificate, so it is public.
+    fn private_scalar(pkcs8: &[u8]) -> &[u8] {
+        let at = pkcs8
+            .windows(5)
+            .position(|w| w == [0x02, 0x01, 0x01, 0x04, 0x20])
+            .expect("an ECPrivateKey")
+            + 5;
+        &pkcs8[at..at + 32]
+    }
+
+    /// Pieces of `secret` in `out`, as `Debug` prints a byte slice or as hex.
+    fn leaks(out: &str, secret: &[u8]) -> Vec<String> {
+        let mut found = Vec::new();
+        for window in secret.windows(6) {
+            let list = format!("{window:?}");
+            let list = list[1..list.len() - 1].to_owned();
+            let hex = window.iter().fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            });
+            let upper = hex.to_uppercase();
+            for needle in [list, hex, upper] {
+                if out.contains(&needle) {
+                    found.push(needle);
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn debug_of_an_identity_never_shows_the_private_key() {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let cert = CertificateParams::new(vec!["worker.limen.internal".to_owned()])
+            .expect("params")
+            .self_signed(&key)
+            .expect("cert");
+        let id = Identity::from_pem(&cert.pem(), &key.serialize_pem()).expect("identity");
+        let der = key.serialize_der();
+        let scalar = private_scalar(&der);
+
+        // The check itself finds a scalar that is printed.
+        let printed = leaks(&format!("{scalar:?}"), scalar);
+        assert!(printed.len() > 1, "{printed:?}");
+
+        let out = format!("{id:?} {:?} {id:#?}", id.clone());
+        assert!(out.contains("certs"), "{out}");
+        let found = leaks(&out, scalar);
+        assert!(found.is_empty(), "private key in Debug output: {found:?}");
+    }
+}
