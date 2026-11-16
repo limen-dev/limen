@@ -34,6 +34,10 @@ limen --server localhost:3443 login --ca-file deploy/compose/.state/internal-ca.
 
 A browser opens on Dex. Sign in as `admin@example.com` with password `password`. On a machine without a browser, use `limen login --device`.
 
+:::caution[If a command says "user locked" a few seconds later]
+Dex stops honouring a person's earlier login when they sign in again, and the dev stack's 15-second check reads that as a deactivation and locks the account. It happens when you sign in a second time as the same user, from another terminal or machine, without signing out first. Run `limen logout`, then `limen login` again, or sign in to the console, which lifts the lock too. Seen on this stack with Dex v2.46.0; Okta is not verified ([#64](https://github.com/limen-dev/limen/issues/64)).
+:::
+
 Your credentials are now a certificate in `~/.limen/` that lasts an hour. Check them:
 
 ```sh
@@ -65,7 +69,7 @@ limen explain orders-prod           # why you can or can't reach something
 
 `ubuntu` is the login and `limen_read` the database role: the **ACCESS AS** column of `limen ls` lists the ones you may use, and Limen asks you to pick when there is more than one.
 
-Then open the console at `https://localhost:3443/console/`, sign in as the same user, find the session, and replay its recording.
+Then open the console at `https://localhost:3443/console/` and sign in as the same user. The first page lists what needs you, your favourites and where you left off. Open **Sessions**, find the one you just had, and replay its recording. **Resources** shows what each resource is doing, and each resource page starts with the command to connect to it. Press `Ctrl+K` (`⌘K` on a Mac) to jump to anything. [The console guide](../guides/console/) covers every page.
 
 :::note
 The proxy's certificate comes from the Limen dev CA, so the browser warns about it. That is expected here. Do not add the CA to your system trust store: click through the warning on localhost, or use `curl --cacert deploy/compose/.state/internal-ca.pem`.
@@ -75,9 +79,14 @@ The proxy's certificate comes from the Limen dev CA, so the browser warns about 
 
 | User | Groups | What they see |
 |---|---|---|
-| `developer@example.com` | `developers` | read-only access to dev resources |
-| `auditor@example.com` | `auditors` | the audit trail, not the resources |
+| `developer@example.com` | `developers` | read-only databases, caches and search, and a shell as `ubuntu` on the staging hosts |
+| `auditor@example.com` | `auditors` | read-only SQL on every database, and no shell |
+| `viewer@example.com` | `viewers` | the staging databases, read only |
+| `oncall@example.com` | `sre-oncall` | the databases, production included, and SSH, for a short window |
+| `contractor@example.com` | `contractors` | one staging host, short-lived and narrow |
 | `guest@example.com` | `marketing` | nothing: login is denied, and the denial is audited |
+
+Apart from `guest`, they can sign in to the console too, and see only what their roles allow.
 
 The full list is in the [local stack reference](../reference/compose-stack/#dev-users).
 

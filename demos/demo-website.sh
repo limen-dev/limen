@@ -39,11 +39,15 @@ curl -fs --retry 20 --retry-connrefused --retry-delay 1 -o /dev/null "$base/" ||
 
 step "Fetch what a visitor sees"
 page() { curl -fsS "$base/$1"; }
-page "" | grep -q "Access you can" || fail "homepage headline"
+page "" | grep -q "No more static keys" || fail "homepage headline"
 pass "homepage"
+for f in overview-dark overview-light replay-dark palette-light; do
+  curl -fsS -o /dev/null "$base/console/$f.jpg" || fail "console screenshot $f"
+done
+pass "homepage console screenshots, under the Pages path"
 page "" | grep -q "not yet been verified against real AWS" || fail "homepage honesty statement"
 pass "homepage says what is unverified"
-for p in docs/ docs/quickstart/ docs/concepts/ docs/status/ docs/guides/databases/ docs/guides/access-requests/ \
+for p in docs/ docs/quickstart/ docs/concepts/ docs/status/ docs/guides/databases/ docs/guides/access-requests/ docs/guides/console/ docs/guides/scim/ \
          docs/runbooks/audit-verify/ docs/architecture/threat-model/ docs/architecture/adr/ docs/reference/policy/ pagefind/pagefind.js; do
   page "$p" >/dev/null || fail "$p"
 done

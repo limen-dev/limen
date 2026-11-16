@@ -11,6 +11,7 @@
   var url = el.dataset.src;
   var IDLE_SECONDS = 30;
   var MAX_MARKERS = 40;
+  var PLAYER_IDLE_LIMIT = 3;
   var player = null;
 
   function span(secs) {
@@ -23,25 +24,35 @@
     if (s || !parts.length) parts.push(s + 's');
     return parts.join(' ');
   }
-  // asciicast v2: a header line, then [seconds, type, data] lines. A gap between two output events
-  // of IDLE_SECONDS or more gets a marker where the output resumed.
+  // An asciicast is a header line, then [time, type, data] lines. In v2 the time is seconds since the start;
+  // in v3 (what the worker writes) it is seconds since the previous event. Either way a gap of IDLE_SECONDS
+  // or more before output gets a marker where the output resumed. The player shortens every pause to
+  // PLAYER_IDLE_LIMIT seconds (idleTimeLimit below), so a marker belongs where the output resumes on that
+  // shortened timeline, not on the original one: it is the sum of the shortened gaps so far.
   function idleMarkers(text) {
-    var out = [], last = null;
     var lines = text.split('\n');
+    var header;
+    try { header = JSON.parse(lines[0]); } catch (e) { return []; }
+    if (!header || typeof header !== 'object') return [];
+    var relative = Number(header.version) >= 3;
+    var out = [], shown = 0, previous = 0;
     for (var i = 1; i < lines.length && out.length < MAX_MARKERS; i++) {
       if (!lines[i]) continue;
       var ev;
       try { ev = JSON.parse(lines[i]); } catch (e) { continue; }
-      if (!Array.isArray(ev) || typeof ev[0] !== 'number' || ev[1] !== 'o') continue;
-      if (last !== null && ev[0] - last >= IDLE_SECONDS) out.push([ev[0], 'Idle ' + span(ev[0] - last)]);
-      last = ev[0];
+      if (!Array.isArray(ev) || typeof ev[0] !== 'number') continue;
+      var gap = relative ? ev[0] : ev[0] - previous;
+      previous = relative ? previous + ev[0] : ev[0];
+      if (gap < 0) gap = 0;
+      shown += Math.min(gap, PLAYER_IDLE_LIMIT);
+      if (ev[1] === 'o' && gap >= IDLE_SECONDS) out.push([shown, 'Idle ' + span(gap)]);
     }
     return out;
   }
   function start(src, markers) {
     player = window.AsciinemaPlayer.create(src, el, {
       fit: 'width',
-      idleTimeLimit: 3,
+      idleTimeLimit: PLAYER_IDLE_LIMIT,
       preload: true,
       theme: 'asciinema',
       markers: markers,

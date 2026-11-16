@@ -24,16 +24,21 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 | Capability | Status | Unverified or missing |
 |---|---|---|
 | OIDC login, groups to roles | <span class="chip ok">built</span> with Dex | <span class="chip warn">unverified</span> with Okta |
+| Offboarding from your IdP: deactivate someone and Limen ends their logins and sessions | <span class="chip ok">built</span> with Dex and a stand-in IdP | <span class="chip warn">unverified</span> with Okta, Entra or any hosted IdP ([guide](../guides/offboarding/)) |
+| SCIM pre-provisioning: people appear before their first sign-in | <span class="chip warn">unverified</span> | built against Okta's published SCIM 2.0 requests, never run against a real Okta ([guide](../guides/scim/)) |
 | Bots: GitHub Actions, GitLab CI, any OIDC | <span class="chip ok">built</span> with a stand-in issuer | real CI tokens |
 | AWS IAM join for components and bots | <span class="chip plan">planned</span> | Phase 15 |
 | Access requests, approvals, break-glass | <span class="chip ok">built</span> | Slack and webhook notifiers against real endpoints |
 | Search across audit and recordings | <span class="chip ok">built</span> | link to Athena history |
 | Resource discovery | <span class="chip ok">built</span> | against real AWS (EC2, RDS, Redshift, ElastiCache, EKS) |
 | Policy tests, who-can, diff, explain | <span class="chip ok">built</span> | |
+| Shadow mode for deny rules, replay against recorded sessions, `limen policy suggest` | <span class="chip ok">built</span> | Replay ran on sessions written to the database, not on sessions opened through a proxy and worker. `suggest` is checked end to end for SSH only; Kubernetes, search and web-app rules are not assessed |
 | One management API: policy from the CLI, the console, or Terraform | <span class="chip ok">built</span> | Phase 14 (ADR-0042), stages 1 and 2; bot logins against a stand-in CI issuer only |
 | Terraform and OpenTofu provider | <span class="chip warn">unverified</span> | built and tested against a stand-in for the control plane, [not yet released](../guides/terraform/) |
 | Access reviews, signed evidence packs | <span class="chip ok">built</span> | PDF evidence pack not built |
 | Live session watch | <span class="chip ok">built</span> for SSH | other protocols |
+| Web console: resources, sessions and replay, approvals, reviews, controls, users, policy | <span class="chip ok">built</span> | Run in Chromium, WebKit and Firefox on a dev stack. Not tried: real devices, screen readers, Firefox ESR ([guide](../guides/console/)) |
+| Read-only MCP server for AI assistants (`limen mcp`) | <span class="chip ok">built</span> | not run against a real agent runtime ([guide](../guides/ai-agents/)) |
 
 ## Audit, deploy and operate
 
@@ -41,11 +46,14 @@ Limen is tested thoroughly against **local stand-ins**: Dex for the identity pro
 |---|---|---|
 | Signed, hash-chained audit to S3, `limen audit verify` (access lent through an assumed AWS role) | <span class="chip ok">built</span> | on real S3 and STS |
 | Datadog logs and monitors, Grafana dashboards | <span class="chip ok">built</span> with a fake intake and Trino | real Datadog, real Athena |
+| OCSF export of the audit trail for SIEMs | <span class="chip ok">built</span> | no SIEM or Security Lake has ingested it, and the records are not validated against each OCSF class's full schema ([guide](../guides/audit-ocsf/)) |
+| Scheduled self-test and a signed controls report | <span class="chip ok">built</span> | run against a local PostgreSQL, S3 and KMS emulator only, never a real bucket or key ([guide](../guides/controls-report/)) |
 | Metrics, OpenTelemetry traces, example alerts | <span class="chip ok">built</span> | |
 | Scale-out: several control planes, proxies, workers | <span class="chip ok">built</span> | Kubernetes example on a real cluster |
 | Docker Compose stack | <span class="chip ok">built</span> | |
 | Terraform for the audit store | <span class="chip ok">built</span> | |
-| ECS, EC2 and Kubernetes deploy examples | <span class="chip plan">planned</span> | Phase 15 |
+| Helm chart, and Terraform modules and examples for ECS, EC2 and Kubernetes | <span class="chip warn">unverified</span> | they pass `terraform validate`, `helm lint` and `helm template`, and nobody has applied them to AWS or installed the chart on a cluster ([deploy guide](../guides/deploy/)) |
+| A publicly trusted certificate on the proxy | <span class="chip ok">built</span> | tested with a CA made for the test; not tried with a certificate from a real public CA or ACM, a browser, or the console and web apps through it |
 
 ## Not claimed
 

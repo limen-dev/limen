@@ -28,7 +28,7 @@ Limen decides who can reach your servers, databases and clusters, and keeps a re
 
 Engineers sign in through your company's identity provider. Limen checks a policy you keep in Git, then gives them a certificate that **expires in an hour** (or sooner: you choose per role). They connect with the tools they already use (`ssh`, `psql`, `kubectl`, `redis-cli`), and every session is recorded or audited into a **signed trail you can verify yourself**. CI jobs sign in the same way, with their own short-lived token, so your pipelines hold no long-lived secret either.
 
-It is open source (Apache-2.0), written in Rust, and you run it on your own infrastructure. It is not production-ready yet: there is no release, and nothing has been tried against real cloud services. [What is not verified yet](#what-is-not-verified-yet) has the details.
+It is open source (Apache-2.0), written in Rust, and you run it on your own infrastructure. It is not production-ready yet: only release candidates have been published, and nothing has been tried against real cloud services. [What is not verified yet](#what-is-not-verified-yet) has the details.
 
 ## Why you might want it
 
@@ -38,7 +38,7 @@ Keys, passwords and tokens tend to outlive the reason they were handed out. Lime
 |---|---|---|
 | **Getting onto a server** | An SSH key that stays valid until someone removes it | A certificate that expires in an hour, or sooner if you choose |
 | **Getting into a database** | A password that people copy and share | `limen db connect orders-prod`. Only Limen's worker holds the database credential; no person sees it |
-| **Someone leaves the team** | Find and remove every key and password they had | Disable them in your identity provider and they can't start new sessions. `limen admin lock` also ends their open ones within seconds |
+| **Someone leaves the team** | Find and remove every key and password they had | Deactivate them in your identity provider. At its next check (every 5 minutes by default) Limen ends their logins and open sessions, and with SCIM it happens within seconds (unverified with a real Okta). `limen admin lock` is still there when you can't wait |
 | **A CI job deploys** | A long-lived secret stored in the CI settings | The job's own OIDC token becomes a short, scoped login |
 | **The network** | Targets reachable from a bastion or a VPN | Limen's worker dials out from your network, so targets need no inbound port |
 | **"Who ran that `DELETE`?"** | Depends on what the database logs, and for how long | Every statement, tied to the person or CI job that ran it, in a hash-chained trail |
@@ -64,7 +64,7 @@ If a resource isn't in your list, `limen explain` tells you which rule stopped y
 
 ## Try it on your laptop
 
-There is no release to download yet, so this builds Limen from source and runs the whole system on your machine, with a test identity provider and test users. You need Docker (on macOS, OrbStack or Docker Desktop) and the tools pinned in `mise.toml` (run `mise install`). The first build takes several minutes.
+This builds Limen from source and runs the whole system on your machine, with a test identity provider and test users. (The release candidates on the [releases page](https://github.com/limen-dev/limen/releases) carry the CLI for four platforms and a deploy bundle, but not this local stack.) You need Docker (on macOS, OrbStack or Docker Desktop) and the tools pinned in `mise.toml` (run `mise install`). The first build takes several minutes.
 
 ```sh
 git clone https://github.com/limen-dev/limen && cd limen
@@ -89,7 +89,7 @@ open https://localhost:3443/console/        # on Linux, paste the address into a
 ```
 
 > [!NOTE]
-> Your browser will warn about the console's certificate. That is expected: it comes from a development CA the script just created. Click through the warning on localhost. **Don't** add that CA to your system's trust store. The other test users, and what each one is allowed to see, are listed in [`deploy/compose/README.md`](deploy/compose/README.md).
+> Your browser will warn about the console's certificate. That is expected: it comes from a development CA the script just created. Click through the warning on localhost. **Don't** add that CA to your system's trust store. The other test users, and what each one is allowed to see, are listed in [`deploy/compose/README.md`](deploy/compose/README.md). If you sign in a second time as the same user and a command says `user locked`, run `limen logout` and sign in again: see [the quickstart](website/src/content/docs/docs/quickstart.md#2-install-the-cli-and-sign-in).
 
 The [quickstart](website/src/content/docs/docs/quickstart.md) walks through the same steps with more explanation.
 
@@ -162,6 +162,8 @@ Audit events are written to S3 in signed batches, and each batch records the has
 limen audit verify
 ```
 
+The trail can also be exported in OCSF for a SIEM ([guide](docs/guides/audit-ocsf.md)), and Limen tests its own controls on a schedule and signs a report of what it found ([guide](docs/guides/controls-report.md)).
+
 Traces carry only ids and outcomes, never user names, SQL statements or tokens. To see one locally, start the dev stack with Jaeger: `deploy/compose/setup.sh --yes --stacks ssh,tracing`.
 
 ## The console and the CLI
@@ -171,14 +173,15 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
     <td width="50%" valign="top">
       <h3>Web console</h3>
       <ul>
-        <li><b>Resources:</b> everything Limen can reach, who has access, and whether a worker is serving it</li>
-        <li><b>Sessions:</b> live and past, with SSH sessions you can <b>replay</b> or <b>watch live</b> in the browser, and a button to <b>end a session</b></li>
+        <li><b>Overview:</b> what needs you first (reviews and requests waiting; for admins also disabled accounts and resources no worker serves), then your favourites and where you left off</li>
+        <li><b>Resources:</b> a page that leads with the command to connect, with a builder for the exact flags (admins also see whether a worker serves each one, and its recent errors)</li>
+        <li><b>Sessions:</b> live and past, with SSH sessions you can <b>replay</b> or <b>watch live</b> in the browser, statements and commands for the other protocols, and a button to <b>end a session</b></li>
         <li><b>Access:</b> ask for access, and approve or deny requests, seeing what the person did on that resource in the past 30 days</li>
-        <li><b>Audit:</b> search every event, and jump from a statement to the moment in the recording</li>
-        <li><b>Reviews:</b> keep or remove each person's access, and download a <b>signed evidence pack</b></li>
-        <li><b>Users, bots and workers:</b> <b>lock</b> a user with a reason, issue <b>join tokens</b>, <b>revoke</b> a worker</li>
-        <li><b>Policy:</b> the active policy, and a <b>preview of what changes</b> before you apply a new one</li>
-        <li>Everyone except admins and auditors sees only their own resources and sessions</li>
+        <li><b>Audit trail and dashboards:</b> search every event, jump from a statement to its session, and chart what happened</li>
+        <li><b>Reviews and controls:</b> keep or remove each person's access and download a <b>signed evidence pack</b>; Limen's own self-test, with a signed report</li>
+        <li><b>Users, bots and workers:</b> <b>disable</b> a user with a reason, issue <b>join tokens</b>, <b>revoke</b> a worker</li>
+        <li><b>Policy and the access simulator:</b> the active policy with a <b>preview of what changes</b> before you apply it, and what any person or bot can reach</li>
+        <li><b>Jump to</b> any page or resource with <code>Ctrl+K</code>; everyone except admins and auditors sees only their own resources and sessions</li>
       </ul>
     </td>
     <td width="50%" valign="top">
@@ -191,8 +194,10 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
         <li><b><code>limen doctor</code></b> says why access doesn't work, and how to fix it</li>
         <li><b><code>limen explain</code></b> says why you can or can't reach something</li>
         <li><b><code>limen request</code></b> asks for time-limited access; <b><code>limen requests approve</code></b> and <b><code>deny</code></b> answer one</li>
-        <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b> and <b><code>diff</code></b> question a policy before it ships</li>
-        <li><b><code>limen admin</code></b> applies policy, locks users, ends sessions and manages workers</li>
+        <li><b><code>limen policy test</code></b>, <b><code>who-can</code></b>, <b><code>diff</code></b> (also <code>--replay</code> against recorded sessions) and <b><code>suggest</code></b> question a policy before it ships and trim it after</li>
+        <li><b><code>limen audit search</code></b> and <b><code>limen audit verify</code></b> find an event and check that the trail was not changed; <b><code>limen review</code></b> answers an access review</li>
+        <li><b><code>limen admin</code></b> applies policy, locks users, ends sessions, manages workers and runs the self-test</li>
+        <li><b><code>limen config mcp</code></b> sets up a read-only MCP server so an AI assistant can ask what you can reach</li>
       </ul>
     </td>
   </tr>
@@ -203,26 +208,27 @@ Traces carry only ids and outcomes, never user names, SQL statements or tokens. 
 | | Status |
 |---|---|
 | **Docker Compose**, the full stack on one machine | ✅ works; this is the local dev stack |
-| **Kubernetes**, several copies of each program | ✅ example manifests; ⚠️ not yet run on a real cluster |
+| **Kubernetes**, several copies of each program | ✅ example manifests and a Helm chart; ⚠️ the chart has not been installed on a real cluster |
 | **Terraform** for the audit store (S3, Glue, Athena) and the Datadog monitors | ✅ works |
-| **Amazon ECS and EC2**, and a Helm chart | ⏳ planned, [Phase 15](https://github.com/limen-dev/limen/milestone/16) |
+| **Terraform for the rest**: PostgreSQL, KMS keys, secrets, and Limen on **Amazon ECS and EC2** or Kubernetes ([deploy guide](docs/guides/deploy.md)) | ⚠️ written and checked with `terraform validate`, never applied to AWS |
 
 ## What is not verified yet
 
 Limen is tested thoroughly, but only against local stand-ins: [Dex](https://dexidp.io) in place of a real identity provider, databases and brokers in containers, a local S3 and KMS, and a fake Datadog intake. **Nothing has been verified against real AWS, Okta or Datadog yet.** The ⚠️ marks above say exactly which paths that affects, and each one has an issue in the [real-environment verification milestone](https://github.com/limen-dev/limen/milestone/21).
 
-Production hardening (a Helm chart, cloud deployment modules, a penetration test) comes after the next phase, and the only tagged release so far is a release candidate (`v0.1.0-rc.1`). Until both are done, treat Limen as something to evaluate, not something to put in front of production systems.
+The Helm chart and the Terraform modules have never been applied to AWS or a real cluster, no penetration test has been done, and only release candidates have been published. Until those are done, treat Limen as something to evaluate, not something to put in front of production systems.
 
 ## Roadmap
 
-Phases 0 to 13 are done: login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, the database, cache, Kubernetes, search and messaging protocols, internal web apps, and access workflows (requests and break-glass, audit search, discovery, policy tooling, access reviews, and watching a live session).
+Phases 0 to 13 are done, and Phase 14 is built apart from its last stage: login and tunnels, SSH with recording, the audit pipeline, the console, bots, scale-out, the database, cache, Kubernetes, search and messaging protocols, internal web apps, access workflows (requests and break-glass, audit search, discovery, policy tooling, access reviews, and watching a live session), and, in Phase 14, one management API for the CLI, the console and Terraform ([ADR-0042](docs/adr/0042-management-api.md)). The last stage, the Terraform provider, is in [its own repository](https://github.com/limen-dev/terraform-provider-limen) and is not released.
+
+Since then: IdP-driven offboarding and SCIM, shadow mode for deny rules, policy replay and `limen policy suggest`, OCSF export, the scheduled self-test, and the console's resource pages, overview and command palette.
 
 Next:
 
-- **Phase 14, one management API (in progress):** manage roles, resources, and bots from the CLI, the console, or Terraform, with one owner per document and scoped writers for automation ([ADR-0042](docs/adr/0042-management-api.md), [milestone](https://github.com/limen-dev/limen/milestone/23))
-- **Phase 15, production readiness:** a Helm chart, ECS and EC2 modules, and a penetration test ([milestone](https://github.com/limen-dev/limen/milestone/16))
-- **Verification against real services** ([milestone](https://github.com/limen-dev/limen/milestone/21))
-- **The documentation site**, already built in [`website/`](website/), is published at <https://limen-dev.github.io/limen> ([milestone](https://github.com/limen-dev/limen/milestone/8)); the custom domain is still open (#136)
+- **Phase 15, production readiness (in progress):** the Helm chart and the ECS, EC2 and Kubernetes Terraform modules are written and unverified; a chaos and failure suite, the penetration test and the AWS IAM join are still to do ([milestone](https://github.com/limen-dev/limen/milestone/16))
+- **Verification against real services:** AWS, Okta and Datadog ([milestone](https://github.com/limen-dev/limen/milestone/21))
+- **The documentation site**, built in [`website/`](website/) and published at <https://limen-dev.github.io/limen>; the custom domain is still open (#136)
 
 Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestones) with its checklist in an epic issue. What "done" means for each one is in [`docs/design.md` §13](docs/design.md#13-phases-and-exit-criteria).
 
@@ -230,16 +236,17 @@ Every phase is a [GitHub milestone](https://github.com/limen-dev/limen/milestone
 
 **Start here**
 - [Quickstart](website/src/content/docs/docs/quickstart.md) and [concepts](website/src/content/docs/docs/concepts.md): run it, then understand what happened
+- [Roll out Limen to your organisation](docs/guides/rollout.md): the whole sequence, from the identity provider to developers logging in
 - [What is built and what is verified](website/src/content/docs/docs/status.mdx), item by item
 
 **Connect**
 - [The CLI](docs/guides/cli.md) · [databases](docs/guides/databases.md) · [Redis](docs/guides/redis.md) · [MongoDB](docs/guides/mongodb.md) · [search](docs/guides/search.md) · [messaging](docs/guides/messaging.md) · [Kubernetes](docs/guides/kubernetes.md) · [web apps](docs/guides/web-apps.md) · [TCP](docs/guides/tcp.md) · [AI agents](docs/guides/ai-agents.md)
 
 **Control access**
-- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API (Terraform)](docs/guides/management-api.md) · [resource discovery](docs/guides/discovery.md)
+- [Policy reference](docs/policy.md) · [testing and questioning policy](docs/guides/policy-tooling.md) · [access requests and break-glass](docs/guides/access-requests.md) · [access reviews](docs/guides/access-reviews.md) · [bots for CI](docs/guides/bots.md) · [the management API](docs/guides/management-api.md) · [Terraform and OpenTofu](docs/guides/terraform.md) · [resource discovery](docs/guides/discovery.md) · [Okta sign-in](docs/guides/okta.md)
 
 **Audit and operate**
-- [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [OCSF export for SIEMs](docs/guides/audit-ocsf.md) · [self-test and controls report](docs/guides/controls-report.md) · [watching a live session](docs/guides/watching-sessions.md) · [offboarding from your IdP](docs/guides/offboarding.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)
+- [The console](docs/guides/console.md) · [audit search](docs/guides/audit-search.md) · [OCSF export for SIEMs](docs/guides/audit-ocsf.md) · [self-test and controls report](docs/guides/controls-report.md) · [watching a live session](docs/guides/watching-sessions.md) · [offboarding from your IdP](docs/guides/offboarding.md) · [SCIM](docs/guides/scim.md) · [metrics and alerts](docs/guides/metrics.md) · [tracing](docs/guides/tracing.md) · [observability recipes](docs/guides/observability.md) · [deploy on AWS or Kubernetes](docs/guides/deploy.md) · [scale-out](docs/guides/scale-out.md) · [runbooks](docs/runbooks/README.md)
 
 **How it is built**
 - [The three programs](docs/components.md) · [design](docs/design.md) · [diagrams](docs/diagrams/README.md) · [decision records (ADRs)](docs/adr/README.md) · [threat model](docs/threat-model.md) · [penetration test plan](docs/pentest-plan.md)

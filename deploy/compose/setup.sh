@@ -155,6 +155,9 @@ start_stack() {
 }
 
 # Trust the dev CA, sign in as the admin and load the policy for the chosen stacks.
+# The admin is signed out again at the end, and before any second sign-in: Dex keeps one refresh token per
+# person, so a login left behind would be refused when you sign in as admin yourself, and the IdP check
+# (docs/guides/offboarding.md) would lock the account ("user locked") a few seconds later.
 sign_in_and_apply_policy() {
   step "Sign in and apply policy"
   local applied
@@ -163,9 +166,11 @@ sign_in_and_apply_policy() {
   "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null
   applied="$("$LIMEN_BIN" admin apply "${POLICY_FILES[@]}" --source-ref setup.sh)"
   wait_for "worker tunnels" sh -c "curl -sf http://$STACK_HEALTH/tunnels | grep -q worker_id"
+  "$LIMEN_BIN" logout >/dev/null 2>&1 || true
   case "$applied" in *"No changes"*) return 0 ;; esac
   sleep 11 # the proxy and worker refresh policy every 10s
   "$here/scripts/dev-login.sh" "$ADMIN" >/dev/null # roles are fixed at login: sign in again to get the new ones
+  "$LIMEN_BIN" logout >/dev/null 2>&1 || true
 }
 
 # Create roles and sample data in each target (see scripts/seed.sh).

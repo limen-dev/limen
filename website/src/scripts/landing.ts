@@ -198,23 +198,21 @@ const ME = 'admin@example.com';
 const scenarios: Record<string, Step[]> = {
   ssh: [
     { c: 'limen login' },
-    { o: 'Opening your browser to sign in…', cls: 'dim' },
-    { o: '✔ Signed in as admin@example.com · role sre · expires in 1h 0m', cls: 'ok' },
+    { o: '› Opening your browser to sign in…', cls: 'dim' },
+    { o: '✔ Signed in to limen.example.com as admin@example.com\n  Server   limen.example.com\n  User     admin@example.com\n  Roles    sre\n  Expires  in 1h 0m', cls: 'ok' },
     { ev: { ty: 'auth.login', who: ME, detail: 'oidc, roles=sre' } },
     { c: 'limen ssh web-staging-1' },
-    { o: '✔ Allowed as ubuntu · session recorded', cls: 'ok' },
     { ev: { ty: 'session.start', who: ME, detail: 'web-staging-1 as ubuntu' } },
     { c: 'sudo systemctl restart nginx', prompt: 'ubuntu@web-staging-1:~$' },
     { ev: { ty: 'session.recording', who: ME, detail: 'recording sealed with its hash' } },
     { c: 'exit', prompt: 'ubuntu@web-staging-1:~$' },
     { ev: { ty: 'session.end', who: ME, detail: 'web-staging-1 · 41s' } },
-    { o: 'Connection closed. Replay it any time in the console.', cls: 'dim' },
   ],
   pg: [
     { c: 'limen db connect orders-staging' },
-    { o: '✔ listening on 127.0.0.1:54321 · no password needed', cls: 'ok' },
+    { o: 'Limen is ready for orders-staging as limen_read. In another terminal:\n  psql "host=127.0.0.1 port=54321 user=limen_read dbname=orders sslmode=disable"\nNo password is needed. Press Ctrl-C to stop.' },
     { ev: { ty: 'session.start', who: ME, detail: 'orders-staging as limen_read' } },
-    { c: 'psql -h 127.0.0.1 -p 54321 orders' },
+    { c: 'psql "host=127.0.0.1 port=54321 user=limen_read dbname=orders sslmode=disable"' },
     { c: "select count(*) from invoices where status = 'open';", prompt: 'orders=>' },
     { o: ' count\n-------\n 18423\n(1 row)' },
     { ev: { ty: 'db.query', who: ME, detail: "select count(*) from invoices where status = …" } },
@@ -226,7 +224,7 @@ const scenarios: Record<string, Step[]> = {
   ],
   k8s: [
     { c: 'limen kube login eks-staging' },
-    { o: '✔ kubeconfig written (it holds no secret, only a short-lived certificate)', cls: 'ok' },
+    { o: '✔ Wrote a kubeconfig for eks-staging (groups: payments-dev).\n  Use it with `export KUBECONFIG=~/.limen/…/kubeconfig-eks-staging.json`', cls: 'ok' },
     { c: 'kubectl get pods -n payments' },
     { o: 'NAME                          READY   STATUS    AGE\npayments-api-6d8f7c9b4-x2k9p   1/1     Running   2d' },
     { ev: { ty: 'kube.request', who: ME, detail: 'get pods in payments · allowed' } },
@@ -238,7 +236,7 @@ const scenarios: Record<string, Step[]> = {
   ],
   redis: [
     { c: 'limen redis connect cache-staging' },
-    { o: '✔ Listening for cache-staging as read. No password needed.', cls: 'ok' },
+    { o: '✔ Listening for cache-staging as read.\n› Run: redis-cli -h 127.0.0.1 -p 56950\n  No password needed. Each connection is its own audited session. Press Ctrl-C to stop.', cls: 'ok' },
     { ev: { ty: 'session.start', who: ME, detail: 'cache-staging as read' } },
     { c: 'redis-cli -h 127.0.0.1 -p 56950 GET app:config:region' },
     { ev: { ty: 'redis.command', who: ME, detail: 'GET app:config:region · allowed' } },
@@ -249,12 +247,12 @@ const scenarios: Record<string, Step[]> = {
   ],
   req: [
     { c: 'limen request orders-prod --for 30m --reason "INC-123: orders table is locked" --wait' },
-    { o: '⏳ Waiting for sre-leads to decide…', cls: 'dim' },
+    { o: '⠋ Waiting for an approver (Ctrl-C to stop waiting; the request stays open)', cls: 'dim' },
     { ev: { ty: 'access.request', who: 'alice@example.com', detail: 'orders-prod · 30m · INC-123' } },
-    { o: '✔ Approved by priya@example.com: “ok for 30 minutes”', cls: 'ok' },
-    { ev: { ty: 'access.approve', who: 'priya@example.com', detail: 'request for alice · 30m' } },
+    { ev: { ty: 'access.approve', who: 'priya@example.com', detail: '“ok for 30 minutes” · request for alice · 30m' } },
+    { o: '✔ Approved.\n✔ You have prod-db-readonly on orders-prod until 2026-11-16T14:32:00Z.', cls: 'ok' },
     { c: 'limen db connect orders-prod' },
-    { o: '✔ listening on 127.0.0.1:54322 · grant ends in 29m 58s', cls: 'ok' },
+    { o: 'Limen is ready for orders-prod as limen_read. In another terminal:\n  psql "host=127.0.0.1 port=54322 user=limen_read dbname=orders sslmode=disable"\nNo password is needed. Press Ctrl-C to stop.' },
     { ev: { ty: 'session.start', who: 'alice@example.com', detail: 'orders-prod as limen_read, under the grant' } },
     { o: '… 30 minutes later. The grant lapses by itself.', cls: 'dim' },
     { ev: { ty: 'session.end', who: 'alice@example.com', detail: 'grant expired · session ended' } },
@@ -433,7 +431,7 @@ const scenarios: Record<string, Step[]> = {
 // CONSOLE TABS: one page of the console at a time.
 // On a phone the picture scrolls sideways; start past the sidebar, on the page itself.
 // Each panel has one picture. Its address is set for the current theme only when the panel is shown,
-// so a visitor downloads one screenshot, not all twenty-two.
+// so a visitor downloads one screenshot, not all thirty.
 const showPic = (fig: HTMLElement | null | undefined, now = false) => {
   const img = fig?.querySelector<HTMLImageElement>('img.shot-pic');
   const want = img?.dataset[document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'];
@@ -447,14 +445,50 @@ const focusShot = (box: HTMLElement | null) => {
 };
 {
   const box = $('.shotbox');
-  box?.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-pg]');
-    if (!b) return;
-    box.querySelectorAll<HTMLButtonElement>('button[data-pg]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
-    box.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
-    showPic(box.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+  const tabs = [...(box?.querySelectorAll<HTMLButtonElement>('[role="tab"][data-pg]') ?? [])];
+  // Without script the tabs would do nothing, so they start hidden and the first picture is the <noscript> one.
+  const list = box?.querySelector<HTMLElement>('[role="tablist"]');
+  if (list) list.hidden = false;
+  const select = (b: HTMLButtonElement, focus = false) => {
+    tabs.forEach((t) => {
+      t.setAttribute('aria-selected', String(t === b));
+      t.tabIndex = t === b ? 0 : -1;
+    });
+    box?.querySelectorAll<HTMLElement>('figure[data-panel]').forEach((f) => (f.hidden = f.dataset.panel !== b.dataset.pg));
+    showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'), true);
+    if (focus) b.focus();
+    b.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     focusShot(box);
+  };
+  box?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"][data-pg]');
+    if (b) select(b);
   });
+  // Arrow keys, Home and End move between tabs, as a tab list does; only the selected tab is a tab stop.
+  list?.addEventListener('keydown', (e) => {
+    const at = tabs.indexOf(document.activeElement as HTMLButtonElement);
+    if (at < 0) return;
+    const to = { ArrowRight: (at + 1) % tabs.length, ArrowLeft: (at + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    select(tabs[to], true);
+  });
+  // The picture scrolls sideways only on a phone, so only there is it a focusable, named region.
+  const phone = matchMedia('(max-width: 560px)');
+  const scrollable = () =>
+    box?.querySelectorAll<HTMLElement>('.shot-img').forEach((el) => {
+      if (phone.matches) {
+        el.tabIndex = 0;
+        el.setAttribute('role', 'region');
+        el.setAttribute('aria-label', el.dataset.name ?? 'Console screenshot');
+      } else {
+        el.removeAttribute('tabindex');
+        el.removeAttribute('role');
+        el.removeAttribute('aria-label');
+      }
+    });
+  scrollable();
+  phone.addEventListener('change', scrollable);
   showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'));
   new MutationObserver(() => showPic(box?.querySelector<HTMLElement>('figure[data-panel]:not([hidden])'))).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   focusShot(box);
