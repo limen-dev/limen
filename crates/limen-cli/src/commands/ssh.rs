@@ -28,7 +28,10 @@ pub fn write_known_hosts(proxy: &str, host_ca_public_key: &str) -> anyhow::Resul
         bail!("the control plane returned an invalid SSH host CA key");
     }
     let path = profile::dir_for(proxy)?.join(KNOWN_HOSTS);
-    std::fs::write(&path, format!("# Written by `limen login`. Trusts the Limen SSH host CA for hosts reached through {proxy}.\n@cert-authority * {key}\n"))
+    // Through the profile's atomic write, like every other profile file: an
+    // interrupted write must not leave a truncated trust file behind, and the
+    // mode must not depend on the umask.
+    profile::write_file(&path, &format!("# Written by `limen login`. Trusts the Limen SSH host CA for hosts reached through {proxy}.\n@cert-authority * {key}\n"), false)
         .with_context(|| format!("writing {}", path.display()))
 }
 
