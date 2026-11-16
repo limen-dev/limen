@@ -242,12 +242,6 @@ enum Command {
         #[command(subcommand)]
         command: ConnsCommand,
     },
-    /// Serve a read-only Model Context Protocol server on stdin and stdout, for AI agents.
-    ///
-    /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
-    /// Agents run this; to set one up, see `limen config mcp`.
-    #[command(hide = true)]
-    Mcp,
     /// Print the CLI reference as Markdown, generated from the command tree.
     #[command(hide = true)]
     MarkdownHelp,
@@ -340,6 +334,15 @@ enum Command {
     },
 }
 
+/// What `limen config mcp` can also do.
+#[derive(Debug, clap::Subcommand)]
+enum McpCommand {
+    /// Serve a read-only Model Context Protocol server on stdin and stdout. Agents run this.
+    ///
+    /// Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+    Serve,
+}
+
 /// Options shared by every `ls` view.
 #[derive(Debug, clap::Args)]
 struct ListArgs {
@@ -404,8 +407,13 @@ enum ConfigCommand {
         #[arg(long, value_name = "FILE")]
         file: Option<PathBuf>,
     },
-    /// Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
-    Mcp,
+    /// Print how to add Limen to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
+    ///
+    /// The agent runs `limen config mcp serve`.
+    Mcp {
+        #[command(subcommand)]
+        command: Option<McpCommand>,
+    },
     /// Print a shell completion script: `limen config completions zsh > ~/.zfunc/_limen`.
     Completions { shell: clap_complete::Shell },
     /// Show or change how the CLI looks and moves: animations, their speed, the logo, the call spinner.
@@ -721,6 +729,7 @@ fn moved_to(word: &str) -> Option<&'static str> {
         "deny" | "reject" => "limen requests deny",
         "cancel" => "limen requests cancel",
         "manage" => "limen admin manage",
+        "mcp" => "limen config mcp",
         "completions" | "completion" => "limen config completions",
         "animations" | "animation" | "settings" => "limen config animations",
         // The admin commands, typed without `admin`.
@@ -774,21 +783,6 @@ fn policy_command(word: &str) -> Option<&'static str> {
     })
 }
 
-/// A command that moved. Typed in a terminal it answers like any unknown command and names the
-/// new one. Run by a script or an agent (stdin or stdout is not a terminal) it still works, so
-/// existing agent configs (`limen mcp`) don't break.
-fn moved(name: &str, now: &str) {
-    use std::io::IsTerminal as _;
-    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-        <Cli as clap::CommandFactory>::command()
-            .error(
-                clap::error::ErrorKind::InvalidSubcommand,
-                format!("unrecognized subcommand '{name}'\n\n  tip: did you mean `{now}`?"),
-            )
-            .exit();
-    }
-}
-
 /// The completion script for `shell`, on stdout.
 fn print_completions(shell: clap_complete::Shell) {
     // Render first: writing straight to a closed pipe (`| head`) would panic.
@@ -813,7 +807,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         return commands::conns::detach(proxy).await;
     }
     // A spinner while a call to the proxy is slow, for the commands that print once it returns.
-    // Not for ones that serve a protocol on stdout (`mcp`, `ssh-proxy`) or are long-lived.
+    // Not for ones that serve a protocol on stdout (`config mcp serve`, `ssh-proxy`) or are long-lived.
     if matches!(
         cli.command,
         Command::Ls { .. }
@@ -888,10 +882,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ConnsCommand::Ls { json } => commands::conns::ls(proxy, json),
             ConnsCommand::Stop { ids, all } => commands::conns::stop_command(proxy, &ids, all),
         },
-        Command::Mcp => {
-            moved("mcp", "limen config mcp");
-            commands::mcp::serve(proxy).await
-        }
         Command::Config {
             command: ConfigCommand::Completions { shell },
         } => {
@@ -992,8 +982,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
         Command::Config {
-            command: ConfigCommand::Mcp,
+            command: ConfigCommand::Mcp { command: None },
         } => commands::mcp::config(proxy),
+        Command::Config {
+            command:
+                ConfigCommand::Mcp {
+                    command: Some(McpCommand::Serve),
+                },
+        } => commands::mcp::serve(proxy).await,
         Command::Config {
             command:
                 ConfigCommand::Animations {
@@ -1232,6 +1228,7 @@ mod tests {
             ("cancel", "limen requests cancel"),
             ("manage", "limen admin manage"),
             ("completions", "limen config completions"),
+            ("mcp", "limen config mcp"),
             ("lock", "limen admin lock"),
             ("token", "limen admin token create"),
             ("who-can", "limen policy who-can"),

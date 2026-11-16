@@ -569,10 +569,22 @@ Options:
 
 #### `limen config mcp`
 
-Print how to add `limen mcp` to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files
+Print how to add Limen to an AI agent (Claude Code and any client that reads `mcpServers`). Changes no files.
+
+The agent runs `limen config mcp serve`.
 
 ```text
-Usage: limen config mcp [OPTIONS]
+Usage: limen config mcp [OPTIONS] [COMMAND]
+```
+
+##### `limen config mcp serve`
+
+Serve a read-only Model Context Protocol server on stdin and stdout. Agents run this.
+
+Tools list and explain what the logged-in person may reach. None connects, requests or changes anything.
+
+```text
+Usage: limen config mcp serve [OPTIONS]
 ```
 
 #### `limen config completions`
