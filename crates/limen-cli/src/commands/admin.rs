@@ -243,7 +243,7 @@ pub async fn run(proxy: Option<&str>, command: AdminCommand) -> anyhow::Result<(
                 ));
             } else if !resp.pending_change_id.is_empty() {
                 ui::warn(&format!(
-                    "Held for approval: it widens standing access, and another admin approves it with `limen manage changes approve {}`.",
+                    "Held for approval: it widens standing access, and another admin approves it with `limen admin manage changes approve {}`.",
                     resp.pending_change_id
                 ));
             } else if resp.applied {
