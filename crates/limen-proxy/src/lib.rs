@@ -33,7 +33,7 @@ use limen_proto::v1::worker_tunnel_client::WorkerTunnelClient;
 use limen_proto::v1::{PingRequest, ReportTunnelsRequest, TunnelReport};
 use limen_tunnel::connect::TracedChannel as Channel;
 use limen_tunnel::connect::{SharedClientConfig, channel, retry_if_went_away};
-use limen_tunnel::serve::{H2Settings, serve_h2};
+use limen_tunnel::serve::{H2Settings, serve_h2_until};
 use limen_tunnel::tls::{ClientAuth, client_config, server_config_with_resolver};
 use limen_tunnel::tunnel::TunnelChannel;
 use limen_tunnel::{PeerInfo, alpn};
@@ -467,11 +467,17 @@ async fn handle_connection(
             let mut shutdown = shutdown;
             let drain = Duration::from_secs(proxy.config.drain_timeout_secs);
             let anonymous = peer.leaf().is_none();
-            let serve = serve_h2(
+            // On shutdown the connection gets a GOAWAY, so clients send new
+            // calls to another replica while the ones in flight finish.
+            let mut stop = shutdown.clone();
+            let serve = serve_h2_until(
                 tls,
                 peer,
                 relay::RelayService::new(proxy.clone()),
                 H2Settings::default(),
+                async move {
+                    let _ = stop.wait_for(|stop| *stop).await;
+                },
             );
             tokio::pin!(serve);
             // A caller with no certificate gets a bounded connection; the
@@ -492,8 +498,11 @@ async fn handle_connection(
                 () = max_age => {
                     tracing::debug!(%remote, "closing an unauthenticated API connection that outlived its time");
                 }
-                _ = shutdown.changed() => {
-                    let _ = tokio::time::timeout(drain, serve).await;
+                // The watch guard is dropped here, before the drain awaits.
+                () = async { let _ = shutdown.wait_for(|stop| *stop).await; } => {
+                    if tokio::time::timeout(drain, serve).await.is_err() {
+                        tracing::debug!(%remote, "API connection still busy after the drain timeout; cut");
+                    }
                 }
             }
         }
