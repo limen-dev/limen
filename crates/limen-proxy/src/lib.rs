@@ -637,6 +637,8 @@ async fn apply_renewals(proxy: Proxy) {
                     .signer
                     .write()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(signer);
+                // Peer channels hold the old client certificate: redial on next use.
+                proxy.peers.forget_channels();
                 tracing::info!("applied renewed certificate");
             }
             (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
