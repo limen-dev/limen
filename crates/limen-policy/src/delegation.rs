@@ -622,7 +622,9 @@ pub fn host_allowed(host: &str, patterns: &[String]) -> bool {
 /// domain below the first label (`b-2.x.kafka.us-east-1.amazonaws.com` for
 /// `b-1.x.kafka.us-east-1.amazonaws.com`), a bare name for a bare name, or an
 /// address in the same /16 (IPv4) or /48 (IPv6). A bootstrap name of two
-/// labels (`kafka.corp`) has no such domain: only `allowed` lets it follow.
+/// labels (`kafka.corp`) has no such domain, and neither does one whose
+/// parent is a cloud domain shared by every customer (see
+/// [`broad_wildcard`]): only `allowed` lets those follow.
 #[must_use]
 pub fn may_follow(bootstrap: &str, reported: &str, allowed: &[String]) -> bool {
     let host_of = |endpoint: &str| -> String {
@@ -653,8 +655,14 @@ pub fn may_follow(bootstrap: &str, reported: &str, allowed: &[String]) -> bool {
             None => !to.contains('.'),
             // The parent must still be a domain, not a top-level one: from
             // `example.com`, "nearby" would otherwise be every `.com` host,
-            // and the credential would go wherever the server pointed.
-            Some((_, parent)) => parent.contains('.') && to.ends_with(&format!(".{parent}")),
+            // and the credential would go wherever the server pointed. Nor a
+            // cloud domain every customer shares (`servicebus.windows.net`,
+            // `compute-1.amazonaws.com`): there only `hosts` lets it follow.
+            Some((_, parent)) => {
+                parent.contains('.')
+                    && broad_wildcard(&format!("*.{parent}")).is_none()
+                    && to.ends_with(&format!(".{parent}"))
+            }
         },
     }
 }
