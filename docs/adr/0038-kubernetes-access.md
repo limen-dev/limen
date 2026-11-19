@@ -43,7 +43,7 @@ After the upgrade the worker checks what the server agreed to. A protocol it can
 (The proposal named separate `kube.exec` and `kube.portforward` events; reusing `session.*` keeps the console, search, and dashboards working without changes.)
 
 ### 6. Authorization shape
-Policy keeps the grant from ADR-0018: `kube: { groups: [...] }`, plus `Policy::kube_groups` to list what roles grant on a cluster. No verb or namespace policy in Limen; that is RBAC's job. Example ClusterRole and bindings: `deploy/kube/`. Constrained impersonation (Kubernetes 1.36+) is planned hardening.
+Policy keeps the grant from ADR-0018: `kube: { groups: [...] }`, plus `Policy::kube_groups` to list what roles grant on a cluster. No verb or namespace policy in Limen; that is RBAC's job. Example ClusterRole and bindings: `deploy/kubernetes/access/`. Constrained impersonation (Kubernetes 1.36+) is planned hardening.
 
 ### 7. Worker configuration
 A kube worker enrolls like any worker and is told its cluster: `--kube-cluster` (must equal `kubernetes.cluster_name`), and `--kube-api-server`, `--kube-ca-file`, `--kube-token-file`, which default to the pod's in-cluster values. The token file is re-read about once a minute so projected tokens can rotate. A missing or unreadable token, or a worker not configured for the cluster, is a `503` (an operator problem), never a `403` (which means "you may not"). The connection to the API server accepts TLS 1.2 as well as 1.3, since it is the one hop that is not between Limen components. `http://` API servers are refused.
