@@ -23,7 +23,7 @@ What happens: the control plane StatefulSet replaces its replicas one at a time.
 - **Don't use `--atomic` or `helm rollback`** once the control plane has migrated; both would put the old version back on a migrated database (see *Rolling back*).
 - Every group (`controlPlanes`, `proxies`, `workers` entries) rolls in the same upgrade.
 
-## Terraform (`examples/complete`)
+## Terraform (`deploy/terraform/examples/complete`)
 Set `image_tag` in `my.tfvars` to `NEW`, then plan and apply:
 ```sh
 terraform plan  -var-file=my.tfvars -out=upgrade.plan
@@ -38,7 +38,7 @@ for asg in $(terraform output -json worker_groups | jq -r '.[].autoscaling_group
     --query 'InstanceRefreshes[0].[Status,PercentageComplete]' --output text   # until Successful 100
 done
 ```
-`examples/kubernetes` creates only the dependencies (database, KMS, S3, IAM, join tokens). Limen itself is the Helm path above.
+`deploy/terraform/examples/kubernetes` creates only the dependencies (database, KMS, S3, IAM, join tokens). Limen itself is the Helm path above.
 
 ## Check it worked
 - Every replica, task and pod is ready, and `limen_control_plane_replicas` is back at its count.

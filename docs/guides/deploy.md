@@ -14,7 +14,7 @@ New here? [Roll out Limen to your organisation](rollout.md) gives the whole sequ
 | Join tokens for every proxy and worker group, and the control plane's `LIMEN_STATIC_JOIN_TOKENS` | creates (Secrets Manager) | |
 | Secret for the internal CA certificate | creates | |
 | IAM: control plane can sign with the keys and write audit | creates (role for EKS via IRSA) | |
-| VPC, load balancers, services | `examples/complete` creates | |
+| VPC, load balancers, services | `deploy/terraform/examples/complete` creates | |
 | Identity provider client (OIDC issuer, client id) | | create it; pass issuer and client id |
 | Public DNS name of each proxy | | point it at the load balancer |
 | A TLS certificate the proxy serves publicly | | get one for the proxy's name; only the Helm chart can mount it so far, see [the public certificate](#the-proxys-public-certificate) |
@@ -22,7 +22,7 @@ New here? [Roll out Limen to your organisation](rollout.md) gives the whole sequ
 
 Generated secrets (database password, join tokens) are in Terraform state. Use an encrypted remote backend with restricted access.
 
-## Everything on ECS and EC2: `examples/complete`
+## Everything on ECS and EC2: `deploy/terraform/examples/complete`
 
 ```sh
 cd deploy/terraform/examples/complete
@@ -86,7 +86,7 @@ The `limen-values.yaml` includes the IRSA role annotation, so the control plane 
 
 ## Discovery
 
-Workers can find EC2 instances, databases, caches and clusters ([discovery guide](discovery.md)). Set `discovery = true` on a worker group in `examples/complete`: it sets `LIMEN_DISCOVERY` and creates the describe-only role through `modules/discovery`; use the `discovery_role_arn` output as `role_arn` in your discovery document. On Kubernetes, apply `modules/discovery` with your worker IRSA role in `worker_role_arns`, then set `discovery: true` and `serviceAccount.annotations` on the worker group. Discovery in other accounts needs one `modules/discovery` per account and the `assume_policy_arn` on the worker role.
+Workers can find EC2 instances, databases, caches and clusters ([discovery guide](discovery.md)). Set `discovery = true` on a worker group in `deploy/terraform/examples/complete`: it sets `LIMEN_DISCOVERY` and creates the describe-only role through `modules/discovery`; use the `discovery_role_arn` output as `role_arn` in your discovery document. On Kubernetes, apply `modules/discovery` with your worker IRSA role in `worker_role_arns`, then set `discovery: true` and `serviceAccount.annotations` on the worker group. Discovery in other accounts needs one `modules/discovery` per account and the `assume_policy_arn` on the worker role.
 
 ## After it runs
 
