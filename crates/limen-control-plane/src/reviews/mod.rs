@@ -513,7 +513,8 @@ pub async fn decide(
         "SELECT ",
         item_cols_i!(),
         ", r.status AS review_status, r.name AS review_name, r.override_days
-         FROM review_items i JOIN access_reviews r ON r.id = i.review_id WHERE i.id = $1 FOR UPDATE OF i"
+         FROM review_items i JOIN access_reviews r ON r.id = i.review_id WHERE i.id = $1
+         FOR UPDATE OF i FOR NO KEY UPDATE OF r"
     ))
     .bind(item_id)
     .fetch_optional(&mut *tx)
@@ -620,7 +621,11 @@ pub async fn decide(
         )
         .await?;
     }
-    // The review closes when its last item is decided.
+    // The review closes when its last item is decided. Deciding locks the
+    // review row (above), so two people deciding its last two items run one
+    // after the other and the second sees the first's decision; otherwise
+    // each would count the other's item as open and the review would never
+    // close.
     let review_id = Uuid::parse_str(&item.review_id).map_err(|e| internal("review id", e))?;
     let open: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM review_items WHERE review_id = $1 AND decision IS NULL",

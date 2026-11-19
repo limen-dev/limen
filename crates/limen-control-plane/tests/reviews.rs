@@ -374,6 +374,71 @@ async fn a_review_closes_when_its_last_item_is_decided_and_counts_silent_certifi
     );
 }
 
+/// Two people deciding a review's last two items at the same moment: each
+/// must see the other's decision, so the review closes (once) instead of
+/// staying open with nothing left to decide.
+#[tokio::test]
+async fn a_review_closes_when_its_last_two_items_are_decided_at_once() {
+    let Some(r) = rig().await else { return };
+    let (_, admin2) =
+        r.h.login(CONTRACTOR, &["admins"])
+            .await
+            .expect("second admin");
+    let (_, lead) =
+        r.h.login("dba-lead@example.com", &["dba-group"])
+            .await
+            .expect("lead");
+    let id = r.start().await;
+    let decider = |item: &ReviewItemInfo| {
+        if item.reviewer == "dba-lead@example.com" {
+            &lead
+        } else if item.subject == ADMIN {
+            &admin2
+        } else {
+            &r.admin
+        }
+    };
+    let items = r.items(&r.admin, &id).await;
+    assert!(items.len() >= 2, "{items:?}");
+    let (last_two, rest) = items.split_at(2);
+    for item in rest {
+        r.decide(decider(item), &item.id, true, "")
+            .await
+            .unwrap_or_else(|e| panic!("{item:?}: {e}"));
+    }
+    let (a, b) = (&last_two[0], &last_two[1]);
+    let (ra, rb) = tokio::join!(
+        r.decide(decider(a), &a.id, true, ""),
+        r.decide(decider(b), &b.id, true, ""),
+    );
+    ra.expect("first of the last two");
+    rb.expect("second of the last two");
+    let review = r
+        .c()
+        .list_reviews(forwarded(
+            ListReviewsRequest {
+                scope: "all".into(),
+            },
+            Some(&r.admin),
+        ))
+        .await
+        .expect("list")
+        .into_inner()
+        .reviews
+        .into_iter()
+        .find(|r| r.id == id)
+        .expect("the review this test started");
+    assert_eq!(review.items, review.decided);
+    assert_eq!(review.status, "complete");
+    let completed =
+        r.h.audit_kinds()
+            .await
+            .into_iter()
+            .filter(|k| *k == EventKind::ReviewComplete)
+            .count();
+    assert_eq!(completed, 1, "review.complete is audited once");
+}
+
 #[tokio::test]
 async fn an_override_lifts_itself_when_the_idp_change_shows_up_and_admins_can_lift_it() {
     let Some(r) = rig().await else { return };
