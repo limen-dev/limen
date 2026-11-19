@@ -786,8 +786,17 @@ async fn enforce(state: &AppState, people: &BTreeSet<Uuid>) {
     ))
     .bind(&ids)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await;
+    // The change is already committed and audited; only ending the logins is
+    // left. Say so loudly rather than report nothing to end: until the next
+    // periodic IdP check (or the certificates expire), they keep their access.
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, people = ids.len(), "SCIM: couldn't look up whose logins to end after a group change; they stay signed in until the next IdP check");
+            return;
+        }
+    };
     for r in &rows {
         let (Ok(name), Ok(Some(groups))) = (
             r.try_get::<String, _>("username"),
