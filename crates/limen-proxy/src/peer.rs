@@ -165,7 +165,33 @@ impl WorkerTunnel for Forwarder {
 #[derive(Debug, Default)]
 pub(crate) struct PeerState {
     tunnels: Mutex<Option<(Instant, Vec<PeerTunnel>)>>,
-    channels: Mutex<HashMap<String, Channel>>,
+    /// Per peer proxy ID: the address dialled and the channel to it. Each
+    /// channel carries the client certificate it was built with, so renewals
+    /// drop them all ([`PeerState::forget_channels`]).
+    channels: Mutex<HashMap<String, (String, Channel)>>,
+}
+
+impl PeerState {
+    /// The cached channel to `proxy_id`, if it was built for `address`.
+    fn cached_channel(
+        channels: &HashMap<String, (String, Channel)>,
+        proxy_id: &str,
+        address: &str,
+    ) -> Option<Channel> {
+        channels
+            .get(proxy_id)
+            .filter(|(dialled, _)| dialled == address)
+            .map(|(_, channel)| channel.clone())
+    }
+
+    /// Drop every cached channel, so the next session to a peer dials with the
+    /// current certificate. Sessions already open keep their own clone.
+    pub(crate) fn forget_channels(&self) {
+        self.channels
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
 }
 
 /// A worker reachable through another proxy. Its load is counted by the
@@ -267,8 +293,8 @@ fn peer_channel(proxy: &Proxy, proxy_id: &str, address: &str) -> anyhow::Result<
         channels.remove(proxy_id);
         anyhow::bail!("proxy {proxy_id} was revoked");
     }
-    if let Some(ch) = channels.get(proxy_id) {
-        return Ok(ch.clone());
+    if let Some(ch) = PeerState::cached_channel(&channels, proxy_id, address) {
+        return Ok(ch);
     }
     let creds = proxy.credentials();
     let provider = limen_tunnel::tls::provider();
@@ -290,7 +316,7 @@ fn peer_channel(proxy: &Proxy, proxy_id: &str, address: &str) -> anyhow::Result<
         "peer.limen.invalid",
         limen_tunnel::connect::SharedClientConfig::new(config),
     );
-    channels.insert(proxy_id.to_owned(), channel.clone());
+    channels.insert(proxy_id.to_owned(), (address.to_owned(), channel.clone()));
     Ok(channel)
 }
 
@@ -356,5 +382,41 @@ impl ServerCertVerifier for PeerVerifier {
         self.provider
             .signature_verification_algorithms
             .supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lazy_channel() -> Channel {
+        Channel::new(tonic::transport::Endpoint::from_static("http://limen.invalid").connect_lazy())
+    }
+
+    #[tokio::test]
+    async fn a_cached_channel_is_reused_only_for_the_same_address() {
+        let state = PeerState::default();
+        state
+            .channels
+            .lock()
+            .expect("lock")
+            .insert("p1".into(), ("10.0.0.1:3443".into(), lazy_channel()));
+        let channels = state.channels.lock().expect("lock");
+        assert!(PeerState::cached_channel(&channels, "p1", "10.0.0.1:3443").is_some());
+        // The peer moved: dial the new address instead of the stale one.
+        assert!(PeerState::cached_channel(&channels, "p1", "10.0.0.2:3443").is_none());
+        assert!(PeerState::cached_channel(&channels, "p2", "10.0.0.1:3443").is_none());
+    }
+
+    #[tokio::test]
+    async fn renewal_forgets_every_peer_channel() {
+        let state = PeerState::default();
+        {
+            let mut channels = state.channels.lock().expect("lock");
+            channels.insert("p1".into(), ("a:1".into(), lazy_channel()));
+            channels.insert("p2".into(), ("b:1".into(), lazy_channel()));
+        }
+        state.forget_channels();
+        assert!(state.channels.lock().expect("lock").is_empty());
     }
 }
