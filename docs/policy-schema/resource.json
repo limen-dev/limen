@@ -451,7 +451,7 @@
     },
     "SearchAudit": {
       "additionalProperties": false,
-      "description": "What a `search.request` event may contain (ADR-0036). Request bodies are\nnever logged unless `log_bodies` is set, and never for security APIs.",
+      "description": "What a `search.request` event may contain (ADR-0036). Request bodies are\nnever logged unless `log_bodies` is set, and never for security or\nadministrative APIs (their bodies can carry credentials).",
       "properties": {
         "log_bodies": {
           "default": false,

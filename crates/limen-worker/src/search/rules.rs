@@ -298,7 +298,11 @@ pub fn classify(method: &str, path: &str, query: Option<&str>) -> Result<Shape, 
     let (raw, segs) = segments(path)?;
     let (params, source_param, hidden_wildcards) = parse_query(query)?;
     let r = dispatch(method, &segs)?;
-    let sensitive = is_sensitive(&segs);
+    // Bodies of security APIs carry credentials, and so can administrative
+    // ones (`_nodes/reload_secure_settings`, inference and ML connectors,
+    // watcher actions), so neither is ever body-logged. Data APIs are
+    // `Read` or `Write`.
+    let sensitive = is_sensitive(&segs) || r.class == Admin;
     Ok(Shape {
         api: r.api,
         class: r.class,
@@ -622,6 +626,13 @@ fn walk_refs(v: &Value, named: &mut Named, depth: usize) -> Result<(), Refused> 
                             add_expr(named, &n)?;
                         }
                     }
+                    // A `lookup` runtime field reads fields from another index
+                    // (Elasticsearch 8.2+). Judged wherever the key appears.
+                    "target_index" => {
+                        for n in token_names(child, "a lookup field's target_index")? {
+                            add_expr(named, &n)?;
+                        }
+                    }
                     "terms" => {
                         if let Value::Object(fields) = child {
                             for lookup in fields.values() {
@@ -775,12 +786,23 @@ fn parse_json(bytes: &[u8]) -> Result<Value, Refused> {
     serde_json::from_slice(bytes).or_else(|_| refuse("the request body isn't valid JSON"))
 }
 
-fn ndjson_lines(bytes: &[u8]) -> Vec<&[u8]> {
-    bytes
+/// The lines of an NDJSON body. A blank line is refused unless only blank
+/// lines follow it: the engine doesn't skip one (in `_msearch` an empty line
+/// is a header meaning "the defaults", and the next line is its body), so
+/// dropping it would pair headers and bodies differently from the engine.
+fn ndjson_lines(bytes: &[u8]) -> Result<Vec<&[u8]>, Refused> {
+    let mut lines: Vec<&[u8]> = bytes
         .split(|b| *b == b'\n')
         .map(|l| l.strip_suffix(b"\r").unwrap_or(l))
-        .filter(|l| !l.iter().all(u8::is_ascii_whitespace))
-        .collect()
+        .collect();
+    let blank = |l: &[u8]| l.iter().all(u8::is_ascii_whitespace);
+    while lines.last().is_some_and(|l| blank(l)) {
+        lines.pop();
+    }
+    if lines.iter().any(|l| blank(l)) {
+        return refuse("a blank line in an NDJSON body is not allowed");
+    }
+    Ok(lines)
 }
 
 fn path_names(shape: &Shape) -> Named {
@@ -813,7 +835,7 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
             // The path's index is a default, not an extra name: replace it by
             // what each action uses.
             let mut named = Named::default();
-            let mut lines = ndjson_lines(body).into_iter();
+            let mut lines = ndjson_lines(body)?.into_iter();
             while let Some(line) = lines.next() {
                 let Value::Object(action) = serde_json::from_slice(line)
                     .or_else(|_| refuse("a _bulk action line isn't valid JSON"))?
@@ -866,7 +888,7 @@ pub fn inspect_body(shape: &Shape, body: &[u8]) -> Result<BodyFacts, Refused> {
         }
         BodyKind::Msearch | BodyKind::MsearchTemplate => {
             let mut named = Named::default();
-            let mut lines = ndjson_lines(body).into_iter();
+            let mut lines = ndjson_lines(body)?.into_iter();
             while let Some(header) = lines.next() {
                 let Value::Object(h) = serde_json::from_slice(header)
                     .or_else(|_| refuse("an _msearch header line isn't valid JSON"))?
@@ -1315,6 +1337,17 @@ mod tests {
         assert!(shape("GET", "/_security/user").sensitive);
         assert!(shape("GET", "/_plugins/_security/api/roles").sensitive);
         assert!(!shape("POST", "/logs-1/_search").sensitive);
+        assert!(!shape("POST", "/logs-1/_bulk").sensitive);
+        // Administrative APIs can carry credentials too.
+        for (m, p) in [
+            ("POST", "/_nodes/reload_secure_settings"),
+            ("PUT", "/_inference/text_embedding/x"),
+            ("PUT", "/_watcher/watch/x"),
+            ("POST", "/_plugins/_ml/connectors/_create"),
+            ("PUT", "/_cluster/settings"),
+        ] {
+            assert!(shape(m, p).sensitive, "{m} {p}");
+        }
     }
 
     #[test]
@@ -1521,6 +1554,9 @@ mod tests {
         // Hidden indices stay hidden.
         let hidden_ = b"{\"index\":{\"_index\":\".security\"}}\n{\"a\":1}\n";
         assert!(allowed(&grant(&[Write], &[]), "POST", "/_bulk", hidden_).is_err());
+        // An empty source line would make the next action line its source.
+        let blank = b"{\"index\":{\"_index\":\"logs-1\"}}\n\n{\"index\":{\"_index\":\"orders\"}}\n{\"a\":1}\n";
+        assert!(allowed(&g, "POST", "/_bulk", blank).is_err());
     }
 
     #[test]
@@ -1568,6 +1604,14 @@ mod tests {
         );
         assert!(allowed(&g, "POST", "/_msearch", b"{\"index\":\"logs-1\"}\n{\"query\":{\"terms\":{\"u\":{\"index\":\"orders\",\"id\":\"1\",\"path\":\"x\"}}}}\n").is_err());
 
+        // The engine reads an empty line as a default header and the next
+        // line as its body: skipping it would hide `secret` in a "body".
+        let shifted =
+            b"{}\n{}\n\n{}\n{\"index\":\"secret\"}\n{\"query\":{\"match_all\":{}}}\n\n{}\n";
+        assert!(allowed(&g, "POST", "/logs-1/_msearch", shifted).is_err());
+        assert!(allowed(&g, "POST", "/logs-1/_msearch", b"{}\n  \n{}\n{}\n").is_err());
+        // Blank lines at the end are only the terminator.
+        assert!(allowed(&g, "POST", "/logs-1/_msearch", b"{}\n{}\n\n\r\n").is_ok());
         // An empty list is every index to the engine, whatever the path says.
         for path in ["/logs-1/_msearch", "/logs-1/_msearch/template"] {
             assert!(
@@ -1706,6 +1750,14 @@ mod tests {
             q(r#"{"query":{"terms":{"user":{"index":"orders","id":"1","path":"u"}}}}"#).is_err()
         );
         assert!(q(r#"{"query":{"bool":{"filter":[{"terms":{"user":{"index":".security","id":"1","path":"u"}}}]}}}"#).is_err());
+        // A lookup runtime field reads another index.
+        let lookup = |index: &str| {
+            format!(
+                r#"{{"runtime_mappings":{{"x":{{"type":"lookup","target_index":"{index}","input_field":"uid","target_field":"_id","fetch_fields":["salary"]}}}},"fields":["x"]}}"#
+            )
+        };
+        assert!(q(&lookup("logs-2")).is_ok());
+        assert!(q(&lookup("orders")).is_err());
         // More like this and pinned docs name `_index`.
         assert!(q(r#"{"query":{"more_like_this":{"fields":["t"],"like":[{"_index":"orders","_id":"1"}]}}}"#).is_err());
         assert!(q(r#"{"query":{"pinned":{"docs":[{"_index":"orders","_id":"1"}],"organic":{"match_all":{}}}}}"#).is_err());

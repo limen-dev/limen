@@ -918,7 +918,8 @@ pub struct SearchTarget {
 }
 
 /// What a `search.request` event may contain (ADR-0036). Request bodies are
-/// never logged unless `log_bodies` is set, and never for security APIs.
+/// never logged unless `log_bodies` is set, and never for security or
+/// administrative APIs (their bodies can carry credentials).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchAudit {
