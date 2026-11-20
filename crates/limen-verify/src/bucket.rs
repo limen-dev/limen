@@ -201,6 +201,7 @@ async fn get(client: &aws_sdk_s3::Client, bucket: &str, key: &str) -> anyhow::Re
 }
 
 /// Check every manifest chain under `prefix`.
+#[allow(clippy::too_many_lines)] // one pass over each chain, check by check
 pub async fn verify_bucket(
     client: &aws_sdk_s3::Client,
     bucket: &str,
@@ -269,21 +270,18 @@ pub async fn verify_bucket(
                 }
             };
             // The signer's certificate lives about a day, so it is judged as of
-            // the time the manifest records, not now. A key stolen from an
-            // expired certificate can't insert a manifest mid-chain (the
-            // previous manifest's hash is checked below), and one appended at
-            // the end, dated inside that certificate's life, falls before the
-            // manifest it follows (`backdated`).
+            // the time the manifest records, not now. A key from an expired
+            // certificate can't insert a manifest mid-chain (the previous hash
+            // is checked below) nor append a backdated one (`backdated`).
             let sealed_by = match time::OffsetDateTime::parse(
                 &manifest.created_at,
                 &time::format_description::well_known::Rfc3339,
             ) {
                 Ok(at) => match verify_at(&envelope, Purpose::AuditManifest, internal_ca, at) {
                     Ok((by, _)) => {
-                        if let Some(why) = backdated(prev_at, at) {
-                            report.problems.push(problem(why));
-                        }
-                        prev_at = Some(at);
+                        report
+                            .problems
+                            .extend(backdated(&mut prev_at, at).map(problem));
                         Some(by)
                     }
                     Err(e) => {
@@ -479,10 +477,9 @@ pub async fn verify_manifest_tail(
             })();
             let manifest = match this {
                 Ok((m, at)) => {
-                    if let Some(why) = backdated(prev_at, at) {
+                    if let Some(why) = backdated(&mut prev_at, at) {
                         add(problem(why));
                     }
-                    prev_at = Some(at);
                     m
                 }
                 Err(e) => {
@@ -534,8 +531,9 @@ const BACKDATE_TOLERANCE: time::Duration = time::Duration::minutes(5);
 /// `created_at`, so a key from an expired certificate could otherwise append
 /// manifests (with the right previous hash) dated inside that certificate's
 /// life.
-fn backdated(prev: Option<time::OffsetDateTime>, at: time::OffsetDateTime) -> Option<String> {
-    let prev = prev?;
+/// `prev` becomes `at`, ready for the next manifest.
+fn backdated(prev: &mut Option<time::OffsetDateTime>, at: time::OffsetDateTime) -> Option<String> {
+    let prev = prev.replace(at)?;
     (at + BACKDATE_TOLERANCE < prev)
         .then(|| format!("created at {at}, before the manifest it follows ({prev}): backdated"))
 }
@@ -547,17 +545,20 @@ mod tests {
     #[test]
     fn a_manifest_dated_before_its_predecessor_is_backdated() {
         let t = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("t");
+        let check = |prev: Option<time::OffsetDateTime>, at| backdated(&mut { prev }, at);
+        assert!(check(None, t).is_none(), "the first has nothing to follow");
+        assert!(check(Some(t), t + time::Duration::seconds(1)).is_none());
+        assert!(check(Some(t), t).is_none());
         assert!(
-            backdated(None, t).is_none(),
-            "the first has nothing to follow"
-        );
-        assert!(backdated(Some(t), t + time::Duration::seconds(1)).is_none());
-        assert!(backdated(Some(t), t).is_none());
-        assert!(
-            backdated(Some(t), t - time::Duration::minutes(1)).is_none(),
+            check(Some(t), t - time::Duration::minutes(1)).is_none(),
             "a clock stepped back a little"
         );
-        assert!(backdated(Some(t), t - time::Duration::hours(30)).is_some());
+        assert!(check(Some(t), t - time::Duration::hours(30)).is_some());
+        // Each manifest is compared with the one just before it.
+        let mut prev = None;
+        assert!(backdated(&mut prev, t).is_none());
+        assert!(backdated(&mut prev, t + time::Duration::hours(1)).is_none());
+        assert!(backdated(&mut prev, t + time::Duration::minutes(10)).is_some());
     }
 
     fn line(instance: &str, seq: u64) -> String {
