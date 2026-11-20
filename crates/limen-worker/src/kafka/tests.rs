@@ -1082,6 +1082,26 @@ async fn audit_failing_closed_stops_requests_and_answers_with_a_retriable_error(
         0,
         "an unaudited request doesn't run"
     );
+    // The producer retries, inside the dedupe window: it must not run either.
+    let resp = rig
+        .client
+        .call(
+            wire::api::PRODUCE,
+            8,
+            &produce_body(1, &[("orders.new", &[0])]),
+        )
+        .await;
+    assert_eq!(
+        produce_result(&resp)[0].1,
+        [(0, 7)],
+        "the retry is refused too"
+    );
+    settle().await;
+    assert_eq!(
+        rig.brokers[0].seen(wire::api::PRODUCE).len(),
+        0,
+        "a retry whose first event was never written doesn't run"
+    );
     rig.sink.set_failing(false);
     let resp = rig
         .client
@@ -1092,6 +1112,16 @@ async fn audit_failing_closed_stops_requests_and_answers_with_a_retriable_error(
         )
         .await;
     assert_eq!(produce_result(&resp)[0].1, [(0, 0)]);
+    settle().await;
+    let produced: Vec<_> = events(&rig.sink, EventKind::KafkaRequest)
+        .into_iter()
+        .filter(|e| e["api"] == "Produce")
+        .collect();
+    assert_eq!(
+        produced.len(),
+        1,
+        "once the sink is back, the first request that runs is logged: {produced:?}"
+    );
 }
 
 #[tokio::test]

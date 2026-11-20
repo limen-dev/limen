@@ -251,6 +251,16 @@ impl Dedupe {
         }
     }
 
+    /// Undo the windows opened at or after `since`: their events weren't
+    /// written, so the next request must be logged, not counted as logged.
+    fn reopen_since(&mut self, since: Instant) {
+        for (last, _) in self.entries.values_mut() {
+            if last.is_some_and(|l| l >= since) {
+                *last = None;
+            }
+        }
+    }
+
     /// What is counted and not yet logged.
     fn leftovers(&self) -> Vec<(i16, String, Counts)> {
         let mut out: Vec<_> = self
@@ -703,6 +713,7 @@ where
             msgs.push(m);
         }
         let mut plan: Vec<Planned> = Vec::with_capacity(msgs.len());
+        let planned_at = Instant::now();
         for msg in msgs {
             shared
                 .bytes_in
@@ -725,8 +736,20 @@ where
             ok
         }))
         .await;
-        for (planned, written) in plan.into_iter().zip(written) {
-            let action = if written {
+        // A request planned after another in the batch may carry no event of
+        // its own because the first one's event was due (the dedupe window).
+        // If any write failed, that event is missing, so nothing in the batch
+        // runs, and the windows it opened are reopened so a retry is logged.
+        let all_written = written.iter().all(|w| *w);
+        if !all_written {
+            shared
+                .dedupe
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .reopen_since(planned_at);
+        }
+        for planned in plan {
+            let action = if all_written {
                 planned.ok
             } else {
                 tracing::error!(resource = %cx.config.resource, session = %cx.config.session_id, "audit unavailable; refusing a Kafka request");
