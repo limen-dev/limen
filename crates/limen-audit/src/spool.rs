@@ -186,6 +186,15 @@ fn scan(
             // (a crash leaves the damage at the very end). Treating it as one
             // would silently discard the valid records that follow.
             if pos + HEADER + (size as u64) < len {
+                // Unless only zeros follow: a crash can persist a record's
+                // first page and leave the pages after it zero-filled, which
+                // damages the record and pads the file past it.
+                let mut rest = Vec::new();
+                file.read_to_end(&mut rest)?;
+                if rest.iter().all(|b| *b == 0) {
+                    torn = true;
+                    break;
+                }
                 return Err(corrupt(
                     path,
                     "checksum mismatch before the end of the segment",
@@ -368,8 +377,12 @@ impl Spool {
                     () = spool.dirty.notified() => {}
                     _ = tick.tick() => {}
                 }
-                if let Err(e) = spool.flush().await {
-                    tracing::error!(error = %e, "spool fsync failed");
+                match spool.flush().await {
+                    Ok(()) => {}
+                    // `mark_broken` has logged it once; only a restart clears
+                    // it, so retrying every tick would only repeat the log.
+                    Err(SpoolError::Broken(_)) => break,
+                    Err(e) => tracing::error!(error = %e, "spool fsync failed"),
                 }
             }
         });
@@ -591,9 +604,24 @@ impl Spool {
         st.offsets.insert(consumer.to_owned(), upto);
 
         let min = st.offsets.values().copied().min().unwrap_or(upto);
+        // The offset is durable now, so a segment that can't be deleted is
+        // not a failed commit (the caller would ship the batch again). It
+        // stays listed, so `used_bytes` still counts it and the next commit
+        // tries again.
         while st.segments.len() > 1 && Self::end(&st.segments[0]) <= min {
-            let seg = st.segments.remove(0);
-            std::fs::remove_file(&seg.path)?;
+            match std::fs::remove_file(&st.segments[0].path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        segment = %st.segments[0].path.display(),
+                        "could not delete a shipped spool segment; will retry"
+                    );
+                    break;
+                }
+            }
+            st.segments.remove(0);
         }
         Ok(())
     }
@@ -930,6 +958,24 @@ mod tests {
         assert_eq!(spool.append(b"after").await.expect("append"), 3);
         drop(spool);
 
+        // A record whose end was zero-filled, with zeros after it, is a crash
+        // artifact too: the records before it survive.
+        let mut bytes = std::fs::read(&seg).expect("read");
+        let valid = bytes.len();
+        bytes.extend_from_slice(&10u32.to_be_bytes());
+        bytes.extend_from_slice(&crc32fast::hash(&[9u8; 10]).to_be_bytes());
+        bytes.extend_from_slice(&[9, 9, 9]);
+        bytes.extend_from_slice(&[0u8; 4096]);
+        std::fs::write(&seg, &bytes).expect("write");
+        let spool = Spool::open(config(dir.path())).expect("a zero-filled record is torn");
+        assert_eq!(spool.read("a", 100).expect("read").len(), 4);
+        assert_eq!(
+            std::fs::metadata(&seg).expect("stat").len(),
+            valid as u64,
+            "truncated back to the last valid record"
+        );
+        drop(spool);
+
         // An absurd length with real data after it is damage, not a crash.
         let mut bytes = std::fs::read(&seg).expect("read");
         bytes[0] = 0xff;
@@ -1086,5 +1132,80 @@ mod tests {
             .expect("open write-only");
         let scanned = scan(&mut file, &path, None);
         assert!(matches!(scanned, Err(SpoolError::Io(_))), "{scanned:?}");
+    }
+
+    /// Once broken, the flusher stops instead of failing (and logging) every
+    /// tick until a restart.
+    #[tokio::test]
+    async fn the_flusher_stops_once_the_spool_is_broken() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        let alone = Arc::strong_count(&spool.config);
+        spool.start();
+        assert_eq!(
+            Arc::strong_count(&spool.config),
+            alone + 1,
+            "the flusher holds a clone"
+        );
+        spool
+            .fail_sync
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(spool.append(b"lost").await.is_err());
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while Arc::strong_count(&spool.config) > alone {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        assert!(
+            stopped.is_ok(),
+            "the flusher kept running on a broken spool"
+        );
+    }
+
+    /// A shipped segment that can't be deleted doesn't fail the commit (the
+    /// offset already moved) and still counts toward the spool's size.
+    #[tokio::test]
+    async fn a_segment_that_cannot_be_deleted_stays_counted() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = Spool::open(config(dir.path())).expect("open");
+        spool.start();
+        for _ in 0..30 {
+            spool.append(&[7; 20]).await.expect("append");
+        }
+        let (first, first_end, segments) = {
+            let st = spool.lock();
+            (
+                st.segments[0].path.clone(),
+                Spool::end(&st.segments[0]),
+                st.segments.len(),
+            )
+        };
+        assert!(segments > 2, "the test needs several segments");
+        // A non-empty directory in its place: `remove_file` fails, even as root.
+        let stuck = dir.path().join("stuck");
+        std::fs::create_dir(&stuck).expect("mkdir");
+        std::fs::write(stuck.join("x"), b"x").expect("write");
+        spool.lock().segments[0].path.clone_from(&stuck);
+        let before = spool.used_bytes();
+
+        spool
+            .commit_all(first_end)
+            .expect("the offset moved, so the commit succeeded");
+        assert_eq!(
+            spool.used_bytes(),
+            before,
+            "the undeleted segment still counts"
+        );
+        assert_eq!(spool.min_offset(), first_end);
+        assert!(first.exists());
+
+        // Once it can be deleted, the next commit cleans it up.
+        std::fs::remove_dir_all(&stuck).expect("rm");
+        std::fs::write(&stuck, b"").expect("a plain file again");
+        let second_end = Spool::end(&spool.lock().segments[1]);
+        spool.commit_all(second_end).expect("commit");
+        assert_eq!(spool.lock().segments.len(), segments - 2);
+        assert!(!stuck.exists());
     }
 }
