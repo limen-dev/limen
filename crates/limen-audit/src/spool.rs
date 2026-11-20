@@ -151,11 +151,15 @@ fn scan(
     let len = file.metadata()?.len();
     let mut torn = false;
     while pos < len && limit.is_none_or(|l| (records.len() as u64) < l) {
-        let mut header = [0u8; 8];
-        if len - pos < HEADER || file.read_exact(&mut header).is_err() {
+        if len - pos < HEADER {
             torn = true;
             break;
         }
+        // At least a header's worth of bytes is on disk, so a failed read is
+        // an I/O error, not a torn write: calling it torn would truncate
+        // records that were synced and acknowledged.
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header)?;
         let size = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
         let crc = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
         if size == 0 || size > MAX_RECORD {
@@ -1066,5 +1070,21 @@ mod tests {
         drop(spool);
         let spool = Spool::open(config(dir.path())).expect("reopen");
         assert_eq!(spool.min_offset(), 30);
+    }
+
+    /// A read that fails with a whole header on disk is an I/O error, not a
+    /// torn write: as torn, `open` would truncate synced records.
+    #[test]
+    fn a_failed_read_is_an_error_not_a_torn_tail() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("segment.log");
+        std::fs::write(&path, [0u8; 64]).expect("write");
+        // Every read of a write-only handle fails; its length is still known.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open write-only");
+        let scanned = scan(&mut file, &path, None);
+        assert!(matches!(scanned, Err(SpoolError::Io(_))), "{scanned:?}");
     }
 }
