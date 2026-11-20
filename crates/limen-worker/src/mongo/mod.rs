@@ -488,7 +488,10 @@ where
         };
         let unacknowledged = parsed.flags & wire::MORE_TO_COME != 0;
         let command = match rules::inspect(parsed.command) {
-            Ok(c) => c,
+            Ok(c) => rules::Inspected {
+                sequences: &parsed.sequences,
+                ..c
+            },
             Err(refusal) => {
                 self.pacer.wait().await;
                 return self
