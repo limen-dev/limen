@@ -99,7 +99,7 @@ impl Restrictions {
         if self
             .locked_users
             .iter()
-            .any(|locked| locked.eq_ignore_ascii_case(username))
+            .any(|locked| limen_core::identity::same_username(locked, username))
         {
             Some("user locked")
         } else if self.revoked_logins.contains(login_id) {
@@ -148,7 +148,10 @@ impl Restrictions {
             .iter()
             // Ignoring case, as for locks: a deny only takes access away, and
             // an IdP that changes a name's case must not bring a role back.
-            .filter(|d| d.username.eq_ignore_ascii_case(username) && d.expires_at_unix > now_unix)
+            .filter(|d| {
+                limen_core::identity::same_username(&d.username, username)
+                    && d.expires_at_unix > now_unix
+            })
             .map(|d| d.role.as_str())
             .collect();
         if !denied.is_empty() {
@@ -637,6 +640,17 @@ mod tests {
         );
         assert!(r.is_revoked("worker-9"));
         assert!(!r.is_revoked("worker-1"));
+    }
+
+    #[test]
+    fn a_lock_covers_non_ascii_case_too() {
+        // The database's lower() folds `Ö` to `ö`; a lock must here too.
+        let r = Restrictions {
+            locked_users: ["JÖRG@x.de".to_owned()].into(),
+            ..Restrictions::default()
+        };
+        assert_eq!(r.blocks("jörg@x.de", "l", "s"), Some("user locked"));
+        assert_eq!(r.blocks("jorg@x.de", "l", "s"), None);
     }
 
     #[test]

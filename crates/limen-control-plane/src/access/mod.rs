@@ -380,7 +380,7 @@ pub async fn decide(
     }
     // Separation of duties: nobody decides their own request. The database
     // refuses it too, in a trigger.
-    if req.requester.eq_ignore_ascii_case(who.username) {
+    if limen_core::identity::same_username(&req.requester, who.username) {
         return Err(Status::permission_denied(
             "you cannot approve or deny your own request",
         ));
@@ -682,7 +682,7 @@ pub async fn list_requests(
             pending.map(|rows| {
                 rows.into_iter()
                     .filter(|r| {
-                        !r.requester.eq_ignore_ascii_case(who.username)
+                        !limen_core::identity::same_username(&r.requester, who.username)
                             && policy.policy.may_approve(
                                 &r.role,
                                 who.username,
@@ -757,8 +757,10 @@ async fn build_info(
         .collect();
     let can_decide = row.status == "pending"
         && row.expires_at > OffsetDateTime::now_utc()
-        && !row.requester.eq_ignore_ascii_case(who.username)
-        && !mine.iter().any(|a| a.approver == who.username)
+        && !limen_core::identity::same_username(&row.requester, who.username)
+        && !mine
+            .iter()
+            .any(|a| limen_core::identity::same_username(&a.approver, who.username))
         && {
             let groups = store::user_groups(&state.db, who.username)
                 .await
@@ -939,7 +941,7 @@ pub async fn effective_roles_now(
         denies: crate::reviews::active_denies(&state.db)
             .await?
             .into_iter()
-            .filter(|d| d.username.eq_ignore_ascii_case(username))
+            .filter(|d| limen_core::identity::same_username(&d.username, username))
             .collect(),
         ..Default::default()
     };
@@ -965,7 +967,7 @@ pub async fn reachable(
     let denied: Vec<String> = crate::reviews::active_denies(&state.db)
         .await?
         .into_iter()
-        .filter(|d| d.username.eq_ignore_ascii_case(username))
+        .filter(|d| limen_core::identity::same_username(&d.username, username))
         .map(|d| d.role)
         .collect();
     let cert_roles: Vec<String> = cert_roles
@@ -1026,7 +1028,7 @@ pub async fn scopes_for(
     let denied: Vec<String> = crate::reviews::active_denies(&state.db)
         .await?
         .into_iter()
-        .filter(|d| d.username.eq_ignore_ascii_case(username))
+        .filter(|d| limen_core::identity::same_username(&d.username, username))
         .map(|d| d.role)
         .collect();
     let mut roles: Vec<String> = cert_roles
