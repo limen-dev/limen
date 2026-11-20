@@ -9,6 +9,7 @@
 //!    client and the worker. Database sessions are terminated at the worker
 //!    (ADR-0002, ADR-0033); the proxy relays them the same way.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tracing::Instrument as _;
@@ -913,14 +914,17 @@ async fn relay<IO>(
     let started = Instant::now();
     metrics::gauge!("limen_sessions_active", "kind" => kind.to_owned()).increment(1.0);
     let (mut reader, mut writer) = tokio::io::split(io);
+    // Counted outside the relay futures, so session.end reports what moved
+    // even when a side is cut off (a kill, or a peer that won't close).
+    let uploaded = AtomicU64::new(0);
+    let downloaded = AtomicU64::new(0);
     let upload = async {
-        let mut bytes = 0u64;
         let mut buf = vec![0u8; CHUNK];
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    bytes += n as u64;
+                    uploaded.fetch_add(n as u64, Ordering::Relaxed);
                     if outbound
                         .send(TunnelFrame {
                             frame: Some(Frame::Data(buf[..n].to_vec())),
@@ -938,15 +942,13 @@ async fn relay<IO>(
                 frame: Some(Frame::Close(limen_proto::v1::SessionClose::default())),
             })
             .await;
-        bytes
     };
     let download = async {
-        let mut bytes = 0u64;
         let mut close = None;
         while let Some(frame) = inbound.next().await {
             match frame.map(|f| f.frame) {
                 Ok(Some(Frame::Data(d))) => {
-                    bytes += d.len() as u64;
+                    downloaded.fetch_add(d.len() as u64, Ordering::Relaxed);
                     if writer.write_all(&d).await.is_err() {
                         break;
                     }
@@ -966,7 +968,7 @@ async fn relay<IO>(
             }
         }
         let _ = writer.shutdown().await;
-        (bytes, close)
+        close
     };
     // Whichever side finishes first, give the other a moment: the worker's
     // closing frame carries the recording reference for session.end.
@@ -1005,32 +1007,33 @@ async fn relay<IO>(
     tokio::pin!(download);
     tokio::pin!(revoked);
     let mut revoked_why = None;
-    let (bytes_in, bytes_out, close) = tokio::select! {
+    let close = tokio::select! {
         why = &mut revoked => {
             revoked_why = Some(why);
             tracing::warn!(session = %session_id, user = %user.username, reason = why, "ending the session");
             // Closing the tunnel makes the worker stop the target connection
             // and finish the recording; its closing frame still reaches us.
-            let _ = outbound
-                .send(TunnelFrame {
-                    frame: Some(Frame::Close(limen_proto::v1::SessionClose {
-                        reason: why.into(),
-                        ..Default::default()
-                    })),
-                })
-                .await;
-            let (out, close) = tokio::time::timeout(Duration::from_secs(15), &mut download).await.unwrap_or((0, None));
-            (0, out, close)
+            // Bounded: a stalled tunnel with a full queue must not keep the
+            // session (and its session.end) from ending.
+            let close = outbound.send(TunnelFrame {
+                frame: Some(Frame::Close(limen_proto::v1::SessionClose {
+                    reason: why.into(),
+                    ..Default::default()
+                })),
+            });
+            let _ = tokio::time::timeout(Duration::from_secs(5), close).await;
+            tokio::time::timeout(Duration::from_secs(15), &mut download).await.ok().flatten()
         }
-        (out, close) = &mut download => {
-            let bytes_in = tokio::time::timeout(Duration::from_secs(5), &mut upload).await.unwrap_or(0);
-            (bytes_in, out, close)
+        close = &mut download => {
+            let _ = tokio::time::timeout(Duration::from_secs(5), &mut upload).await;
+            close
         }
-        bytes_in = &mut upload => {
-            let (out, close) = tokio::time::timeout(Duration::from_secs(15), &mut download).await.unwrap_or((0, None));
-            (bytes_in, out, close)
+        () = &mut upload => {
+            tokio::time::timeout(Duration::from_secs(15), &mut download).await.ok().flatten()
         }
     };
+    let bytes_in = uploaded.load(Ordering::Relaxed);
+    let bytes_out = downloaded.load(Ordering::Relaxed);
     let close = close.unwrap_or_default();
     let ctx_user = ctx.user.clone().unwrap_or_default();
     let mut end = json!({

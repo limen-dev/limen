@@ -40,10 +40,9 @@ pub mod alpn {
     pub const H2: &[u8] = b"h2";
     /// Browsers that don't speak HTTP/2. Only the web console is served this way.
     pub const HTTP1: &[u8] = b"http/1.1";
-    pub const HTTP11: &[u8] = b"http/1.1";
 
     pub const ALL: [&[u8]; 13] = [
-        TUNNEL, PEER, WORKER_API, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, TCP, SSH, H2, HTTP11,
+        TUNNEL, PEER, WORKER_API, DB, REDIS, MONGO, SEARCH, MQ, KAFKA, TCP, SSH, H2, HTTP1,
     ];
 
     /// The protocols spoken only by Limen's own components, which verify the proxy against the

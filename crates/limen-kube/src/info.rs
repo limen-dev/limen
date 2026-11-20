@@ -45,16 +45,16 @@ pub fn percent_decode(s: &str) -> String {
 }
 
 /// Whether the query turns the boolean parameter `name` on, the way the API
-/// server reads it: the first occurrence wins, keys and values are
-/// percent-decoded, and the value is Go's `strconv.ParseBool` (`1 t T TRUE
-/// true True`). A bare `?watch` counts as on.
+/// server reads it (`runtime.Convert_Slice_string_To_bool`, used to decode
+/// `ListOptions`): the first occurrence wins, keys and values are
+/// percent-decoded, and only `0` and `false` (any case) are off. Anything
+/// else, `no` and a bare `?watch` included, is on.
 fn query_flag(query: &str, name: &str) -> bool {
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         if percent_decode(&key.replace('+', " ")) == name {
             let value = percent_decode(&value.replace('+', " "));
-            return value.is_empty()
-                || matches!(value.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True");
+            return value != "0" && !value.eq_ignore_ascii_case("false");
         }
     }
     false
@@ -136,11 +136,15 @@ impl RequestInfo {
                 info.subresource = sub.join("/");
             }
         }
-        let watching = query_flag(query, "watch");
-        if info.verb == "get" && watching {
-            info.verb = "watch".into();
-        } else if info.verb == "get" && info.name.is_empty() {
-            info.verb = "list".into();
+        // Only a request with no name becomes a list or a watch; a named get
+        // stays a get whatever its query says.
+        if info.verb == "get" && info.name.is_empty() {
+            info.verb = if query_flag(query, "watch") {
+                "watch"
+            } else {
+                "list"
+            }
+            .into();
         } else if info.verb == "delete" && info.name.is_empty() {
             info.verb = "deletecollection".into();
         }
@@ -269,7 +273,8 @@ mod tests {
         assert_eq!((i.resource.as_str(), i.name.as_str()), ("secrets", "db"));
         let i = parse("GET", "/%61pi/v1/namespaces/dev/pods/web/%65xec");
         assert_eq!(i.stream_subresource(), Some(StreamSubresource::Exec));
-        // Booleans are Go's ParseBool; keys and values may be encoded.
+        // Only `0` and `false` (any case) are off; keys and values may be
+        // encoded.
         for q in [
             "watch=true",
             "watch=True",
@@ -278,6 +283,10 @@ mod tests {
             "watch=T",
             "watch=1",
             "watch",
+            "watch=",
+            "watch=f",
+            "watch=no",
+            "watch=yes",
             "%77atch=%74rue",
         ] {
             let i = parse("GET", &format!("/api/v1/pods?{q}"));
@@ -285,9 +294,10 @@ mod tests {
         }
         for q in [
             "watch=false",
+            "watch=FALSE",
+            "watch=fAlSe",
             "watch=0",
-            "watch=f",
-            "watch=no",
+            "%77atch=%30",
             "wat=true",
             "limit=5",
         ] {
@@ -302,6 +312,11 @@ mod tests {
         assert_eq!(
             parse("GET", "/api/v1/pods?watch=true&watch=false").verb,
             "watch"
+        );
+        // A named get is a get, as in the cluster's audit log.
+        assert_eq!(
+            parse("GET", "/api/v1/namespaces/dev/pods/web?watch=true").verb,
+            "get"
         );
     }
 
