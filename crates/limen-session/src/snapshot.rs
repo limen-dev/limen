@@ -146,7 +146,9 @@ impl Restrictions {
         let denied: Vec<&str> = self
             .denies
             .iter()
-            .filter(|d| d.username == username && d.expires_at_unix > now_unix)
+            // Ignoring case, as for locks: a deny only takes access away, and
+            // an IdP that changes a name's case must not bring a role back.
+            .filter(|d| d.username.eq_ignore_ascii_case(username) && d.expires_at_unix > now_unix)
             .map(|d| d.role.as_str())
             .collect();
         if !denied.is_empty() {
@@ -562,6 +564,37 @@ mod tests {
         );
         assert!(r.is_revoked("worker-9"));
         assert!(!r.is_revoked("worker-1"));
+    }
+
+    #[test]
+    fn a_deny_applies_whatever_the_case_of_the_name() {
+        let r = Restrictions {
+            denies: vec![RoleDeny {
+                id: "deny-1".into(),
+                username: "Alice@Example.com".into(),
+                role: "dev".into(),
+                expires_at_unix: 3_000,
+            }],
+            ..Restrictions::default()
+        };
+        let roles = ["dev".to_owned(), "viewer".to_owned()];
+        for name in [
+            "alice@example.com",
+            "ALICE@EXAMPLE.COM",
+            "Alice@Example.com",
+        ] {
+            assert_eq!(
+                r.effective_roles(name, &roles, "orders", 1_000).roles,
+                vec!["viewer".to_owned()],
+                "{name}"
+            );
+        }
+        // Someone else keeps the role.
+        assert_eq!(
+            r.effective_roles("bob@example.com", &roles, "orders", 1_000)
+                .roles,
+            roles
+        );
     }
 
     fn grant(id: &str, user: &str, role: &str, resource: &str, expires: i64) -> ActiveGrant {

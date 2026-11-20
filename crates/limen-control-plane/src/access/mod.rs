@@ -939,7 +939,7 @@ pub async fn effective_roles_now(
         denies: crate::reviews::active_denies(&state.db)
             .await?
             .into_iter()
-            .filter(|d| d.username == username)
+            .filter(|d| d.username.eq_ignore_ascii_case(username))
             .collect(),
         ..Default::default()
     };
@@ -965,7 +965,7 @@ pub async fn reachable(
     let denied: Vec<String> = crate::reviews::active_denies(&state.db)
         .await?
         .into_iter()
-        .filter(|d| d.username == username)
+        .filter(|d| d.username.eq_ignore_ascii_case(username))
         .map(|d| d.role)
         .collect();
     let cert_roles: Vec<String> = cert_roles
@@ -1026,7 +1026,7 @@ pub async fn scopes_for(
     let denied: Vec<String> = crate::reviews::active_denies(&state.db)
         .await?
         .into_iter()
-        .filter(|d| d.username == username)
+        .filter(|d| d.username.eq_ignore_ascii_case(username))
         .map(|d| d.role)
         .collect();
     let mut roles: Vec<String> = cert_roles
