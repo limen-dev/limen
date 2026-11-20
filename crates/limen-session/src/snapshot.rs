@@ -480,6 +480,154 @@ mod tests {
         );
     }
 
+    /// Restrictions change without the policy version moving (a lock is not
+    /// a policy edit), so an older signed copy of the *same* version must not
+    /// replace a newer one: replaying it would lift a lock, a killed session
+    /// or a revoked component. A refused update leaves the held snapshot as
+    /// it was.
+    #[tokio::test]
+    async fn an_older_copy_of_the_same_version_cannot_undo_a_lock() {
+        let (ca, cp, _) = setup().await;
+        let now = OffsetDateTime::now_utc();
+        let cache = PolicyCache::new(DEFAULT_GRACE, None);
+        let before_lock = sign(
+            &cp,
+            7,
+            &Policy::default(),
+            &Restrictions::default(),
+            now - time::Duration::seconds(30),
+        )
+        .expect("sign");
+        let locked = Restrictions {
+            locked_users: ["mallory@example.com".to_owned()].into(),
+            revoked_components: ["proxy-3".to_owned()].into(),
+            ..Restrictions::default()
+        };
+        cache
+            .update(
+                &sign(&cp, 7, &Policy::default(), &locked, now).expect("sign"),
+                ca.cert_der(),
+            )
+            .expect("the locked snapshot");
+
+        let replay = cache.update(&before_lock, ca.cert_der());
+        assert!(
+            matches!(&replay, Err(SessionError::Malformed(why)) if why.contains("older")),
+            "replaying an earlier copy of version 7 must be refused: {replay:?}"
+        );
+        let held = cache.fresh(now).expect("still fresh");
+        assert_eq!(held.issued_at.unix_timestamp(), now.unix_timestamp());
+        assert_eq!(
+            held.restrictions.blocks("mallory@example.com", "l", "s"),
+            Some("user locked"),
+            "the lock still holds"
+        );
+        assert!(held.restrictions.is_revoked("proxy-3"));
+
+        // A newer version issued earlier than the held one is refused too:
+        // either clue to an older snapshot is enough.
+        assert!(
+            cache
+                .update(
+                    &sign(
+                        &cp,
+                        8,
+                        &Policy::default(),
+                        &Restrictions::default(),
+                        now - time::Duration::seconds(1),
+                    )
+                    .expect("sign"),
+                    ca.cert_der(),
+                )
+                .is_err(),
+            "a later version with an earlier issue time"
+        );
+        assert_eq!(cache.latest().expect("held").version, 7);
+
+        // The same version, signed again later (the control plane's regular
+        // refresh), is accepted.
+        let later = now + time::Duration::seconds(1);
+        let refreshed = cache
+            .update(
+                &sign(&cp, 7, &Policy::default(), &Restrictions::default(), later).expect("sign"),
+                ca.cert_der(),
+            )
+            .expect("a newer copy of the same version");
+        assert!(refreshed.restrictions.locked_users.is_empty());
+    }
+
+    /// The age check is inclusive: a snapshot exactly `grace` old is still
+    /// used, one second more is stale.
+    #[tokio::test]
+    async fn freshness_ends_one_second_past_the_grace_period() {
+        let (ca, cp, _) = setup().await;
+        let issued =
+            OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
+                .expect("whole seconds");
+        let cache = PolicyCache::new(Duration::from_secs(300), None);
+        cache
+            .update(
+                &sign(&cp, 1, &Policy::default(), &Restrictions::default(), issued).expect("sign"),
+                ca.cert_der(),
+            )
+            .expect("update");
+        cache
+            .fresh(issued + time::Duration::seconds(300))
+            .expect("exactly the grace period is still fresh");
+        match cache.fresh(issued + time::Duration::seconds(301)) {
+            Err(SessionError::Stale {
+                age_secs,
+                grace_secs,
+            }) => assert_eq!((age_secs, grace_secs), (301, 300)),
+            other => panic!("expected stale, got {other:?}"),
+        }
+    }
+
+    /// A persisted snapshot is only a cache: one that was tampered with on
+    /// disk, signed by a component that may not sign policy, or signed under
+    /// another CA is ignored. With nothing else held, the cache then has no
+    /// snapshot, so decisions fail closed instead of following the file.
+    #[tokio::test]
+    async fn a_persisted_snapshot_that_does_not_verify_is_ignored() {
+        let (ca, cp, proxy) = setup().await;
+        let (other_ca, other_cp, _) = setup().await;
+        let dir = std::env::temp_dir().join(format!("limen-snap-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("policy.snapshot");
+        let now = OffsetDateTime::now_utc();
+        let unlocked = Restrictions::default();
+
+        let mut tampered = sign(&cp, 2, &Policy::default(), &unlocked, now).expect("sign");
+        let last = tampered.payload.len() - 1;
+        tampered.payload[last] ^= 1;
+        let by_proxy = sign(&proxy, 2, &Policy::default(), &unlocked, now).expect("sign");
+        let foreign = sign(&other_cp, 2, &Policy::default(), &unlocked, now).expect("sign");
+        let cases: [(&str, Vec<u8>); 5] = [
+            ("tampered payload", tampered.encode_to_vec()),
+            ("signed by a proxy", by_proxy.encode_to_vec()),
+            ("signed under another CA", foreign.encode_to_vec()),
+            ("not a Signed message", b"\xff\xff\xff\xff".to_vec()),
+            ("empty file", Vec::new()),
+        ];
+        for (what, bytes) in cases {
+            std::fs::write(&path, bytes).expect("write");
+            let cache = PolicyCache::new(DEFAULT_GRACE, Some(path.clone()));
+            cache.load(ca.cert_der());
+            assert!(cache.latest().is_none(), "{what}: loaded");
+            assert!(
+                matches!(cache.fresh(now), Err(SessionError::NoSnapshot)),
+                "{what}: must fail closed"
+            );
+        }
+        // The foreign snapshot is fine under its own CA: the refusal above is
+        // about trust, not a broken file.
+        std::fs::write(&path, foreign.encode_to_vec()).expect("write");
+        let cache = PolicyCache::new(DEFAULT_GRACE, Some(path));
+        cache.load(other_ca.cert_der());
+        assert_eq!(cache.latest().expect("loaded").version, 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn persisted_snapshot_reloads_with_its_original_age() {
         let (ca, cp, _) = setup().await;
