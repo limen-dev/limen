@@ -13,6 +13,9 @@
 name: policy
 on:
   pull_request:
+    # `labeled` and `unlabeled` re-run the check when a reviewer adds or removes
+    # access-widening-approved; the default types would leave it red.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     paths: ["policy/**"]
 
 permissions:
@@ -23,9 +26,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { path: head }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ github.base_ref }}", path: base }
       - name: Install limen
         run: |
