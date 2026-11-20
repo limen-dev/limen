@@ -79,7 +79,7 @@ spec:
   elasticsearch:
     endpoint: "es.example.com:9200"
     audit:
-      log_bodies: true     # first 16 KiB of the body, audit sinks only. Never for security APIs
+      log_bodies: true     # first 16 KiB of the body, audit sinks only. Never for security or admin APIs
       log_query: true      # query-string values, not just names
       redact_ids: true     # hash document ids in the path
 ```

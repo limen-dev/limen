@@ -97,6 +97,25 @@ const NAMES: [&str; 11] = [
     "renameCollection",
 ];
 
+/// Values under these keys are the user's data (a filter, an update, a
+/// matched or computed document): the keys in them are field names, so the
+/// lists above (`from`, `to`, `new`, `limit`, ...) don't apply below them.
+const DATA: [&str; 13] = [
+    "filter",
+    "query",
+    "q",
+    "u",
+    "update",
+    "replacement",
+    "$match",
+    "$set",
+    "$addFields",
+    "$setOnInsert",
+    "$replaceWith",
+    "$replaceRoot",
+    "let",
+];
+
 /// Fields whose values are never kept, even with `full_commands`.
 const SECRETS: [&str; 11] = [
     "pwd",
@@ -162,6 +181,8 @@ struct Scope {
 struct Ctx {
     full: bool,
     scope: Scope,
+    /// Below a [`DATA`] key: keys name fields, not options.
+    data: bool,
     depth: usize,
 }
 
@@ -186,6 +207,7 @@ pub fn summarize(command: Doc<'_>, sequences: &[Sequence<'_>], full: bool) -> Su
     let base = Ctx {
         full,
         scope: Scope::default(),
+        data: false,
         depth: 0,
     };
     // The first element is the command name and its target, shown elsewhere.
@@ -282,14 +304,21 @@ fn value_for_key(out: &mut Out, key: &str, value: Value<'_>, mut ctx: Ctx) {
         out.push("\"[REDACTED]\"");
         return;
     }
-    if KEPT_SCALARS.contains(&key) {
-        ctx.scope.scalars = true;
+    if DATA.contains(&key) {
+        // Nothing kept above reaches into the data.
+        ctx.scope = Scope::default();
+        ctx.data = true;
     }
-    if STRUCTURAL.contains(&key) {
-        ctx.scope.structural = true;
-    }
-    if NAMES.contains(&key) {
-        ctx.scope.names = true;
+    if !ctx.data {
+        if KEPT_SCALARS.contains(&key) {
+            ctx.scope.scalars = true;
+        }
+        if STRUCTURAL.contains(&key) {
+            ctx.scope.structural = true;
+        }
+        if NAMES.contains(&key) {
+            ctx.scope.names = true;
+        }
     }
     render(out, value, ctx);
 }
@@ -645,6 +674,50 @@ mod tests {
         assert_eq!(
             text,
             r#"{"updates":[{"q":{"email":"?"},"u":{"$set":{"tier":"?"}},"multi":false,"upsert":true}]}"#
+        );
+    }
+
+    /// Field names that match an option or a stage argument (`from`, `to`,
+    /// `new`, `limit`, `db`) are data inside a filter or an update.
+    #[test]
+    fn data_fields_named_like_options_lose_their_values() {
+        let filter = Builder::new()
+            .str("from", "ada@example.com")
+            .str("new", "s3cret")
+            .str("db", "prod-1")
+            .doc("limit", &Builder::new().str_array("$in", &["a", "b"]));
+        let doc = Builder::new()
+            .str("find", "mail")
+            .doc("filter", &filter)
+            .i32("limit", 5)
+            .str("$db", "orders")
+            .finish();
+        let text = summary(&doc, false);
+        for leaked in ["ada@example.com", "s3cret", "prod-1", "\"a\""] {
+            assert!(!text.contains(leaked), "{leaked} in {text}");
+        }
+        assert!(text.contains(r#""limit":5"#), "the option stays: {text}");
+        assert!(text.contains(r#""$in":"?[2]""#), "{text}");
+
+        let cmd = Builder::new()
+            .str("update", "customers")
+            .str("$db", "orders")
+            .finish();
+        let upd = Builder::new()
+            .doc("q", &Builder::new().str("to", "bob@example.com"))
+            .doc(
+                "u",
+                &Builder::new().doc("$set", &Builder::new().str("to", "eve@example.com")),
+            )
+            .finish();
+        let seq = Sequence {
+            identifier: "updates",
+            docs: vec![Doc::new(&upd).expect("doc")],
+        };
+        let text = summarize(Doc::new(&cmd).expect("doc"), &[seq], false).text;
+        assert_eq!(
+            text,
+            r#"{"updates":[{"q":{"to":"?"},"u":{"$set":{"to":"?"}}}]}"#
         );
     }
 

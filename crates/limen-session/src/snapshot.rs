@@ -99,7 +99,7 @@ impl Restrictions {
         if self
             .locked_users
             .iter()
-            .any(|locked| locked.eq_ignore_ascii_case(username))
+            .any(|locked| limen_core::identity::same_username(locked, username))
         {
             Some("user locked")
         } else if self.revoked_logins.contains(login_id) {
@@ -146,7 +146,12 @@ impl Restrictions {
         let denied: Vec<&str> = self
             .denies
             .iter()
-            .filter(|d| d.username == username && d.expires_at_unix > now_unix)
+            // Ignoring case, as for locks: a deny only takes access away, and
+            // an IdP that changes a name's case must not bring a role back.
+            .filter(|d| {
+                limen_core::identity::same_username(&d.username, username)
+                    && d.expires_at_unix > now_unix
+            })
             .map(|d| d.role.as_str())
             .collect();
         if !denied.is_empty() {
@@ -285,6 +290,24 @@ pub fn verify_snapshot(
     })
 }
 
+/// How far ahead of this component's clock a snapshot's `issued_at` may be.
+/// The same tolerance as for session grants (`grant.rs`).
+const CLOCK_SKEW_SECS: i64 = 120;
+
+/// Refuse a snapshot stamped further in the future than clock skew explains.
+/// Held, it would be "newer" than every honest snapshot (each one would be
+/// refused as a rollback) and would never age, so new locks, kills and
+/// revocations would stop arriving.
+fn check_not_future(snapshot: &Snapshot, now: OffsetDateTime) -> Result<(), SessionError> {
+    let ahead = (snapshot.issued_at - now).whole_seconds();
+    if ahead > CLOCK_SKEW_SECS {
+        return Err(SessionError::Malformed(format!(
+            "issued {ahead}s in the future (allowed skew {CLOCK_SKEW_SECS}s)"
+        )));
+    }
+    Ok(())
+}
+
 /// The latest verified snapshot, optionally persisted so a restart can use
 /// it (its age still counts from when it was issued).
 #[derive(Debug, Clone)]
@@ -313,6 +336,7 @@ impl PolicyCache {
         match Signed::decode(bytes.as_slice())
             .map_err(|e| SessionError::Malformed(e.to_string()))
             .and_then(|s| verify_snapshot(&s, internal_ca))
+            .and_then(|s| check_not_future(&s, OffsetDateTime::now_utc()).map(|()| s))
         {
             Ok(snapshot) => {
                 tracing::info!(version = snapshot.version, issued_at = %snapshot.issued_at, "loaded persisted policy snapshot");
@@ -330,7 +354,17 @@ impl PolicyCache {
         signed: &Signed,
         internal_ca: &CertificateDer<'_>,
     ) -> Result<Snapshot, SessionError> {
+        self.update_at(signed, internal_ca, OffsetDateTime::now_utc())
+    }
+
+    fn update_at(
+        &self,
+        signed: &Signed,
+        internal_ca: &CertificateDer<'_>,
+        now: OffsetDateTime,
+    ) -> Result<Snapshot, SessionError> {
         let snapshot = verify_snapshot(signed, internal_ca)?;
+        check_not_future(&snapshot, now)?;
         if let Some(current) = self.latest()
             && (snapshot.version < current.version || snapshot.issued_at < current.issued_at)
         {
@@ -370,7 +404,9 @@ impl PolicyCache {
         let snapshot = self.latest().ok_or(SessionError::NoSnapshot)?;
         let age = (now - snapshot.issued_at).whole_seconds();
         let grace = i64::try_from(self.grace.as_secs()).unwrap_or(i64::MAX);
-        if age > grace {
+        // One from the future (held before this check existed, or the clock
+        // here moved back) can't be judged fresh: its age is unknown.
+        if age > grace || age < -CLOCK_SKEW_SECS {
             return Err(SessionError::Stale {
                 age_secs: age,
                 grace_secs: grace,
@@ -478,6 +514,48 @@ mod tests {
                 .is_err(),
             "no version rollback"
         );
+    }
+
+    /// A replica whose clock runs fast must not freeze the cache: its
+    /// snapshot is refused, and honest ones keep arriving.
+    #[tokio::test]
+    async fn a_snapshot_from_the_future_is_refused() {
+        let (ca, cp, _) = setup().await;
+        let now = OffsetDateTime::now_utc();
+        let dir = std::env::temp_dir().join(format!("limen-snap-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("policy.snapshot");
+        let cache = PolicyCache::new(DEFAULT_GRACE, Some(path.clone()));
+        let signed_at =
+            |at| sign(&cp, 1, &Policy::default(), &Restrictions::default(), at).expect("sign");
+        let ahead = signed_at(now + time::Duration::hours(6));
+        assert!(cache.update_at(&ahead, ca.cert_der(), now).is_err());
+        assert!(cache.latest().is_none());
+        // Within the skew is fine, and later honest snapshots still replace it.
+        cache
+            .update_at(
+                &signed_at(now + time::Duration::seconds(60)),
+                ca.cert_der(),
+                now,
+            )
+            .expect("within skew");
+        cache
+            .update_at(
+                &signed_at(now + time::Duration::seconds(90)),
+                ca.cert_der(),
+                now + time::Duration::seconds(30),
+            )
+            .expect("a later one");
+
+        // One that is already held (persisted by an older build) is never fresh,
+        // and isn't loaded back.
+        cache.set(verify_snapshot(&ahead, ca.cert_der()).expect("verify"));
+        assert!(matches!(cache.fresh(now), Err(SessionError::Stale { .. })));
+        std::fs::write(&path, ahead.encode_to_vec()).expect("persist");
+        let reloaded = PolicyCache::new(DEFAULT_GRACE, Some(path));
+        reloaded.load(ca.cert_der());
+        assert!(reloaded.latest().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Restrictions change without the policy version moving (a lock is not
@@ -710,6 +788,48 @@ mod tests {
         );
         assert!(r.is_revoked("worker-9"));
         assert!(!r.is_revoked("worker-1"));
+    }
+
+    #[test]
+    fn a_lock_covers_non_ascii_case_too() {
+        // The database's lower() folds `Ö` to `ö`; a lock must here too.
+        let r = Restrictions {
+            locked_users: ["JÖRG@x.de".to_owned()].into(),
+            ..Restrictions::default()
+        };
+        assert_eq!(r.blocks("jörg@x.de", "l", "s"), Some("user locked"));
+        assert_eq!(r.blocks("jorg@x.de", "l", "s"), None);
+    }
+
+    #[test]
+    fn a_deny_applies_whatever_the_case_of_the_name() {
+        let r = Restrictions {
+            denies: vec![RoleDeny {
+                id: "deny-1".into(),
+                username: "Alice@Example.com".into(),
+                role: "dev".into(),
+                expires_at_unix: 3_000,
+            }],
+            ..Restrictions::default()
+        };
+        let roles = ["dev".to_owned(), "viewer".to_owned()];
+        for name in [
+            "alice@example.com",
+            "ALICE@EXAMPLE.COM",
+            "Alice@Example.com",
+        ] {
+            assert_eq!(
+                r.effective_roles(name, &roles, "orders", 1_000).roles,
+                vec!["viewer".to_owned()],
+                "{name}"
+            );
+        }
+        // Someone else keeps the role.
+        assert_eq!(
+            r.effective_roles("bob@example.com", &roles, "orders", 1_000)
+                .roles,
+            roles
+        );
     }
 
     fn grant(id: &str, user: &str, role: &str, resource: &str, expires: i64) -> ActiveGrant {

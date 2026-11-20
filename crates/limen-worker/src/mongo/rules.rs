@@ -13,6 +13,7 @@ use limen_policy::model::MongoGrant;
 use limen_policy::{AccessRequest, Policy, Principal};
 
 use super::bson::{Doc, Value};
+use super::wire::Sequence;
 
 /// Handshake commands the worker answers itself (never forwarded).
 const HELLO: [&str; 2] = ["hello", "ismaster"];
@@ -38,6 +39,15 @@ const ADMIN_METADATA: [&str; 7] = [
 /// database. Walked for `$out`, `$merge`, `$lookup`, and `$graphLookup`.
 const CROSS_DATABASE: [&str; 3] = ["aggregate", "explain", "mapreduce"];
 
+/// Commands that name `db.coll` namespaces, possibly in other databases than
+/// their own `$db` (they run on `admin`): `renameCollection` and `to`, and
+/// `bulkWrite`'s `nsInfo[].ns` (MongoDB 8).
+const NAMESPACED: [&str; 2] = ["renamecollection", "bulkwrite"];
+
+/// Commands that apply arbitrary operations to any namespace. Their effects
+/// can't be judged, so they're never forwarded.
+const UNJUDGEABLE: [&str; 2] = ["applyops", "dotxn"];
+
 /// Keys whose document value names a `{db, coll}` target.
 const TARGET_KEYS: [&str; 5] = ["$out", "$merge", "into", "from", "out"];
 
@@ -54,6 +64,9 @@ pub struct Inspected<'a> {
     /// The first value, when it is a string: the collection of most commands.
     pub collection: Option<&'a str>,
     pub body: Doc<'a>,
+    /// The `OP_MSG`'s kind-1 sections, which can hold part of the command
+    /// (`bulkWrite` may send `nsInfo` as one). Empty until the caller sets it.
+    pub sequences: &'a [Sequence<'a>],
 }
 
 /// Why a command was refused, in the shape of a server error.
@@ -100,6 +113,7 @@ pub fn inspect(body: Doc<'_>) -> Result<Inspected<'_>, Refusal> {
         database,
         collection: first.as_str(),
         body,
+        sequences: &[],
     })
 }
 
@@ -222,6 +236,41 @@ pub fn judge(command: &Inspected<'_>, access: &Access, cursors: &HashSet<i64>) -
             ),
         ));
     }
+    if UNJUDGEABLE.contains(&lower) {
+        return Verdict::Refuse(refuse(
+            13,
+            "Unauthorized",
+            "command_denied",
+            format!(
+                "Limen does not allow the {} command: it can reach any database",
+                command.name
+            ),
+        ));
+    }
+    if NAMESPACED.contains(&lower) {
+        let Some(named) = namespaced_databases(command) else {
+            return Verdict::Refuse(refuse(
+                13,
+                "Unauthorized",
+                "database_not_granted",
+                format!(
+                    "Limen cannot tell which databases the {} command reaches",
+                    command.name
+                ),
+            ));
+        };
+        if let Some(other) = named.into_iter().find(|db| !access.database_allowed(db)) {
+            return Verdict::Refuse(refuse(
+                13,
+                "Unauthorized",
+                "database_not_granted",
+                format!(
+                    "not authorized on {other} to execute command {}",
+                    command.name
+                ),
+            ));
+        }
+    }
     if CROSS_DATABASE.contains(&lower) {
         // A command the walk cannot read to the end may name a database it
         // never reached: refuse it rather than guess.
@@ -260,6 +309,59 @@ pub fn judge(command: &Inspected<'_>, access: &Access, cursors: &HashSet<i64>) -
         ));
     }
     Verdict::Forward
+}
+
+/// The databases in the namespaces a `renameCollection` or `bulkWrite` names.
+/// `None` when one can't be read (not a string, no `db.` prefix, malformed
+/// BSON): the caller refuses the command.
+fn namespaced_databases<'a>(command: &Inspected<'a>) -> Option<Vec<&'a str>> {
+    fn db_of(ns: &str) -> Option<&str> {
+        ns.split_once('.')
+            .map(|(db, _)| db)
+            .filter(|db| plausible_database(db))
+    }
+    let mut out = Vec::new();
+    if command.lower == "renamecollection" {
+        for key in [command.name, "to"] {
+            match command.body.get(key) {
+                Ok(Some(Value::Str(ns))) => out.push(db_of(ns)?),
+                _ => return None,
+            }
+        }
+        return Some(out);
+    }
+    let mut add_ns_info = |doc: Doc<'a>| -> Option<()> {
+        match doc.get("ns") {
+            Ok(Some(Value::Str(ns))) => {
+                out.push(db_of(ns)?);
+                Some(())
+            }
+            _ => None,
+        }
+    };
+    let mut seen = false;
+    match command.body.get("nsInfo") {
+        Ok(Some(Value::Array(items))) => {
+            seen = true;
+            for item in items {
+                let (_, v) = item.ok()?;
+                let Value::Doc(d) = v else { return None };
+                add_ns_info(d)?;
+            }
+        }
+        Ok(None) => {}
+        _ => return None,
+    }
+    for seq in command.sequences {
+        if seq.identifier == "nsInfo" {
+            seen = true;
+            for d in &seq.docs {
+                add_ns_info(*d)?;
+            }
+        }
+    }
+    // A bulkWrite with no namespaces at all is malformed; nothing to forward.
+    seen.then_some(out)
 }
 
 /// The databases an aggregation (or `explain`, or `mapReduce`) writes to or
@@ -340,6 +442,8 @@ spec:
       mongo: { roles: [read], databases: [orders], deny_commands: [dropDatabase, Drop] }
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
       mongo: { roles: [write], databases: [orders, billing] }
+    - resources: { kind: [mongodb], labels: { "*": ["*"] } }
+      mongo: { roles: [ops], databases: [admin, orders] }
   deny:
     - resources: { kind: [mongodb], labels: { "*": ["*"] } }
       mongo: { roles: [write], databases: [billing] }
@@ -459,6 +563,91 @@ spec:
             .str("$db", "billing")
             .finish();
         assert!(matches!(verdict("read", &doc, &[]), Verdict::Refuse(_)));
+    }
+
+    /// Commands run on `admin` that name `db.coll` namespaces are judged by
+    /// those namespaces, so a role granted `admin` can't reach `billing`.
+    #[test]
+    fn admin_commands_are_judged_by_the_namespaces_they_name() {
+        let rename = |from: &str, to: &str| {
+            Builder::new()
+                .str("renameCollection", from)
+                .str("to", to)
+                .str("$db", "admin")
+                .finish()
+        };
+        assert_eq!(
+            verdict("ops", &rename("orders.a", "orders.b"), &[]),
+            Verdict::Forward
+        );
+        for (from, to) in [
+            ("orders.a", "billing.b"),
+            ("billing.a", "orders.b"),
+            ("orders", "orders.b"),
+        ] {
+            assert_eq!(
+                refused(verdict("ops", &rename(from, to), &[])).reason,
+                "database_not_granted",
+                "{from} -> {to}"
+            );
+        }
+        let no_to = Builder::new()
+            .str("renameCollection", "orders.a")
+            .str("$db", "admin")
+            .finish();
+        assert!(matches!(verdict("ops", &no_to, &[]), Verdict::Refuse(_)));
+
+        let bulk = |nss: &[&str]| {
+            let infos: Vec<Vec<u8>> = nss
+                .iter()
+                .map(|ns| Builder::new().str("ns", ns).finish())
+                .collect();
+            Builder::new()
+                .i32("bulkWrite", 1)
+                .docs_array("nsInfo", &infos)
+                .str("$db", "admin")
+                .finish()
+        };
+        assert_eq!(
+            verdict("ops", &bulk(&["orders.a", "orders.b"]), &[]),
+            Verdict::Forward
+        );
+        assert_eq!(
+            refused(verdict("ops", &bulk(&["orders.a", "billing.ledger"]), &[])).reason,
+            "database_not_granted"
+        );
+        // nsInfo as a kind-1 section counts the same.
+        let ns = Builder::new().str("ns", "billing.ledger").finish();
+        let seq = [Sequence {
+            identifier: "nsInfo",
+            docs: vec![Doc::new(&ns).expect("doc")],
+        }];
+        let body = Builder::new()
+            .i32("bulkWrite", 1)
+            .str("$db", "admin")
+            .finish();
+        let cmd = Inspected {
+            sequences: &seq,
+            ..inspect(Doc::new(&body).expect("doc")).expect("inspect")
+        };
+        assert!(matches!(
+            judge(&cmd, &access("ops"), &HashSet::new()),
+            Verdict::Refuse(_)
+        ));
+        // No namespaces at all can't be judged.
+        assert!(matches!(verdict("ops", &body, &[]), Verdict::Refuse(_)));
+
+        for name in ["applyOps", "doTxn"] {
+            let doc = Builder::new()
+                .docs_array(name, &[])
+                .str("$db", "admin")
+                .finish();
+            assert_eq!(
+                refused(verdict("ops", &doc, &[])).reason,
+                "command_denied",
+                "{name}"
+            );
+        }
     }
 
     #[test]

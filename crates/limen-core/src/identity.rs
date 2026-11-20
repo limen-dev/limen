@@ -56,6 +56,16 @@ pub fn is_reserved(username: &str) -> bool {
     is_bot(username) || is_selftest(username)
 }
 
+/// Whether two usernames are one person. The database compares them with
+/// `lower()` (locks, approvals), which folds more than ASCII, so this folds
+/// Unicode case too. Use it where a match takes access away (a lock, a deny,
+/// separation of duties): there, matching too little fails open.
+#[must_use]
+pub fn same_username(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+        || (!(a.is_ascii() && b.is_ascii()) && a.to_lowercase() == b.to_lowercase())
+}
+
 /// `user` or `bot`: the `actor_type` audit events carry, so people and
 /// automation can be told apart (and filtered) everywhere.
 #[must_use]
@@ -224,6 +234,15 @@ fn decode(s: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn same_username_folds_case_beyond_ascii() {
+        assert!(super::same_username("Alice@X.com", "alice@x.com"));
+        assert!(super::same_username("JÖRG@x.de", "jörg@x.de"));
+        assert!(super::same_username("ΣΩ@x.gr", "σω@x.gr"));
+        assert!(!super::same_username("jörg@x.de", "jorg@x.de"));
+        assert!(!super::same_username("alice@x.com", "alice@x.co"));
+    }
+
     use super::*;
 
     #[test]

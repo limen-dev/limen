@@ -494,6 +494,15 @@ fn grant_allows(
                 return Err("MOVE to a database this role doesn't name".into());
             }
         }
+        "SWAPDB" => {
+            // SWAPDB a b: the data of both databases changes places, so each
+            // must be one the role names, as for MOVE.
+            if !selected_database(args).is_some_and(|a| opens_database(grant, a))
+                || !selected_database(&args[1..]).is_some_and(|b| opens_database(grant, b))
+            {
+                return Err("SWAPDB with a database this role doesn't name".into());
+            }
+        }
         "COPY" => {
             // COPY source destination [DB n] [REPLACE]: the options start at
             // the fourth argument, so a key named "DB" is not the option.
@@ -837,6 +846,13 @@ mod tests {
         // Keys named "DB" and "1": the destination database is 9.
         assert!(run(&rules, &["COPY", "DB", "1", "DB", "9"]).is_err());
         assert!(run(&rules, &["COPY", "DB", "1", "DB", "2"]).is_ok());
+        let mut g = grant(&[], &["SWAPDB"], &[]);
+        g.databases = vec![0, 2];
+        let rules = Rules::new(vec![g], specs());
+        assert!(run(&rules, &["SWAPDB", "0", "2"]).is_ok());
+        assert!(run(&rules, &["SWAPDB", "0", "9"]).is_err());
+        assert!(run(&rules, &["SWAPDB", "9", "2"]).is_err());
+        assert!(run(&rules, &["SWAPDB", "0"]).is_err());
     }
 
     #[test]

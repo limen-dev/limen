@@ -201,6 +201,7 @@ async fn get(client: &aws_sdk_s3::Client, bucket: &str, key: &str) -> anyhow::Re
 }
 
 /// Check every manifest chain under `prefix`.
+#[allow(clippy::too_many_lines)] // one pass over each chain, check by check
 pub async fn verify_bucket(
     client: &aws_sdk_s3::Client,
     bucket: &str,
@@ -241,6 +242,7 @@ pub async fn verify_bucket(
     for (writer, mut keys) in by_writer {
         keys.sort();
         let mut prev_sha = String::new();
+        let mut prev_at: Option<time::OffsetDateTime> = None;
         for (expected_seq, key) in (0u64..).zip(keys) {
             let file = get(client, bucket, &key).await?;
             let problem = |what: String| format!("{writer} #{expected_seq} ({key}): {what}");
@@ -268,15 +270,20 @@ pub async fn verify_bucket(
                 }
             };
             // The signer's certificate lives about a day, so it is judged as of
-            // the time the manifest records, not now. (A key stolen from an
-            // expired certificate could backdate a manifest, but not make it
-            // fit the chain: the previous manifest's hash is checked below.)
+            // the time the manifest records, not now. A key from an expired
+            // certificate can't insert a manifest mid-chain (the previous hash
+            // is checked below) nor append a backdated one (`backdated`).
             let sealed_by = match time::OffsetDateTime::parse(
                 &manifest.created_at,
                 &time::format_description::well_known::Rfc3339,
             ) {
                 Ok(at) => match verify_at(&envelope, Purpose::AuditManifest, internal_ca, at) {
-                    Ok((by, _)) => Some(by),
+                    Ok((by, _)) => {
+                        report
+                            .problems
+                            .extend(backdated(&mut prev_at, at).map(problem));
+                        Some(by)
+                    }
                     Err(e) => {
                         report.problems.push(problem(format!("signature: {e}")));
                         None
@@ -436,6 +443,7 @@ pub async fn verify_manifest_tail(
         // One more than asked for: the oldest only anchors the chain.
         let start = keys.len().saturating_sub(last.saturating_add(1));
         let mut prev: Option<(u64, String)> = None;
+        let mut prev_at: Option<time::OffsetDateTime> = None;
         for (i, key) in keys.iter().enumerate().skip(start) {
             let problem = |what: String| format!("{writer} #{i} ({key}): {what}");
             let mut add = |what: String| {
@@ -445,7 +453,7 @@ pub async fn verify_manifest_tail(
             };
             let file = get(client, bucket, key).await?;
             let file_sha = hex(&Sha256::digest(&file));
-            let this = (|| -> Result<Manifest, String> {
+            let this = (|| -> Result<(Manifest, time::OffsetDateTime), String> {
                 let signed: SignedManifest = serde_json::from_slice(&file)
                     .map_err(|e| format!("unreadable manifest: {e}"))?;
                 let manifest: Manifest = serde_json::from_str(&signed.manifest)
@@ -465,10 +473,15 @@ pub async fn verify_manifest_tail(
                 if let Some(why) = crate::manifest::signer_problem(&by.id, &manifest.writer) {
                     return Err(why);
                 }
-                Ok(manifest)
+                Ok((manifest, at))
             })();
             let manifest = match this {
-                Ok(m) => m,
+                Ok((m, at)) => {
+                    if let Some(why) = backdated(&mut prev_at, at) {
+                        add(problem(why));
+                    }
+                    m
+                }
                 Err(e) => {
                     add(problem(e));
                     break;
@@ -509,9 +522,44 @@ pub async fn verify_manifest_tail(
     Ok(report)
 }
 
+/// How far a manifest's `created_at` may fall behind the one before it in
+/// the same writer's chain (a clock stepped back by NTP). Far less than a
+/// signing certificate's life, so it gives a backdating key nothing.
+const BACKDATE_TOLERANCE: time::Duration = time::Duration::minutes(5);
+
+/// A manifest created before the one it follows. Signatures are judged as of
+/// `created_at`, so a key from an expired certificate could otherwise append
+/// manifests (with the right previous hash) dated inside that certificate's
+/// life.
+/// `prev` becomes `at`, ready for the next manifest.
+fn backdated(prev: &mut Option<time::OffsetDateTime>, at: time::OffsetDateTime) -> Option<String> {
+    let prev = prev.replace(at)?;
+    (at + BACKDATE_TOLERANCE < prev)
+        .then(|| format!("created at {at}, before the manifest it follows ({prev}): backdated"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_manifest_dated_before_its_predecessor_is_backdated() {
+        let t = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("t");
+        let check = |prev: Option<time::OffsetDateTime>, at| backdated(&mut { prev }, at);
+        assert!(check(None, t).is_none(), "the first has nothing to follow");
+        assert!(check(Some(t), t + time::Duration::seconds(1)).is_none());
+        assert!(check(Some(t), t).is_none());
+        assert!(
+            check(Some(t), t - time::Duration::minutes(1)).is_none(),
+            "a clock stepped back a little"
+        );
+        assert!(check(Some(t), t - time::Duration::hours(30)).is_some());
+        // Each manifest is compared with the one just before it.
+        let mut prev = None;
+        assert!(backdated(&mut prev, t).is_none());
+        assert!(backdated(&mut prev, t + time::Duration::hours(1)).is_none());
+        assert!(backdated(&mut prev, t + time::Duration::minutes(10)).is_some());
+    }
 
     fn line(instance: &str, seq: u64) -> String {
         let producer = limen_audit::Producer {
