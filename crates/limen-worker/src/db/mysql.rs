@@ -1087,14 +1087,24 @@ enum Kill {
 /// `KILL [QUERY|CONNECTION] <id>`: the id is the one Limen gave the client,
 /// so it is translated to the target's thread id, and only for the same user.
 /// Every other `KILL` is refused.
-/// A SQL-level `PREPARE name FROM '...'` that could carry a `KILL`: one that
-/// says so, or one whose text is a user variable the worker cannot read.
-/// `KILL` is only safe where `kill_target` rewrites it to this session's own
+/// SQL run from a value (`PREPARE name FROM <source>`, MariaDB's
+/// `EXECUTE IMMEDIATE <source>`) that could carry a `KILL`: one that says so,
+/// as written or once its escapes are applied, or one whose source the worker
+/// can't read (a user variable, `CONCAT(...)`, adjacent literals). `KILL` is
+/// only safe where `kill_target` rewrites it to this session's own
 /// connection, and that sees plain statements only.
 fn hides_kill(statement: &Statement) -> bool {
-    statement.kind == "prepare" && {
-        let text = statement.text.to_ascii_lowercase();
-        text.contains("kill") || text.contains('@')
+    if !matches!(statement.kind, "prepare" | "execute") {
+        return false;
+    }
+    let says_kill = |text: &str| text.to_ascii_lowercase().contains("kill");
+    match sqltext::dynamic_sql(&statement.text, sqltext::Flavor::Mysql) {
+        // `EXECUTE name` runs what an earlier PREPARE (checked here) made.
+        None => statement.kind == "prepare",
+        Some(sqltext::DynamicSql::Opaque) => true,
+        // The raw text too: with `NO_BACKSLASH_ESCAPES` the server reads the
+        // literal as written.
+        Some(sqltext::DynamicSql::Literal(sql)) => says_kill(&statement.text) || says_kill(&sql),
     }
 }
 
@@ -1335,6 +1345,35 @@ mod tests {
         assert!(hides_kill(&first("prepare s from @q")));
         assert!(!hides_kill(&first("PREPARE s FROM 'SELECT 1'")));
         assert!(!hides_kill(&first("SELECT 'kill'")));
+        // Spelled so the text doesn't say `kill`, but the server builds it.
+        for hidden in [
+            r"PREPARE s FROM 'K\ILL 123'",
+            r#"PREPARE s FROM "K\ILL 123""#,
+            "PREPARE s FROM CONCAT('KI', 'LL 123')",
+            "PREPARE s FROM 'KI' 'LL 123'",
+            "PREPARE s FROM 'KI' /* */ 'LL 123'",
+            "PREPARE s FROM X'4B494C4C20313233'",
+            "PREPARE s FROM _utf8mb4'KILL 123'",
+            "PREPARE s FROM",
+            "EXECUTE IMMEDIATE 'KILL 123'",
+            r"execute immediate 'K\ILL 123'",
+            "EXECUTE IMMEDIATE CONCAT('KI', 'LL 123')",
+            "EXECUTE /* x */ IMMEDIATE @q",
+            "/*M! EXECUTE IMMEDIATE CONCAT('KI','LL 1') */",
+            "; EXECUTE IMMEDIATE CONCAT('KI', 'LL 123')",
+        ] {
+            assert!(hides_kill(&first(hidden)), "{hidden}");
+        }
+        // Dynamic SQL the worker can read, and running what was prepared.
+        for plain in [
+            "PREPARE s FROM 'SELECT * FROM t WHERE a = ?'",
+            "PREPARE s FROM 'SELECT 1';",
+            "EXECUTE IMMEDIATE 'SELECT ?' USING 1",
+            "EXECUTE s",
+            "EXECUTE s USING @a",
+        ] {
+            assert!(!hides_kill(&first(plain)), "{plain}");
+        }
         // COM_STMT_PREPARE carries the bare statement, which is a `kill`.
         assert_eq!(first("KILL 5").kind, "kill");
     }

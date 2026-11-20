@@ -298,6 +298,12 @@ async fn open(target: &Target) -> Result<BoxedIo> {
     Ok(target.start_tls(tcp).await?)
 }
 
+/// The database didn't show, by the SCRAM server signature, that it knows
+/// the password.
+fn unproven_server() -> Error {
+    Error::Refused("the database failed to prove it knows the password".into())
+}
+
 pub(super) async fn connect_backend(
     target: &Target,
     role: &str,
@@ -333,7 +339,10 @@ pub(super) async fn connect_backend(
                     .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
                     .ok_or_else(|| Error::Protocol("short authentication frame".into()))?;
                 match code {
-                    0 => break,
+                    // A SCRAM exchange that started ends with the server's
+                    // proof (code 12), never with a bare "OK".
+                    0 if scram_state.is_none() && proof.is_none() => break,
+                    0 => return Err(unproven_server()),
                     3 => {
                         let mut pw = password.expose().clone().into_bytes();
                         pw.push(0);
@@ -375,9 +384,7 @@ pub(super) async fn connect_backend(
                             .take()
                             .is_some_and(|p| p.verify_server_final(&lossy(&body[4..])));
                         if !ok {
-                            return Err(Error::Refused(
-                                "the database failed to prove it knows the password".into(),
-                            ));
+                            return Err(unproven_server());
                         }
                     }
                     5 => {
@@ -1052,6 +1059,64 @@ mod tests {
     #[test]
     fn frames_have_inclusive_length() {
         assert_eq!(frame(b'Z', b"I"), [b'Z', 0, 0, 0, 5, b'I']);
+    }
+
+    /// A server that starts SCRAM and then says "OK" without sending its
+    /// proof (`SASLFinal`) has not shown it knows the password: the login is
+    /// refused, not completed.
+    #[tokio::test]
+    async fn scram_login_without_the_server_proof_is_refused() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.expect("accept");
+            let len = tcp.read_u32().await.expect("startup length");
+            let mut startup = vec![0u8; len as usize - 4];
+            tcp.read_exact(&mut startup).await.expect("startup");
+            let auth = |code: u32, data: &[u8]| {
+                let mut body = code.to_be_bytes().to_vec();
+                body.extend_from_slice(data);
+                frame(b'R', &body)
+            };
+            tcp.write_all(&auth(10, b"SCRAM-SHA-256\0\0"))
+                .await
+                .expect("R10");
+            let (_, first) = read_frame(&mut tcp, 1 << 16).await.expect("client-first");
+            let first = String::from_utf8_lossy(&first).into_owned();
+            let nonce = first.rsplit("r=").next().expect("nonce").to_owned();
+            let server_first = format!("r={nonce}srv,s=c2FsdHNhbHQ=,i=4096");
+            tcp.write_all(&auth(11, server_first.as_bytes()))
+                .await
+                .expect("R11");
+            read_frame(&mut tcp, 1 << 16).await.expect("client-final");
+            // Skip SASLFinal (12) and claim success.
+            tcp.write_all(&auth(0, b"")).await.expect("R0");
+            tcp.write_all(&frame(b'Z', b"I")).await.expect("Z");
+            // Hold the connection until the worker gives up on it.
+            let _ = tcp.read_u8().await;
+        });
+        let spec: limen_policy::model::DbTarget = serde_json::from_value(serde_json::json!({
+            "endpoint": addr.to_string(),
+            "insecure_dev": true,
+        }))
+        .expect("spec");
+        let target = Target::from_spec(&spec, true).await.expect("target");
+        let result = connect_backend(
+            &target,
+            "app",
+            &Secret::new("pw".to_owned()),
+            "s1",
+            &[("user".into(), "app".into())],
+        )
+        .await;
+        match result {
+            Err(Error::Refused(why)) => assert!(why.contains("prove"), "{why}"),
+            Err(e) => panic!("refused for the wrong reason: {e}"),
+            Ok(_) => panic!("a login without the server's proof was accepted"),
+        }
+        server.abort();
     }
 }
 

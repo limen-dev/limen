@@ -9,6 +9,7 @@
 //!    client and the worker. Database sessions are terminated at the worker
 //!    (ADR-0002, ADR-0033); the proxy relays them the same way.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tracing::Instrument as _;
@@ -913,14 +914,17 @@ async fn relay<IO>(
     let started = Instant::now();
     metrics::gauge!("limen_sessions_active", "kind" => kind.to_owned()).increment(1.0);
     let (mut reader, mut writer) = tokio::io::split(io);
+    // Counted outside the relay futures, so session.end reports what moved
+    // even when a side is cut off (a kill, or a peer that won't close).
+    let uploaded = AtomicU64::new(0);
+    let downloaded = AtomicU64::new(0);
     let upload = async {
-        let mut bytes = 0u64;
         let mut buf = vec![0u8; CHUNK];
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    bytes += n as u64;
+                    uploaded.fetch_add(n as u64, Ordering::Relaxed);
                     if outbound
                         .send(TunnelFrame {
                             frame: Some(Frame::Data(buf[..n].to_vec())),
@@ -938,15 +942,13 @@ async fn relay<IO>(
                 frame: Some(Frame::Close(limen_proto::v1::SessionClose::default())),
             })
             .await;
-        bytes
     };
     let download = async {
-        let mut bytes = 0u64;
         let mut close = None;
         while let Some(frame) = inbound.next().await {
             match frame.map(|f| f.frame) {
                 Ok(Some(Frame::Data(d))) => {
-                    bytes += d.len() as u64;
+                    downloaded.fetch_add(d.len() as u64, Ordering::Relaxed);
                     if writer.write_all(&d).await.is_err() {
                         break;
                     }
@@ -966,7 +968,7 @@ async fn relay<IO>(
             }
         }
         let _ = writer.shutdown().await;
-        (bytes, close)
+        close
     };
     // Whichever side finishes first, give the other a moment: the worker's
     // closing frame carries the recording reference for session.end.
@@ -1005,32 +1007,33 @@ async fn relay<IO>(
     tokio::pin!(download);
     tokio::pin!(revoked);
     let mut revoked_why = None;
-    let (bytes_in, bytes_out, close) = tokio::select! {
+    let close = tokio::select! {
         why = &mut revoked => {
             revoked_why = Some(why);
             tracing::warn!(session = %session_id, user = %user.username, reason = why, "ending the session");
             // Closing the tunnel makes the worker stop the target connection
             // and finish the recording; its closing frame still reaches us.
-            let _ = outbound
-                .send(TunnelFrame {
-                    frame: Some(Frame::Close(limen_proto::v1::SessionClose {
-                        reason: why.into(),
-                        ..Default::default()
-                    })),
-                })
-                .await;
-            let (out, close) = tokio::time::timeout(Duration::from_secs(15), &mut download).await.unwrap_or((0, None));
-            (0, out, close)
+            // Bounded: a stalled tunnel with a full queue must not keep the
+            // session (and its session.end) from ending.
+            let close = outbound.send(TunnelFrame {
+                frame: Some(Frame::Close(limen_proto::v1::SessionClose {
+                    reason: why.into(),
+                    ..Default::default()
+                })),
+            });
+            let _ = tokio::time::timeout(Duration::from_secs(5), close).await;
+            tokio::time::timeout(Duration::from_secs(15), &mut download).await.ok().flatten()
         }
-        (out, close) = &mut download => {
-            let bytes_in = tokio::time::timeout(Duration::from_secs(5), &mut upload).await.unwrap_or(0);
-            (bytes_in, out, close)
+        close = &mut download => {
+            let _ = tokio::time::timeout(Duration::from_secs(5), &mut upload).await;
+            close
         }
-        bytes_in = &mut upload => {
-            let (out, close) = tokio::time::timeout(Duration::from_secs(15), &mut download).await.unwrap_or((0, None));
-            (bytes_in, out, close)
+        () = &mut upload => {
+            tokio::time::timeout(Duration::from_secs(15), &mut download).await.ok().flatten()
         }
     };
+    let bytes_in = uploaded.load(Ordering::Relaxed);
+    let bytes_out = downloaded.load(Ordering::Relaxed);
     let close = close.unwrap_or_default();
     let ctx_user = ctx.user.clone().unwrap_or_default();
     let mut end = json!({
@@ -1064,7 +1067,190 @@ async fn relay<IO>(
 
 #[cfg(test)]
 mod tests {
-    use super::{connection_group, session_expiry};
+    use super::{Denial, Protocol, connection_group, resolve_principal, session_expiry};
+    use limen_policy::{Policy, Principal};
+    use limen_proto::v1::SessionRequest;
+
+    const RESOURCES: &str = r#"
+kind: resource
+version: v1
+metadata: { name: orders-pg }
+spec:
+  postgres: { endpoint: "pg:5432", default_database: orders }
+---
+kind: resource
+version: v1
+metadata: { name: orders-mysql }
+spec:
+  mysql: { endpoint: "mysql:3306" }
+---
+kind: resource
+version: v1
+metadata: { name: catalog-mongo }
+spec:
+  mongodb: { endpoint: "mongo:27017", default_database: catalog, credentials_dir: /c }
+---
+kind: resource
+version: v1
+metadata: { name: logs-search }
+spec:
+  elasticsearch: { endpoint: "es:9200", tls: false }
+---
+kind: resource
+version: v1
+metadata: { name: web-1 }
+spec:
+  ssh: { address: "web-1:22" }
+"#;
+
+    fn policy() -> Policy {
+        Policy::parse_yaml([("resources.yaml", RESOURCES)]).expect("policy")
+    }
+
+    fn request(resource: &str, principal: &str, database: &str) -> SessionRequest {
+        SessionRequest {
+            resource: resource.into(),
+            principal: principal.into(),
+            database: database.into(),
+            group: String::new(),
+        }
+    }
+
+    fn refusal(result: Result<(Principal, String, String), Denial>) -> Denial {
+        match result {
+            Ok(resolved) => panic!("resolved to {resolved:?}"),
+            Err(denial) => denial,
+        }
+    }
+
+    /// Each session protocol opens only its own resource kinds: a
+    /// `limen db connect` can't reach a MongoDB or SSH resource, a MongoDB
+    /// session can't reach PostgreSQL, a search session can't reach a
+    /// database. Each refusal is a policy denial (audited), and reads the
+    /// same as one for a resource that doesn't exist.
+    #[test]
+    fn a_protocol_never_opens_a_resource_of_another_kind() {
+        let policy = policy();
+        for (protocol, resource) in [
+            (Protocol::Db, "catalog-mongo"),
+            (Protocol::Db, "logs-search"),
+            (Protocol::Db, "web-1"),
+            (Protocol::Mongo, "orders-pg"),
+            (Protocol::Mongo, "orders-mysql"),
+            (Protocol::Mongo, "web-1"),
+            (Protocol::Search, "orders-pg"),
+            (Protocol::Search, "catalog-mongo"),
+            (Protocol::Db, "no-such-resource"),
+            (Protocol::Mongo, "no-such-resource"),
+            (Protocol::Search, "no-such-resource"),
+        ] {
+            let denial = refusal(resolve_principal(
+                &policy,
+                &request(resource, "reader", ""),
+                protocol,
+            ));
+            assert!(denial.audit, "{protocol:?} on {resource}: audited");
+            assert_eq!(
+                denial.reason,
+                format!("access denied to reader@{resource}"),
+                "{protocol:?} on {resource}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_protocol_resolves_its_own_kind_and_database() {
+        let policy = policy();
+        let (principal, kind, database) =
+            resolve_principal(&policy, &request("orders-pg", "reader", ""), Protocol::Db)
+                .unwrap_or_else(|d| panic!("{}", d.reason));
+        assert_eq!(
+            principal,
+            Principal::DbRole {
+                role: "reader".into(),
+                database: "orders".into()
+            },
+            "the resource's default database"
+        );
+        assert_eq!((kind.as_str(), database.as_str()), ("postgres", "orders"));
+
+        // A database the user names is the one policy is asked about.
+        let (principal, _, database) = resolve_principal(
+            &policy,
+            &request("orders-pg", "reader", "billing"),
+            Protocol::Db,
+        )
+        .unwrap_or_else(|d| panic!("{}", d.reason));
+        assert_eq!(database, "billing");
+        assert!(matches!(principal, Principal::DbRole { database, .. } if database == "billing"));
+
+        let (principal, kind, _) = resolve_principal(
+            &policy,
+            &request("catalog-mongo", "reader", ""),
+            Protocol::Mongo,
+        )
+        .unwrap_or_else(|d| panic!("{}", d.reason));
+        assert_eq!(kind, "mongodb");
+        assert_eq!(
+            principal,
+            Principal::MongoRole {
+                role: "reader".into(),
+                database: "catalog".into()
+            }
+        );
+
+        let (principal, kind, _) = resolve_principal(
+            &policy,
+            &request("logs-search", "viewer", ""),
+            Protocol::Search,
+        )
+        .unwrap_or_else(|d| panic!("{}", d.reason));
+        assert_eq!(kind, "elasticsearch");
+        assert_eq!(principal, Principal::SearchRole("viewer".into()));
+    }
+
+    /// With no default and no database named, the session is refused (not a
+    /// policy decision, so not audited) rather than asking policy about an
+    /// empty database name.
+    #[test]
+    fn a_database_must_be_named_when_the_resource_has_no_default() {
+        let denial = refusal(resolve_principal(
+            &policy(),
+            &request("orders-mysql", "reader", ""),
+            Protocol::Db,
+        ));
+        assert!(!denial.audit);
+        assert!(denial.reason.contains("--database"), "{}", denial.reason);
+    }
+
+    /// A Kafka session carries the CLI's listener table in `database`; one
+    /// that doesn't parse is refused before policy is asked.
+    #[test]
+    fn a_malformed_kafka_listener_table_is_refused() {
+        let denial = refusal(resolve_principal(
+            &policy(),
+            &request("anything", "client", "not a listener table"),
+            Protocol::Kafka,
+        ));
+        assert!(!denial.audit);
+    }
+
+    /// A `RabbitMQ` session names a database (vhost) only as the run's anchor;
+    /// anything else the client sends there is dropped, not passed on.
+    #[test]
+    fn an_mq_session_passes_on_only_the_anchor() {
+        let policy = policy();
+        let resolve = |database: &str| {
+            resolve_principal(&policy, &request("mq", "app", database), Protocol::Mq)
+                .unwrap_or_else(|d| panic!("{}", d.reason))
+        };
+        assert_eq!(resolve("/prod-vhost").2, "");
+        assert_eq!(
+            resolve(limen_core::broker::ANCHOR).2,
+            limen_core::broker::ANCHOR
+        );
+        assert_eq!(resolve("").0, Principal::MqUser("app".into()));
+    }
 
     #[test]
     fn a_session_ttl_past_year_9999_is_refused_not_a_panic() {

@@ -455,6 +455,209 @@ mod tests {
         assert_eq!(upstream.calls.load(Ordering::SeqCst), 2);
     }
 
+    /// A stand-in control plane (plain HTTP/2) that reports the headers of
+    /// every request it receives.
+    async fn recording_upstream() -> (
+        limen_tunnel::connect::TracedChannel,
+        tokio::sync::mpsc::UnboundedReceiver<(String, http::HeaderMap)>,
+    ) {
+        use hyper_util::rt::{TokioExecutor, TokioIo};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let tx = tx.clone();
+                let service = hyper::service::service_fn(move |req: Request<Incoming>| {
+                    let _ = tx.send((req.uri().path().to_owned(), req.headers().clone()));
+                    async {
+                        Ok::<_, Infallible>(Response::new(http_body_util::Empty::<Bytes>::new()))
+                    }
+                });
+                tokio::spawn(
+                    hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                        .serve_connection(TokioIo::new(tcp), service),
+                );
+            }
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{addr}"))
+            .expect("endpoint")
+            .connect_lazy();
+        (limen_tunnel::connect::TracedChannel::new(channel), rx)
+    }
+
+    /// Send `req` through [`relay`] as if it arrived on a TLS connection
+    /// from `peer`, and return the `grpc-status` the client got (`None` for
+    /// a plain response, as the stand-in upstream sends).
+    async fn through_relay(
+        channel: limen_tunnel::connect::TracedChannel,
+        peer: PeerInfo,
+        req: Request<http_body_util::Full<Bytes>>,
+    ) -> Option<String> {
+        use hyper_util::rt::{TokioExecutor, TokioIo};
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let service = hyper::service::service_fn(move |mut req: Request<Incoming>| {
+            req.extensions_mut().insert(peer.clone());
+            let channel = channel.clone();
+            async move { Ok::<_, Infallible>(relay(channel, req).await) }
+        });
+        tokio::spawn(
+            hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(server_io), service),
+        );
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(client_io))
+                .await
+                .expect("handshake");
+        tokio::spawn(conn);
+        let response =
+            tokio::time::timeout(std::time::Duration::from_secs(10), sender.send_request(req))
+                .await
+                .expect("the relay answers")
+                .expect("response");
+        assert_eq!(response.status(), http::StatusCode::OK);
+        response
+            .headers()
+            .get("grpc-status")
+            .map(|v| v.to_str().expect("ascii").to_owned())
+    }
+
+    const PEER_ADDR: &str = "192.0.2.7:4242";
+
+    fn peer(leaf: Option<&[u8]>) -> PeerInfo {
+        PeerInfo {
+            remote_addr: Some(PEER_ADDR.parse().expect("addr")),
+            server_name: None,
+            client_certs: leaf
+                .map(|der| rustls_pki_types::CertificateDer::from(der.to_vec()))
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// A request that claims, in its own headers, to have been forwarded
+    /// already, from another address, with someone else's certificate.
+    fn spoofed(path: &str) -> Request<http_body_util::Full<Bytes>> {
+        Request::builder()
+            .method(http::Method::POST)
+            .uri(path)
+            .header("content-type", "application/grpc")
+            .header(
+                relay::CLIENT_CERT,
+                base64::engine::general_purpose::STANDARD.encode(b"forged admin certificate"),
+            )
+            .header(relay::FORWARDED, "0")
+            .header(relay::CLIENT_ADDR, "10.9.9.9:1")
+            .header("x-limen-anything", "smuggled")
+            .body(http_body_util::Full::new(Bytes::from_static(b"message")))
+            .expect("request")
+    }
+
+    fn limen_headers(headers: &http::HeaderMap) -> Vec<(String, String)> {
+        let mut out: Vec<_> = headers
+            .iter()
+            .filter(|(k, _)| k.as_str().starts_with("x-limen-"))
+            .map(|(k, v)| (k.as_str().to_owned(), v.to_str().expect("ascii").to_owned()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// An anonymous caller can't pass itself off as a certificate holder:
+    /// every client-supplied `x-limen-*` header is dropped, and the control
+    /// plane sees only what the proxy itself vouches for.
+    #[tokio::test]
+    async fn an_anonymous_caller_cannot_forge_a_forwarded_certificate() {
+        let (channel, mut seen) = recording_upstream().await;
+        let status = through_relay(channel, peer(None), spoofed("/limen.v1.Auth/Login")).await;
+        assert_eq!(status, None, "relayed, not refused");
+        let (path, headers) = seen.recv().await.expect("relayed");
+        assert_eq!(path, "/limen.v1.Auth/Login");
+        assert_eq!(
+            limen_headers(&headers),
+            [
+                (relay::CLIENT_ADDR.to_owned(), PEER_ADDR.to_owned()),
+                (relay::FORWARDED.to_owned(), "1".to_owned()),
+            ],
+            "no forged certificate, address or other limen header reaches the control plane"
+        );
+    }
+
+    /// A caller with a certificate is forwarded with that certificate only,
+    /// never with a second one it put in the headers itself.
+    #[tokio::test]
+    async fn a_caller_is_forwarded_with_its_own_certificate_only() {
+        let (channel, mut seen) = recording_upstream().await;
+        let leaf = b"the verified leaf certificate";
+        let status = through_relay(
+            channel,
+            peer(Some(leaf)),
+            spoofed("/limen.v1.Resources/ListResources"),
+        )
+        .await;
+        assert_eq!(status, None, "relayed, not refused");
+        let (_, headers) = seen.recv().await.expect("relayed");
+        let certs: Vec<_> = headers.get_all(relay::CLIENT_CERT).iter().collect();
+        assert_eq!(
+            certs,
+            [base64::engine::general_purpose::STANDARD
+                .encode(leaf)
+                .as_str()],
+            "exactly the certificate from the TLS handshake"
+        );
+        assert!(headers.get("x-limen-anything").is_none());
+        assert_eq!(headers.get(relay::FORWARDED).expect("marker"), "1");
+    }
+
+    /// The console authenticates with its own cookie: no client certificate
+    /// is forwarded on that path, verified or forged.
+    #[tokio::test]
+    async fn console_traffic_carries_no_client_certificate() {
+        let (channel, mut seen) = recording_upstream().await;
+        let status = through_relay(
+            channel,
+            peer(Some(b"a verified user certificate")),
+            spoofed("/console/api/sessions"),
+        )
+        .await;
+        assert_eq!(status, None, "relayed, not refused");
+        let (path, headers) = seen.recv().await.expect("relayed");
+        assert_eq!(path, "/console/api/sessions");
+        assert_eq!(
+            limen_headers(&headers),
+            [
+                (relay::CLIENT_ADDR.to_owned(), PEER_ADDR.to_owned()),
+                (relay::FORWARDED.to_owned(), "1".to_owned()),
+            ]
+        );
+    }
+
+    /// `Registry` is for proxies calling directly; it and any other service
+    /// not on the list are refused at the proxy and never reach the control plane.
+    #[tokio::test]
+    async fn services_off_the_list_are_not_relayed() {
+        let (channel, mut seen) = recording_upstream().await;
+        for path in [
+            "/limen.v1.Registry/ListTunnels",
+            "/limen.v1.Unknown/Call",
+            "/limen.v1.AuthX/Login",
+        ] {
+            let status = through_relay(channel.clone(), peer(None), spoofed(path)).await;
+            let unimplemented = (tonic::Code::Unimplemented as i32).to_string();
+            assert_eq!(status.as_deref(), Some(unimplemented.as_str()), "{path}");
+        }
+        // Prove the upstream works, then that it saw only this one call.
+        assert_eq!(
+            through_relay(channel, peer(None), spoofed("/limen.v1.Auth/Login")).await,
+            None
+        );
+        let (path, _) = seen.recv().await.expect("relayed");
+        assert_eq!(path, "/limen.v1.Auth/Login", "nothing off the list arrived");
+        assert!(seen.try_recv().is_err());
+    }
+
     #[tokio::test]
     async fn a_request_that_may_have_reached_the_control_plane_is_not_repeated() {
         let upstream = Upstream {

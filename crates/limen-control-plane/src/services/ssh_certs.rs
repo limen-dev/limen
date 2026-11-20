@@ -187,3 +187,112 @@ impl SshCertificates for SshCertificatesService {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+    use ssh_key::{Algorithm, EcdsaCurve, PrivateKey};
+    use tonic::Code;
+
+    use super::parse_key;
+
+    /// An OpenSSH public key line built from its wire fields (RFC 4253
+    /// §6.6), so key types the CA must refuse can be written without a key
+    /// generator for them.
+    fn openssh_line(algorithm: &str, fields: &[&[u8]]) -> String {
+        let mut blob = Vec::new();
+        for field in std::iter::once(algorithm.as_bytes()).chain(fields.iter().copied()) {
+            blob.extend_from_slice(&u32::try_from(field.len()).expect("len").to_be_bytes());
+            blob.extend_from_slice(field);
+        }
+        format!(
+            "{algorithm} {} test",
+            base64::engine::general_purpose::STANDARD.encode(blob)
+        )
+    }
+
+    /// A positive mpint of `bytes` bytes with the high bit set (so it needs
+    /// the leading zero), odd, as an RSA modulus or DSA prime would be.
+    fn mpint(bytes: usize) -> Vec<u8> {
+        let mut v = vec![0x00, 0xc5];
+        v.extend(std::iter::repeat_n(0x5a, bytes - 2));
+        v.push(0x01);
+        v
+    }
+
+    fn refusal(what: &str, line: &str) -> String {
+        match parse_key(what, line) {
+            Err(status) => {
+                assert_eq!(status.code(), Code::InvalidArgument, "{line}");
+                status.message().to_owned()
+            }
+            Ok(key) => panic!("{what}: accepted a {} key", key.algorithm()),
+        }
+    }
+
+    /// Session certificates are only signed for Ed25519 and ECDSA keys.
+    #[test]
+    fn ed25519_and_ecdsa_keys_are_accepted() {
+        let ed = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+        assert_eq!(
+            parse_key("user_public_key", ed)
+                .expect("ed25519")
+                .algorithm(),
+            Algorithm::Ed25519
+        );
+        let ecdsa = Algorithm::Ecdsa {
+            curve: EcdsaCurve::NistP256,
+        };
+        let line = PrivateKey::random(&mut rand::rng(), ecdsa.clone())
+            .expect("key")
+            .public_key()
+            .to_openssh()
+            .expect("openssh");
+        assert_eq!(
+            parse_key("user_public_key", &line)
+                .expect("ecdsa")
+                .algorithm(),
+            ecdsa
+        );
+    }
+
+    /// A worker asking for a certificate over an RSA or DSA key is refused by
+    /// algorithm, not signed: the CA never vouches for a key type Limen
+    /// doesn't issue for (SHA-1 `ssh-rsa` signatures, 1024-bit DSA).
+    #[test]
+    fn rsa_and_dsa_keys_are_refused() {
+        let exponent: &[u8] = &[0x01, 0x00, 0x01];
+        let rsa = openssh_line("ssh-rsa", &[exponent, &mpint(257)]);
+        let why = refusal("user_public_key", &rsa);
+        assert!(
+            why.starts_with("user_public_key: unsupported algorithm"),
+            "{why}"
+        );
+
+        // p, q, g, y.
+        let dsa = openssh_line(
+            "ssh-dss",
+            &[&mpint(129), &mpint(21), &mpint(128), &mpint(128)],
+        );
+        let why = refusal("host_public_key", &dsa);
+        assert!(
+            why.starts_with("host_public_key: unsupported algorithm"),
+            "{why}"
+        );
+    }
+
+    /// Text that isn't an OpenSSH public key is refused with the field named.
+    #[test]
+    fn malformed_keys_are_refused() {
+        for bad in [
+            "",
+            "ssh-ed25519",
+            "ssh-ed25519 not-base64!",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0",
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+        ] {
+            let why = refusal("user_public_key", bad);
+            assert!(why.starts_with("user_public_key: "), "{bad:?}: {why}");
+        }
+    }
+}

@@ -166,3 +166,60 @@ where
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// When `stop` resolves, an open connection is told to go away (GOAWAY) and
+    /// closes, rather than taking new requests until it is cut.
+    #[tokio::test]
+    async fn stop_closes_an_open_h2_connection_gracefully() {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let service = tower::service_fn(|_req: Request<Incoming>| async {
+            Ok::<_, Infallible>(Response::new(String::from("ok")))
+        });
+        let peer = PeerInfo {
+            remote_addr: None,
+            server_name: None,
+            client_certs: Vec::new(),
+        };
+        let server = tokio::spawn(serve_h2_until(
+            server_io,
+            peer,
+            service,
+            H2Settings::default(),
+            async move {
+                let _ = stop_rx.await;
+            },
+        ));
+
+        let (mut sender, conn) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(client_io))
+                .await
+                .expect("handshake");
+        let client = tokio::spawn(conn);
+        let response = sender
+            .send_request(Request::new(String::new()))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        stop_tx.send(()).expect("server is running");
+        // The client sees a GOAWAY and its connection ends without error:
+        // a graceful close, not a cut.
+        tokio::time::timeout(Duration::from_secs(5), client)
+            .await
+            .expect("the client connection ends after GOAWAY")
+            .expect("client task")
+            .expect("the client saw a graceful close");
+        // The server is done too. It may report the closed pipe, since the
+        // client hung up as soon as it had nothing in flight.
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("an idle connection closes as soon as it is stopped")
+            .expect("server task")
+            .ok();
+    }
+}

@@ -96,7 +96,7 @@ spec:
 - **Loosening needs a second admin.** Moving a deny rule from enforce to shadow, or moving `shadow_until` later, is held for another admin whatever `--widening-approval` says. Going back to enforce, or earlier, applies at once.
 - **Upgrade every component first.** A control plane, proxy or worker from before this feature can't read a role with `name`, `mode` or `shadow_until` (unknown fields are errors), and an older control plane refuses the proxy's `policy.shadow_deny` events along with the rest of its batch. Use shadow rules only after all of them run this version.
 - **Where it is reported.** The proxy reports at the point it allows a session or web request. Checks made only by a worker are not reported yet: Kubernetes groups, and the database a MongoDB command names.
-- **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`+Inf` when none), `limen policy explain`, and `limen policy test` (`shadow_deny: [role/rule]`; rules with a `web` grant can't be asserted there yet, since a case has no method or path).
+- **Where you see it.** The audit trail (`policy.shadow_deny`, under Admin), the *Shadow denies by rule* panel in Grafana, the role's line in the console's policy page, `limen_policy_shadow_rules` and `limen_policy_shadow_days_left` (`+Inf` when none), `limen explain`, and `limen policy test` (`shadow_deny: [role/rule]`; rules with a `web` grant can't be asserted there yet, since a case has no method or path).
 
 ## `role_mapping`
 
@@ -177,7 +177,7 @@ A role with a `request` block grants nothing until someone asks, gives a reason,
 | `break_glass: true` | granted at once, reason required, at most 1 hour, announced and reviewed; takes no approvers |
 | `notify_observed: true` | users on SSH sessions this role grants are told an admin may watch ([guide](guides/watching-sessions.md)) |
 
-`limen apply` warns when a group can both request and approve a role, when a requestable role is already held by a group in `request.who`, and when a role selects on a label copied from a cloud tag.
+`limen admin apply` warns when a group can both request and approve a role, when a requestable role is already held by a group in `request.who`, and when a role selects on a label copied from a cloud tag.
 
 ## `discovery`
 
@@ -305,7 +305,7 @@ A writer of `role`, `role_mapping`, or `policy_test` writes them in its namespac
 - A writer can't change or delete documents it doesn't own, so it can't remove a test that would stop it.
 - Standing access that comes from the writer's own roles and mappings is **held** for a person: an admin, or a member of `approvers.groups`. That is weighed on every write, so writing a role and mapping first and resources later still waits. Access that only people's roles give a resource the writer completes from its profile is approved by the grant. See [the management API guide](guides/management-api.md#changes-held-for-approval).
 
-Two writers in one namespace can change each other's documents; `limen apply` warns about it.
+Two writers in one namespace can change each other's documents; `limen admin apply` warns about it.
 
 **Upgrading:** finish upgrading every proxy and worker before anyone writes a resource from a profile. Such a resource carries the `delegated` field. A component from before Phase 14 parses snapshots strictly, so it refuses the whole snapshot, and after the grace period it stops serving every resource, not just that one. Profiles and writer grants themselves never leave the control plane, so writing them is safe at any point.
 

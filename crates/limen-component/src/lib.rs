@@ -51,6 +51,9 @@ struct Meta {
 
 const KEY_FILE: &str = "key.pem";
 const CERT_FILE: &str = "cert.pem";
+/// The new certificate, written before the new key replaces the old one, so a
+/// crash between the two leaves a key that still has its certificate on disk.
+const NEXT_CERT_FILE: &str = "cert.next.pem";
 const INTERNAL_CA_FILE: &str = "internal-ca.pem";
 const USER_CA_FILE: &str = "user-ca.pem";
 const META_FILE: &str = "identity.json";
@@ -67,14 +70,38 @@ impl ComponentCredentials {
                 .with_context(|| format!("reading {}", dir.join(name).display()))
         };
         let meta: Meta = serde_json::from_str(&read(META_FILE)?)?;
-        let cert_pem = read(CERT_FILE)?;
+        let key_pem = Secret::new(read(KEY_FILE)?);
+        let mut cert_pem = read(CERT_FILE)?;
+        if !key_matches_cert(key_pem.expose(), &cert_pem)? {
+            // A save stopped after the new key replaced the old one: finish it
+            // with the certificate it staged for that key.
+            let next = dir.join(NEXT_CERT_FILE);
+            let staged = match std::fs::read_to_string(&next) {
+                Ok(staged) => Some(staged),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e).with_context(|| format!("reading {}", next.display())),
+            };
+            match staged {
+                Some(staged) if key_matches_cert(key_pem.expose(), &staged)? => {
+                    std::fs::rename(&next, dir.join(CERT_FILE))
+                        .with_context(|| format!("restoring {}", dir.join(CERT_FILE).display()))?;
+                    cert_pem = staged;
+                }
+                _ => bail!(
+                    "{} does not belong to {} in {}; remove the directory and enroll again",
+                    KEY_FILE,
+                    CERT_FILE,
+                    dir.display()
+                ),
+            }
+        }
         let (not_before, not_after) = validity(&cert_pem)?;
         Ok(Some(Self {
             id: meta.id,
             kind: meta.kind,
             name: meta.name,
             labels: meta.labels,
-            key_pem: Secret::new(read(KEY_FILE)?),
+            key_pem,
             cert_pem,
             internal_ca_pem: read(INTERNAL_CA_FILE)?,
             user_ca_pem: read(USER_CA_FILE)?,
@@ -85,6 +112,8 @@ impl ComponentCredentials {
 
     /// Write credentials to `dir`. Every file is written to a temporary name
     /// first and renamed, so a crash never leaves a half-written identity.
+    /// The certificate is staged before the key is replaced, so a crash
+    /// between the two is repaired by [`ComponentCredentials::load`].
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir)?;
         let meta = serde_json::to_string_pretty(&Meta {
@@ -93,6 +122,7 @@ impl ComponentCredentials {
             name: self.name.clone(),
             labels: self.labels.clone(),
         })?;
+        write_atomic(&dir.join(NEXT_CERT_FILE), &self.cert_pem, false)?;
         for (name, contents, private) in [
             (KEY_FILE, self.key_pem.expose().as_str(), true),
             (CERT_FILE, self.cert_pem.as_str(), false),
@@ -102,6 +132,11 @@ impl ComponentCredentials {
             (META_FILE, meta.as_str(), false),
         ] {
             write_atomic(&dir.join(name), contents, private)?;
+        }
+        match std::fs::remove_file(dir.join(NEXT_CERT_FILE)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         Ok(())
     }
@@ -140,6 +175,14 @@ fn validity(cert_pem: &str) -> anyhow::Result<(OffsetDateTime, OffsetDateTime)> 
         cert.validity().not_before.to_datetime(),
         cert.validity().not_after.to_datetime(),
     ))
+}
+
+/// Whether the private key in `key_pem` is the one `cert_pem` certifies.
+fn key_matches_cert(key_pem: &str, cert_pem: &str) -> anyhow::Result<bool> {
+    let key = KeyPair::from_pem(key_pem).context("parsing the private key")?;
+    let der = first_cert(cert_pem)?;
+    let (_, cert) = x509_parser::parse_x509_certificate(&der).context("parsing certificate")?;
+    Ok(cert.public_key().subject_public_key.data.as_ref() == key.public_key_raw())
 }
 
 fn write_atomic(path: &Path, contents: &str, private: bool) -> std::io::Result<()> {
@@ -455,6 +498,55 @@ mod tests {
         };
         creds.save(dir).expect("save");
         creds
+    }
+
+    /// A renewal that stopped after writing the new key, before the new
+    /// certificate replaced the old one.
+    fn interrupted_renewal(dir: &Path) -> (ComponentCredentials, String) {
+        let old = sample(dir, None);
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let cert = CertificateParams::new(vec!["localhost".into()])
+            .expect("params")
+            .self_signed(&key)
+            .expect("cert");
+        std::fs::write(dir.join(NEXT_CERT_FILE), cert.pem()).expect("stage");
+        std::fs::write(dir.join(KEY_FILE), key.serialize_pem()).expect("key");
+        (old, cert.pem())
+    }
+
+    #[test]
+    fn a_save_leaves_no_staged_certificate_behind() {
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        sample(dir.path(), None);
+        assert!(!dir.path().join(NEXT_CERT_FILE).exists());
+    }
+
+    #[test]
+    fn load_finishes_a_renewal_cut_between_the_key_and_the_certificate() {
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        let (old, new_cert) = interrupted_renewal(dir.path());
+        let loaded = ComponentCredentials::load(dir.path())
+            .expect("load")
+            .expect("present");
+        assert_eq!(loaded.cert_pem, new_cert);
+        assert_ne!(loaded.cert_pem, old.cert_pem);
+        loaded
+            .tls_identity()
+            .expect("the key and certificate pair up");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(CERT_FILE)).expect("cert"),
+            new_cert
+        );
+        assert!(!dir.path().join(NEXT_CERT_FILE).exists());
+    }
+
+    #[test]
+    fn load_refuses_a_key_that_does_not_match_its_certificate() {
+        let dir = limen_testkit::temp_dir().expect("tempdir");
+        interrupted_renewal(dir.path());
+        std::fs::remove_file(dir.path().join(NEXT_CERT_FILE)).expect("unstage");
+        let err = ComponentCredentials::load(dir.path()).expect_err("a mismatched pair is refused");
+        assert!(err.to_string().contains("enroll again"), "{err}");
     }
 
     #[test]

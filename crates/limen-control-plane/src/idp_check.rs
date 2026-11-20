@@ -534,8 +534,14 @@ pub async fn end_logins_of(
     )
     .bind(username)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, user = %username, reason, "couldn't read the logins to end; they stay signed in until the next IdP check");
+            return 0;
+        }
+    };
     let mut ended = 0;
     for r in &rows {
         let Ok(t) = (|| -> Result<Tracked, sqlx::Error> {

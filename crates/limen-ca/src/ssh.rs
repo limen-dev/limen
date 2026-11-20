@@ -422,6 +422,140 @@ mod tests {
         }
     }
 
+    fn user_req(principal: &str, ttl: Duration) -> SshUserCertRequest {
+        SshUserCertRequest {
+            public_key: user_key().public_key().clone(),
+            principal: principal.into(),
+            key_id: "session-bounds".into(),
+            ttl,
+            permit_pty: false,
+            permit_port_forwarding: false,
+        }
+    }
+
+    fn refused_as_invalid(result: Result<Certificate, CaError>, what: &str) {
+        match result {
+            Err(CaError::InvalidRequest(_)) => {}
+            Err(e) => panic!("{what}: refused for the wrong reason: {e:?}"),
+            Ok(cert) => panic!("{what}: issued, valid for {:?}", cert.valid_principals()),
+        }
+    }
+
+    /// Certificates are short-lived by construction: a zero or over-12-hour
+    /// TTL is refused, the bounds themselves are not.
+    #[tokio::test]
+    async fn ttl_must_be_positive_and_at_most_twelve_hours() {
+        let user_ca = ca(CaPurpose::UserSsh);
+        let host_ca = ca(CaPurpose::HostSsh);
+        for ttl in [Duration::ZERO, MAX_SSH_TTL + Duration::from_secs(1)] {
+            refused_as_invalid(
+                user_ca.issue_user_cert(user_req("ubuntu", ttl)).await,
+                &format!("user ttl {ttl:?}"),
+            );
+            refused_as_invalid(
+                host_ca
+                    .issue_host_cert(SshHostCertRequest {
+                        public_key: user_key().public_key().clone(),
+                        principals: vec!["web-1".into()],
+                        key_id: "s".into(),
+                        ttl,
+                    })
+                    .await,
+                &format!("host ttl {ttl:?}"),
+            );
+        }
+        let cert = user_ca
+            .issue_user_cert(user_req("ubuntu", MAX_SSH_TTL))
+            .await
+            .expect("exactly the maximum is allowed");
+        assert!(
+            cert.valid_before() - cert.valid_after()
+                <= MAX_SSH_TTL.as_secs() + BACKDATE.as_secs() + 1
+        );
+        user_ca
+            .issue_user_cert(user_req("ubuntu", Duration::from_secs(1)))
+            .await
+            .expect("one second is allowed");
+    }
+
+    /// A principal is one exact login or host name: no wildcard or list
+    /// characters (`*`, `?`, `,`), no spaces, no control characters, at most
+    /// 256 bytes.
+    #[tokio::test]
+    async fn principals_that_could_match_more_than_one_name_are_refused() {
+        let user_ca = ca(CaPurpose::UserSsh);
+        let host_ca = ca(CaPurpose::HostSsh);
+        let too_long = "a".repeat(257);
+        for bad in [
+            "",
+            "*",
+            "ro?t",
+            "ubuntu,root",
+            "a b",
+            "root\n",
+            "root\0",
+            "\tadmin",
+            "\u{7f}",
+            "\u{85}root",
+            too_long.as_str(),
+        ] {
+            refused_as_invalid(
+                user_ca
+                    .issue_user_cert(user_req(bad, Duration::from_mins(1)))
+                    .await,
+                &format!("user principal {bad:?}"),
+            );
+            // A host certificate is refused when any one of its names is bad.
+            refused_as_invalid(
+                host_ca
+                    .issue_host_cert(SshHostCertRequest {
+                        public_key: user_key().public_key().clone(),
+                        principals: vec!["web-1".into(), bad.into()],
+                        key_id: "s".into(),
+                        ttl: Duration::from_mins(1),
+                    })
+                    .await,
+                &format!("host principal {bad:?}"),
+            );
+        }
+        let longest = "a".repeat(256);
+        let cert = user_ca
+            .issue_user_cert(user_req(&longest, Duration::from_mins(1)))
+            .await
+            .expect("256 characters is allowed");
+        assert_eq!(cert.valid_principals(), [longest]);
+    }
+
+    /// A host certificate with no principals would be valid for every host
+    /// name in OpenSSH, so it is never issued.
+    #[tokio::test]
+    async fn a_host_certificate_needs_a_principal() {
+        refused_as_invalid(
+            ca(CaPurpose::HostSsh)
+                .issue_host_cert(SshHostCertRequest {
+                    public_key: user_key().public_key().clone(),
+                    principals: Vec::new(),
+                    key_id: "s".into(),
+                    ttl: Duration::from_mins(1),
+                })
+                .await,
+            "no principals",
+        );
+    }
+
+    /// Only the two SSH purposes make an SSH CA, so an X.509 CA key is never
+    /// used to sign SSH certificates.
+    #[test]
+    fn only_ssh_purposes_make_an_ssh_ca() {
+        for purpose in [CaPurpose::UserX509, CaPurpose::Internal] {
+            let result = SshCa::new(purpose, Arc::new(FileSigner::generate().expect("key")));
+            assert!(
+                matches!(result, Err(CaError::InvalidRequest(_))),
+                "{purpose:?}"
+            );
+        }
+    }
+
     #[test]
     fn der_conversion_handles_padding_and_rejects_garbage() {
         // r = 0x80 (DER-padded, high bit set: stays padded in mpint);

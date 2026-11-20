@@ -715,6 +715,24 @@ fn a_worker_follows_only_hosts_near_the_one_it_was_given() {
         ("example.com:9092", "evil.com", false),
         ("example.com:9092", "b-2.example.com", true),
         ("kafka.corp:27017", "attacker.corp", false),
+        // Below a cloud domain every customer shares is not "nearby" either:
+        // another tenant's namespace or instance sits there too.
+        (
+            "myns.servicebus.windows.net:9093",
+            "attacker.servicebus.windows.net",
+            false,
+        ),
+        (
+            "ec2-1-2-3-4.compute-1.amazonaws.com:9092",
+            "ec2-5-6-7-8.compute-1.amazonaws.com",
+            false,
+        ),
+        // A customer-specific label below the shared root is still nearby.
+        (
+            "shop-shard-00-00.abc12.mongodb.net:27017",
+            "shop-shard-00-01.abc12.mongodb.net",
+            true,
+        ),
         // Addresses stay in their /16.
         ("10.1.2.3:9092", "10.1.9.9", true),
         ("10.1.2.3:9092", "10.2.0.1", false),

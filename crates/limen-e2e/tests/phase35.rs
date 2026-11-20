@@ -335,6 +335,21 @@ async fn lock_ends_live_sessions_and_kill_ends_one() {
         .find(|e| e["kind"] == "session.kill")
         .expect("session.kill");
     assert_eq!(kill["session_id"], guest_session);
+    // A session ended by a kill or a lock still reports what it moved: both
+    // sides spoke SSH, and the developer typed a line.
+    for why in ["session killed", "user locked"] {
+        let ended = events
+            .iter()
+            .find(|e| e["kind"] == "session.end" && e["data"]["reason"] == why)
+            .expect("session.end");
+        for field in ["bytes_in", "bytes_out"] {
+            assert!(
+                ended["data"][field].as_u64().unwrap_or_default() > 0,
+                "{why}: {field} is {}",
+                ended["data"][field]
+            );
+        }
+    }
     assert!(
         events
             .iter()
