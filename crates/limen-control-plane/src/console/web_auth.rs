@@ -275,6 +275,9 @@ pub async fn login_callback(
         )
         .await;
     }
+    // The app sees these roles (the certificate, the identity assertion and
+    // `X-Limen-Roles`), so a role an access review took away is not among them.
+    let roles = without_denied(roles, &effective.roles);
 
     let login_id = Uuid::now_v7();
     let ttl = state
@@ -547,4 +550,28 @@ pub async fn redeem(
         session: Some(session),
         return_path,
     }))
+}
+
+/// The certificate's roles less those an access review denies: `effective`
+/// (from [`crate::access::effective_roles_now`]) has the denied ones removed,
+/// and grant roles added, which stay out of the certificate.
+fn without_denied(roles: Vec<String>, effective: &[String]) -> Vec<String> {
+    roles
+        .into_iter()
+        .filter(|r| effective.contains(r))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_denied_role_is_not_passed_to_the_app() {
+        let roles = vec!["grafana-admin".to_owned(), "grafana-viewer".to_owned()];
+        // A review denied grafana-admin; a grant added oncall for this app.
+        let effective = vec!["grafana-viewer".to_owned(), "oncall".to_owned()];
+        assert_eq!(
+            super::without_denied(roles, &effective),
+            vec!["grafana-viewer".to_owned()]
+        );
+    }
 }
