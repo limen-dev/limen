@@ -248,6 +248,61 @@ pub fn normalize(sql: &str, flavor: Flavor) -> String {
         .collect()
 }
 
+/// The SQL a MySQL statement runs from a value rather than from its own text:
+/// `PREPARE name FROM <source>`, or MariaDB's `EXECUTE IMMEDIATE <source>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicSql {
+    /// The source is one plain string literal; this is its value as the
+    /// server reads it, escapes applied (`'K\ILL'` is `KILL`).
+    Literal(String),
+    /// The source is anything else: a user variable, an expression such as
+    /// `CONCAT(...)`, adjacent literals, a hex or charset-prefixed literal, or
+    /// text that didn't tokenize. What runs can't be known here.
+    Opaque,
+}
+
+/// The source of a statement that prepares or runs SQL from a value, or `None`
+/// for any other statement (including `EXECUTE name`, which runs a statement
+/// prepared earlier).
+#[must_use]
+pub fn dynamic_sql(sql: &str, flavor: Flavor) -> Option<DynamicSql> {
+    let Some(tokens) = tokenize(sql, flavor) else {
+        let lower = sql.trim_start().to_ascii_lowercase();
+        return (lower.starts_with("prepare") || lower.starts_with("execute"))
+            .then_some(DynamicSql::Opaque);
+    };
+    // Leading semicolons are skipped, as `kind_of` skips them.
+    let tokens: Vec<&Token> = tokens
+        .iter()
+        .filter(|t| !matches!(t, Token::Whitespace(_)))
+        .skip_while(|t| matches!(t, Token::SemiColon))
+        .collect();
+    let word = |t: Option<&&Token>, want: &str| matches!(t, Some(Token::Word(w)) if w.quote_style.is_none() && w.value.eq_ignore_ascii_case(want));
+    let source = if word(tokens.first(), "prepare") {
+        // `PREPARE name FROM <source>`; any other shape is not understood.
+        match (tokens.get(1), word(tokens.get(2), "from")) {
+            (Some(Token::Word(_)), true) => &tokens[3..],
+            _ => return Some(DynamicSql::Opaque),
+        }
+    } else if word(tokens.first(), "execute") && word(tokens.get(1), "immediate") {
+        &tokens[2..]
+    } else {
+        return None;
+    };
+    let source = match source {
+        [rest @ .., Token::SemiColon] => rest,
+        all => all,
+    };
+    Some(match source {
+        // `EXECUTE IMMEDIATE '...' USING ...` binds values, not SQL.
+        [
+            Token::SingleQuotedString(s) | Token::DoubleQuotedString(s),
+            rest @ ..,
+        ] if rest.is_empty() || word(rest.first(), "using") => DynamicSql::Literal(s.clone()),
+        _ => DynamicSql::Opaque,
+    })
+}
+
 /// Rows affected from a PostgreSQL `CommandComplete` tag, such as
 /// `INSERT 0 5` or `SELECT 3`.
 #[must_use]
