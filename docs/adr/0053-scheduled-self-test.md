@@ -41,7 +41,7 @@ The control plane signs the report with its own certificate, the same way it sig
 - **Evidence packs** gain a `controls` section: the runs in the period, with their manifest hashes. An auditor then sees, in the pack they already request, whether the controls were being tested.
 
 ### Scheduling and scale-out
-- **Interval.** `--selftest-interval` (`LIMEN_SELFTEST_INTERVAL`), default 24 hours, `0` turns it off. Runs are also started by an admin (`limen selftest run`, console "Run now").
+- **Interval.** `--selftest-interval` (`LIMEN_SELFTEST_INTERVAL`), default 24 hours, `0` turns it off. Runs are also started by an admin (`limen admin selftest run`, console "Run now").
 - **One run at a time, across replicas.** A run is a row in `selftest_runs`; a partial unique index allows one `running` row. A replica claims a run with `INSERT … ON CONFLICT DO NOTHING`, so a second replica, or a second click, gets the run in progress instead of a new one. A scheduled claim also requires that no scheduled run started within the interval. A `running` row older than 15 minutes (a crashed replica) is marked `abandoned`. No advisory lock is held on a pooled connection.
 - **Manual runs are admin only and rate limited**: at most one manual run per minute.
 - **Bounded.** Each check has a timeout; the recording sample is at most five recordings and 128 MiB in all; the manifest tail is the last 20 batches per writer.

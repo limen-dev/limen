@@ -216,7 +216,7 @@ Each test creates its own database named `limen_test_*` or `limen_e2e_*`. Drop t
 
 ## Web console
 
-`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (own resources and sessions only). The certificate warning and dev CA are covered in the [README quickstart](../../README.md#quickstart). `demos/demo-phase35.sh` logs in with curl, locks and unlocks a user, ends a live session and checks recording playback. The console's OIDC client (`limen-console`) and its dev secret are in `config/dex/config.yaml` and `docker-compose.yml`.
+`https://localhost:3443/console/`, served by the proxy. Sign in through Dex as `admin@example.com` (admin) or `developer@example.com` (own resources and sessions only). The certificate warning and dev CA are covered in the [README quickstart](../../README.md#try-it-on-your-laptop). `demos/demo-phase35.sh` logs in with curl, locks and unlocks a user, ends a live session and checks recording playback. The console's OIDC client (`limen-console`) and its dev secret are in `config/dex/config.yaml` and `docker-compose.yml`.
 
 ## Scale-out
 
