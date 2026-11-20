@@ -2649,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "limen-audit"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "crc32fast",
  "futures",
@@ -2670,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "limen-ca"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "aws-sdk-kms",
  "futures",
@@ -2694,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "limen-cli"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "limen-component"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "limen-audit",
@@ -2756,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "limen-control-plane"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "askama",
@@ -2813,7 +2813,7 @@ dependencies = [
 
 [[package]]
 name = "limen-core"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -2836,7 +2836,7 @@ dependencies = [
 
 [[package]]
 name = "limen-e2e"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "limen-kube"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "flate2",
  "serde_json",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "limen-policy"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "limen-core",
  "regex-lite",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "limen-proto"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "prost",
  "tonic",
@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "limen-proxy"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -2949,7 +2949,7 @@ dependencies = [
 
 [[package]]
 name = "limen-session"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "limen-testkit"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "limen-tunnel"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "bytes",
  "clap",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "limen-verify"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "limen-worker"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "anyhow",
  "aws-config",
