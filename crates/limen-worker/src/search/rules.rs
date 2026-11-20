@@ -584,6 +584,10 @@ pub fn decode_body(
 fn token_names(v: &Value, what: &str) -> Result<Vec<String>, Refused> {
     let mut out = Vec::new();
     let items: Vec<&Value> = match v {
+        // An empty list names nothing here, but the engine reads an empty
+        // index list as every index (`"index": []` in an _msearch header
+        // searches them all), so it can't pass as "no names".
+        Value::Array(a) if a.is_empty() => return refuse(format!("{what} is an empty list")),
         Value::Array(a) => a.iter().collect(),
         other => vec![other],
     };
@@ -1563,6 +1567,18 @@ mod tests {
             "odd line count"
         );
         assert!(allowed(&g, "POST", "/_msearch", b"{\"index\":\"logs-1\"}\n{\"query\":{\"terms\":{\"u\":{\"index\":\"orders\",\"id\":\"1\",\"path\":\"x\"}}}}\n").is_err());
+
+        // An empty list is every index to the engine, whatever the path says.
+        for path in ["/logs-1/_msearch", "/logs-1/_msearch/template"] {
+            assert!(
+                allowed(&g, "POST", path, b"{\"index\":[]}\n{}\n").is_err(),
+                "{path}"
+            );
+            assert!(
+                allowed(&g, "POST", path, b"{\"indices\":[]}\n{}\n").is_err(),
+                "{path}"
+            );
+        }
     }
 
     #[test]
@@ -1868,5 +1884,8 @@ mod tests {
             go(br#"{"source":{"index":"logs-1"},"dest":{"index":"logs-2","pipeline":"p"}}"#)
                 .is_err()
         );
+        // An empty list names no index the grant could be checked against.
+        assert!(go(br#"{"source":{"index":[]},"dest":{"index":"logs-2"}}"#).is_err());
+        assert!(go(br#"{"source":{"index":"logs-1"},"dest":{"index":[]}}"#).is_err());
     }
 }
