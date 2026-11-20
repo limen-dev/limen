@@ -133,10 +133,20 @@ pub fn verify_signed(
             manifest.format
         ));
     }
-    if let Err(e) = verify_at(&signed, purpose, internal_ca, generated_at) {
-        out.problems
-            .push(format!("the manifest's signature is not valid: {e}"));
-        return out;
+    match verify_at(&signed, purpose, internal_ca, generated_at) {
+        // Any control plane's certificate is valid for the purpose, so the
+        // signer must be the one the manifest names (as for audit
+        // manifests, bucket.rs).
+        Ok((by, _)) => {
+            if let Some(why) = crate::manifest::signer_problem(&by.id, &manifest.control_plane) {
+                out.problems.push(why);
+            }
+        }
+        Err(e) => {
+            out.problems
+                .push(format!("the manifest's signature is not valid: {e}"));
+            return out;
+        }
     }
     let empty = serde_json::Map::new();
     let sections = v["sections"].as_object().unwrap_or(&empty);
@@ -179,6 +189,11 @@ mod tests {
     /// A pack signed with a certificate that expires in a second, generated
     /// at `generated_at` seconds from now.
     async fn pack_signed_by_a_short_lived_cert(generated_at: i64) -> (Vec<u8>, Vec<u8>) {
+        pack_signed_by("cp", "cp", generated_at).await
+    }
+
+    /// A pack whose manifest names `named` but is signed by `signer`.
+    async fn pack_signed_by(signer: &str, named: &str, generated_at: i64) -> (Vec<u8>, Vec<u8>) {
         use limen_ca::{CaPurpose, CertificateAuthority, ComponentCertRequest, FileSigner};
         use limen_core::identity::ComponentKind;
         use limen_session::envelope::EnvelopeSigner;
@@ -198,7 +213,7 @@ mod tests {
             .issue_component(ComponentCertRequest {
                 csr_der: csr.der().to_vec(),
                 kind: ComponentKind::ControlPlane,
-                id: "cp".into(),
+                id: signer.into(),
                 dns_names: vec![],
                 labels: BTreeMap::new(),
                 ttl: std::time::Duration::from_secs(1),
@@ -214,7 +229,7 @@ mod tests {
             from: 0,
             to: 1,
             requested_by: "auditor@example.com".into(),
-            control_plane: "cp".into(),
+            control_plane: named.into(),
             files: BTreeMap::from([(
                 "sessions".to_owned(),
                 FileEntry {
@@ -261,6 +276,22 @@ mod tests {
         assert!(!checked.ok());
         assert!(
             checked.problems[0].contains("signature is not valid"),
+            "{:?}",
+            checked.problems
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pack_signed_by_another_control_plane_is_refused() {
+        let (pack, ca) = pack_signed_by("cp-a", "cp-b", 0).await;
+        let ca = rustls_pki_types::CertificateDer::from(ca);
+        let checked = verify_pack(&pack, &ca);
+        assert!(!checked.ok());
+        assert!(
+            checked
+                .problems
+                .iter()
+                .any(|p| p.contains("not by its writer cp-b")),
             "{:?}",
             checked.problems
         );
