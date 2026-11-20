@@ -590,7 +590,7 @@ mod tests {
     #[tokio::test]
     async fn a_persisted_snapshot_that_does_not_verify_is_ignored() {
         let (ca, cp, proxy) = setup().await;
-        let (other_ca, other_cp, _) = setup().await;
+        let (foreign_ca, foreign_signer, _) = setup().await;
         let dir = std::env::temp_dir().join(format!("limen-snap-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("policy.snapshot");
@@ -601,7 +601,7 @@ mod tests {
         let last = tampered.payload.len() - 1;
         tampered.payload[last] ^= 1;
         let by_proxy = sign(&proxy, 2, &Policy::default(), &unlocked, now).expect("sign");
-        let foreign = sign(&other_cp, 2, &Policy::default(), &unlocked, now).expect("sign");
+        let foreign = sign(&foreign_signer, 2, &Policy::default(), &unlocked, now).expect("sign");
         let cases: [(&str, Vec<u8>); 5] = [
             ("tampered payload", tampered.encode_to_vec()),
             ("signed by a proxy", by_proxy.encode_to_vec()),
@@ -623,7 +623,7 @@ mod tests {
         // about trust, not a broken file.
         std::fs::write(&path, foreign.encode_to_vec()).expect("write");
         let cache = PolicyCache::new(DEFAULT_GRACE, Some(path));
-        cache.load(other_ca.cert_der());
+        cache.load(foreign_ca.cert_der());
         assert_eq!(cache.latest().expect("loaded").version, 2);
         let _ = std::fs::remove_dir_all(dir);
     }

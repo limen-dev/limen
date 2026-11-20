@@ -261,16 +261,19 @@ mod tests {
     /// doesn't issue for (SHA-1 `ssh-rsa` signatures, 1024-bit DSA).
     #[test]
     fn rsa_and_dsa_keys_are_refused() {
-        let e: &[u8] = &[0x01, 0x00, 0x01];
-        let rsa = openssh_line("ssh-rsa", &[e, &mpint(257)]);
+        let exponent: &[u8] = &[0x01, 0x00, 0x01];
+        let rsa = openssh_line("ssh-rsa", &[exponent, &mpint(257)]);
         let why = refusal("user_public_key", &rsa);
         assert!(
             why.starts_with("user_public_key: unsupported algorithm"),
             "{why}"
         );
 
-        let (p, q, g, y) = (mpint(129), mpint(21), mpint(128), mpint(128));
-        let dsa = openssh_line("ssh-dss", &[&p, &q, &g, &y]);
+        // p, q, g, y.
+        let dsa = openssh_line(
+            "ssh-dss",
+            &[&mpint(129), &mpint(21), &mpint(128), &mpint(128)],
+        );
         let why = refusal("host_public_key", &dsa);
         assert!(
             why.starts_with("host_public_key: unsupported algorithm"),
