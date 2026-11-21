@@ -1368,7 +1368,10 @@ fn rule_scopes(rule: &Rule, kind: ResourceKind, out: &mut BTreeMap<String, Scope
 }
 
 /// What `roles` grant on one resource: every allowed principal, less the ones
-/// a deny rule names (or all of them, for a deny rule that names none).
+/// a deny rule takes away entirely (or all of them, for a deny rule that names
+/// none). A deny that only narrows a principal (some web paths or methods,
+/// some databases) leaves it listed, as enforcement leaves it usable: hiding it
+/// would hide the access from listings, reviews and the access diff.
 fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<String> {
     let mut principals = BTreeSet::new();
     for rule in roles.iter().flat_map(|r| r.spec.enforced_allow()) {
@@ -1380,7 +1383,7 @@ fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<St
         if selector_matches(&rule.resources, resource) {
             if rule_has_no_principals(rule) {
                 principals.clear();
-            } else {
+            } else if deny_covers_principals(rule, resource_kind(resource)) {
                 for p in rule_principals(rule, resource_kind(resource)) {
                     principals.remove(&p);
                 }
@@ -1388,6 +1391,28 @@ fn granted_principals(roles: &[&RoleDoc], resource: &ResourceDoc) -> BTreeSet<St
         }
     }
     principals
+}
+
+/// Whether a deny rule refuses its principals on a resource of `kind` for
+/// every request, so they are gone, not narrowed. Mirrors enforcement: a web
+/// deny is decided per request ([`web_grant_matches`]), and a database or
+/// MongoDB deny per database ([`rule_grants`]).
+fn deny_covers_principals(rule: &Rule, kind: ResourceKind) -> bool {
+    match kind {
+        ResourceKind::Web => rule
+            .web
+            .as_ref()
+            .is_some_and(|g| g.methods.is_empty() && g.path_prefixes.is_empty()),
+        ResourceKind::Postgres | ResourceKind::Mysql | ResourceKind::Redshift => rule
+            .db
+            .as_ref()
+            .is_some_and(|g| g.databases.iter().any(|d| d == "*")),
+        ResourceKind::Mongodb => rule
+            .mongo
+            .as_ref()
+            .is_some_and(|g| g.databases.iter().any(|d| d == "*")),
+        _ => true,
+    }
 }
 
 /// Whether a deny rule refuses `principal` on `resource`. Enforcement, the
