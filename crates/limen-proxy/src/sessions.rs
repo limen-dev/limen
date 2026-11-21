@@ -382,7 +382,18 @@ fn resolve_principal(
                 request.database.clone(),
             )
         }
-        Protocol::Tcp => (Principal::TcpAccess, "tcp".to_owned(), String::new()),
+        // TCP has one principal, which the CLI always names `access`. The
+        // name goes into the grant and the audit trail as the session's login,
+        // so another value is refused rather than recorded as the client chose.
+        Protocol::Tcp if request.principal == "access" => {
+            (Principal::TcpAccess, "tcp".to_owned(), String::new())
+        }
+        Protocol::Tcp => {
+            return Err(denied(format!(
+                "access denied to {}@{}",
+                request.principal, request.resource
+            )));
+        }
         Protocol::Web => (Principal::WebAccess, "web".to_owned(), String::new()),
         Protocol::Search => {
             let refused = || {
@@ -1155,6 +1166,25 @@ spec:
                 format!("access denied to reader@{resource}"),
                 "{protocol:?} on {resource}"
             );
+        }
+    }
+
+    #[test]
+    fn a_tcp_session_names_only_the_access_principal() {
+        let policy = policy();
+        let (principal, kind, _) =
+            resolve_principal(&policy, &request("db-tcp", "access", ""), Protocol::Tcp)
+                .unwrap_or_else(|d| panic!("{}", d.reason));
+        assert_eq!(principal, Principal::TcpAccess);
+        assert_eq!(kind, "tcp");
+        for chosen in ["root", "", "Access"] {
+            let denial = refusal(resolve_principal(
+                &policy,
+                &request("db-tcp", chosen, ""),
+                Protocol::Tcp,
+            ));
+            assert!(denial.audit, "{chosen:?}: audited");
+            assert_eq!(denial.reason, format!("access denied to {chosen}@db-tcp"));
         }
     }
 

@@ -170,7 +170,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> ProxyRe
     }
 
     if uri.path() == HANDOFF_PATH {
-        return redeem_handoff(proxy, &route, req).await;
+        return redeem_handoff(proxy, source, &route, req).await;
     }
 
     let websocket = is_websocket_request(&req);
@@ -1174,15 +1174,22 @@ fn sanitize_hop_headers(headers: &mut HeaderMap, preserve_upgrade: bool) {
 }
 
 #[allow(clippy::too_many_lines)] // Keep one-use redemption and fail-closed audit sequencing clear.
-async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>) -> ProxyResponse {
+/// Nobody is signed in yet here, so every refusal a client can provoke goes
+/// through the per-source pre-auth limit, as the other unauthenticated
+/// refusals do.
+async fn redeem_handoff(
+    proxy: &Proxy,
+    source: IpAddr,
+    route: &WebRoute,
+    req: Request<Incoming>,
+) -> ProxyResponse {
     let started = Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
     if req.method() != Method::GET {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "invalid_handoff_method",
             StatusCode::METHOD_NOT_ALLOWED,
             "method not allowed",
@@ -1198,10 +1205,9 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
             .map(|(_, value)| value.into_owned())
     });
     let Some(token) = token.filter(|token| !token.is_empty() && token.len() <= 128) else {
-        return audit_denied(
+        return audit_denied_preauth(
             proxy,
-            None,
-            None,
+            source,
             "invalid_handoff",
             StatusCode::BAD_REQUEST,
             "invalid sign-in handoff",
@@ -1214,10 +1220,9 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
     let browser_nonce = match cookie_value(req.headers(), APP_LOGIN_COOKIE) {
         Ok(Some(nonce)) if valid_browser_nonce(&nonce) => nonce,
         _ => {
-            return audit_denied(
+            return audit_denied_preauth(
                 proxy,
-                None,
-                None,
+                source,
                 "invalid_handoff_browser",
                 StatusCode::FORBIDDEN,
                 "sign-in handoff is not valid for this browser",
@@ -1241,10 +1246,9 @@ async fn redeem_handoff(proxy: &Proxy, route: &WebRoute, req: Request<Incoming>)
         Ok(response) => response.into_inner(),
         Err(status) => {
             tracing::warn!(code = ?status.code(), "web sign-in handoff could not be redeemed");
-            return audit_denied(
+            return audit_denied_preauth(
                 proxy,
-                None,
-                None,
+                source,
                 "handoff_redemption_failed",
                 StatusCode::FORBIDDEN,
                 "sign-in handoff expired; start again",
@@ -1401,6 +1405,9 @@ impl PreAuthDenials {
     }
 
     fn check(&self, source: IpAddr) -> PreAuth {
+        // Keyed as the connection limit is: an IPv6 /64 is one source, so a
+        // client can't rotate addresses within its prefix for fresh buckets.
+        let source = crate::source::source_key(source);
         if self.checks.fetch_add(1, Ordering::Relaxed) % 4096 == 4095 {
             self.limiter.retain_recent();
         }
@@ -1985,6 +1992,30 @@ mod tests {
         assert_eq!(limiter.check(b), PreAuth::Audit { suppressed: 0 });
         std::thread::sleep(std::time::Duration::from_millis(150));
         assert_eq!(limiter.check(a), PreAuth::Audit { suppressed: 2 });
+    }
+
+    #[test]
+    fn preauth_denials_share_a_bucket_across_an_ipv6_prefix() {
+        use super::{PreAuth, PreAuthDenials};
+        use std::net::IpAddr;
+        use std::num::NonZeroU32;
+        let quota = governor::Quota::with_period(std::time::Duration::from_secs(60))
+            .expect("period")
+            .allow_burst(NonZeroU32::new(1).expect("burst"));
+        let limiter = PreAuthDenials::new(quota);
+        let a: IpAddr = "2001:db8::1".parse().expect("ip");
+        let b: IpAddr = "2001:db8::ffff:2".parse().expect("ip");
+        let other: IpAddr = "2001:db8:0:1::1".parse().expect("ip");
+        assert_eq!(limiter.check(a), PreAuth::Audit { suppressed: 0 });
+        // Another address in the same /64 is the same source.
+        assert_eq!(limiter.check(b), PreAuth::Skip);
+        // The next /64 is not.
+        assert_eq!(limiter.check(other), PreAuth::Audit { suppressed: 0 });
+        // An IPv4-mapped address counts as its IPv4 address.
+        let v4: IpAddr = "192.0.2.9".parse().expect("ip");
+        let mapped: IpAddr = "::ffff:192.0.2.9".parse().expect("ip");
+        assert_eq!(limiter.check(v4), PreAuth::Audit { suppressed: 0 });
+        assert_eq!(limiter.check(mapped), PreAuth::Skip);
     }
 
     #[test]
