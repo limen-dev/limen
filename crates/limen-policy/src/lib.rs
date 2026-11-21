@@ -1163,9 +1163,9 @@ impl Policy {
 
     /// For each principal `roles` let someone use on resource `name`, what it may do there: the
     /// databases of a role, the vhosts and classes of a broker user, and so on. The principals are
-    /// exactly those `accessible` gives (a deny rule that names one removes it); the detail is the
-    /// union of the allow rules, so it can say a little more than a deny narrowed to one database
-    /// refuses. Empty if the resource is unknown or the roles give nothing on it.
+    /// exactly those `accessible` gives (a deny rule that covers one entirely removes it); the
+    /// detail is the union of the allow rules, so it can say a little more than a deny narrowed to
+    /// one database refuses. Empty if the resource is unknown or the roles give nothing on it.
     #[must_use]
     pub fn grant_scopes(&self, roles: &[String], name: &str) -> Vec<GrantScope> {
         let Some(resource) = self.resources.get(name) else {
