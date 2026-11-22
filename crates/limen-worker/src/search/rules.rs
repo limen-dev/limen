@@ -570,12 +570,19 @@ pub fn decode_body(
         Some(e) if e.eq_ignore_ascii_case("gzip") => {
             let mut out = Vec::new();
             let limit = u64::try_from(limit).unwrap_or(u64::MAX);
-            flate2::read::GzDecoder::new(bytes)
+            // One gzip member only: the decoder stops after the first, and the
+            // body is forwarded as sent, so a second member (which an engine
+            // or a proxy in front of it may decode) would go unread.
+            let mut decoder = flate2::bufread::GzDecoder::new(bytes);
+            (&mut decoder)
                 .take(limit.saturating_add(1))
                 .read_to_end(&mut out)
                 .or_else(|_| refuse("the request body isn't valid gzip"))?;
             if out.len() as u64 > limit {
                 return refuse("the request body is too large to inspect");
+            }
+            if !decoder.into_inner().is_empty() {
+                return refuse("the request body has data after its gzip stream");
             }
             Ok(out)
         }
@@ -1847,6 +1854,29 @@ mod tests {
         let bomb = enc.finish().expect("finish");
         assert!(bomb.len() < 64 * 1024);
         assert!(decode_body(&bomb, Some("gzip"), 1024 * 1024).is_err());
+    }
+
+    #[test]
+    fn a_gzip_body_with_a_second_member_is_refused() {
+        use std::io::Write as _;
+        let member = |text: &[u8]| {
+            let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            enc.write_all(text).expect("write");
+            enc.finish().expect("finish")
+        };
+        let allowed_line = b"{\"index\":{\"_index\":\"logs-1\"}}\n{}\n";
+        let mut body = member(allowed_line);
+        assert_eq!(
+            decode_body(&body, Some("gzip"), 1024).expect("one member"),
+            allowed_line
+        );
+        // Only the first member would be inspected, and the whole body sent on.
+        body.extend(member(b"{\"index\":{\"_index\":\"secret\"}}\n{}\n"));
+        assert!(decode_body(&body, Some("gzip"), 1024).is_err());
+        // Trailing bytes of any kind, too.
+        let mut junk = member(allowed_line);
+        junk.push(b'x');
+        assert!(decode_body(&junk, Some("gzip"), 1024).is_err());
     }
 
     #[test]

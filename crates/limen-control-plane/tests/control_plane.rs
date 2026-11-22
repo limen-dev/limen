@@ -16,11 +16,14 @@ use limen_proto::v1::resources_client::ResourcesClient;
 use limen_proto::v1::{
     ApplyPolicyRequest, CreateJoinTokenRequest, EnrollRequest, GetServerVersionRequest,
     ListComponentsRequest, ListResourcesRequest, ListTunnelsRequest, LoginFlow, PolicySource,
-    RenewCertificateRequest, ReportTunnelsRequest, TunnelReport, WhoAmIRequest,
+    RenewCertificateRequest, ReportTunnelsRequest, RevokeComponentRequest, TunnelReport,
+    WhoAmIRequest,
 };
 use limen_testkit::idp::Claims;
 use limen_testkit::users::{ADMIN, DEVELOPER, GUEST};
 use limen_tunnel::tls::Identity;
+use std::time::Duration;
+
 use tonic::Code;
 
 const ROLES: &str = include_str!("../../../examples/policy/shared/roles.yaml");
@@ -504,7 +507,7 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
     // Another proxy finds the worker through the registry, with the load the
     // first one reported, for its least-loaded choice.
     let (_, other) = h.enroll_proxy().await;
-    let listed = RegistryClient::new(h.channel(Some(other)))
+    let listed = RegistryClient::new(h.channel(Some(other.clone())))
         .list_tunnels(tonic::Request::new(ListTunnelsRequest {}))
         .await
         .expect("list tunnels")
@@ -516,6 +519,41 @@ async fn worker_enrolls_once_with_single_use_token_and_renews() {
         .expect("the worker is listed to other proxies");
     assert_eq!(t.peer_address, "10.0.0.5:3024");
     assert_eq!((t.active_sessions, t.max_sessions), (3, 200));
+
+    // Once the first proxy is revoked it may not relay the worker's
+    // certificate to renew it, though its own certificate has not expired.
+    // The other proxy still may.
+    let other_ch = h.channel(Some(other));
+    AdminClient::new(other_ch.clone())
+        .revoke_component(forwarded(
+            RevokeComponentRequest {
+                component_id: proxy_id.clone(),
+                reason: "test".into(),
+            },
+            Some(&admin_user),
+        ))
+        .await
+        .expect("revoke the proxy");
+    tokio::time::sleep(limen_control_plane::state::RevokedCache::TTL + Duration::from_millis(100))
+        .await;
+    let renew = |ch| {
+        let worker_der = worker_der.clone();
+        async move {
+            EnrollmentClient::new(ch)
+                .renew_certificate(forwarded(
+                    RenewCertificateRequest {
+                        csr_der: csr(&new_key()),
+                    },
+                    Some(&worker_der),
+                ))
+                .await
+        }
+    };
+    let err = renew(h.channel(Some(proxy)))
+        .await
+        .expect_err("revoked relay");
+    assert_eq!(err.code(), Code::PermissionDenied);
+    renew(other_ch).await.expect("renew through a live proxy");
 }
 
 #[tokio::test]
