@@ -79,9 +79,10 @@ done < "$dir/image-refs.txt"
 
 step "Helper images (built locally; not part of a release)"
 source "$here/scripts/lib.sh"
-stack_setup ssh observability
-"${compose[@]}" build fake-datadog sshd-target >/dev/null
-pass "fake-datadog and sshd-target"
+# The same profiles as demos/demo-phase35.sh, which starts them with --no-build.
+stack_setup ssh observability bots
+"${compose[@]}" build fake-datadog sshd-target fake-ci-issuer >/dev/null
+pass "fake-datadog, sshd-target and fake-ci-issuer"
 
 step "The Phase 3.5 demo, against the release"
 LIMEN_RELEASE_IMAGES=1 LIMEN_BIN="$limen" "$root/demos/demo-phase35.sh"

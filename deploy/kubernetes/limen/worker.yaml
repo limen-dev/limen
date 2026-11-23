@@ -20,9 +20,18 @@ spec:
       # ends the rest and uploads their recordings (about 20 s more). Set the
       # grace period above both, or the kubelet ends sessions early.
       terminationGracePeriodSeconds: 330
+      # Distroless nonroot image (uid 65532). Matches the Helm chart's
+      # podSecurityContext and securityContext (the restricted Pod Security level).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: worker
           image: REPLACE/limen-worker:REPLACE
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           ports:
             - { name: admin, containerPort: 3090 }
           env:

@@ -19,6 +19,7 @@ on:
       - "crates/limen-control-plane/assets/**"
       - "crates/limen-control-plane/templates/**"
       - "crates/limen-control-plane/tests/console-pages/**"
+      - "crates/limen-control-plane/tests/player-init.test.mjs"
       - "deploy/compose/scripts/console-snapshot-matrix.mjs"
       - ".github/workflows/browser-tests.yml"
   # Pull requests run through ci.yml, which reads the paths above.

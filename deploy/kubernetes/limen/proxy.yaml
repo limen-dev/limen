@@ -23,7 +23,9 @@ spec:
   replicas: 3
   strategy:
     type: RollingUpdate
-    rollingUpdate: { maxUnavailable: 1, maxSurge: 1 }
+    # A new proxy serves nothing while it waits for the control plane
+    # (ADR-0045), so keep every old one until its replacement is ready.
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   selector:
     matchLabels: { app.kubernetes.io/name: limen-proxy }
   template:
@@ -32,9 +34,18 @@ spec:
     spec:
       # LIMEN_DRAIN_TIMEOUT_SECS (20) plus margin.
       terminationGracePeriodSeconds: 40
+      # Distroless nonroot image (uid 65532). Matches the Helm chart's
+      # podSecurityContext and securityContext (the restricted Pod Security level).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: proxy
           image: REPLACE/limen-proxy:REPLACE
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           ports:
             - { name: public, containerPort: 3443 }
             - { name: admin, containerPort: 3444 }
@@ -64,6 +75,11 @@ spec:
           readinessProbe:
             httpGet: { path: /readyz, port: admin }
             periodSeconds: 3
+          # The admin port is down while the proxy waits for the control plane (ADR-0045): allow 30 min.
+          startupProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+            failureThreshold: 180
           livenessProbe:
             httpGet: { path: /healthz, port: admin }
             periodSeconds: 10

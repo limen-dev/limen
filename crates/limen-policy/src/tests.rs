@@ -504,6 +504,151 @@ spec:
     assert!(!policy.web_request_allowed(&roles, "app", "GET", "/admin/secret"));
 }
 
+/// A method the client sends in another case is still the same method to
+/// frameworks that upper-case it, so a deny on `DELETE` refuses `delete`.
+#[test]
+fn web_method_denies_ignore_case() {
+    let role = r#"
+kind: role
+version: v1
+metadata: { name: editor }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: {}
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: { methods: [DELETE, POST], path_prefixes: ["/admin"] }
+---
+kind: resource
+version: v1
+metadata: { name: app }
+spec:
+  web: { address: "app:443", host: "app.apps.example.com", tls_ca_file: "/etc/ssl/ca.pem" }
+"#;
+    let policy = Policy::parse_yaml([("web.yaml", role)]).expect("valid web policy");
+    let roles = vec!["editor".to_owned()];
+    assert!(policy.web_request_allowed(&roles, "app", "GET", "/admin/users"));
+    for method in ["DELETE", "delete", "Delete", "post"] {
+        assert!(
+            !policy.web_request_allowed(&roles, "app", method, "/admin/users/7"),
+            "{method} reached a denied path"
+        );
+    }
+    assert!(policy.web_request_allowed(&roles, "app", "delete", "/public"));
+}
+
+/// A deny that narrows a principal (some paths, some databases) leaves the
+/// access usable, so listings and the access diff must still show it: hiding it
+/// let a role that opens a whole resource pass as a change that grants nothing.
+#[test]
+fn a_partial_deny_still_lists_the_access_it_leaves() {
+    let base = r#"
+kind: resource
+version: v1
+metadata: { name: app }
+spec:
+  web: { address: "app:443", host: "app.apps.example.com", tls_ca_file: "/etc/ssl/ca.pem" }
+---
+kind: resource
+version: v1
+metadata: { name: pg }
+spec:
+  postgres: { endpoint: "pg:5432" }
+---
+kind: role_mapping
+version: v1
+metadata: { name: m }
+spec:
+  - { idp_group: eng, roles: [reader] }
+"#;
+    let before_role = r"
+kind: role
+version: v1
+metadata: { name: reader }
+spec:
+  allow:
+    - resources: { kind: [ssh], names: [nothing] }
+      ssh: { logins: [x] }
+";
+    let partial = r#"
+kind: role
+version: v1
+metadata: { name: reader }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: {}
+    - resources: { kind: [postgres], names: [pg] }
+      db: { roles: [limen_rw] }
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: { path_prefixes: ["/zzz"] }
+    - resources: { kind: [postgres], names: [pg] }
+      db: { roles: [limen_rw], databases: [dummy] }
+"#;
+    let full = r#"
+kind: role
+version: v1
+metadata: { name: reader }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: {}
+    - resources: { kind: [postgres], names: [pg] }
+      db: { roles: [limen_rw] }
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: {}
+    - resources: { kind: [postgres], names: [pg] }
+      db: { roles: [limen_rw], databases: ["*"] }
+"#;
+    let parse =
+        |role: &str| Policy::parse_yaml([("a.yaml", base), ("b.yaml", role)]).expect("policy");
+    let (before, partial, full) = (parse(before_role), parse(partial), parse(full));
+    let r = roles(&["reader"]);
+
+    // Enforcement lets the access through...
+    assert!(partial.web_request_allowed(&r, "app", "GET", "/"));
+    assert!(matches!(
+        partial.evaluate(&AccessRequest {
+            roles: &r,
+            resource: "pg",
+            principal: Principal::DbRole {
+                role: "limen_rw".into(),
+                database: "prod".into(),
+            },
+        }),
+        Decision::Allow { .. }
+    ));
+    // ...so the listing shows it, and the diff counts it as a gain.
+    let listed: Vec<(String, Vec<String>)> = partial
+        .accessible(&r)
+        .into_iter()
+        .map(|a| (a.name, a.principals))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("app".to_owned(), vec!["access".to_owned()]),
+            ("pg".to_owned(), vec!["limen_rw".to_owned()]),
+        ]
+    );
+    let gains: Vec<String> = before
+        .access_diff(&partial)
+        .changes
+        .iter()
+        .filter(|c| c.change == tooling::ChangeKind::Gain)
+        .map(|c| c.resource.clone())
+        .collect();
+    assert!(gains.contains(&"app".to_owned()), "{gains:?}");
+    assert!(gains.contains(&"pg".to_owned()), "{gains:?}");
+
+    // A deny that covers every request still takes the principal away.
+    assert!(!full.web_request_allowed(&r, "app", "GET", "/"));
+    assert_eq!(full.accessible(&r), []);
+}
+
 /// A prefix written with a trailing slash names the same directory: a deny on
 /// `/admin/` must cover everything below it, not only `/admin/` itself.
 #[test]

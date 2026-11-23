@@ -245,7 +245,9 @@ impl Enrollment for EnrollmentService {
         &self,
         request: Request<RenewCertificateRequest>,
     ) -> Result<Response<RenewCertificateResponse>, Status> {
-        let caller = caller::resolve(&request, &self.0.cas)?;
+        // Checked: a revoked proxy must not relay a worker's certificate to
+        // get a fresh one issued for a key it chose.
+        let caller = caller::resolve_checked(&request, &self.0).await?;
         let identity = caller.component()?.clone();
         let row = db::component(&self.0.db, &identity.id)
             .await

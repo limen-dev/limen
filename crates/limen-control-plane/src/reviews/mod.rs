@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 
 use limen_audit::{Context, EventKind};
+use limen_core::identity::same_username;
 use limen_proto::v1::{DenyInfo, ReviewInfo, ReviewItemInfo, ReviewReach};
 use serde_json::{Value, json};
 use sqlx::Row as _;
@@ -261,7 +262,7 @@ pub async fn start(
             .collect();
         let mut reviewer = reviewer_for(&policy.policy, &item.role, &reaches);
         // Nobody reviews their own access.
-        if reviewer.eq_ignore_ascii_case(&item.subject) {
+        if same_username(&reviewer, &item.subject) {
             ADMIN_POOL.clone_into(&mut reviewer);
         }
         let (mut sessions, mut last): (i64, Option<OffsetDateTime>) = (0, None);
@@ -393,9 +394,8 @@ fn item_from(r: &sqlx::postgres::PgRow, who: &Who<'_>) -> Result<ReviewItemInfo,
     let last: Option<OffsetDateTime> = r.try_get("last_used_at").map_err(e)?;
     let reaches: Value = r.try_get("reaches").map_err(e)?;
     let can_decide = decision.is_none()
-        && !subject.eq_ignore_ascii_case(who.username)
-        && (reviewer.eq_ignore_ascii_case(who.username)
-            || (reviewer == ADMIN_POOL && who.is_admin));
+        && !same_username(&subject, who.username)
+        && (same_username(&reviewer, who.username) || (reviewer == ADMIN_POOL && who.is_admin));
     Ok(ReviewItemInfo {
         id: r.try_get::<Uuid, _>("id").map_err(e)?.to_string(),
         review_id: r.try_get::<Uuid, _>("review_id").map_err(e)?.to_string(),
@@ -532,7 +532,7 @@ pub async fn decide(
     if !item.decision.is_empty() {
         return Err(Status::already_exists("this item was already decided"));
     }
-    if item.subject.eq_ignore_ascii_case(who.username) {
+    if same_username(&item.subject, who.username) {
         return Err(Status::permission_denied(
             "you can't review your own access",
         ));

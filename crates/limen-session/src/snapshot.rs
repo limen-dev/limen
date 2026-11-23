@@ -125,24 +125,6 @@ impl Restrictions {
         resource: &str,
         now_unix: i64,
     ) -> EffectiveRoles {
-        let mut out = EffectiveRoles {
-            roles: cert_roles.to_vec(),
-            ..EffectiveRoles::default()
-        };
-        for grant in &self.grants {
-            if grant.username == username
-                && grant.resource == resource
-                && grant.expires_at_unix > now_unix
-                && !out.roles.contains(&grant.role)
-            {
-                out.roles.push(grant.role.clone());
-                out.request_ids.push(grant.request_id.clone());
-                out.earliest_expiry_unix = Some(
-                    out.earliest_expiry_unix
-                        .map_or(grant.expires_at_unix, |e| e.min(grant.expires_at_unix)),
-                );
-            }
-        }
         let denied: Vec<&str> = self
             .denies
             .iter()
@@ -154,19 +136,35 @@ impl Restrictions {
             })
             .map(|d| d.role.as_str())
             .collect();
-        if !denied.is_empty() {
-            out.roles.retain(|r| !denied.contains(&r.as_str()));
-            // A grant for a denied role supplies nothing.
-            out.request_ids = self
-                .grants
-                .iter()
-                .filter(|g| {
-                    out.request_ids.contains(&g.request_id) && !denied.contains(&g.role.as_str())
-                })
-                .map(|g| g.request_id.clone())
-                .collect();
+        // One grant per role the certificate doesn't already give. When
+        // several grants give the same role, the one that lasts longest
+        // supplies it: a later approval extends access, it doesn't vanish
+        // behind an earlier, shorter one. A grant for a denied role supplies
+        // nothing and so sets no deadline.
+        let mut used: Vec<&ActiveGrant> = Vec::new();
+        for grant in &self.grants {
+            if grant.username != username
+                || grant.resource != resource
+                || grant.expires_at_unix <= now_unix
+                || cert_roles.contains(&grant.role)
+                || denied.contains(&grant.role.as_str())
+            {
+                continue;
+            }
+            match used.iter_mut().find(|g| g.role == grant.role) {
+                Some(held) if held.expires_at_unix < grant.expires_at_unix => *held = grant,
+                Some(_) => {}
+                None => used.push(grant),
+            }
         }
-        out
+        let mut roles = cert_roles.to_vec();
+        roles.retain(|r| !denied.contains(&r.as_str()));
+        roles.extend(used.iter().map(|g| g.role.clone()));
+        EffectiveRoles {
+            roles,
+            request_ids: used.iter().map(|g| g.request_id.clone()).collect(),
+            earliest_expiry_unix: used.iter().map(|g| g.expires_at_unix).min(),
+        }
     }
 
     /// The grants `username` holds right now, on any resource.
@@ -907,6 +905,34 @@ mod tests {
     }
 
     #[test]
+    fn the_longest_grant_for_a_role_supplies_it() {
+        // A short grant, then a longer one for the same role: the session
+        // lasts until the later deadline and depends on the later grant.
+        let r = Restrictions {
+            grants: vec![
+                grant("short", "alice", "prod-db", "orders", 2_000),
+                grant("long", "alice", "prod-db", "orders", 9_000),
+                grant("other", "alice", "prod-db", "billing", 1_500),
+            ],
+            ..Restrictions::default()
+        };
+        let eff = r.effective_roles("alice", &[], "orders", 1_000);
+        assert_eq!(eff.roles, ["prod-db"]);
+        assert_eq!(eff.request_ids, ["long"]);
+        assert_eq!(eff.earliest_expiry_unix, Some(9_000));
+        // Listed the other way round, the result is the same.
+        let mut flipped = r.clone();
+        flipped.grants.reverse();
+        assert_eq!(flipped.effective_roles("alice", &[], "orders", 1_000), eff);
+        // Once the long one is gone, the short one still supplies the role.
+        let mut short_only = r.clone();
+        short_only.grants.retain(|g| g.request_id != "long");
+        let eff = short_only.effective_roles("alice", &[], "orders", 1_000);
+        assert_eq!(eff.request_ids, ["short"]);
+        assert_eq!(eff.earliest_expiry_unix, Some(2_000));
+    }
+
+    #[test]
     fn a_deny_override_beats_the_certificate_and_a_grant() {
         let r = Restrictions {
             grants: vec![grant("req-1", "alice", "prod-db", "orders", 9_000)],
@@ -932,6 +958,10 @@ mod tests {
         assert!(
             eff.request_ids.is_empty(),
             "a denied grant supplies nothing"
+        );
+        assert_eq!(
+            eff.earliest_expiry_unix, None,
+            "nor does it cap the session"
         );
         // The override lapses, and the roles come back.
         assert_eq!(

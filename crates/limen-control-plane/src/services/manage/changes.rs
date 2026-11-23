@@ -150,9 +150,10 @@ impl Viewer {
             })
     }
 
-    /// Usernames compared without case, as for access requests.
+    /// Usernames compared without case (non-ASCII too), as for access
+    /// requests, so a case variant of the author's name is still the author.
     pub(crate) fn is_author(&self, held: &Held) -> bool {
-        self.username.eq_ignore_ascii_case(&held.author)
+        limen_core::identity::same_username(&self.username, &held.author)
     }
 
     pub(crate) fn may_see(&self, held: &Held) -> bool {
@@ -544,5 +545,70 @@ impl ManageService {
         Ok(pb::CancelChangeResponse {
             change: Some(to_pb(&decided)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn held(author: &str) -> Held {
+        let now = OffsetDateTime::now_utc();
+        Held {
+            id: Uuid::nil(),
+            state: State::Pending,
+            author: author.into(),
+            author_ci: BTreeMap::new(),
+            plan: crate::policy_changes::Plan {
+                changes: vec![],
+                require_tests: false,
+                gains: vec![],
+                basis: vec![],
+            },
+            writes: vec![],
+            impact: vec![],
+            base_policy_version: 0,
+            reason: String::new(),
+            source_ref: String::new(),
+            created_at: now,
+            expires_at: now,
+            decided_by: None,
+            decision_note: None,
+            decided_at: None,
+            applied_policy_version: None,
+        }
+    }
+
+    fn admin(username: &str) -> Viewer {
+        Viewer {
+            username: username.into(),
+            bot: false,
+            admin: true,
+            groups: vec![],
+            policy: crate::state::PolicyStore::empty().current(),
+        }
+    }
+
+    /// The second-person rule holds for a case variant of the author's name,
+    /// non-ASCII included, as usernames compare everywhere else.
+    #[test]
+    fn a_case_variant_of_the_author_is_the_author() {
+        let change = held("JÖRG@example.com");
+        for same in ["JÖRG@example.com", "jörg@example.com", "Jörg@Example.com"] {
+            assert!(admin(same).is_author(&change), "{same}");
+            assert!(
+                matches!(
+                    admin(same).may_decide(&change),
+                    Err(Refusal::NotDecidable { .. })
+                ),
+                "{same} decided their own change"
+            );
+        }
+        assert!(!admin("jorg@example.com").is_author(&change));
+        admin("someone@example.com")
+            .may_decide(&change)
+            .expect("another admin decides it");
     }
 }

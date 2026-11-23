@@ -54,6 +54,7 @@ spec:
       containers:
         - name: control-plane
           image: REPLACE/limen-control-plane:REPLACE
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           ports:
             - { name: grpc, containerPort: 3080 }
             - { name: admin, containerPort: 3081 }

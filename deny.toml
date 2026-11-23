@@ -22,6 +22,11 @@ ignore = [
     # libsqlite3-sys <0.38 and the fix is 0.39, so no bump is possible until
     # sqlx releases. See ADR-0012.
     { id = "RUSTSEC-2026-0459", reason = "SQLite driver is never compiled; sqlx-sqlite pins <0.38" },
+    # chrono: marked unmaintained (all versions, no fix). It is pulled in by
+    # oauth2, openidconnect and russh-util, so it cannot be dropped until those
+    # move off it; limen-testkit also uses it directly. Unmaintained, not
+    # vulnerable. See ADR-0012.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained; transitive via oauth2/openidconnect/russh-util, no fix" },
 ]
 
 [licenses]

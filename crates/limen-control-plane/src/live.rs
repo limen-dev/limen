@@ -166,7 +166,7 @@ pub async fn begin(
     // Nobody watches themselves through the console; they have the session.
     if subject
         .as_deref()
-        .is_some_and(|s| s.eq_ignore_ascii_case(observer))
+        .is_some_and(|s| limen_core::identity::same_username(s, observer))
     {
         return Err(Status::failed_precondition("this is your own session"));
     }
