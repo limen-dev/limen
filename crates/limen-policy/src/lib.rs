@@ -1428,9 +1428,12 @@ pub(crate) fn deny_rule_matches(
 }
 
 /// Whether a web grant covers one request. Path prefixes match path
-/// segments, not arbitrary string fragments.
+/// segments, not arbitrary string fragments. Methods match without regard to
+/// case: HTTP methods are case-sensitive on the wire, but common frameworks
+/// (Django, Werkzeug) upper-case them before routing, so `delete` must not
+/// slip past a deny on `DELETE`.
 pub(crate) fn web_grant_matches(grant: &WebGrant, method: &str, path: &str) -> bool {
-    (grant.methods.is_empty() || grant.methods.iter().any(|m| m == method))
+    (grant.methods.is_empty() || grant.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
         && (grant.path_prefixes.is_empty()
             || grant
                 .path_prefixes

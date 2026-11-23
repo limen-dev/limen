@@ -34,9 +34,18 @@ spec:
     spec:
       # LIMEN_DRAIN_TIMEOUT_SECS (20) plus margin.
       terminationGracePeriodSeconds: 40
+      # Distroless nonroot image (uid 65532). Matches the Helm chart's
+      # podSecurityContext and securityContext (the restricted Pod Security level).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: proxy
           image: REPLACE/limen-proxy:REPLACE
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           ports:
             - { name: public, containerPort: 3443 }
             - { name: admin, containerPort: 3444 }

@@ -504,6 +504,40 @@ spec:
     assert!(!policy.web_request_allowed(&roles, "app", "GET", "/admin/secret"));
 }
 
+/// A method the client sends in another case is still the same method to
+/// frameworks that upper-case it, so a deny on `DELETE` refuses `delete`.
+#[test]
+fn web_method_denies_ignore_case() {
+    let role = r#"
+kind: role
+version: v1
+metadata: { name: editor }
+spec:
+  allow:
+    - resources: { kind: [web], names: [app] }
+      web: {}
+  deny:
+    - resources: { kind: [web], names: [app] }
+      web: { methods: [DELETE, POST], path_prefixes: ["/admin"] }
+---
+kind: resource
+version: v1
+metadata: { name: app }
+spec:
+  web: { address: "app:443", host: "app.apps.example.com", tls_ca_file: "/etc/ssl/ca.pem" }
+"#;
+    let policy = Policy::parse_yaml([("web.yaml", role)]).expect("valid web policy");
+    let roles = vec!["editor".to_owned()];
+    assert!(policy.web_request_allowed(&roles, "app", "GET", "/admin/users"));
+    for method in ["DELETE", "delete", "Delete", "post"] {
+        assert!(
+            !policy.web_request_allowed(&roles, "app", method, "/admin/users/7"),
+            "{method} reached a denied path"
+        );
+    }
+    assert!(policy.web_request_allowed(&roles, "app", "delete", "/public"));
+}
+
 /// A deny that narrows a principal (some paths, some databases) leaves the
 /// access usable, so listings and the access diff must still show it: hiding it
 /// let a role that opens a whole resource pass as a change that grants nothing.
