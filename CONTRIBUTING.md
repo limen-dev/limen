@@ -64,6 +64,7 @@ All terminal output goes through `crates/limen-cli/src/ui.rs` (colour, glyphs, t
 ## Rules
 - Security problems are reported privately, never in a public issue or PR: see [SECURITY.md](SECURITY.md).
 - A new dependency needs a row in [ADR-0012](docs/adr/0012-dependency-selection.md).
+- A new advisory ignore in `deny.toml` or `.cargo/audit.toml` is a last resort. Try a version bump first. Otherwise it needs a row in the ADR-0012 "Accepted advisories" table with an exit condition (the upstream fix that lets us delete it), and both files kept in sync.
 - A new entry point, credential type, or data store needs an update to the [threat model](docs/threat-model.md).
 - A change to the audit event envelope must bump `limen_audit::SCHEMA_VERSION`.
 - No `unsafe` (forbidden workspace-wide). Never put secrets in logs: wrap them in the secret newtype.

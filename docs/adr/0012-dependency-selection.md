@@ -81,11 +81,13 @@ A dependency is adopted only if all of these hold:
 
 ## Accepted advisories
 
-| Advisory | Crate (path) | Why it's accepted |
-|---|---|---|
-| RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is no fixed version. Re-evaluate when `openidconnect` drops `rsa` or a fix ships. |
-| RUSTSEC-2026-0459 (C SQLite CVE) | `libsqlite3-sys` (via `sqlx-sqlite`, an optional driver of `sqlx`) | Limen uses `sqlx` with PostgreSQL only. The SQLite driver is never compiled (`cargo tree -i libsqlite3-sys` prints nothing), but `sqlx` lists it as an optional dependency, so it is in `Cargo.lock`, which `cargo audit` scans. `sqlx-sqlite` 0.9.0 requires `libsqlite3-sys` below 0.38 and the fix is 0.39, so no bump is possible until `sqlx` releases one. Re-evaluate on the next `sqlx` release. |
-| RUSTSEC-2026-0543 (unmaintained) | `chrono` (via `oauth2`, `openidconnect`, `russh-util`; direct in `limen-testkit`) | An unmaintained notice, not a vulnerability; no fixed version exists. Three upstream crates depend on it, so it cannot be removed here. Re-evaluate when those crates move to `jiff` or `time`. |
+Every entry needs an exit condition: the upstream change that lets us delete it. Re-check this table when bumping the crates named in it, and delete a row as soon as its condition is met.
+
+| Advisory | Crate (path) | Why it's accepted | Exit condition |
+|---|---|---|---|
+| RUSTSEC-2023-0071 (Marvin attack) | `rsa` (via `openidconnect`) | The attack recovers keys through timing of **private-key** operations. Limen only verifies IdP RS256 ID token signatures with public keys from the IdP's JWKS, and never generates or holds an RSA private key. There is `rsa` 0.10.0 fixes it, but `openidconnect` 4.1.0 still pins `rsa` 0.9, so we can't upgrade it ourselves. | `openidconnect` moves to `rsa` 0.10, which has the fix (issue #227). |
+| RUSTSEC-2026-0459 (C SQLite CVE) | `libsqlite3-sys` (via `sqlx-sqlite`, an optional driver of `sqlx`) | Limen uses `sqlx` with PostgreSQL only. The SQLite driver is never compiled (`cargo tree -i libsqlite3-sys` prints nothing), but `sqlx` lists it as an optional dependency, so it is in `Cargo.lock`, which `cargo audit` scans. `sqlx-sqlite` 0.9.0 requires `libsqlite3-sys` below 0.38 and the fix is 0.39, so no bump is possible until `sqlx` releases one. Re-evaluate on the next `sqlx` release. | A `sqlx` release whose `sqlx-sqlite` accepts `libsqlite3-sys` 0.39 or newer. |
+| RUSTSEC-2026-0543 (unmaintained) | `chrono` (via `oauth2`, `openidconnect`, `russh-util`; direct in `limen-testkit`) | An unmaintained notice, not a vulnerability; no fixed version exists. Three upstream crates depend on it, so it cannot be removed here. Re-evaluate when those crates move to `jiff` or `time`. | `oauth2` and `openidconnect` move to `jiff` (oauth2-rs #256) and `russh-util` drops `chrono`. `limen-testkit` uses `chrono` directly only because `IdTokenClaims::new` takes it. |
 
 ## Terraform registry modules (2026-10-25)
 

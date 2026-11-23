@@ -1,6 +1,6 @@
 # Keep in sync with the ignore list in deny.toml (see ADR-0012).
 [advisories]
 ignore = [
-    "RUSTSEC-2023-0071", # rsa Marvin attack: we only verify RS256 with public keys
-    "RUSTSEC-2026-0459", # libsqlite3-sys: in Cargo.lock only (sqlx's optional SQLite driver), never compiled
+    "RUSTSEC-2023-0071", # rsa Marvin attack: public-key verification only; exit when openidconnect uses rsa >= 0.10
+    "RUSTSEC-2026-0459", # libsqlite3-sys: in Cargo.lock only (sqlx's optional SQLite driver), never compiled; exit when sqlx accepts libsqlite3-sys >= 0.39
 ]
