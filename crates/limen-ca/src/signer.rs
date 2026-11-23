@@ -261,4 +261,79 @@ mod tests {
             assert_eq!(leftovers, 1, "no temporary files left behind");
         }
     }
+
+    /// Where the 32-byte private scalar starts in a PKCS#8 P-256 key: the
+    /// OCTET STRING after `ECPrivateKey`'s version (`02 01 01 04 20`). The
+    /// rest of the key (OIDs, the public point) is also in the certificate,
+    /// so it is public.
+    fn scalar_at(pkcs8: &[u8]) -> usize {
+        pkcs8
+            .windows(5)
+            .position(|w| w == [0x02, 0x01, 0x01, 0x04, 0x20])
+            .expect("an ECPrivateKey")
+            + 5
+    }
+
+    /// Pieces of the private scalar in `out`: 6-byte runs as `Debug` prints a
+    /// byte slice or as hex, and 8-character runs of the PEM body's base64
+    /// that encode only scalar bytes.
+    fn leaks(out: &str, pkcs8: &[u8], pem: &str) -> Vec<String> {
+        let at = scalar_at(pkcs8);
+        let mut needles = Vec::new();
+        for window in pkcs8[at..at + 32].windows(6) {
+            let list = format!("{window:?}");
+            needles.push(list[1..list.len() - 1].to_owned());
+            let hex = window.iter().fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            });
+            needles.push(hex.to_uppercase());
+            needles.push(hex);
+        }
+        // Each 4 base64 characters encode 3 bytes; keep the groups that fall
+        // wholly inside the scalar.
+        let body: Vec<char> = pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .flat_map(str::chars)
+            .collect();
+        let inner = &body[at.div_ceil(3) * 4..(at + 32) / 3 * 4];
+        needles.extend(inner.windows(8).map(|w| w.iter().collect::<String>()));
+        needles.into_iter().filter(|n| out.contains(n)).collect()
+    }
+
+    /// `FileSigner` and the `CertificateAuthority` that holds it both derive
+    /// `Debug`, and the key is a CA's signing key: printing either (a stray
+    /// `?ca` in a log line) must never show it.
+    #[tokio::test]
+    async fn debug_of_a_ca_never_shows_its_signing_key() {
+        let pem = FileSigner::generate().expect("key").key.serialize_pem();
+        let signer = FileSigner::from_pem(&pem).expect("signer");
+        let der = signer.key.serialize_der();
+
+        // The check itself finds a key that is printed, as bytes or as PEM.
+        let scalar = &der[scalar_at(&der)..scalar_at(&der) + 32];
+        assert!(leaks(&format!("{scalar:?}"), &der, &pem).len() > 1);
+        assert!(leaks(&pem, &der, &pem).len() > 1);
+
+        let out = format!("{signer:?} {signer:#?}");
+        assert!(out.contains("FileSigner"), "{out}");
+        let found = leaks(&out, &der, &pem);
+        assert!(found.is_empty(), "CA key in FileSigner Debug: {found:?}");
+
+        let ca = crate::CertificateAuthority::create_self_signed(
+            crate::CaPurpose::Internal,
+            std::sync::Arc::new(signer),
+        )
+        .await
+        .expect("ca");
+        let out = format!("{ca:?} {ca:#?}");
+        assert!(out.contains("CertificateAuthority"), "{out}");
+        let found = leaks(&out, &der, &pem);
+        assert!(
+            found.is_empty(),
+            "CA key in CertificateAuthority Debug: {found:?}"
+        );
+    }
 }
