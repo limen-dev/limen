@@ -1,7 +1,14 @@
 # What a Limen kube worker needs in the cluster it serves (ADR-0038): a service
 # account that can impersonate users, the Limen groups, and the session extra.
-# It can do nothing else: what a user may do is decided by the RoleBindings in
-# limen-groups.yaml, evaluated by the API server for the impersonated identity.
+# What a user may do is decided by the RoleBindings in limen-groups.yaml,
+# evaluated by the API server for the impersonated identity.
+#
+# Kubernetes RBAC can't limit which user names may be impersonated without
+# listing each one, so this account may impersonate any user name. The worker
+# refuses `system:` names itself, but anyone holding this service account's
+# token could act as any user bound directly in the cluster. Keep the token
+# to the worker, and in clusters the worker serves, bind roles to groups
+# rather than to individual User subjects.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -18,6 +25,7 @@ kind: ClusterRole
 metadata:
   name: limen-impersonator
 rules:
+  # Any user name: see the note at the top.
   - apiGroups: [""]
     resources: ["users"]
     verbs: ["impersonate"]

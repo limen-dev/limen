@@ -122,12 +122,15 @@ impl RequestInfo {
         }
         // `namespaces/<ns>/<resource>...` scopes the request; `namespaces/<name>`
         // (and its `finalize` and `status`) is the Namespace resource itself.
-        if let ["namespaces", ns, tail @ ..] = rest
-            && !tail.is_empty()
-            && !matches!(tail, ["finalize" | "status"])
-        {
+        // Either way the API server records `<ns>` as the namespace, so a
+        // namespace's own deletion is found by a search for that namespace.
+        if let ["namespaces", ns, tail @ ..] = rest {
             (*ns).clone_into(&mut info.namespace);
-            rest = tail;
+            if let [first, ..] = tail
+                && !matches!(*first, "finalize" | "status")
+            {
+                rest = tail;
+            }
         }
         if let [resource, tail @ ..] = rest {
             (*resource).clone_into(&mut info.resource);
@@ -213,12 +216,26 @@ mod tests {
         let i = parse("GET", "/api/v1/namespaces/dev");
         assert_eq!(
             (i.namespace.as_str(), i.resource.as_str(), i.name.as_str()),
-            ("", "namespaces", "dev")
+            ("dev", "namespaces", "dev")
+        );
+        let i = parse("DELETE", "/api/v1/namespaces/prod");
+        assert_eq!(
+            (i.verb.as_str(), i.namespace.as_str(), i.name.as_str()),
+            ("delete", "prod", "prod")
         );
         let i = parse("PUT", "/api/v1/namespaces/dev/status");
         assert_eq!(
-            (i.resource.as_str(), i.subresource.as_str()),
-            ("namespaces", "status")
+            (
+                i.namespace.as_str(),
+                i.resource.as_str(),
+                i.subresource.as_str()
+            ),
+            ("dev", "namespaces", "status")
+        );
+        let i = parse("PUT", "/api/v1/namespaces/dev/finalize");
+        assert_eq!(
+            (i.namespace.as_str(), i.subresource.as_str()),
+            ("dev", "finalize")
         );
         let i = parse("GET", "/api/v1/namespaces");
         assert_eq!(

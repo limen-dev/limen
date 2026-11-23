@@ -412,6 +412,54 @@ mod tests {
         );
     }
 
+    /// Each time check holds to the second: the last second inside a limit is
+    /// accepted and the first one past it is refused, for the deadline, the
+    /// clock skew on the issue time, and the length of the establish window.
+    #[tokio::test]
+    async fn time_limits_hold_to_the_second() {
+        let f = fixture().await;
+        let proxy = component(&f.internal, ComponentKind::Proxy, "p1").await;
+        let (cert, login) = user_cert(&f.user_ca).await;
+        let now = OffsetDateTime::now_utc();
+        let n = now.unix_timestamp();
+        let max_window = ESTABLISH_WITHIN.as_secs().cast_signed() + CLOCK_SKEW_SECS;
+        assert_eq!(max_window, 180, "the window this test pins");
+        let at = |issued: i64, by: i64, when: OffsetDateTime| {
+            let mut g = grant(cert.clone(), login.clone(), "p1");
+            g.issued_at_unix = issued;
+            g.establish_by_unix = by;
+            verify_grant(
+                &sign(&proxy, &g).expect("sign"),
+                f.internal.cert_der(),
+                f.user_ca.cert_der(),
+                when,
+            )
+        };
+        let one = time::Duration::seconds(1);
+
+        // The deadline itself is still in time; a second later is not.
+        assert!(at(n - 60, n, now).is_ok(), "at establish_by");
+        assert_eq!(refusal(at(n - 60, n, now + one)), "expired");
+
+        // An issue time up to the allowed skew ahead of the verifier's clock
+        // is accepted; one second more is from the future.
+        let skew = CLOCK_SKEW_SECS;
+        assert!(at(n + skew, n + skew + 60, now).is_ok(), "at the skew");
+        assert_eq!(
+            refusal(at(n + skew + 1, n + skew + 61, now)),
+            "issued in the future"
+        );
+
+        // The longest window allowed, and one second longer.
+        assert!(at(n, n + max_window, now).is_ok(), "the longest window");
+        assert_eq!(
+            refusal(at(n, n + max_window + 1, now)),
+            "establish window longer than allowed"
+        );
+        // A zero-length window (issued at its own deadline) is a window.
+        assert!(at(n, n, now).is_ok(), "a zero-length window");
+    }
+
     #[tokio::test]
     async fn a_payload_that_is_not_a_grant_is_malformed() {
         let f = fixture().await;
