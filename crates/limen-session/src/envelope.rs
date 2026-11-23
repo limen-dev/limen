@@ -512,4 +512,68 @@ mod tests {
             .verify(format!("{header}.{payload}").as_bytes(), &raw)
             .expect("JWT signature verifies");
     }
+
+    /// Where the 32-byte private scalar starts in a PKCS#8 P-256 key: the
+    /// OCTET STRING after `ECPrivateKey`'s version (`02 01 01 04 20`). The
+    /// rest of the key (OIDs, the public point) is also in the certificate,
+    /// so it is public.
+    fn scalar_at(pkcs8: &[u8]) -> usize {
+        pkcs8
+            .windows(5)
+            .position(|w| w == [0x02, 0x01, 0x01, 0x04, 0x20])
+            .expect("an ECPrivateKey")
+            + 5
+    }
+
+    /// Pieces of the private scalar in `out`: 6-byte runs as `Debug` prints a
+    /// byte slice or as hex, and 8-character runs of the PEM body's base64
+    /// that encode only scalar bytes.
+    fn leaks(out: &str, pkcs8: &[u8], pem: &str) -> Vec<String> {
+        let at = scalar_at(pkcs8);
+        let mut needles = Vec::new();
+        for window in pkcs8[at..at + 32].windows(6) {
+            let list = format!("{window:?}");
+            needles.push(list[1..list.len() - 1].to_owned());
+            let hex = window.iter().fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            });
+            needles.push(hex.to_uppercase());
+            needles.push(hex);
+        }
+        // Each 4 base64 characters encode 3 bytes; keep the groups that fall
+        // wholly inside the scalar.
+        let body: Vec<char> = pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .flat_map(str::chars)
+            .collect();
+        let inner = &body[at.div_ceil(3) * 4..(at + 32) / 3 * 4];
+        needles.extend(inner.windows(8).map(|w| w.iter().collect::<String>()));
+        needles.into_iter().filter(|n| out.contains(n)).collect()
+    }
+
+    /// Every component holds an `EnvelopeSigner` with its own private key,
+    /// and the type derives `Debug`: printing it must never show that key.
+    #[test]
+    fn debug_of_an_envelope_signer_never_shows_the_private_key() {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
+        let cert = CertificateParams::default()
+            .self_signed(&key)
+            .expect("certificate");
+        let pem = key.serialize_pem();
+        let der = key.serialize_der();
+        let signer = EnvelopeSigner::new(&pem, cert.der().to_vec()).expect("envelope signer");
+
+        // The check itself finds a key that is printed, as bytes or as PEM.
+        let scalar = &der[scalar_at(&der)..scalar_at(&der) + 32];
+        assert!(leaks(&format!("{scalar:?}"), &der, &pem).len() > 1);
+        assert!(leaks(&pem, &der, &pem).len() > 1);
+
+        let out = format!("{signer:?} {signer:#?}");
+        assert!(out.contains("EnvelopeSigner"), "{out}");
+        let found = leaks(&out, &der, &pem);
+        assert!(found.is_empty(), "private key in Debug output: {found:?}");
+    }
 }
