@@ -38,6 +38,11 @@ pub enum ShipError {
 pub struct ConsumerConfig {
     pub name: String,
     pub batch_max: usize,
+    /// Stop filling a batch once its records hold this many bytes. A batch
+    /// always has at least one record, so a single large record still ships.
+    /// Keep it under what the receiver accepts: a batch it refuses for size is
+    /// the same batch on every retry, and shipping would never move on.
+    pub batch_max_bytes: usize,
     /// Wait this long for a batch to fill before shipping what there is.
     pub linger: Duration,
 }
@@ -56,6 +61,22 @@ async fn flipped(rx: &mut tokio::sync::watch::Receiver<bool>, closed_means_set: 
             std::future::pending::<()>().await;
         }
     }
+}
+
+/// Drop records from the end of `batch` until it fits in `max_bytes`, keeping
+/// at least one. Returns whether anything was dropped.
+fn cap_bytes(batch: &mut Vec<(u64, Vec<u8>)>, max_bytes: usize) -> bool {
+    let mut total = 0usize;
+    let keep = batch
+        .iter()
+        .position(|(_, r)| {
+            total = total.saturating_add(r.len());
+            total > max_bytes
+        })
+        .map_or(batch.len(), |i| i.max(1));
+    let capped = keep < batch.len();
+    batch.truncate(keep);
+    capped
 }
 
 // Metrics take f64; precision loss past 2^52 records is irrelevant.
@@ -87,7 +108,7 @@ pub async fn run_consumer<F, Fut>(
             return;
         }
         let stopping = *shutdown.borrow() || shutdown.has_changed().is_err();
-        let batch = match spool.read(&config.name, config.batch_max) {
+        let mut batch = match spool.read(&config.name, config.batch_max) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!(consumer = %config.name, error = %e, "spool read failed");
@@ -113,15 +134,22 @@ pub async fn run_consumer<F, Fut>(
         // batch is acked by the producers but not shipped yet.
         metrics::gauge!("limen_audit_spool_pending", "consumer" => config.name.clone())
             .set(spool.pending(&config.name) as f64);
+        let full_by_bytes = cap_bytes(&mut batch, config.batch_max_bytes);
         // Give a small batch a moment to grow, unless it's already full or
         // we are draining.
-        let batch = if batch.len() < config.batch_max && !config.linger.is_zero() && !stopping {
+        let batch = if batch.len() < config.batch_max
+            && !full_by_bytes
+            && !config.linger.is_zero()
+            && !stopping
+        {
             tokio::select! {
                 () = tokio::time::sleep(config.linger) => {}
                 () = flipped(&mut shutdown, true) => {}
                 () = flipped(&mut deadline, false) => {}
             }
-            spool.read(&config.name, config.batch_max).unwrap_or(batch)
+            let mut grown = spool.read(&config.name, config.batch_max).unwrap_or(batch);
+            cap_bytes(&mut grown, config.batch_max_bytes);
+            grown
         } else {
             batch
         };
@@ -207,6 +235,7 @@ mod tests {
             ConsumerConfig {
                 name: "out".into(),
                 batch_max: 10,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::ZERO,
             },
             move |batch| {
@@ -267,6 +296,7 @@ mod tests {
             ConsumerConfig {
                 name: "out".into(),
                 batch_max: 10,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::ZERO,
             },
             move |_batch| {
@@ -309,6 +339,7 @@ mod tests {
             ConsumerConfig {
                 name: "lingering".into(),
                 batch_max: 100,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::from_secs(60),
             },
             |_| async { Ok(()) },
@@ -350,6 +381,7 @@ mod tests {
         ConsumerConfig {
             name: "out".into(),
             batch_max,
+            batch_max_bytes: usize::MAX,
             linger: Duration::from_millis(50),
         }
     }
@@ -423,5 +455,55 @@ mod tests {
             .expect("a send that never returns can't hang shutdown")
             .expect("join");
         assert_eq!(spool.pending("out"), 5);
+    }
+
+    #[test]
+    fn cap_bytes_keeps_a_prefix_and_at_least_one_record() {
+        let rec = |i: u64, n: usize| (i, vec![0u8; n]);
+        let mut b = vec![rec(0, 4), rec(1, 4), rec(2, 4)];
+        assert!(cap_bytes(&mut b, 9));
+        assert_eq!(b.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [0, 1]);
+        let mut b = vec![rec(0, 4), rec(1, 4)];
+        assert!(!cap_bytes(&mut b, 8), "exactly at the budget is kept");
+        assert_eq!(b.len(), 2);
+        let mut b = vec![rec(0, 100), rec(1, 1)];
+        assert!(cap_bytes(&mut b, 10));
+        assert_eq!(b.len(), 1, "an oversized first record still ships alone");
+    }
+
+    #[tokio::test]
+    async fn a_byte_budget_splits_batches_without_losing_records() {
+        let dir = tempfile::tempdir().expect("dir");
+        let spool = spool_with(dir.path(), 25).await;
+        let sizes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (_tx, rx) = tokio::sync::watch::channel(true); // drain and return
+        let (_dtx, drx) = tokio::sync::watch::channel(false);
+        let s = Arc::clone(&sizes);
+        let mut cfg = config(500);
+        // Records are 4 bytes each: at most 2 fit under 10 bytes.
+        cfg.batch_max_bytes = 10;
+        run_consumer(
+            spool.clone(),
+            cfg,
+            move |batch| {
+                let s = Arc::clone(&s);
+                async move {
+                    let bytes: usize = batch.iter().map(|(_, r)| r.len()).sum();
+                    if bytes > 10 {
+                        // Like a receiver with a message size limit.
+                        return Err(ShipError::Retry("too large".into()));
+                    }
+                    s.lock().expect("lock").push(batch.len());
+                    Ok(())
+                }
+            },
+            rx,
+            drx,
+        )
+        .await;
+        let sizes = sizes.lock().expect("lock").clone();
+        assert_eq!(sizes.iter().sum::<usize>(), 25);
+        assert!(sizes.iter().all(|&n| n <= 2), "{sizes:?}");
+        assert_eq!(spool.pending("out"), 0);
     }
 }
