@@ -1,5 +1,6 @@
 # Build output and local state
 target/
+**/target/
 .git/
 .claude/
 deploy/compose/.state/
@@ -17,6 +18,12 @@ examples/
 scripts/
 deploy/compose/
 deploy/grafana/
+deploy/helm/
 deploy/kubernetes/
+deploy/prometheus/
 deploy/terraform/
+# Its own workspace (nightly, fuzz/target can grow to gigabytes) and the docs site
+# (node_modules, dist) are not part of the image either.
+fuzz/
+website/
 **/*.md
