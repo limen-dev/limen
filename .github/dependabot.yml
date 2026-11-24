@@ -1,7 +1,11 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: /
+    # fuzz/ is its own workspace with its own Cargo.lock; without it here the
+    # fuzzers keep building against old (and advisory-flagged) versions.
+    directories:
+      - /
+      - /fuzz
     schedule:
       interval: weekly
     commit-message:

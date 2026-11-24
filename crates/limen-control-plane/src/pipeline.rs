@@ -434,6 +434,7 @@ impl Pipeline {
             ConsumerConfig {
                 name: CONSOLE.into(),
                 batch_max: 500,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::from_millis(200),
             },
             move |batch| project(db.clone(), batch),
@@ -442,6 +443,7 @@ impl Pipeline {
             let consumer = ConsumerConfig {
                 name: JSONL.into(),
                 batch_max: 500,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::ZERO,
             };
             self.spawn_consumer(consumer, move |batch| write_jsonl(path.clone(), batch));
@@ -450,6 +452,7 @@ impl Pipeline {
             let consumer = ConsumerConfig {
                 name: S3.into(),
                 batch_max: 10_000,
+                batch_max_bytes: usize::MAX,
                 linger: self.config.audit_s3_flush,
             };
             let fenced = Arc::clone(&self.fenced);
@@ -467,6 +470,7 @@ impl Pipeline {
             let consumer = ConsumerConfig {
                 name: DATADOG.into(),
                 batch_max: 1000,
+                batch_max_bytes: usize::MAX,
                 linger: Duration::from_secs(1),
             };
             self.spawn_consumer(consumer, move |batch| {
@@ -478,6 +482,7 @@ impl Pipeline {
             let consumer = ConsumerConfig {
                 name: OCSF.into(),
                 batch_max: 1000,
+                batch_max_bytes: usize::MAX,
                 linger: self.config.audit_ocsf_s3_flush,
             };
             let spool = self.spool.clone();

@@ -277,6 +277,10 @@ pub async fn login_callback(
     }
     // The app sees these roles (the certificate, the identity assertion and
     // `X-Limen-Roles`), so a role an access review took away is not among them.
+    // `users.roles` keeps what the IdP gives: the review tick lifts an override
+    // once a login no longer holds the role, so storing the filtered list
+    // would read as the IdP change having been made.
+    let idp_roles = roles.clone();
     let roles = without_denied(roles, &effective.roles);
 
     let login_id = Uuid::now_v7();
@@ -326,7 +330,7 @@ pub async fn login_callback(
         &state.db,
         &identity.username,
         &identity.subject,
-        &roles,
+        &idp_roles,
         &identity.groups,
     )
     .await

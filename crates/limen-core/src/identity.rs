@@ -29,9 +29,15 @@ pub fn bot_username(name: &str) -> String {
     format!("{BOT_PREFIX}{name}")
 }
 
+/// Whether `username` is in the bot namespace. Case insensitive, like
+/// [`is_selftest`]: the database compares user names with `lower()`, so a
+/// person signing in as `BOT:deploy` would otherwise share `bot:deploy`'s
+/// locks, approvals and records.
 #[must_use]
 pub fn is_bot(username: &str) -> bool {
-    username.starts_with(BOT_PREFIX)
+    username
+        .get(..BOT_PREFIX.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(BOT_PREFIX))
 }
 
 /// The scheduled self-test's principal is `selftest:<probe>` (ADR-0053). No
@@ -249,6 +255,16 @@ mod tests {
     fn no_person_may_sign_in_under_a_reserved_name() {
         assert!(is_reserved("bot:x") && is_reserved("SelfTest:x"));
         assert!(!is_reserved("alice@example.com"));
+    }
+
+    #[test]
+    fn the_bot_namespace_is_reserved_in_any_case() {
+        for name in ["bot:deploy", "BOT:deploy", "Bot:x", "bOt:"] {
+            assert!(is_bot(name) && is_reserved(name), "{name}");
+        }
+        for name in ["bot", "bo", "xbot:a", "", "robot:a", "é"] {
+            assert!(!is_bot(name), "{name}");
+        }
     }
 
     #[test]

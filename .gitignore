@@ -3,6 +3,8 @@
 .DS_Store
 # Local dev state
 /.limen/
+# Agent worktrees (AGENTS.md: git worktree add .claude/worktrees/<topic>)
+/.claude/worktrees/
 *.pem
 *.key
 !deploy/compose/**/*.pub

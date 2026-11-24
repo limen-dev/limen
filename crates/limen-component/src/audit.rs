@@ -58,6 +58,8 @@ pub async fn ship_until<F>(
     let consumer = ConsumerConfig {
         name: TO_CONTROL_PLANE.into(),
         batch_max: 500,
+        // The control plane refuses an ingest request over 8 MiB.
+        batch_max_bytes: 4 * 1024 * 1024,
         linger: Duration::from_millis(50),
     };
     run_consumer(
