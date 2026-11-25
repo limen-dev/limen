@@ -141,7 +141,7 @@ workerDefaults:
   maxSessions: 200
   # -- How long a worker lets open sessions finish on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS).
   drainTimeoutSecs: 300
-  # -- Must exceed drainTimeoutSecs plus about 20 s to upload recordings. The chart refuses a smaller value.
+  # -- Must exceed drainTimeoutSecs plus about 20 s to upload recordings. The chart refuses a value at or below drainTimeoutSecs; the 20 s margin is up to you.
   terminationGracePeriodSeconds: 330
   # -- Prefix of each worker's name. REQUIRED.
   namePrefix: ""
