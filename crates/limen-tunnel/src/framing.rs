@@ -65,4 +65,71 @@ mod tests {
             .expect_err("too large");
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
+
+    fn request_of_encoded_len(len: usize) -> SessionRequest {
+        // Field 1 (tag byte) + a two-byte varint length + the string.
+        let req = SessionRequest {
+            resource: "r".repeat(len - 3),
+            ..SessionRequest::default()
+        };
+        assert_eq!(req.encoded_len(), len, "the fixture's size is exact");
+        req
+    }
+
+    /// The limit is inclusive on both sides: a message of exactly
+    /// `MAX_MESSAGE` bytes goes through, one byte more is refused by the
+    /// writer before anything reaches the stream.
+    #[tokio::test]
+    async fn the_size_limit_holds_to_the_byte_on_both_sides() {
+        let max = MAX_MESSAGE as usize;
+        let (mut a, mut b) = tokio::io::duplex(64 * 1024);
+        let at_limit = request_of_encoded_len(max);
+        write_message(&mut a, &at_limit)
+            .await
+            .expect("at the limit");
+        let got: SessionRequest = read_message(&mut b).await.expect("read at the limit");
+        assert_eq!(got, at_limit);
+
+        let over = request_of_encoded_len(max + 1);
+        write_message(&mut a, &over)
+            .await
+            .expect_err("one byte over");
+        drop(a);
+        // Nothing was written for the refused message, not even its length.
+        let mut rest = Vec::new();
+        b.read_to_end(&mut rest).await.expect("read rest");
+        assert!(rest.is_empty(), "wrote {} bytes", rest.len());
+    }
+
+    /// A peer that sends less than it announced, or bytes that are not the
+    /// message, gets an error rather than a default (empty) request.
+    #[tokio::test]
+    async fn truncated_or_malformed_messages_are_errors() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        a.write_all(&10u32.to_be_bytes()).await.expect("len");
+        a.write_all(b"short").await.expect("body");
+        drop(a);
+        let err = read_message::<_, SessionRequest>(&mut b)
+            .await
+            .expect_err("truncated");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        // A length-delimited field that runs past the end of the message.
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        a.write_all(&2u32.to_be_bytes()).await.expect("len");
+        a.write_all(&[0x0a, 0x7f]).await.expect("body");
+        let err = read_message::<_, SessionRequest>(&mut b)
+            .await
+            .expect_err("malformed");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        // A cut-off length prefix is an error too.
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        a.write_all(&[0, 0]).await.expect("half a length");
+        drop(a);
+        let err = read_message::<_, SessionRequest>(&mut b)
+            .await
+            .expect_err("half a length");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
 }
