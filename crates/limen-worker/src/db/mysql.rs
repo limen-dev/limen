@@ -898,6 +898,19 @@ where
             COM_QUERY => {
                 let text = String::from_utf8_lossy(body).into_owned();
                 let statements = sqltext::split(&text, audit.flavor());
+                if hides_statements(&statements) {
+                    audit.action(Phase::Refused, "unknown").await?;
+                    reply(
+                        client,
+                        seq.wrapping_add(1),
+                        1064,
+                        "42000",
+                        "Limen could not read this query to check it for USE or KILL; \
+                         send the statements one at a time",
+                    )
+                    .await?;
+                    continue;
+                }
                 if statements.iter().any(|s| s.kind == "use") {
                     audit.action(Phase::Refused, "use").await?;
                     reply(
@@ -1077,6 +1090,19 @@ where
         }
         client.flush().await?;
     }
+}
+
+/// Text the worker could not tokenize (an unterminated literal or comment, a
+/// `\'` read differently under `NO_BACKSLASH_ESCAPES`) is one `unknown`
+/// statement, so the USE and KILL guards see nothing. With multi-statement
+/// mode the server still runs every statement before the one it can't parse:
+/// `KILL 5; SELECT '` would kill another session. A `;` anywhere in such text
+/// could start a second statement, so it is refused. A single unreadable
+/// statement is passed on: the server rejects what it can't parse either.
+fn hides_statements(statements: &[Statement]) -> bool {
+    statements
+        .iter()
+        .any(|s| s.kind == "unknown" && s.text.contains(';'))
 }
 
 enum Kill {
@@ -1332,6 +1358,30 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The guards can't see into text that doesn't tokenize, and the server
+    /// runs the statements before its own parse error.
+    #[test]
+    fn statements_cannot_hide_in_untokenizable_text() {
+        use super::sqltext::{Flavor, split};
+        let hides = |sql: &str| hides_statements(&split(sql, Flavor::Mysql));
+        for hidden in [
+            "KILL 5; SELECT '",
+            "USE other; SELECT 'x",
+            "PREPARE s FROM 'KILL 5'; SELECT \"",
+            "SELECT 1; /* unterminated",
+        ] {
+            assert!(hides(hidden), "{hidden}");
+        }
+        for plain in [
+            "SELECT 'unterminated",
+            "SELECT 1; SELECT 2",
+            "SELECT 'a;b'",
+            "KILL 5",
+        ] {
+            assert!(!hides(plain), "{plain}");
+        }
+    }
 
     /// `KILL n` takes a connection id, which is only translated to the
     /// session's own for a plain statement. Inside a prepared statement the id
