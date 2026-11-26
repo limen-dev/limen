@@ -156,6 +156,12 @@ impl Enrollment for EnrollmentService {
             }
         };
         if let Some(bad) = req.dns_names.iter().find(|n| !allowed_dns.contains(n)) {
+            // Someone holding a valid token asked for a certificate for a
+            // host name it doesn't allow: record it like the other refusals.
+            // Rolls back first, so a single-use token stays usable.
+            drop(tx);
+            tracing::warn!(kind = %req.kind, dns_name = ?bad, addr = ?caller.addr(), "enrollment rejected: DNS name not allowed by the join token");
+            self.audit_denial(json!({ "action": "enroll", "kind": req.kind, "reason": "DNS name not allowed by join token", "dns_name": bad, "token_type": token_type, "client_addr": caller.addr().map(|a| a.to_string()) })).await;
             return Err(Status::permission_denied(format!(
                 "DNS name {bad:?} is not allowed by this join token"
             )));
