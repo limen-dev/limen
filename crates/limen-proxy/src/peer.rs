@@ -408,6 +408,110 @@ mod tests {
         assert!(PeerState::cached_channel(&channels, "p2", "10.0.0.1:3443").is_none());
     }
 
+    async fn ca(purpose: limen_ca::CaPurpose) -> limen_ca::CertificateAuthority {
+        limen_ca::CertificateAuthority::create_self_signed(
+            purpose,
+            Arc::new(limen_ca::FileSigner::generate().expect("key")),
+        )
+        .await
+        .expect("ca")
+    }
+
+    fn csr() -> Vec<u8> {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("key");
+        rcgen::CertificateParams::default()
+            .serialize_request(&key)
+            .expect("csr")
+            .der()
+            .to_vec()
+    }
+
+    async fn component(
+        ca: &limen_ca::CertificateAuthority,
+        kind: ComponentKind,
+        id: &str,
+    ) -> CertificateDer<'static> {
+        ca.issue_component(limen_ca::ComponentCertRequest {
+            csr_der: csr(),
+            kind,
+            id: id.into(),
+            dns_names: vec!["localhost".into()],
+            labels: std::collections::BTreeMap::new(),
+            ttl: Duration::from_secs(600),
+        })
+        .await
+        .expect("issue")
+        .der
+    }
+
+    /// The client side of peering trusts exactly one peer: a proxy
+    /// certificate from the internal CA carrying the ID the registry named.
+    /// Anything else (another proxy, a worker, a user, a foreign CA) must
+    /// fail the handshake, whatever host name was dialled.
+    #[tokio::test]
+    async fn the_peer_verifier_accepts_only_the_expected_proxy() {
+        use limen_ca::CaPurpose;
+        let internal = ca(CaPurpose::Internal).await;
+        let rogue = ca(CaPurpose::Internal).await;
+        let users = ca(CaPurpose::UserX509).await;
+        let verifier = PeerVerifier {
+            internal_ca: internal.cert_der().clone(),
+            expected_id: "proxy-2".into(),
+            provider: limen_tunnel::tls::provider(),
+        };
+        let check = |cert: &CertificateDer<'_>| {
+            verifier.verify_server_cert(
+                cert,
+                &[],
+                &ServerName::try_from("peer.limen.invalid").expect("name"),
+                &[],
+                UnixTime::now(),
+            )
+        };
+
+        let expected = component(&internal, ComponentKind::Proxy, "proxy-2").await;
+        check(&expected).expect("the expected peer is accepted");
+
+        let refused = [
+            (
+                "another proxy",
+                component(&internal, ComponentKind::Proxy, "proxy-3").await,
+            ),
+            (
+                "a worker with the expected id",
+                component(&internal, ComponentKind::Worker, "proxy-2").await,
+            ),
+            (
+                "the control plane",
+                component(&internal, ComponentKind::ControlPlane, "proxy-2").await,
+            ),
+            (
+                "the expected id from a foreign CA",
+                component(&rogue, ComponentKind::Proxy, "proxy-2").await,
+            ),
+        ];
+        for (what, cert) in &refused {
+            assert!(check(cert).is_err(), "{what} must be refused");
+        }
+
+        let user = users
+            .issue_user(limen_ca::UserCertRequest {
+                csr_der: csr(),
+                username: "proxy-2".into(),
+                roles: vec![],
+                login_id: uuid::Uuid::now_v7(),
+                ttl: Duration::from_secs(60),
+                ci: None,
+            })
+            .await
+            .expect("issue user");
+        assert!(check(&user.der).is_err(), "a user certificate is refused");
+        assert!(
+            check(&CertificateDer::from(vec![0x30, 0x03, 0x02, 0x01, 0x01])).is_err(),
+            "garbage is refused"
+        );
+    }
+
     #[tokio::test]
     async fn renewal_forgets_every_peer_channel() {
         let state = PeerState::default();

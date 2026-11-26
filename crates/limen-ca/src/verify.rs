@@ -672,6 +672,63 @@ mod tests {
         assert!(verify_component(&issued.der, user_ca.cert_der(), false).is_err());
     }
 
+    /// The proxy trusts both the user CA and the internal CA at the TLS
+    /// layer, so the route checks must pin the issuer: a component
+    /// certificate from a second internal CA, and a user certificate whose
+    /// name looks like a component, are refused as chain errors in both key
+    /// usages, live and as of a past time.
+    #[tokio::test]
+    async fn component_certs_from_any_other_ca_are_refused() {
+        let internal = ca(CaPurpose::Internal).await;
+        let rogue = ca(CaPurpose::Internal).await;
+        let user_ca = ca(CaPurpose::UserX509).await;
+        let forged = rogue
+            .issue_component(ComponentCertRequest {
+                csr_der: csr().1,
+                kind: ComponentKind::Proxy,
+                id: "proxy-1".into(),
+                dns_names: vec!["localhost".into()],
+                labels: std::collections::BTreeMap::new(),
+                ttl: Duration::from_secs(600),
+            })
+            .await
+            .expect("issue");
+        let user = user_ca
+            .issue_user(UserCertRequest {
+                csr_der: csr().1,
+                username: "proxy-1".into(),
+                roles: vec!["limen:admin".into()],
+                login_id: Uuid::now_v7(),
+                ttl: Duration::from_secs(60),
+                ci: None,
+            })
+            .await
+            .expect("issue");
+        // The rogue CA's own certificate verifies its component (the
+        // certificate itself is well formed), so the refusals below are
+        // about the issuer.
+        verify_component(&forged.der, rogue.cert_der(), true).expect("own CA");
+        let now = OffsetDateTime::now_utc();
+        for (what, cert) in [("rogue component", &forged.der), ("user", &user.der)] {
+            for server in [false, true] {
+                assert!(
+                    matches!(
+                        verify_component(cert, internal.cert_der(), server),
+                        Err(VerifyError::Chain(_))
+                    ),
+                    "{what} (server: {server})"
+                );
+                assert!(
+                    matches!(
+                        verify_component_at(cert, internal.cert_der(), server, now),
+                        Err(VerifyError::Chain(_))
+                    ),
+                    "{what} at (server: {server})"
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn component_cert_has_dns_and_identity() {
         let internal = ca(CaPurpose::Internal).await;
