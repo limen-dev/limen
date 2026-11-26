@@ -190,6 +190,14 @@ fn one_line(s: &str) -> String {
         .collect()
 }
 
+/// Print one line of a verification result. The text quotes what is being
+/// verified (object keys, writer and section names, a report's own fields),
+/// which whoever tampered with it chose: it must not be able to move the
+/// cursor and overwrite a `PROBLEM` line with an `OK`.
+fn say(line: &str) {
+    eprintln!("{}", one_line(line));
+}
+
 /// The CA manifests and packs must be signed under: `--ca-file`, else the one
 /// pinned at login. Never anything Limen sends along with the data.
 fn trusted_ca(
@@ -269,14 +277,14 @@ async fn verify_bucket(
         eprintln!("OK: every batch is present, unmodified, signed, and chained");
     } else {
         for p in &report.problems {
-            eprintln!("PROBLEM: {p}");
+            say(&format!("PROBLEM: {p}"));
         }
     }
     if report.seq_gaps.is_empty() {
         eprintln!("OK: no producer has a sequence gap");
     } else {
         for g in &report.seq_gaps {
-            eprintln!("GAP: {g}");
+            say(&format!("GAP: {g}"));
         }
         eprintln!(
             "  (a gap is an event that was not recorded or not shipped; under fail_closed a refused action's failed emit also leaves one)"
@@ -286,7 +294,7 @@ async fn verify_bucket(
         eprintln!("OK: no sequence number is used by two events");
     } else {
         for c in &report.seq_conflicts {
-            eprintln!("CONFLICT: {c}");
+            say(&format!("CONFLICT: {c}"));
         }
     }
     if report.ok() {
@@ -323,21 +331,21 @@ fn verify_evidence(
         }
     }
     if let Some(m) = &v.manifest {
-        eprintln!(
+        say(&format!(
             "pack for {} to {}, {} sections, exported by {} from {}",
             m.from,
             m.to,
             m.files.len(),
             m.requested_by,
             m.control_plane
-        );
+        ));
     }
     if problems.is_empty() {
         eprintln!("OK: the manifest is signed by the control plane and every section matches it");
         Ok(())
     } else {
         for p in &problems {
-            eprintln!("PROBLEM: {p}");
+            say(&format!("PROBLEM: {p}"));
         }
         std::process::exit(2);
     }
@@ -376,7 +384,7 @@ fn verify_controls(
     let mut failed = false;
     let mut skipped = false;
     if let Some(run) = &v.run {
-        eprintln!(
+        say(&format!(
             "run {} ({}) by {}, {} to {}, policy version {}",
             run.meta.run_id,
             run.meta.trigger,
@@ -384,25 +392,25 @@ fn verify_controls(
             run.meta.started_at,
             run.meta.finished_at,
             run.meta.policy_version
-        );
+        ));
         for c in &run.checks {
             let word = match c.status {
                 Status::Passed => "PASSED ",
                 Status::Failed => "FAILED ",
                 Status::Skipped => "SKIPPED",
             };
-            eprintln!("{word} {}: {}", c.id, one_line(&c.detail));
+            say(&format!("{word} {}: {}", c.id, c.detail));
         }
         let counts = Counts::of(&run.checks);
         failed = counts.failed > 0;
         skipped = counts.skipped > 0;
-        eprintln!(
+        say(&format!(
             "{} passed, {} failed, {} skipped. {}",
             counts.passed, counts.failed, counts.skipped, run.meta.attestation
-        );
+        ));
     }
     for p in &problems {
-        eprintln!("PROBLEM: {p}");
+        say(&format!("PROBLEM: {p}"));
     }
     if problems.is_empty() && !failed && !(strict && skipped) {
         eprintln!("OK: the report is signed by the control plane and every section matches it");
