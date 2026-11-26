@@ -261,6 +261,39 @@ pub(crate) fn add_names(
 pub(crate) struct SessionWorker {
     pub(crate) id: String,
     pub(crate) name: Option<String>,
+    /// The peer proxy the session runs through, when the worker's tunnel is
+    /// held by another proxy. Revoking that proxy ends the session too.
+    pub(crate) via: Option<String>,
+}
+
+/// Why a live session must end now, if it must: an admin lock, kill, or
+/// logout; a revoked worker, or a revoked peer proxy the session runs
+/// through; or a grant it relied on that was revoked or reached its deadline.
+/// Checked every second against the cached snapshot.
+pub(crate) fn must_end(
+    restrictions: &limen_session::snapshot::Restrictions,
+    user: (&str, &str),
+    session_id: &str,
+    worker: (&str, Option<&str>),
+    request_ids: &[String],
+    now_unix: i64,
+) -> Option<&'static str> {
+    let (username, login_id) = user;
+    let (worker_id, via) = worker;
+    if let Some(why) = restrictions.blocks(username, login_id, session_id) {
+        return Some(why);
+    }
+    if restrictions.is_revoked(worker_id) {
+        return Some("worker revoked");
+    }
+    if via.is_some_and(|p| restrictions.is_revoked(p)) {
+        return Some("peer proxy revoked");
+    }
+    // Expiry is enforced here, not only when credentials are issued.
+    if !request_ids.is_empty() && restrictions.grant_ended(request_ids, now_unix) {
+        return Some("access grant ended");
+    }
+    None
 }
 
 pub(crate) struct Denial {
@@ -667,6 +700,10 @@ pub(crate) async fn open_session(
         .await?;
         let worker_id = route.worker_id().to_owned();
         let worker_name = route.worker_name().map(str::to_owned);
+        let via = match &route {
+            Route::Local { .. } => None,
+            Route::Peer(remote) => Some(remote.proxy_id.clone()),
+        };
         let grant = SessionGrant {
             session_id: session_id.to_string(),
             username: user.username.clone(),
@@ -693,6 +730,7 @@ pub(crate) async fn open_session(
                 let worker = SessionWorker {
                     id: worker_id,
                     name: worker_name,
+                    via,
                 };
                 return Ok((session_id, worker, inbound, outbound, slot));
             }
@@ -989,28 +1027,17 @@ async fn relay<IO>(
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         loop {
             tick.tick().await;
-            if let Some(snapshot) = proxy.policy.latest() {
-                if let Some(why) = snapshot.restrictions.blocks(
-                    &user.username,
-                    &user.login_id,
+            if let Some(snapshot) = proxy.policy.latest()
+                && let Some(why) = must_end(
+                    &snapshot.restrictions,
+                    (&user.username, &user.login_id),
                     &session_id.to_string(),
-                ) {
-                    return why;
-                }
-                if snapshot.restrictions.is_revoked(worker_id) {
-                    return "worker revoked";
-                }
-                // A grant that was revoked, or reached its deadline, ends
-                // the sessions it allowed. Expiry is enforced here, not only
-                // when credentials are issued.
-                if !resolved.request_ids.is_empty()
-                    && snapshot.restrictions.grant_ended(
-                        &resolved.request_ids,
-                        OffsetDateTime::now_utc().unix_timestamp(),
-                    )
-                {
-                    return "access grant ended";
-                }
+                    (worker_id, worker.via.as_deref()),
+                    &resolved.request_ids,
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                )
+            {
+                return why;
             }
         }
     };
@@ -1078,7 +1105,7 @@ async fn relay<IO>(
 
 #[cfg(test)]
 mod tests {
-    use super::{Denial, Protocol, connection_group, resolve_principal, session_expiry};
+    use super::{Denial, Protocol, connection_group, must_end, resolve_principal, session_expiry};
     use limen_policy::{Policy, Principal};
     use limen_proto::v1::SessionRequest;
 
@@ -1303,5 +1330,44 @@ spec:
         assert_eq!(connection_group("<script>"), None);
         assert_eq!(connection_group(&"a".repeat(65)), None);
         assert!(connection_group(&"a".repeat(64)).is_some());
+    }
+
+    #[test]
+    fn a_session_through_a_revoked_peer_proxy_ends() {
+        use limen_session::snapshot::Restrictions;
+        let mut r = Restrictions::default();
+        r.revoked_components.insert("proxy-b".into());
+        let user = ("alice", "login-1");
+        assert_eq!(
+            must_end(&r, user, "s1", ("worker-1", Some("proxy-b")), &[], 0),
+            Some("peer proxy revoked")
+        );
+        // Through another peer, or a local tunnel: nothing to end.
+        assert_eq!(
+            must_end(&r, user, "s1", ("worker-1", Some("proxy-c")), &[], 0),
+            None
+        );
+        assert_eq!(must_end(&r, user, "s1", ("worker-1", None), &[], 0), None);
+        // The worker's own revocation still wins, and is named as such.
+        r.revoked_components.insert("worker-1".into());
+        assert_eq!(
+            must_end(&r, user, "s1", ("worker-1", Some("proxy-b")), &[], 0),
+            Some("worker revoked")
+        );
+    }
+
+    #[test]
+    fn a_live_session_ends_on_a_lock_a_kill_or_a_lapsed_grant() {
+        use limen_session::snapshot::Restrictions;
+        let user = ("alice", "login-1");
+        let mut r = Restrictions::default();
+        r.killed_sessions.insert("s1".into());
+        assert!(must_end(&r, user, "s1", ("w", None), &[], 0).is_some());
+        assert_eq!(must_end(&r, user, "s2", ("w", None), &[], 0), None);
+        // A grant the snapshot no longer holds has ended.
+        assert_eq!(
+            must_end(&r, user, "s2", ("w", None), &["req-1".into()], 0),
+            Some("access grant ended")
+        );
     }
 }

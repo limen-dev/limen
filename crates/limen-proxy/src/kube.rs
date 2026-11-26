@@ -114,7 +114,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
     // `slot` counts this request in the worker's load until the response (or
     // the stream it upgrades to) is over.
     let (session_id, worker, inbound, outbound, slot, request_ids) = opened;
-    let worker_id = worker.id;
+    let worker_id = worker.id.clone();
 
     let io = TokioIo::new(bridge(inbound, outbound));
     let (mut sender, connection) = match hyper::client::conn::http1::handshake(io).await {
@@ -170,9 +170,7 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
         };
         let worker_upgrade = hyper::upgrade::on(&mut response);
         let proxy = proxy.clone();
-        let username = user.username.clone();
-        let login_id = user.login_id.clone();
-        let worker = worker_id.clone();
+        let user = user.clone();
         tokio::spawn(async move {
             let _slot = slot;
             let (Ok(client), Ok(worker_side)) = tokio::join!(client_upgrade, worker_upgrade) else {
@@ -180,12 +178,11 @@ pub(crate) async fn handle(proxy: &Proxy, mut req: Request<Incoming>) -> Respons
             };
             let (mut client, mut worker_side) = (TokioIo::new(client), TokioIo::new(worker_side));
             let sid = session_id.to_string();
-            let revoked =
-                watch_revocation(&proxy, &username, &login_id, &sid, &worker, &request_ids);
+            let revoked = watch_revocation(&proxy, &user, &sid, &worker, &request_ids);
             tokio::select! {
                 _ = tokio::io::copy_bidirectional(&mut client, &mut worker_side) => {}
                 why = revoked => {
-                    tracing::warn!(session = %session_id, user = %username, reason = why, "kube: ending the stream");
+                    tracing::warn!(session = %session_id, user = %user.username, reason = why, "kube: ending the stream");
                     let _ = client.shutdown().await;
                     let _ = worker_side.shutdown().await;
                 }
@@ -458,33 +455,30 @@ fn bridge(mut inbound: Inbound, outbound: Outbound) -> tokio::io::DuplexStream {
     ours
 }
 
-/// Resolves, with the reason, when an admin lock, a kill, or a worker
-/// revocation reaches this proxy's cached snapshot. Checked every second.
+/// Resolves, with the reason, when an admin lock, a kill, a worker or peer
+/// proxy revocation, or the end of a grant reaches this proxy's cached
+/// snapshot. Checked every second.
 async fn watch_revocation(
     proxy: &Proxy,
-    username: &str,
-    login_id: &str,
+    user: &UserIdentity,
     session_id: &str,
-    worker_id: &str,
+    worker: &SessionWorker,
     request_ids: &[String],
 ) -> &'static str {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     loop {
         tick.tick().await;
-        if let Some(snapshot) = proxy.policy.latest() {
-            if let Some(why) = snapshot.restrictions.blocks(username, login_id, session_id) {
-                return why;
-            }
-            if snapshot.restrictions.is_revoked(worker_id) {
-                return "worker revoked";
-            }
-            if !request_ids.is_empty()
-                && snapshot
-                    .restrictions
-                    .grant_ended(request_ids, OffsetDateTime::now_utc().unix_timestamp())
-            {
-                return "access grant ended";
-            }
+        if let Some(snapshot) = proxy.policy.latest()
+            && let Some(why) = sessions::must_end(
+                &snapshot.restrictions,
+                (&user.username, &user.login_id),
+                session_id,
+                (&worker.id, worker.via.as_deref()),
+                request_ids,
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+        {
+            return why;
         }
     }
 }

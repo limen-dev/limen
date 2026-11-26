@@ -1085,6 +1085,16 @@ fn grant_allows(
     if (shape.hidden_wildcards || named.hidden_wildcards) && !g.indices.iter().any(|p| hidden(p)) {
         return Err("expand_wildcards for hidden indices isn't allowed".into());
     }
+    // Hidden names first: a request can cover every index and still name a
+    // hidden one (an `_mget` doc, a terms lookup, an `_msearch` header), and
+    // the shortcuts for "every index" below must not let that through.
+    if let Some(name) = named
+        .names
+        .iter()
+        .find(|n| hidden(n) && !g.indices.iter().any(|p| hidden(p) && covers(p, n)))
+    {
+        return Err(format!("{name} is a hidden index and isn't granted"));
+    }
     if named.all {
         if !restricted {
             return Ok(());
@@ -1406,6 +1416,28 @@ mod tests {
         assert!(allowed(&g, "GET", "/.kibana/_doc/1", b"").is_err());
         assert!(allowed(&g, "POST", "/orders,.tasks/_search", b"{}").is_err());
         assert!(allowed(&g, "POST", "/orders/_search?expand_wildcards=all", b"{}").is_err());
+    }
+
+    #[test]
+    fn a_request_over_every_index_cannot_name_a_hidden_one() {
+        let mget = br#"{"docs":[{"_index":".security","_id":"1"}]}"#;
+        let lookup = br#"{"query":{"terms":{"f":{"index":".kibana","id":"1","path":"p"}}}}"#;
+        let msearch = b"{}\n{}\n{\"index\":\".security\"}\n{}\n";
+        for g in [grant(&[Read], &[]), grant(&[Read], &["*"])] {
+            assert!(allowed(&g, "POST", "/_mget", mget).is_err(), "{g:?}");
+            assert!(allowed(&g, "POST", "/_search", lookup).is_err(), "{g:?}");
+            assert!(allowed(&g, "POST", "/_msearch", msearch).is_err(), "{g:?}");
+            // The same requests without a hidden name still pass.
+            let plain = br#"{"docs":[{"_index":"orders","_id":"1"}]}"#;
+            assert!(allowed(&g, "POST", "/_mget", plain).is_ok(), "{g:?}");
+            assert!(
+                allowed(&g, "POST", "/_msearch", b"{}\n{}\n").is_ok(),
+                "{g:?}"
+            );
+        }
+        // A grant with a matching dot pattern still reaches it.
+        let dot = grant(&[Read], &["*", ".security"]);
+        assert!(allowed(&dot, "POST", "/_mget", mget).is_ok());
     }
 
     #[test]

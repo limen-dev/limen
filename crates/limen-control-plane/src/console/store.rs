@@ -1696,7 +1696,7 @@ pub async fn delete_console_session(db: &Db, token_hash: &[u8]) -> Result<(), sq
 
 /// End every browser session a user has (when they are locked).
 pub async fn delete_console_sessions_of(db: &Db, username: &str) -> Result<u64, sqlx::Error> {
-    sqlx::query("DELETE FROM console_sessions WHERE username = $1")
+    sqlx::query("DELETE FROM console_sessions WHERE lower(username) = lower($1)")
         .bind(username)
         .execute(db)
         .await

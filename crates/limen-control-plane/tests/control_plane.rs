@@ -681,6 +681,15 @@ async fn proxy_cannot_request_unapproved_dns_names() {
         .await
         .expect_err("unapproved DNS name");
     assert_eq!(err.code(), Code::PermissionDenied);
+    // The refusal is audited like the other enrollment refusals.
+    let denied = h
+        .audit_events()
+        .await
+        .into_iter()
+        .find(|e| e.kind == EventKind::AuthDenied && e.data["action"] == "enroll")
+        .expect("the refusal is audited");
+    assert_eq!(denied.data["reason"], "DNS name not allowed by join token");
+    assert_eq!(denied.data["dns_name"], "bank.example.com");
 }
 
 #[tokio::test]

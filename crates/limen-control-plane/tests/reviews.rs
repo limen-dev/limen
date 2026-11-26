@@ -217,6 +217,14 @@ async fn certifying_and_flagging_and_what_a_flag_does() {
         .execute(&r.h.state.db)
         .await
         .expect("session");
+    // The same person, recorded under another spelling: a flag ends it too.
+    let other_case = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO sessions (session_id, username, resource, started_at) VALUES ($1, $2, 'web-1', now())")
+        .bind(other_case)
+        .bind(ONCALL.to_uppercase())
+        .execute(&r.h.state.db)
+        .await
+        .expect("session");
     assert_eq!(
         ResourcesClient::new(r.ch.clone())
             .list_resources(forwarded(ListResourcesRequest {}, Some(&r.oncall)))
@@ -270,6 +278,12 @@ async fn certifying_and_flagging_and_what_a_flag_does() {
         snap.restrictions
             .killed_sessions
             .contains(&session.to_string())
+    );
+    assert!(
+        snap.restrictions
+            .killed_sessions
+            .contains(&other_case.to_string()),
+        "a flag ends the person's sessions whatever the case of their name"
     );
 
     // It can't be decided twice, and the dba lead's item is theirs alone.
