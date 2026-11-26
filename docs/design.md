@@ -341,9 +341,8 @@ Workers renew their certs at 50% of a 24-hour TTL, so they survive control plane
 ## 11. Deployment
 - **Images:** multi-stage builds (`rust:1.99-bookworm` builder) on `gcr.io/distroless/cc-debian12:nonroot`.
 - **Terraform:**
-  - `modules/audit` and `modules/datadog`: built
-  - `modules/ecs` and `modules/ec2`: planned for Phase 15 (not yet in the repo)
-  - `examples/complete`: planned for Phase 15; `deploy/terraform/examples/audit` exists
+  - `modules/audit`, `modules/datadog`, `modules/foundation`, `modules/discovery`, `modules/ecs` and `modules/ec2`: written. The ECS, EC2 and foundation modules are validated with `terraform validate` only, never applied to AWS (#123)
+  - `examples/complete`, `examples/kubernetes` and `examples/audit`: written, with the same limit for the first two. The Helm chart is in `deploy/helm/limen`
 - **Local:** `deploy/compose` runs Postgres (state), SeaweedFS (S3; MinIO no longer publishes images), Dex (OIDC), local-kms (KMS emulator; LocalStack now needs an account token), a fake Datadog intake, and targets (sshd, Postgres, MySQL, Redis), plus kind for Kubernetes.
 
 ## 12. Workspace layout
