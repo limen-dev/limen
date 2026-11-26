@@ -600,7 +600,7 @@ pub async fn decide(
         let ended = sqlx::query(
             "INSERT INTO session_kills (session_id, reason, killed_by)
              SELECT session_id::text, 'access removed in a review', $3 FROM sessions
-             WHERE username = $1 AND resource = ANY($2) AND ended_at IS NULL
+             WHERE lower(username) = lower($1) AND resource = ANY($2) AND ended_at IS NULL
              ON CONFLICT DO NOTHING",
         )
         .bind(&item.subject)

@@ -2291,7 +2291,7 @@ pub async fn lock_user(
     if let Err(r) = auth.check_post(console, &headers, &form.csrf) {
         return r;
     }
-    if name == auth.username {
+    if limen_core::identity::same_username(&name, &auth.username) {
         return error_page(
             StatusCode::BAD_REQUEST,
             "That would lock you out",
