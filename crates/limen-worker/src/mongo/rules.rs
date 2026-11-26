@@ -41,8 +41,18 @@ const CROSS_DATABASE: [&str; 3] = ["aggregate", "explain", "mapreduce"];
 
 /// Commands that name `db.coll` namespaces, possibly in other databases than
 /// their own `$db` (they run on `admin`): `renameCollection` and `to`, and
-/// `bulkWrite`'s `nsInfo[].ns` (MongoDB 8).
-const NAMESPACED: [&str; 2] = ["renamecollection", "bulkwrite"];
+/// `bulkWrite`'s `nsInfo[].ns` (MongoDB 8). The rest take one full namespace
+/// as their value and the server reads that, not `$db`.
+const NAMESPACED: [&str; 5] = [
+    "renamecollection",
+    "bulkwrite",
+    "datasize",
+    "splitvector",
+    "checkshardingindex",
+];
+
+/// The `NAMESPACED` commands whose own value is the one namespace they reach.
+const NAMESPACE_VALUED: [&str; 3] = ["datasize", "splitvector", "checkshardingindex"];
 
 /// Commands that apply arbitrary operations to any namespace. Their effects
 /// can't be judged, so they're never forwarded.
@@ -311,7 +321,7 @@ pub fn judge(command: &Inspected<'_>, access: &Access, cursors: &HashSet<i64>) -
     Verdict::Forward
 }
 
-/// The databases in the namespaces a `renameCollection` or `bulkWrite` names.
+/// The databases in the namespaces a `NAMESPACED` command names.
 /// `None` when one can't be read (not a string, no `db.` prefix, malformed
 /// BSON): the caller refuses the command.
 fn namespaced_databases<'a>(command: &Inspected<'a>) -> Option<Vec<&'a str>> {
@@ -329,6 +339,12 @@ fn namespaced_databases<'a>(command: &Inspected<'a>) -> Option<Vec<&'a str>> {
             }
         }
         return Some(out);
+    }
+    if NAMESPACE_VALUED.contains(&command.lower.as_str()) {
+        return match command.body.get(command.name) {
+            Ok(Some(Value::Str(ns))) => Some(vec![db_of(ns)?]),
+            _ => None,
+        };
     }
     let mut add_ns_info = |doc: Doc<'a>| -> Option<()> {
         match doc.get("ns") {
@@ -636,6 +652,28 @@ spec:
         ));
         // No namespaces at all can't be judged.
         assert!(matches!(verdict("ops", &body, &[]), Verdict::Refuse(_)));
+
+        // These take the namespace they read as their value, not from `$db`.
+        for name in ["dataSize", "splitVector", "checkShardingIndex"] {
+            let doc = |ns: &str| Builder::new().str(name, ns).str("$db", "orders").finish();
+            assert_eq!(
+                verdict("ops", &doc("orders.a"), &[]),
+                Verdict::Forward,
+                "{name}"
+            );
+            for ns in ["billing.ledger", "orders"] {
+                assert_eq!(
+                    refused(verdict("ops", &doc(ns), &[])).reason,
+                    "database_not_granted",
+                    "{name} {ns}"
+                );
+            }
+            let not_a_string = Builder::new().i32(name, 1).str("$db", "orders").finish();
+            assert!(
+                matches!(verdict("ops", &not_a_string, &[]), Verdict::Refuse(_)),
+                "{name}"
+            );
+        }
 
         for name in ["applyOps", "doTxn"] {
             let doc = Builder::new()

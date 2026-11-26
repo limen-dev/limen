@@ -50,7 +50,14 @@ spec:
       serviceAccountName: {{ $name }}
       {{- end }}
       {{- include "limen.pullSecrets" $ | nindent 6 }}
-      {{- if and (hasSuffix "s" (toString $c.drainTimeout)) (le (int $c.terminationGracePeriodSeconds) (int (trimSuffix "s" (toString $c.drainTimeout)))) }}
+      {{- /* LIMEN_DRAIN_TIMEOUT takes s, m or h (limen_core::duration::parse_short): compare in seconds. */}}
+      {{- $drain := toString $c.drainTimeout }}
+      {{- if not (regexMatch "^[0-9]+[smh]$" $drain) }}
+      {{- fail "controlPlanes.<key>.drainTimeout must be a whole number and s, m or h, such as 20s" }}
+      {{- end }}
+      {{- $unit := regexFind "[smh]$" $drain }}
+      {{- $drainSecs := mul (atoi (trimSuffix $unit $drain)) (get (dict "s" 1 "m" 60 "h" 3600) $unit) }}
+      {{- if le (int $c.terminationGracePeriodSeconds) (int $drainSecs) }}
       {{- fail "controlPlanes.<key>.terminationGracePeriodSeconds must exceed drainTimeout" }}
       {{- end }}
       terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds }}

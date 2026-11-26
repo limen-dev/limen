@@ -102,7 +102,7 @@ Values without a default fail the install with a message naming them: the OIDC i
 | workerDefaults.replicas | int | `3` | Replicas per group. |
 | workerDefaults.maxSessions | int | `200` | Sessions a worker accepts at once (LIMEN_MAX_SESSIONS). |
 | workerDefaults.drainTimeoutSecs | int | `300` | How long a worker lets open sessions finish on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS). |
-| workerDefaults.terminationGracePeriodSeconds | int | `330` | Must exceed drainTimeoutSecs plus about 20 s to upload recordings. The chart refuses a smaller value. |
+| workerDefaults.terminationGracePeriodSeconds | int | `330` | Must exceed drainTimeoutSecs plus about 20 s to upload recordings. The chart refuses a value at or below drainTimeoutSecs; the 20 s margin is up to you. |
 | workerDefaults.namePrefix | string | `""` | Prefix of each worker's name. REQUIRED. |
 | workerDefaults.proxy | string | `""` | Key of the proxy group to dial. Empty uses the first. |
 | workerDefaults.proxyAddr | string | `""` | Overrides proxy: host:port. |

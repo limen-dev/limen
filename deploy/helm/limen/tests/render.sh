@@ -70,6 +70,10 @@ render "${base[@]}" --set workers.prod-db.proxy=publc >/dev/null 2>&1 && fail "a
 render "${base[@]}" --set proxies.public.controlPlane=cor >/dev/null 2>&1 && fail "a proxy naming a control plane group that does not exist rendered"
 render "${base[@]}" --set proxies.public.terminationGracePeriodSeconds=20 >/dev/null 2>&1 && fail "a proxy grace period at its drain time rendered"
 render "${base[@]}" --set controlPlanes.core.terminationGracePeriodSeconds=20 >/dev/null 2>&1 && fail "a control plane grace period at its drain time rendered"
+# drainTimeout takes m and h too: 1m is 60 s, past the default 45 s grace period.
+render "${base[@]}" --set controlPlanes.core.drainTimeout=1m >/dev/null 2>&1 && fail "a control plane drain of 1m over a 45 s grace period rendered"
+render "${base[@]}" --set controlPlanes.core.drainTimeout=1m --set controlPlanes.core.terminationGracePeriodSeconds=90 >/dev/null || fail "a control plane drain of 1m under a 90 s grace period did not render"
+render "${base[@]}" --set controlPlanes.core.drainTimeout=20 >/dev/null 2>&1 && fail "a control plane drainTimeout without a unit rendered"
 
 # 6. Every component runs as the nonroot uid, and the spool volume is group-writable by it.
 out="$(render "${base[@]}")"
