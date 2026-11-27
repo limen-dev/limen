@@ -23,11 +23,21 @@ spec:
     - resources: {{ kind: [ssh], labels: {{ env: [test] }} }}
       ssh: {{ logins: [ubuntu] }}
 ---
+kind: role
+version: v1
+metadata: {{ name: short }}
+spec:
+  max_session_ttl: 4s
+  allow:
+    - resources: {{ kind: [ssh], labels: {{ env: [test] }} }}
+      ssh: {{ logins: [ubuntu] }}
+---
 kind: role_mapping
 version: v1
 metadata: {{ name: idp }}
 spec:
   - {{ idp_group: ops, roles: [ops] }}
+  - {{ idp_group: short, roles: [short] }}
 ---
 kind: resource
 version: v1
@@ -335,6 +345,122 @@ async fn ssh_end_to_end_with_recording_audit_and_outage() {
     assert!(
         read_until(&mut shell, "after grace").await,
         "existing session survives past the grace period"
+    );
+}
+
+/// A session that reaches its `max_session_ttl` is ended by the worker, and
+/// its recording is still finished and uploaded: the longest sessions are
+/// the ones whose recording matters most.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_at_its_ttl_keeps_its_recording() {
+    let Some(d) = Deployment::start().await else {
+        return;
+    };
+    let target = SshTarget::start(&d.public_ca("ssh-user-ca.pub")).await;
+    let host_ca = d.public_ca("ssh-host-ca.pub");
+    let ca_pem = std::fs::read_to_string(d.ca_file()).expect("ca");
+    let admin_user = d.login(ADMIN, &["admins"]).await.expect("admin");
+    let mut admin = AdminClient::new(d.proxy_channel(Some(admin_user)));
+    let applied = admin
+        .apply_policy(ApplyPolicyRequest {
+            source: String::new(),
+            require_tests: false,
+            sources: policy(&target.addr.to_string(), &target.host_key),
+            dry_run: false,
+            source_ref: String::new(),
+            replay_days: 0,
+        })
+        .await
+        .expect("apply")
+        .into_inner();
+    let token = admin
+        .create_join_token(CreateJoinTokenRequest {
+            kind: "worker".into(),
+            ttl_seconds: 600,
+            labels: HashMap::from([("pool".to_owned(), "dev".to_owned())]),
+            dns_names: vec![],
+            name: String::new(),
+        })
+        .await
+        .expect("token")
+        .into_inner()
+        .token;
+    let worker = d.start_worker(&token, "worker").await;
+    eventually(
+        Duration::from_secs(15),
+        "the worker tunnels and has the policy",
+        || async {
+            d.proxy().tunnels.summaries().len() == 2
+                && d.proxy().policy_version() == Some(applied.version)
+                && worker.worker.policy_version() == Some(applied.version)
+        },
+    )
+    .await;
+
+    let user = d.login(DEVELOPER, &["short"]).await.expect("developer");
+    let conn = ssh_client::connect(
+        &d.proxy_addr.to_string(),
+        &ca_pem,
+        user,
+        &host_ca,
+        "web-1",
+        "ubuntu",
+    )
+    .await
+    .expect("ssh session");
+    let mut shell = conn.channel_open_session().await.expect("channel");
+    shell
+        .request_pty(true, "xterm", 80, 24, 0, 0, &[])
+        .await
+        .expect("pty");
+    shell.request_shell(true).await.expect("shell");
+    assert!(read_until(&mut shell, "welcome ubuntu").await);
+
+    // Left open, the session ends on its own at the 4 s limit.
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        while shell.wait().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "the session outlived its max_session_ttl");
+
+    eventually(
+        Duration::from_secs(30),
+        "session.end at the limit, and the session's recording",
+        || async {
+            let events = read_jsonl(&d, AUDIT);
+            events.iter().any(|end| {
+                end["kind"] == "session.end"
+                    && end["data"]["reason"] == "max_session_ttl reached"
+                    && events.iter().any(|e| {
+                        e["kind"] == "session.recording" && e["session_id"] == end["session_id"]
+                    })
+            })
+        },
+    )
+    .await;
+    let events = read_jsonl(&d, AUDIT);
+    let end = events
+        .iter()
+        .find(|e| e["kind"] == "session.end")
+        .expect("session.end");
+    assert_eq!(
+        end["data"]["recording_sha256"].as_str().map(str::len),
+        Some(64),
+        "the worker reported the finished recording"
+    );
+    let stored = events
+        .iter()
+        .find(|e| e["kind"] == "session.recording" && e["session_id"] == end["session_id"])
+        .expect("session.recording");
+    assert_eq!(stored["data"]["sha256"], end["data"]["recording_sha256"]);
+    let path = stored["data"]["recording_uri"]
+        .as_str()
+        .and_then(|u| u.strip_prefix("file://"))
+        .expect("file uri");
+    let cast = std::fs::read_to_string(path).expect("recording");
+    assert!(
+        cast.contains("welcome ubuntu"),
+        "the recording has the output"
     );
 }
 

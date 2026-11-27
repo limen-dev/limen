@@ -46,8 +46,10 @@ spec:
       {{- end }}
     spec:
       {{- include "limen.pullSecrets" $ | nindent 6 }}
-      {{- if le (int $c.terminationGracePeriodSeconds) (int $c.drainTimeoutSecs) }}
-      {{- fail "proxies.<key>.terminationGracePeriodSeconds must exceed proxy.drainTimeoutSecs" }}
+      {{- /* After the drain the proxy spends up to 10 s shipping its audit spool
+             (FINAL_FLUSH), which lives on an emptyDir: a kill before that loses it. */}}
+      {{- if le (int $c.terminationGracePeriodSeconds) (add (int $c.drainTimeoutSecs) 10) }}
+      {{- fail "proxies.<key>.terminationGracePeriodSeconds must exceed proxy.drainTimeoutSecs plus the 10 s final audit flush" }}
       {{- end }}
       terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds }}
       {{- with $c.podSecurityContext }}

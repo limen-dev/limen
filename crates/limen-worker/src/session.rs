@@ -41,6 +41,8 @@ pub(crate) const PUMP_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Why a session ended when the worker ended it at its drain timeout.
 pub(crate) const WORKER_DRAIN: &str = "worker_drain";
+/// The `session.end` reason for a session that reached its `max_session_ttl`.
+const MAX_TTL: &str = "max_session_ttl reached";
 
 /// `guard` holds the session's slot under the worker's cap: dropped on any
 /// early return, otherwise moved into the session task.
@@ -139,9 +141,13 @@ pub(crate) async fn open(
         let until = (expires - OffsetDateTime::now_utc())
             .max(time::Duration::ZERO)
             .unsigned_abs();
+        let deadline = tokio::time::Instant::now() + until;
+        let is_ssh = matches!(admitted, Admitted::Ssh(_));
         let serving = async {
             match admitted {
-                Admitted::Ssh(config) => serve(ours, *config, audit, end).await,
+                // SSH ends itself at the deadline so it can finish (and
+                // upload) the recording; the outer timeout is a backstop.
+                Admitted::Ssh(config) => serve(ours, *config, audit, end, deadline).await,
                 Admitted::Db(config) => {
                     // A drain that reaches its timeout ends database sessions too.
                     let mut end = end;
@@ -261,13 +267,19 @@ pub(crate) async fn open(
                 }
             }
         };
-        let (reason, outcome) = match tokio::time::timeout(until, serving).await {
+        let backstop = if is_ssh {
+            until + crate::ssh::END_WITHIN + std::time::Duration::from_secs(2)
+        } else {
+            until
+        };
+        let (reason, outcome) = match tokio::time::timeout(backstop, serving).await {
             // The proxy's session.end carries this reason (`data.reason`).
             Ok(Ok(outcome)) if outcome.ended_by_drain => (WORKER_DRAIN.to_owned(), outcome),
+            Ok(Ok(outcome)) if outcome.ended_by_deadline => (MAX_TTL.to_owned(), outcome),
             Ok(Ok(outcome)) => ("ended".to_owned(), outcome),
             Ok(Err(e)) => (format!("error: {e}"), crate::ssh::SessionOutcome::default()),
             Err(_) => (
-                "max_session_ttl reached".to_owned(),
+                MAX_TTL.to_owned(),
                 crate::ssh::SessionOutcome::default(),
             ),
         };

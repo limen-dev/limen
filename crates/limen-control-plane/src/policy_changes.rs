@@ -139,6 +139,18 @@ pub fn gives_standing(c: &AccessChange) -> bool {
     c.change == ChangeKind::Gain && c.via == Via::Standing && !matches!(c.subject, Subject::Role(_))
 }
 
+/// How a [`widening_gains`] line for a deny rule moved to shadow mode, or
+/// given more shadow time, starts.
+pub const SHADOW_GAIN: &str = "shadow mode: ";
+
+/// Whether a held change moves a deny rule to shadow mode or extends its
+/// shadow time: ADR-0046 holds that for a second admin, not for a writer
+/// grant's approver groups.
+#[must_use]
+pub fn loosens_shadow(plan: &Plan) -> bool {
+    plan.gains.iter().any(|g| g.starts_with(SHADOW_GAIN))
+}
+
 /// The standing access a write gives that nobody had, one line each, and
 /// the deny rules it moves to shadow mode (ADR-0046).
 #[must_use]
@@ -153,7 +165,7 @@ pub fn widening_gains(outcome: &Outcome) -> Vec<String> {
             outcome
                 .shadow_loosening
                 .iter()
-                .map(|l| format!("shadow mode: {l}")),
+                .map(|l| format!("{SHADOW_GAIN}{l}")),
         )
         .collect()
 }

@@ -80,7 +80,7 @@ Values without a default fail the install with a message naming them: the OIDC i
 | proxies | object | `{}` | Proxy groups, by key. One Deployment and LoadBalancer Service per entry. REQUIRED unless you run no proxy. |
 | proxyDefaults.replicas | int | `3` | Replicas per group. |
 | proxyDefaults.drainTimeoutSecs | int | `20` | How long a proxy drains on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS). |
-| proxyDefaults.terminationGracePeriodSeconds | int | `40` | Must exceed drainTimeoutSecs. |
+| proxyDefaults.terminationGracePeriodSeconds | int | `40` | Must exceed drainTimeoutSecs plus the 10 s final audit flush (the spool is on an emptyDir, so what isn't shipped by then is lost). |
 | proxyDefaults.namePrefix | string | `""` | Prefix of each proxy's name; the join token must approve it. REQUIRED. |
 | proxyDefaults.dnsNames | string | `""` | Public DNS name(s) of the load balancer, comma separated. REQUIRED. |
 | proxyDefaults.controlPlane | string | `""` | Key of the control plane group to dial. Empty uses the first. |

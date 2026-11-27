@@ -373,7 +373,7 @@ pub async fn list(state: &AppState, who: &Who<'_>, all: bool) -> Result<Vec<Revi
     let rows = sqlx::query(concat!(
         info_sql!(),
         " WHERE $1 OR EXISTS (SELECT 1 FROM review_items m WHERE m.review_id = r.id
-            AND (lower(m.reviewer) = lower($2) OR (m.reviewer = '*admin' AND $3)))
+            AND ((m.reviewer <> '*admin' AND lower(m.reviewer) = lower($2)) OR (m.reviewer = '*admin' AND $3)))
          GROUP BY r.id ORDER BY r.started_at DESC LIMIT 100"
     ))
     .bind(all)
@@ -383,6 +383,17 @@ pub async fn list(state: &AppState, who: &Who<'_>, all: bool) -> Result<Vec<Revi
     .await
     .map_err(|e| internal("listing reviews", e))?;
     rows.iter().map(info_from).collect()
+}
+
+/// Whether `username` is the reviewer named on an item. The admin pool is
+/// for admins only: someone whose IdP username happens to be `*admin` is
+/// not an admin.
+fn reviews_for(reviewer: &str, username: &str, is_admin: bool) -> bool {
+    if reviewer == ADMIN_POOL {
+        is_admin
+    } else {
+        same_username(reviewer, username)
+    }
 }
 
 fn item_from(r: &sqlx::postgres::PgRow, who: &Who<'_>) -> Result<ReviewItemInfo, Status> {
@@ -395,7 +406,7 @@ fn item_from(r: &sqlx::postgres::PgRow, who: &Who<'_>) -> Result<ReviewItemInfo,
     let reaches: Value = r.try_get("reaches").map_err(e)?;
     let can_decide = decision.is_none()
         && !same_username(&subject, who.username)
-        && (same_username(&reviewer, who.username) || (reviewer == ADMIN_POOL && who.is_admin));
+        && reviews_for(&reviewer, who.username, who.is_admin);
     Ok(ReviewItemInfo {
         id: r.try_get::<Uuid, _>("id").map_err(e)?.to_string(),
         review_id: r.try_get::<Uuid, _>("review_id").map_err(e)?.to_string(),
@@ -464,7 +475,7 @@ pub async fn items(
         "SELECT ",
         item_cols!(),
         " FROM review_items WHERE review_id = $1
-           AND ($2 OR lower(reviewer) = lower($3) OR (reviewer = '*admin' AND $4))
+           AND ($2 OR (reviewer <> '*admin' AND lower(reviewer) = lower($3)) OR (reviewer = '*admin' AND $4))
            AND (NOT $5 OR decision IS NULL)
          ORDER BY (decision IS NULL) DESC, subject, role LIMIT 5000"
     ))
@@ -922,4 +933,24 @@ pub async fn tick(state: &AppState) -> Result<(), Status> {
         tx.commit().await.map_err(|e| internal("committing", e))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ADMIN_POOL, reviews_for};
+
+    #[test]
+    fn only_admins_review_for_the_admin_pool() {
+        assert!(reviews_for(ADMIN_POOL, "root@example.com", true));
+        assert!(!reviews_for(ADMIN_POOL, "root@example.com", false));
+        // A username that is the pool's own name is not a way in.
+        assert!(!reviews_for(ADMIN_POOL, ADMIN_POOL, false));
+        assert!(!reviews_for(ADMIN_POOL, "*ADMIN", false));
+    }
+
+    #[test]
+    fn a_named_reviewer_matches_whatever_the_case() {
+        assert!(reviews_for("lead@example.com", "Lead@Example.com", false));
+        assert!(!reviews_for("lead@example.com", "other@example.com", true));
+    }
 }

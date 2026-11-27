@@ -172,6 +172,13 @@ impl Viewer {
                 "deciding this change needs the {ADMIN_ROLE} role or its writer's approver groups"
             )));
         }
+        // Turning a deny off (shadow mode, or more shadow time) waits for a
+        // second admin whoever wrote it (ADR-0046): approver groups don't do.
+        if !self.admin && policy_changes::loosens_shadow(&held.plan) {
+            return Err(Refusal::Forbidden(format!(
+                "this change moves a deny rule to shadow mode: deciding it needs the {ADMIN_ROLE} role"
+            )));
+        }
         let refused = |why: &str| {
             Err(Refusal::NotDecidable {
                 why: why.to_owned(),
@@ -610,5 +617,73 @@ mod tests {
         admin("someone@example.com")
             .may_decide(&change)
             .expect("another admin decides it");
+    }
+
+    const WRITER_POLICY: &str = r"
+kind: bot
+version: v1
+metadata: { name: deploy-staging }
+spec:
+  join:
+    method: github_actions
+    match: { repository: acme/infra, repository_id: '123456789', ref: refs/heads/main }
+  roles: [deployer]
+  max_ttl: 15m
+---
+kind: role
+version: v1
+metadata: { name: deployer }
+spec:
+  allow:
+    - resources: { kind: [ssh], labels: { env: [staging] } }
+      ssh: { logins: [deploy] }
+---
+kind: policy_writer
+version: v1
+metadata: { name: payments-terraform }
+spec:
+  bot: deploy-staging
+  namespace: payments
+  names: ['payments-*']
+  kinds: [role]
+  approvers: { groups: [payments-leads] }
+";
+
+    fn approver(username: &str) -> Viewer {
+        let store = crate::state::PolicyStore::empty();
+        let policy = limen_policy::Policy::parse_yaml([("w.yaml", WRITER_POLICY)]).expect("policy");
+        let base = store.current();
+        Viewer {
+            username: username.into(),
+            bot: false,
+            admin: false,
+            groups: vec!["payments-leads".into()],
+            policy: std::sync::Arc::new(crate::state::LoadedPolicy {
+                policy: std::sync::Arc::new(policy),
+                ..(*base).clone()
+            }),
+        }
+    }
+
+    /// A writer grant's approvers decide its bot's widening, but a deny rule
+    /// moved to shadow mode waits for an admin (ADR-0046).
+    #[test]
+    fn approver_groups_cannot_turn_a_deny_rule_to_shadow() {
+        let mut change = held("bot:deploy-staging");
+        change.plan.gains = vec!["group:sre gains ssh on payments-db".into()];
+        approver("lead@example.com")
+            .may_decide(&change)
+            .expect("an approver decides ordinary widening");
+        change.plan.gains.push(format!(
+            "{}payments-admin/no-prod",
+            policy_changes::SHADOW_GAIN
+        ));
+        assert!(matches!(
+            approver("lead@example.com").may_decide(&change),
+            Err(Refusal::Forbidden(_))
+        ));
+        admin("someone@example.com")
+            .may_decide(&change)
+            .expect("an admin decides it");
     }
 }
