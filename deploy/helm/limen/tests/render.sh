@@ -69,6 +69,9 @@ doc PodDisruptionBudget control-plane-core <<<"$out" | grep -q 'minAvailable: 2'
 render "${base[@]}" --set workers.prod-db.proxy=publc >/dev/null 2>&1 && fail "a worker naming a proxy group that does not exist rendered"
 render "${base[@]}" --set proxies.public.controlPlane=cor >/dev/null 2>&1 && fail "a proxy naming a control plane group that does not exist rendered"
 render "${base[@]}" --set proxies.public.terminationGracePeriodSeconds=20 >/dev/null 2>&1 && fail "a proxy grace period at its drain time rendered"
+# The proxy flushes its audit spool for up to 10 s after the drain: 20 s of drain needs more than 30 s.
+render "${base[@]}" --set proxies.public.terminationGracePeriodSeconds=30 >/dev/null 2>&1 && fail "a proxy grace period with no room for the final audit flush rendered"
+render "${base[@]}" --set proxies.public.terminationGracePeriodSeconds=31 >/dev/null || fail "a proxy grace period past drain plus the final flush did not render"
 render "${base[@]}" --set controlPlanes.core.terminationGracePeriodSeconds=20 >/dev/null 2>&1 && fail "a control plane grace period at its drain time rendered"
 # drainTimeout takes m and h too: 1m is 60 s, past the default 45 s grace period.
 render "${base[@]}" --set controlPlanes.core.drainTimeout=1m >/dev/null 2>&1 && fail "a control plane drain of 1m over a 45 s grace period rendered"

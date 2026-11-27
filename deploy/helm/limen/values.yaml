@@ -89,7 +89,7 @@ proxyDefaults:
   replicas: 3
   # -- How long a proxy drains on SIGTERM (LIMEN_DRAIN_TIMEOUT_SECS).
   drainTimeoutSecs: 20
-  # -- Must exceed drainTimeoutSecs.
+  # -- Must exceed drainTimeoutSecs plus the 10 s final audit flush (the spool is on an emptyDir, so what isn't shipped by then is lost).
   terminationGracePeriodSeconds: 40
   # -- Prefix of each proxy's name; the join token must approve it. REQUIRED.
   namePrefix: ""
