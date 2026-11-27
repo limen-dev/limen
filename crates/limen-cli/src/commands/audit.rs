@@ -146,13 +146,8 @@ async fn search(proxy: Option<&str>, query: &str, limit: u32, json: bool) -> any
         anstream::println!(
             "{}  {}  {}{}",
             ui::dim(&when(h.at_unix)),
-            ui::bold(&h.kind),
-            [h.user.as_str(), h.resource.as_str()]
-                .iter()
-                .filter(|s| !s.is_empty())
-                .copied()
-                .collect::<Vec<_>>()
-                .join(" on "),
+            ui::bold(&one_line(&h.kind)),
+            who_on(&h.user, &h.resource),
             outcome
         );
         anstream::println!(
@@ -167,16 +162,31 @@ async fn search(proxy: Option<&str>, query: &str, limit: u32, json: bool) -> any
             } else {
                 String::new()
             };
-            anstream::println!("    {}", ui::dim(&format!("session {}{at}", h.session_id)));
+            anstream::println!(
+                "    {}",
+                ui::dim(&format!("session {}{at}", one_line(&h.session_id)))
+            );
         }
     }
     if resp.truncated {
         ui::hint("More matched than shown. Narrow it with user:, resource:, kind:, or after:.");
     }
     if !resp.history_url.is_empty() {
-        ui::hint(&format!("Full history: {}", resp.history_url));
+        ui::hint(&format!("Full history: {}", one_line(&resp.history_url)));
     }
     Ok(())
+}
+
+/// "user on resource" for a search hit. Both are whatever the event
+/// recorded, which a denied request names freely (an unknown resource is
+/// audited as asked for), so they go through [`one_line`] like the snippet.
+fn who_on(user: &str, resource: &str) -> String {
+    [user, resource]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| one_line(s))
+        .collect::<Vec<_>>()
+        .join(" on ")
 }
 
 /// Newlines in a snippet would break the layout.
@@ -417,7 +427,20 @@ fn verify_controls(
 
 #[cfg(test)]
 mod tests {
-    use super::one_line;
+    use super::{one_line, who_on};
+
+    #[test]
+    fn a_hit_names_its_user_and_resource_without_escapes() {
+        assert_eq!(
+            who_on("ada@example.com", "web-1"),
+            "ada@example.com on web-1"
+        );
+        assert_eq!(who_on("", "web-1"), "web-1");
+        assert_eq!(who_on("ada@example.com", ""), "ada@example.com");
+        // A denied request names any resource it likes, and it is audited.
+        let out = who_on("ada@example.com", "x\u{1b}]0;owned\u{7}\u{1b}[2J\ny");
+        assert!(!out.chars().any(char::is_control), "{out:?}");
+    }
 
     #[test]
     fn terminal_escapes_are_not_printed() {
