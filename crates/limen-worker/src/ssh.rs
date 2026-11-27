@@ -75,7 +75,7 @@ pub async fn serve<S>(
     config: SshSessionConfig,
     audit: Emitter,
     mut end: tokio::sync::watch::Receiver<bool>,
-    deadline: Duration,
+    deadline: tokio::time::Instant,
 ) -> anyhow::Result<SessionOutcome>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -121,7 +121,7 @@ where
                 .await;
             (tokio::time::timeout(END_WITHIN, &mut running).await.ok(), true, false)
         }
-        () = tokio::time::sleep(deadline) => {
+        () = tokio::time::sleep_until(deadline) => {
             tracing::info!(session = %config.session_id, "ending the session: max_session_ttl reached");
             let _ = handle
                 .disconnect(

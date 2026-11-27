@@ -141,12 +141,13 @@ pub(crate) async fn open(
         let until = (expires - OffsetDateTime::now_utc())
             .max(time::Duration::ZERO)
             .unsigned_abs();
+        let deadline = tokio::time::Instant::now() + until;
         let is_ssh = matches!(admitted, Admitted::Ssh(_));
         let serving = async {
             match admitted {
                 // SSH ends itself at the deadline so it can finish (and
                 // upload) the recording; the outer timeout is a backstop.
-                Admitted::Ssh(config) => serve(ours, *config, audit, end, until).await,
+                Admitted::Ssh(config) => serve(ours, *config, audit, end, deadline).await,
                 Admitted::Db(config) => {
                     // A drain that reaches its timeout ends database sessions too.
                     let mut end = end;

@@ -458,7 +458,10 @@ async fn a_session_at_its_ttl_keeps_its_recording() {
         .and_then(|u| u.strip_prefix("file://"))
         .expect("file uri");
     let cast = std::fs::read_to_string(path).expect("recording");
-    assert!(cast.contains("welcome ubuntu"), "the recording has the output");
+    assert!(
+        cast.contains("welcome ubuntu"),
+        "the recording has the output"
+    );
 }
 
 async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, want: &str) -> bool {
