@@ -999,4 +999,126 @@ mod tests {
         // A session that used no grant never ends this way.
         assert!(!Restrictions::default().grant_ended(&[], 1_000));
     }
+
+    /// A snapshot payload signed by a control plane, as the control plane
+    /// would build it, after `edit` has changed it.
+    fn signed_payload(cp: &EnvelopeSigner, edit: impl FnOnce(&mut PolicySnapshot)) -> Signed {
+        let mut snapshot = PolicySnapshot {
+            version: 2,
+            issued_at_unix: OffsetDateTime::now_utc().unix_timestamp(),
+            documents_json: "[]".into(),
+            locked_users: vec!["mallory@example.com".into()],
+            ..PolicySnapshot::default()
+        };
+        edit(&mut snapshot);
+        cp.sign(Purpose::PolicySnapshot, snapshot.encode_to_vec())
+            .expect("sign")
+    }
+
+    /// A correctly signed snapshot that doesn't hold a usable policy is
+    /// refused, not read as an empty one (which would allow nothing but also
+    /// carry no locks), and the cache keeps deciding from what it held:
+    /// a lock already received stays in force, on disk too.
+    #[tokio::test]
+    async fn a_signed_snapshot_without_a_usable_policy_is_refused_and_changes_nothing() {
+        let (ca, cp, _) = setup().await;
+        let dir = std::env::temp_dir().join(format!("limen-snap-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("policy.snapshot");
+        let cache = PolicyCache::new(DEFAULT_GRACE, Some(path.clone()));
+        let held = signed_payload(&cp, |_| {});
+        cache.update(&held, ca.cert_der()).expect("a good snapshot");
+        let on_disk = std::fs::read(&path).expect("persisted");
+
+        // Two copies of one valid role: each parses, together they don't compile.
+        let role = Policy::parse_yaml([(
+            "r.yaml",
+            "kind: role\nversion: v1\nmetadata: {name: dev}\nspec:\n  allow:\n    - resources: { kind: [ssh] }\n      ssh: { logins: [ubuntu] }\n",
+        )])
+        .expect("a valid role");
+        let one = role.snapshot_documents();
+        let twice: Vec<_> = one.iter().chain(one.iter()).cloned().collect();
+        let duplicated = serde_json::to_string(&twice).expect("json");
+
+        let bad = [
+            (
+                "not a snapshot",
+                cp.sign(Purpose::PolicySnapshot, vec![0xff; 8])
+                    .expect("sign"),
+            ),
+            (
+                "documents that aren't JSON",
+                signed_payload(&cp, |s| {
+                    s.version = 3;
+                    s.documents_json = "not json".into();
+                }),
+            ),
+            (
+                "documents that aren't a list",
+                signed_payload(&cp, |s| {
+                    s.version = 3;
+                    s.documents_json = "{}".into();
+                }),
+            ),
+            (
+                "an unknown kind of document",
+                signed_payload(&cp, |s| {
+                    s.version = 3;
+                    s.documents_json =
+                        r#"[{"kind":"user","version":"v1","metadata":{"name":"a"},"spec":{}}]"#
+                            .into();
+                }),
+            ),
+            (
+                "documents that don't compile",
+                signed_payload(&cp, |s| {
+                    s.version = 3;
+                    s.documents_json = duplicated.clone();
+                }),
+            ),
+            (
+                "an issue time no clock can hold",
+                signed_payload(&cp, |s| {
+                    s.version = 3;
+                    s.issued_at_unix = i64::MAX;
+                }),
+            ),
+        ];
+        for (what, signed) in &bad {
+            assert!(
+                matches!(
+                    verify_snapshot(signed, ca.cert_der()),
+                    Err(SessionError::Malformed(_))
+                ),
+                "{what}: verify_snapshot must refuse it as malformed"
+            );
+            assert!(
+                matches!(
+                    cache.update(signed, ca.cert_der()),
+                    Err(SessionError::Malformed(_))
+                ),
+                "{what}: the cache must refuse it"
+            );
+            let latest = cache.latest().expect("still held");
+            assert_eq!(latest.version, 2, "{what}");
+            assert_eq!(
+                latest.restrictions.blocks("mallory@example.com", "l", "s"),
+                Some("user locked"),
+                "{what}: the lock stays"
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("persisted"),
+                on_disk,
+                "{what}: the persisted snapshot is not replaced"
+            );
+        }
+        // The same documents once compile, so the case above fails for the
+        // duplicate and not for the role.
+        let single = signed_payload(&cp, |s| {
+            s.version = 3;
+            s.documents_json = serde_json::to_string(&one).expect("json");
+        });
+        assert_eq!(cache.update(&single, ca.cert_der()).expect("v3").version, 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
