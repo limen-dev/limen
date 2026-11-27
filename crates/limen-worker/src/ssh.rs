@@ -56,6 +56,9 @@ pub struct SessionOutcome {
     pub output_bytes: u64,
     /// The worker ended the session because its drain timeout was up.
     pub ended_by_drain: bool,
+    /// The worker ended the session because it reached its deadline (the
+    /// grant's `max_session_ttl`).
+    pub ended_by_deadline: bool,
 }
 
 /// How long an ended session gets to close before it is dropped.
@@ -63,14 +66,16 @@ pub(crate) const END_WITHIN: Duration = Duration::from_secs(3);
 
 type SharedRecorder = Arc<Mutex<Option<Recorder>>>;
 
-/// Run the SSH server side on `stream` until the user disconnects, or `end`
-/// flips (the worker's drain timeout is up): then the user is disconnected
-/// and the recording is finished as usual.
+/// Run the SSH server side on `stream` until the user disconnects, `end`
+/// flips (the worker's drain timeout is up), or `deadline` passes (the
+/// session's `max_session_ttl`): then the user is disconnected and the
+/// recording is finished as usual, so it is still uploaded.
 pub async fn serve<S>(
     stream: S,
     config: SshSessionConfig,
     audit: Emitter,
     mut end: tokio::sync::watch::Receiver<bool>,
+    deadline: Duration,
 ) -> anyhow::Result<SessionOutcome>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -97,15 +102,15 @@ where
     let running = russh::server::run_stream(server_config, stream, handler).await?;
     let handle = running.handle();
     let mut running = std::pin::pin!(running);
-    let ending = async {
+    let drained = async {
         if end.wait_for(|end| *end).await.is_err() {
             // The worker is gone without asking: nothing to do here.
             std::future::pending::<()>().await;
         }
     };
-    let (result, ended_by_drain) = tokio::select! {
-        r = &mut running => (Some(r), false),
-        () = ending => {
+    let (result, ended_by_drain, ended_by_deadline) = tokio::select! {
+        r = &mut running => (Some(r), false, false),
+        () = drained => {
             tracing::info!(session = %config.session_id, "ending the session: the worker is shutting down");
             let _ = handle
                 .disconnect(
@@ -114,7 +119,18 @@ where
                     "en".into(),
                 )
                 .await;
-            (tokio::time::timeout(END_WITHIN, &mut running).await.ok(), true)
+            (tokio::time::timeout(END_WITHIN, &mut running).await.ok(), true, false)
+        }
+        () = tokio::time::sleep(deadline) => {
+            tracing::info!(session = %config.session_id, "ending the session: max_session_ttl reached");
+            let _ = handle
+                .disconnect(
+                    russh::Disconnect::ByApplication,
+                    "this Limen session reached its time limit; connect again".into(),
+                    "en".into(),
+                )
+                .await;
+            (tokio::time::timeout(END_WITHIN, &mut running).await.ok(), false, true)
         }
     };
     if let Some(Err(e)) = result {
@@ -126,6 +142,7 @@ where
         .take();
     let mut outcome = SessionOutcome {
         ended_by_drain,
+        ended_by_deadline,
         ..SessionOutcome::default()
     };
     if let Some(rec) = taken {
@@ -138,6 +155,7 @@ where
             recording_sha256: sha,
             output_bytes: bytes,
             ended_by_drain,
+            ended_by_deadline,
         };
     }
     Ok(outcome)
