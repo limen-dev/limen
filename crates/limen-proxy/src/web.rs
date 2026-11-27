@@ -2188,4 +2188,256 @@ mod tests {
         assert!(!headers.contains_key(header::UPGRADE));
         assert!(!headers.contains_key("x-remove-me"));
     }
+
+    /// An `X-Limen-Identity` assertion with these header and payload JSON
+    /// values and a 64-byte (ES256-sized) signature. The proxy checks the
+    /// shape and claims; the app checks the signature against the JWKS.
+    fn assertion(header: &serde_json::Value, payload: &serde_json::Value) -> String {
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        format!(
+            "{}.{}.{}",
+            b64(header.to_string().as_bytes()),
+            b64(payload.to_string().as_bytes()),
+            b64(&[7u8; 64])
+        )
+    }
+
+    /// A session and the identity in its user certificate, agreeing, with an
+    /// assertion built like the control plane builds it (`web_auth.rs`).
+    fn web_session() -> (WebAppSession, UserIdentity, serde_json::Value) {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let identity = UserIdentity {
+            username: "developer@example.com".to_owned(),
+            roles: vec!["phase12-web".to_owned(), "viewer".to_owned()],
+            login_id: "0196d1c0-0000-7000-8000-000000000001".to_owned(),
+            not_after: OffsetDateTime::now_utc() + time::Duration::hours(1),
+            bot: false,
+            ci: std::collections::BTreeMap::new(),
+        };
+        let payload = json!({
+            "iss": "urn:limen:control-plane",
+            "sub": identity.username,
+            "aud": "app.apps.test",
+            "iat": now,
+            "exp": now + 300,
+            "roles": identity.roles,
+            "login_id": identity.login_id,
+        });
+        let session = WebAppSession {
+            username: identity.username.clone(),
+            roles: identity.roles.clone(),
+            login_id: identity.login_id.clone(),
+            resource: "app".to_owned(),
+            host: "app.apps.test".to_owned(),
+            expires_at_unix: now + 300,
+            identity_assertion: assertion(&jwt_header(), &payload),
+            ..WebAppSession::default()
+        };
+        (session, identity, payload)
+    }
+
+    fn jwt_header() -> serde_json::Value {
+        json!({"alg": "ES256", "typ": "JWT", "kid": "cp-key-1"})
+    }
+
+    /// The assertion an app trusts must name the same person, login, roles
+    /// and app host as the session it rides in, and must not outlive it. Each
+    /// mismatch alone is refused, so a session can't carry someone else's
+    /// identity (or one minted for another app) into the identity headers.
+    #[test]
+    fn the_identity_assertion_must_describe_this_session_exactly() {
+        let (session, identity, payload) = web_session();
+        let host = "app.apps.test";
+        assert!(
+            identity_assertion_matches(&session, &identity, host),
+            "the assertion the control plane builds is accepted"
+        );
+
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let with = |key: &str, value: serde_json::Value| {
+            let mut p = payload.clone();
+            p[key] = value;
+            WebAppSession {
+                identity_assertion: assertion(&jwt_header(), &p),
+                ..session.clone()
+            }
+        };
+        let cases = [
+            ("another issuer", with("iss", json!("urn:someone-else"))),
+            ("another person", with("sub", json!("admin@example.com"))),
+            (
+                "the person in another case",
+                with("sub", json!("Developer@example.com")),
+            ),
+            ("another app", with("aud", json!("other.apps.test"))),
+            ("an audience list", with("aud", json!([host]))),
+            ("another login", with("login_id", json!("some-other-login"))),
+            (
+                "an extra role",
+                with("roles", json!(["phase12-web", "viewer", "admin"])),
+            ),
+            ("a missing role", with("roles", json!(["phase12-web"]))),
+            (
+                "reordered roles",
+                with("roles", json!(["viewer", "phase12-web"])),
+            ),
+            (
+                "roles as a string",
+                with("roles", json!("phase12-web,viewer")),
+            ),
+            ("no roles claim", with("roles", serde_json::Value::Null)),
+            ("already expired", with("exp", json!(now - 1))),
+            ("expiring right now", with("exp", json!(now))),
+            (
+                "outliving the session",
+                with("exp", json!(session.expires_at_unix + 1)),
+            ),
+            (
+                "an expiry as text",
+                with("exp", json!((now + 60).to_string())),
+            ),
+            ("no expiry", with("exp", serde_json::Value::Null)),
+        ];
+        for (what, s) in &cases {
+            assert!(
+                !identity_assertion_matches(s, &identity, host),
+                "{what} must be refused"
+            );
+        }
+        // The same assertion, presented for a different app host.
+        assert!(!identity_assertion_matches(
+            &session,
+            &identity,
+            "other.apps.test"
+        ));
+        // An expiry exactly at the session's end is still inside it.
+        let at_end = with("exp", json!(session.expires_at_unix));
+        assert!(identity_assertion_matches(&at_end, &identity, host));
+    }
+
+    /// Only a compact ES256 JWT with a key id passes: no `none` or HMAC
+    /// algorithm, no missing or extra parts, nothing that isn't base64url JSON.
+    #[test]
+    fn the_identity_assertion_must_be_a_well_formed_es256_jwt() {
+        let (session, identity, payload) = web_session();
+        let host = "app.apps.test";
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let with_header = |h: serde_json::Value| assertion(&h, &payload);
+        let good = session.identity_assertion.clone();
+        let parts: Vec<&str> = good.split('.').collect();
+        let bad = [
+            (
+                "alg none",
+                with_header(json!({"alg": "none", "typ": "JWT", "kid": "k"})),
+            ),
+            (
+                "alg HS256",
+                with_header(json!({"alg": "HS256", "typ": "JWT", "kid": "k"})),
+            ),
+            ("no typ", with_header(json!({"alg": "ES256", "kid": "k"}))),
+            ("no kid", with_header(json!({"alg": "ES256", "typ": "JWT"}))),
+            (
+                "empty kid",
+                with_header(json!({"alg": "ES256", "typ": "JWT", "kid": ""})),
+            ),
+            ("two parts", format!("{}.{}", parts[0], parts[1])),
+            ("four parts", format!("{good}.{}", parts[2])),
+            ("empty signature", format!("{}.{}.", parts[0], parts[1])),
+            (
+                "short signature",
+                format!("{}.{}.{}", parts[0], parts[1], b64(&[7u8; 63])),
+            ),
+            (
+                "long signature",
+                format!("{}.{}.{}", parts[0], parts[1], b64(&[7u8; 65])),
+            ),
+            (
+                "padded base64",
+                format!("{}.{}=.{}", parts[0], parts[1], parts[2]),
+            ),
+            (
+                "payload not JSON",
+                format!("{}.{}.{}", parts[0], b64(b"not json"), parts[2]),
+            ),
+            ("empty", String::new()),
+        ];
+        for (what, a) in bad {
+            let s = WebAppSession {
+                identity_assertion: a,
+                ..session.clone()
+            };
+            assert!(
+                !identity_assertion_matches(&s, &identity, host),
+                "{what} must be refused"
+            );
+        }
+    }
+
+    fn cookies(values: &[&'static str]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for v in values {
+            headers.append(header::COOKIE, HeaderValue::from_static(v));
+        }
+        headers
+    }
+
+    /// The session cookie is read by its exact name, and two of them (one
+    /// planted by a sibling host, say, next to the real one) make the request
+    /// unreadable rather than letting either one win.
+    #[test]
+    fn the_session_cookie_is_read_once_by_its_exact_name() {
+        let read = |values: &[&'static str]| cookie_value(&cookies(values), APP_COOKIE);
+        assert_eq!(read(&["__Host-limen_app=abc"]), Ok(Some("abc".to_owned())));
+        assert_eq!(
+            read(&["a=1; __Host-limen_app=abc; b=2"]),
+            Ok(Some("abc".to_owned()))
+        );
+        assert_eq!(read(&[]), Ok(None));
+        // The sign-in cookie shares a prefix but is another cookie, and the
+        // name doesn't match in another case or without its prefix.
+        assert_eq!(read(&["__Host-limen_app_login=n"]), Ok(None));
+        assert_eq!(read(&["__host-limen_app=abc"]), Ok(None));
+        assert_eq!(read(&["limen_app=abc"]), Ok(None));
+        assert_eq!(read(&["x__Host-limen_app=abc"]), Ok(None));
+        // A value that holds `=` is kept whole.
+        assert_eq!(read(&["__Host-limen_app=a=b"]), Ok(Some("a=b".to_owned())));
+        // Two of them, in one header or across two, are refused.
+        assert_eq!(read(&["__Host-limen_app=a; __Host-limen_app=b"]), Err(()));
+        assert_eq!(read(&["__Host-limen_app=a", "__Host-limen_app=b"]), Err(()));
+        assert_eq!(read(&["__Host-limen_app=a; __Host-limen_app=a"]), Err(()));
+        // A cookie header that isn't text is refused, not skipped.
+        let mut opaque = cookies(&["__Host-limen_app=abc"]);
+        opaque.append(
+            header::COOKIE,
+            HeaderValue::from_bytes(b"x=\xff").expect("opaque header value"),
+        );
+        assert_eq!(cookie_value(&opaque, APP_COOKIE), Err(()));
+    }
+
+    /// Neither Limen cookie (the session, or the sign-in nonce) reaches the
+    /// app, from any `Cookie` header; the app's own cookies do.
+    #[test]
+    fn limen_cookies_never_reach_the_app() {
+        let forwarded = |values: &[&'static str]| {
+            filtered_cookie(&cookies(values)).map(|v| v.to_str().expect("text").to_owned())
+        };
+        assert_eq!(
+            forwarded(&[
+                "__Host-limen_app=secret; a=1",
+                "__Host-limen_app_login=nonce; b=2",
+            ])
+            .as_deref(),
+            Some("a=1; b=2")
+        );
+        assert_eq!(
+            forwarded(&["__Host-limen_app=secret", "__Host-limen_app_login=nonce"]),
+            None,
+            "with only Limen cookies, no Cookie header is sent"
+        );
+        assert_eq!(forwarded(&["  ;  ; "]), None);
+        assert_eq!(
+            forwarded(&["app=1;;app2=2"]).as_deref(),
+            Some("app=1; app2=2")
+        );
+    }
 }
