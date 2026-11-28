@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use axum::extract::Query;
+use axum::extract::rejection::QueryRejection;
+use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
 use openidconnect::core::{
@@ -166,6 +168,13 @@ fn callback_error_message(error: &str, description: &str) -> String {
     )
 }
 
+/// Whether a loopback callback answers this login: it carries the `state` we
+/// sent. The provider echoes `state` on error responses too (RFC 6749 §4.1.2.1),
+/// so an error without it is someone else's.
+fn is_this_login(cb: &Callback, expected_state: &str) -> bool {
+    !expected_state.is_empty() && cb.state.as_deref() == Some(expected_state)
+}
+
 /// Authorization code flow with PKCE. Opens the browser unless `open_browser`
 /// is false, waits for the redirect to a loopback port, and returns the tokens.
 pub async fn pkce_login(
@@ -203,23 +212,45 @@ pub async fn pkce_login(
 
     let (tx, rx) = tokio::sync::oneshot::channel::<Callback>();
     let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+    let expected_state = csrf.secret().clone();
     let app = axum::Router::new().route(
         "/callback",
-        get(move |Query(cb): Query<Callback>| {
+        get(move |cb: Result<Query<Callback>, QueryRejection>| {
             let tx = std::sync::Arc::clone(&tx);
+            let expected_state = expected_state.clone();
             async move {
+                // Any local process or web page can reach the loopback port.
+                // Only the redirect for this login (it carries our `state`,
+                // errors included) ends the wait; anything else is answered
+                // and ignored, so it can neither abort the login nor put its
+                // own error text in the terminal.
+                let Some(Query(cb)) = cb
+                    .ok()
+                    .filter(|Query(cb)| is_this_login(cb, &expected_state))
+                else {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(callback_page(
+                            "Not this login.",
+                            "This request is not the sign-in the terminal is waiting for.",
+                        )),
+                    );
+                };
                 let ok = cb.error.is_none();
                 if let Some(tx) = tx.lock().ok().and_then(|mut g| g.take()) {
                     let _ = tx.send(cb);
                 }
-                Html(if ok {
-                    callback_page(
-                        "Login complete.",
-                        "You can close this tab and return to the terminal.",
-                    )
-                } else {
-                    callback_page("Login failed.", "See the terminal for details.")
-                })
+                (
+                    StatusCode::OK,
+                    Html(if ok {
+                        callback_page(
+                            "Login complete.",
+                            "You can close this tab and return to the terminal.",
+                        )
+                    } else {
+                        callback_page("Login failed.", "See the terminal for details.")
+                    }),
+                )
             }
         }),
     );
@@ -253,7 +284,7 @@ pub async fn pkce_login(
             &callback.error_description.unwrap_or_default()
         ));
     }
-    if callback.state.as_deref() != Some(csrf.secret().as_str()) {
+    if !is_this_login(&callback, csrf.secret()) {
         bail!("login callback state did not match; possible CSRF, aborting");
     }
     let code = callback.code.context("login callback had no code")?;
@@ -333,7 +364,46 @@ fn callback_page(heading: &str, detail: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{callback_error_message, require_secure_url};
+    use super::{Callback, callback_error_message, is_this_login, require_secure_url};
+
+    fn cb(state: Option<&str>, code: Option<&str>, error: Option<&str>) -> Callback {
+        Callback {
+            code: code.map(str::to_owned),
+            state: state.map(str::to_owned),
+            error: error.map(str::to_owned),
+            error_description: None,
+        }
+    }
+
+    /// Only the redirect carrying this login's `state` ends the wait. A probe
+    /// from another local process or a web page, with a wrong or missing
+    /// state, an error, or nothing at all, is ignored instead of aborting the
+    /// login.
+    #[test]
+    fn only_a_callback_with_our_state_ends_the_login() {
+        let ours = "s3cr3t-state";
+        assert!(is_this_login(&cb(Some(ours), Some("code"), None), ours));
+        assert!(
+            is_this_login(&cb(Some(ours), None, Some("access_denied")), ours),
+            "the provider's own error, with our state, is reported"
+        );
+        for (what, c) in [
+            ("no state", cb(None, Some("code"), None)),
+            ("another state", cb(Some("guess"), Some("code"), None)),
+            ("a prefix", cb(Some("s3cr3t"), Some("code"), None)),
+            (
+                "an error without state",
+                cb(None, None, Some("access_denied")),
+            ),
+            ("an empty request", cb(None, None, None)),
+        ] {
+            assert!(!is_this_login(&c, ours), "{what} must be ignored");
+        }
+        assert!(
+            !is_this_login(&cb(Some(""), Some("code"), None), ""),
+            "an empty expected state matches nothing"
+        );
+    }
 
     #[test]
     fn callback_error_text_cannot_inject_terminal_escapes() {
