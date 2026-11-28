@@ -80,20 +80,17 @@ fn ssh_fragment(
 }
 
 /// `ssh_options` as indented `ssh_config` lines. A `ProxyCommand` is the
-/// rest of its line, already shell-quoted; other values with a space (a
-/// home directory like `/Users/A B`) are quoted for OpenSSH.
+/// rest of its line, already shell-quoted; `ssh_options` quotes other values
+/// with a space (a home directory like `/Users/A B`) for OpenSSH, which splits
+/// config lines the same way as `-o` values.
 pub(crate) fn ssh_option_lines(exe: &Path, proxy: &str, known_hosts: &Path) -> String {
     super::ssh::ssh_options(exe, proxy, known_hosts)
         .iter()
-        .map(|o| {
+        .fold(String::new(), |mut out, o| {
             let (k, v) = o.split_once('=').unwrap_or((o.as_str(), ""));
-            if k != "ProxyCommand" && v.contains(' ') {
-                format!("    {k} \"{v}\"\n")
-            } else {
-                format!("    {k} {v}\n")
-            }
+            let _ = writeln!(out, "    {k} {v}");
+            out
         })
-        .collect()
 }
 
 /// `$LIMEN_HOME/ssh_config`: every proxy's fragment, the current proxy's
@@ -650,6 +647,21 @@ mod tests {
         assert!(!text.contains("orders") && !text.contains("evil"));
         assert!(text.contains("    IdentityAgent none\n"));
         assert!(text.contains("    UserKnownHostsFile /h/known_hosts\n"));
+    }
+
+    /// A home directory with a space is quoted once in `ssh_config`, as in
+    /// the `-o` form, not twice.
+    #[test]
+    fn a_known_hosts_path_with_a_space_is_quoted_once() {
+        let text = ssh_option_lines(
+            Path::new("/usr/bin/limen"),
+            "limen.example:443",
+            Path::new("/Users/A B/known_hosts"),
+        );
+        assert!(
+            text.contains("    UserKnownHostsFile \"/Users/A B/known_hosts\"\n"),
+            "{text}"
+        );
     }
 
     #[test]
