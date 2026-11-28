@@ -67,7 +67,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the Rust toolchain and protoc
-        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: rust protoc
 
@@ -101,7 +101,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install buf
-        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: buf
 
@@ -219,7 +219,7 @@ jobs:
         run: scripts/ci-db-targets.sh start
 
       - name: Install the Rust toolchain and protoc
-        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: rust protoc
 
@@ -247,7 +247,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the Rust toolchain and protoc
-        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: rust protoc
 
