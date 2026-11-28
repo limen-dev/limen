@@ -863,6 +863,35 @@ async fn audit_options_are_per_resource() {
     );
 }
 
+/// A request refused before it was understood still keeps document ids out
+/// of the trail when the resource redacts them: only the index and API names
+/// stay readable.
+#[tokio::test]
+async fn ids_stay_out_of_denials_the_worker_could_not_classify() {
+    let mut h = start(Options {
+        grants: vec![grant(&[SearchClass::Read, SearchClass::Write], &[])],
+        audit: SearchAudit {
+            redact_ids: true,
+            ..SearchAudit::default()
+        },
+        ..Options::default()
+    })
+    .await;
+    let r = h
+        .client
+        .send("GET", "/users/_doc/bob@example.com%ZZ/extra?x=1", &[], b"")
+        .await;
+    assert_eq!(r.status, 400);
+    let denied = h.events(EventKind::AuthDenied);
+    assert_eq!(denied.len(), 1);
+    let path = denied[0].data["path"].as_str().expect("path");
+    assert!(
+        path.starts_with("/users/_doc/h:") && !path.contains("bob") && !path.contains("extra"),
+        "{path}"
+    );
+    assert!(h.fake.user_requests().is_empty());
+}
+
 #[tokio::test]
 async fn credential_apis_are_never_logged_even_when_bodies_are() {
     let mut h = start(Options {
