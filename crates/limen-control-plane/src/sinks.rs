@@ -130,7 +130,7 @@ impl S3Sink {
             );
         }
         keys.sort_unstable_by(|a, b| b.cmp(a));
-        let highest = keys.first().and_then(|k| key_seq(k));
+        let highest = highest_seq(&keys);
         // The newest manifest that is consistent with its key and writer. A key
         // that is not (planted, corrupt, another writer's) is skipped with an
         // error in the log rather than stopping the writer for good; the
@@ -346,6 +346,14 @@ impl S3Sink {
 /// `manifests/<writer>/000000000007.json` -> 7.
 fn key_seq(key: &str) -> Option<u64> {
     key.rsplit('/').next()?.strip_suffix(".json")?.parse().ok()
+}
+
+/// The highest sequence number any manifest key holds. Taken over every key,
+/// not from the first in sort order: a stray key that sorts after the digits
+/// (`manifests/cp-a/tmp`) must not hide the real ones, or the chain would
+/// resume at a sequence number that already has a manifest and overwrite it.
+fn highest_seq(keys: &[String]) -> Option<u64> {
+    keys.iter().filter_map(|k| key_seq(k)).max()
 }
 
 /// Where the chain continues: after the newest manifest that verified, but
@@ -731,6 +739,28 @@ mod tests {
         );
         assert_eq!(key_seq("manifests/cp-a/000000000007.json"), Some(7));
         assert_eq!(key_seq("manifests/cp-a/junk"), None);
+    }
+
+    #[test]
+    fn a_stray_key_does_not_hide_the_highest_manifest() {
+        let mut keys: Vec<String> = [
+            "manifests/cp-a/000000000006.json",
+            "manifests/cp-a/zzz",
+            "manifests/cp-a/000000000007.json",
+            "manifests/cp-a/tmp",
+        ]
+        .map(str::to_owned)
+        .into();
+        // The order `resume` lists them in: newest first.
+        keys.sort_unstable_by(|a, b| b.cmp(a));
+        assert_eq!(highest_seq(&keys), Some(7));
+        // Even when #7 doesn't verify and #6 is the trusted one, #7 is kept.
+        assert_eq!(
+            resume_point(highest_seq(&keys), Some((6, "h".into()))),
+            (8, "h".into())
+        );
+        assert_eq!(highest_seq(&["manifests/cp-a/tmp".to_owned()]), None);
+        assert_eq!(highest_seq(&[]), None);
     }
 
     #[test]
