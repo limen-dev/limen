@@ -90,7 +90,10 @@ pub(crate) fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<St
     );
     vec![
         format!("ProxyCommand={proxy_command}"),
-        format!("UserKnownHostsFile={}", known_hosts.display()),
+        format!(
+            "UserKnownHostsFile={}",
+            ssh_config_word(&known_hosts.display().to_string())
+        ),
         "GlobalKnownHostsFile=/dev/null".into(),
         "StrictHostKeyChecking=yes".into(),
         // Authentication happens below SSH. Don't offer the user's keys or
@@ -109,6 +112,22 @@ pub(crate) fn ssh_options(exe: &Path, proxy: &str, known_hosts: &Path) -> Vec<St
         // OpenSSH adds "Connection closed by UNKNOWN port 65535" after them.
         "LogLevel=ERROR".into(),
     ]
+}
+
+/// One word of an OpenSSH option value. OpenSSH splits `-o` values and
+/// config lines on whitespace, and `UserKnownHostsFile` takes several files,
+/// so `/Users/Jane Doe/.limen/...` would name `/Users/Jane` and `Doe/...`
+/// and no host would verify. Such a word is double-quoted, with `"` and `\`
+/// escaped.
+pub(crate) fn ssh_config_word(s: &str) -> String {
+    if s.is_empty()
+        || s.chars()
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '\\' | '\''))
+    {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_owned()
+    }
 }
 
 fn shell_quote(s: &str) -> String {
@@ -318,6 +337,33 @@ mod tests {
         assert!(opts.iter().any(|o| o.starts_with(
             "ProxyCommand=/usr/local/bin/limen --server limen.example.com:443 ssh-proxy %r %h"
         )));
+    }
+
+    /// `-o UserKnownHostsFile=/Users/Jane Doe/...` names two files to OpenSSH
+    /// (checked against OpenSSH 9.6 with `ssh -vv`), so the path is quoted.
+    #[test]
+    fn a_known_hosts_path_with_a_space_stays_one_file() {
+        let opts = ssh_options(
+            Path::new("/usr/local/bin/limen"),
+            "limen.example.com:443",
+            Path::new("/Users/Jane Doe/.limen/known_hosts"),
+        );
+        assert!(
+            opts.iter()
+                .any(|o| o == r#"UserKnownHostsFile="/Users/Jane Doe/.limen/known_hosts""#),
+            "{opts:?}"
+        );
+        let plain = ssh_options(
+            Path::new("/usr/local/bin/limen"),
+            "limen.example.com:443",
+            Path::new("/home/a/.limen/known_hosts"),
+        );
+        assert!(
+            plain
+                .iter()
+                .any(|o| o == "UserKnownHostsFile=/home/a/.limen/known_hosts")
+        );
+        assert_eq!(ssh_config_word(r#"/a "b"\c"#), r#""/a \"b\"\\c""#);
     }
 
     #[test]

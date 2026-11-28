@@ -86,12 +86,7 @@ impl Auditor {
         for (i, seg) in shape.segments.iter().enumerate() {
             out.push('/');
             if self.settings.redact_ids && shape.id_segments.contains(&i) {
-                let mut h = Sha256::new();
-                h.update(self.resource.as_bytes());
-                h.update([0]);
-                h.update(seg.as_bytes());
-                out.push_str("h:");
-                out.push_str(&hex(&h.finalize()[..8]));
+                out.push_str(&self.id_hash(seg));
             } else {
                 out.push_str(seg);
             }
@@ -100,6 +95,39 @@ impl Auditor {
             out.push('/');
         }
         out
+    }
+
+    /// A document id as the trail records it when `redact_ids` is on: keyed
+    /// by the resource, so the same id hashes the same within it.
+    fn id_hash(&self, seg: &str) -> String {
+        let mut h = Sha256::new();
+        h.update(self.resource.as_bytes());
+        h.update([0]);
+        h.update(seg.as_bytes());
+        format!("h:{}", hex(&h.finalize()[..8]))
+    }
+
+    /// The path of a request refused before it was understood, so which
+    /// segments are ids is unknown. With `redact_ids` on, every segment after
+    /// the first (the index or API) is hashed unless it names an API
+    /// (`_doc`, `_search`): a malformed `/users/_doc/bob@example.com/x` must
+    /// not put the id in the trail when a well-formed one wouldn't.
+    fn unclassified_path(&self, raw_target: &str) -> String {
+        let path = raw_target.split('?').next().unwrap_or(raw_target);
+        if !self.settings.redact_ids {
+            return path.to_owned();
+        }
+        path.split('/')
+            .enumerate()
+            .map(|(i, seg)| {
+                if i <= 1 || seg.is_empty() || seg.starts_with('_') {
+                    seg.to_owned()
+                } else {
+                    self.id_hash(seg)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/")
     }
 
     /// Record a request *before* it is forwarded. An error means the request
@@ -206,8 +234,8 @@ impl Auditor {
                 }
             }
             None => {
-                let path = raw_target.split('?').next().unwrap_or(raw_target);
-                data["path"] = json!(cut(path, MAX_RAW_TARGET).0);
+                let path = self.unclassified_path(raw_target);
+                data["path"] = json!(cut(&path, MAX_RAW_TARGET).0);
             }
         }
         data["reason"] = json!(reason);
